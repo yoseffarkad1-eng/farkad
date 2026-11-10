@@ -84,6 +84,413 @@ list opening cleanly, the message, the words, the store's isolation) and
 
 ---
 
+## Phase 3: shared (designed 2026-11-10; behind a shut gate, rules NOT published)
+
+The owner, 2026-11-10, having tried the picture on his own phone: *"add the feature to the
+other accounts."* Offered two meanings, he chose **one shared plan**: he seats the men, the
+other two phones see the same cars and the same riders, and may change them.
+
+This section is the design, written before the code. Where the code ended up differing, the
+difference is said at the end ("As built"). The v171 sketch of phase 3 in §2.4 (create-only
+accepted versions) is void: there are no accepted versions since v174.
+
+### 3.1 Where it lives: documents of its own, beside the record and never in it
+
+    schedules/{docId}/transport/settings              the list of vehicles
+    schedules/{docId}/transport/day_<YYYY-MM-DD>      one day: who sits where, which vehicles
+                                                      stay, who gets there another way
+
+`{docId}` is the schedule's own (`current`), so the people are the schedule's allow-list and
+there is one place in `firestore.rules` where they are named. A subcollection document is a
+document of its own: it adds **no byte** to `schedules/current` (the 1 MiB ceiling is per
+document), it has no field in it, and nothing the record's protocol reads - `revision`,
+`lastOpId`, receipts, fingerprints - is touched by a transport write.
+
+    settings   { v: 1, revision, updatedAt, updatedBy, vehicles: [ {id, name, seats, active, rows?, …} ] }
+    day_<date> { v: 1, revision, updatedAt, updatedBy, date, unavailable: {vehicle: true},
+                 status: {worker: 'private'|'contractor'|'other'}, trips: {vehicle: {driver, passengers, seats}} }
+
+- **What is NOT shared:** a day's `marks` («נפתח בוואטסאפ»). It says that THIS phone opened
+  THIS driver's chat; on another phone it would be a claim about a tap nobody there made.
+  It stays in the local day record, beside the shared part, and survives an adoption.
+  v171's `areas` and `workers` in the settings are not shared either: nothing reads them.
+- **A vehicle travels as the phone's own reader keeps it** (`transportReadVehicle`), field
+  for field, so a field another change adds to a vehicle (a lasting on/off, say) is shared
+  the day the reader keeps it, with no change here and none in the rules.
+- **Privacy:** worker ids and vehicle names, as stored today. No name of a man, no phone, no
+  site, no rate. Nothing new.
+
+### 3.2 The separation from the record's sync, by construction
+
+| the record | transport sharing |
+|---|---|
+| `js/sync/*`, the outbox, the journal, the send claim, receipts | none of them. One new file, `js/ui/transport-share.js`, which never names `FarkadSync`, `State.commit`, `State.save` or `Recovery` (pinned by a test that reads the file) |
+| reaches Firebase through `FarkadSync.connect(adapter)` | reaches it through `window.FarkadTransportShare.connect(…)`, a second and separate object the adapter hands over AFTER the record's, inside a `try` - a throw there cannot stop the record connecting |
+| its status sentence (`FarkadSync.status`, the chip, the ⋯ line) | its own line, on the transport screen only. Nothing in the share file calls `setStatus`, `fail` or `refreshStatus`; a refused or failed transport write is not an error of the record |
+
+So a transport failure cannot block, delay or dirty the record's sync: there is no shared
+queue to be stuck behind, no shared status to be demoted, and no shared document to be
+refused. Measured in Node (the fake cloud refusing every transport call while the record
+syncs and says «מסונכרן») and on the emulator (the OLD rules refusing the transport paths).
+
+### 3.3 Offline first
+
+A change is written to the phone at once, exactly as today (`Store.setVerified`, optional) -
+the share file is told AFTER the local write and never before, and the screen never waits
+for it. What the phone knows about each shared document is one small record of its own:
+
+    farkadTransport:shared:<settings | day_YYYY-MM-DD>   { rev, base, sent? }
+
+`rev` is the cloud revision this phone's copy was last equal to; `base` is the shared part
+at that revision, as canonical text. **There is no "dirty" flag to forget to set:** a
+document is owed to the cloud exactly when the shared part of the local copy differs from
+`base`. A crash between the two writes therefore cannot hide a change.
+
+The screen says which of these is true, in one line under the head (proposed Hebrew, in the
+transport words block, pinned):
+
+| state | when | sentence |
+|---|---|---|
+| (nothing) | the gate is shut; or the phone has no cloud account and never shared | - exactly today's screen |
+| checking | connected, the first answer has not come | «בודק את השיבוץ המשותף…» |
+| shared | heard from the cloud, nothing owed | «השיבוץ משותף עם הטלפונים האחרים ומעודכן.» |
+| waiting | something is owed | «השינוי שמור במכשיר הזה ומחכה לחיבור כדי להתעדכן בענן.» |
+| unchecked | no answer, or the answer is from before the signal went | «אין חיבור: לא ניתן לבדוק אם השיבוץ מעודכן. מוצג מה ששמור במכשיר הזה.» |
+| not shared | the cloud refuses the transport paths (rules not published yet, or this address is not on the list) | «השיבוץ עדיין לא משותף: הענן אינו מאפשר זאת כרגע. הוא שמור במכשיר הזה בלבד.» |
+
+Never «נשלח», never «מסונכרן» (that word is the record's).
+
+### 3.4 Two people at once: the day is the unit, and the server is the judge
+
+**The unit of conflict is the whole document, with a revision compare-and-set.** A write
+says "I was built on revision N and I am N+1"; the adapter checks it inside a transaction
+and the rules check it again (`revision == resource.data.revision + 1`; a create must be 1).
+Two phones that both built on N: one lands, the other is refused and handed the document
+that won.
+
+Why not one field per seat, merged by the server so that two people seating different cars
+both land: **the rule "a man is in one seat" is a rule about the whole day**, and a
+field-merge cannot see it. Moving a man is two fields (out of one seat, into another); two
+phones moving the same man to two cars would both land and he would be in both; a phone
+keeping a vehicle home while another seats a man in it would both land and the man would be
+in a car that is not going. `TransportEngine.layout` would draw something for each of these,
+but it would be a plan NOBODY made. A day is about 1 KB and is edited by one person for a
+minute in the evening; the price of the coarse unit is that the loser of a same-second race
+redoes one drag. That is the cheaper mistake.
+
+**What the loser sees.** His copy of that day is put aside, the plan that won is drawn, and
+one sentence says so, with two buttons:
+
+    «השיבוץ של היום הזה שונה בטלפון אחר. מוצג השיבוץ המשותף, והשיבוץ שלך נשמר בצד.»
+    [ להשתמש בשיבוץ שלי ]   [ להשאיר את המשותף ]
+
+«להשתמש בשיבוץ שלי» asks once (the app's own question) and then makes his copy the local
+plan again, which is an ordinary change: it goes up as revision N+1 through the same
+compare-and-set, and if the day moved again meanwhile he is the loser again and is told
+again. There is no force-write. The copy aside is one per document, the newest; it is
+removed by either button and pruned with the day.
+
+The same for the list of vehicles, with its own two sentences.
+
+**Same fact twice is not a conflict:** if the document that won says exactly what this phone
+has, the phone just takes its revision.
+
+**Its own echo is recognised across a restart:** what is being sent is written into the
+share record (`sent: {rev, text}`) before the request leaves, so a request that landed
+while the app was being closed is not mistaken, at the next opening, for another phone's
+change.
+
+To be proved on the emulator with the production adapter: two phones on the same seat; the
+same man into two cars; a phone offline for a day and back; a vehicle kept home on one
+phone while the other seats a man in it. In each: exactly one write lands, the man is in at
+most one seat on the server and on both phones, and the loser holds the winner's plan, his
+own aside, and the sentence.
+
+### 3.5 v174's rule survives
+
+A stored day is rewritten only by its own change. Adopting a newer shared day writes THAT
+day's key and no other (and its share record); it keeps that day's own `marks`. A shared
+day that says what the local day already says writes the share record only - the local
+day's bytes, v171 leftovers included, stay as they are.
+
+### 3.6 The switch stays per phone, and the gate is in the build
+
+- `farkadTransport:enabled` is unchanged. Off: the share file reads nothing, writes nothing,
+  listens to nothing and sends nothing - checked by counting every Store read and every
+  call the fake cloud receives.
+- On, with no cloud account (empty config, or signed out): nothing connects, and the phone
+  works exactly as today.
+- **The gate:** `TRANSPORT_SHARE = false` in `js/ui/transport-share.js`, read through
+  `transportShareOn()`, with the suites opening it through the existing test-only seam
+  (`FARKAD_FLAG_OVERRIDES.transportShare`) - the way `LEDGER_WRITES` is gated in
+  `js/model/ledger.js`. It is NOT an entry in `FARKAD_SHIPPED_FLAGS`: that object is in
+  `js/model/schema.js`, which this work was told not to touch. Shut, every hook in
+  `js/ui/transport.js` returns before doing anything: no key, no listener, no line on the
+  screen, the old sentence on the switch.
+
+### 3.7 The first time a phone meets the cloud
+
+Nothing is sent for a document this phone has never shared until the cloud has been HEARD
+(the first answer of the listener, from the server and not from a cache). Then, document by
+document:
+
+| the cloud | this phone | what happens |
+|---|---|---|
+| has none | has a plan / a list ON ITS DISK | created at revision 1 (the transaction refuses if somebody got there first, and then the next row applies) |
+| has none | has nothing on its disk (an unopened day; the seven vehicles never edited) | nothing. An untouched list is not uploaded: it is the seed every phone already has, and uploading it would make the first phone to connect - not the owner's - the author of the shared list |
+| has one | has nothing, or exactly the same | adopted silently |
+| has one | has something DIFFERENT, never shared | **the cloud's wins; this phone's copy is put aside and said once**, with «להשתמש בשלי» |
+
+Why the cloud wins rather than asking first: a question that must be answered before the
+screen can draw is a screen waiting on the network (3.3), and "mine or theirs" is only
+answerable looking at theirs. Why it is safe: the copy aside is on the disk before the
+adoption is (verified write; if the copy cannot be kept, nothing is adopted and the screen
+stays on the local plan and says it is not shared), so no order of crashes loses it.
+
+What is NOT solved: three phones with three different edited lists. The first to connect
+makes the shared one; the other two are each told once and each can put theirs back - and
+the last to do so wins. The owner's phone should be the first to run the build that opens
+the gate; the release note must say so (3.13, step 5).
+
+### 3.8 Older builds, pruning, growth
+
+- A build without sharing (v171-v182) never names `transport/` in its adapter: it cannot
+  read, write or listen to these documents, and they are not in the document it does read.
+  To be measured with the real older files out of Git on the fake cloud, and by the rules
+  matrix on the emulator. Such a phone shows its own local plans, as today, and is simply
+  not in the shared plan. Its screen does not say so (it cannot - it is already shipped);
+  the release note has to.
+- **Local pruning is unchanged** (35 days). The share records and the copies aside are
+  pruned on the same date.
+- **Shared day documents are never deleted.** The rules forbid delete, as they do for the
+  schedule; a client that could delete could delete by a bug. Growth: at most one document
+  per calendar day with a plan (about 1 KB) and one for the list - **at most 366 a year**,
+  each its own document, so the 1 MiB ceiling is not in play. A phone listens only from
+  35 days back (`documentId() >= 'day_<today-35>'`, which also takes `settings`, since
+  `s` sorts after `d`), so what a phone reads does not grow with the years.
+
+### 3.9 Rules, and the rollout
+
+One nested `match /transport/{name}` under `match /schedules/{docId}`: read for the
+allow-list; create only at revision 1; update only at exactly the next revision; never
+delete; and the shape checked as far as rules can (the exact top-level keys, types, the
+day's name agreeing with its `date`, sizes of the maps and the list capped). An independent,
+minimal addition to main's file: no existing line changes.
+
+To be measured, in the style of `docs/payroll-closure.md`: (a) every existing emulator
+suite under the new file; (b) the new rules with only current builds in the field - nothing
+changes for them; (c) this build under the OLD rules - transport says «עדיין לא משותף», the
+record syncs untouched. From (b) and (c): rules first, then the build with the gate shut,
+then the gate. **Measured: 3.13.**
+
+### 3.10 Backup and the rescue file
+
+Unchanged: transport is in neither, nor in a restore point, nor in the daily cloud copy.
+What changes is the price: with sharing on, a lost phone no longer loses the plans or the
+list - they are in the cloud and on the other phones. With sharing off (or on a phone with
+no cloud account) it still does.
+
+### 3.11 As built (2026-11-10) - where the code differs from 3.1-3.10, and what was found
+
+**Files.** `js/ui/transport-share.js` (new: the whole client half, and the gate);
+`js/ui/transport.js` (five marked hooks through `transportShareTell`, eighteen strings in the
+one block, a paragraph in the header); `js/sync/firebase-adapter.js` (`transportOps`, and its
+hand-over to `window.FarkadTransportShare` after the record's, in a `try`); `firestore.rules`
+(one block); `index.html` (the `#transportShare` node, one script tag after transport.js);
+`sw.js` (the file in the shell); `css/design.css` (the line and the notice);
+`tests/harness.mjs` (`makeTransportCloud`, on `makeCloud().transport`). Not touched:
+`js/sync/sync.js`, `send.js`, `receive.js`, `restore.js`, `status.js`, `boot.js`,
+`js/state.js`, `js/store.js`, `js/recovery.js`, `js/model/*`.
+
+**Differences from the design above.**
+
+- 3.3, the «waiting» sentence is «השינוי שמור במכשיר הזה ועדיין לא התעדכן בענן.» and not
+  «…ומחכה לחיבור…»: the state is also true for the third of a second a write takes with a
+  good signal, and "waiting for a connection" would be false then.
+- 3.3, one more state, **noRoom**: this phone's copy could not be put aside (the disk
+  refused it), so the shared plan was NOT drawn over it - «אין מקום במכשיר לשמור בצד את
+  השיבוץ שלך, ולכן השיבוץ המשותף לא הוצג. מוצג מה ששמור במכשיר הזה.» Nothing is sent from
+  that document until the copy can be kept.
+- 3.1, a document of another version (`v` not 1), with no revision, or whose `date` is not
+  its name is neither drawn nor written over; the line says «לא ניתן לבדוק».
+- 3.6, the switch's sentence in ⋯: with the gate open it is `switchLeadShared`, set by
+  `transportRenderSwitch` - the card is built when transport.js loads, BEFORE the share file
+  exists, and the browser suite caught the card still saying «לא משותף» with the gate open.
+- **Both sides of every comparison go through the same reader.** What the phone holds is
+  passed through `transportReadSettings` / `transportReadDay` exactly as a cloud document
+  is, so "the same plan" is decided on what the reader keeps. A field added to a vehicle or
+  a day is therefore shared from the moment the reader keeps it, and never before.
+- **Two windows of the app on one phone** (not in the design; found while writing it up).
+  `Store.get` answers from what THIS window last wrote before it asks the disk, so a window
+  that did not adopt a shared day went on holding the older copy, and its next change would
+  have been written over the adopted plan and sent as this phone's change to the winner.
+  With the gate open the share file listens for the browser's `storage` event on the
+  transport keys, drops that window's copy (`Store.forget`, safe because every transport
+  write is optional and a refused optional write is never left in the cache) and redraws.
+  With the gate shut two windows behave as they always did.
+
+**Known limits, said rather than hidden.**
+
+- One copy aside per document, the newest. A second loss on the same day before the first
+  notice was answered replaces the first copy. The sentence is said each time.
+- A phone whose list lacks a vehicle another phone added sees that vehicle's men as waiting
+  until the shared list arrives (the list is taken before the days in every delivery), and
+  if it changes the day in that window it writes the day without that car - as a normal
+  change through the compare-and-set, visible to the other phone as its plan being
+  replaced, with no notice there (the other phone had nothing unsent).
+- **A later build that adds a field to a shared vehicle or day**: a phone on THIS build
+  drops it when it next changes that document (its reader does not keep it). That is the
+  v166 Rima situation in small. Every sharing phone must be on the newer build before the
+  field is first used, or the document version `v` moves and the rules with it.
+- **A lost answer and another phone's write in between.** This phone's write landed but
+  its answer did not arrive, and before it asked again another phone changed the same day.
+  The server keeps no history, so the phone cannot tell "they built on mine" from "mine
+  never landed": it treats it as a loss - its copy aside, the sentence said - though its
+  change may be inside the plan that won. It errs towards telling.
+- **What the server says to the loser of a race** is `permission-denied`, the same word as
+  an address off the list (measured on the emulator). `transportOps.write` reads the
+  document again on that word and says `conflict` when it has moved. If that second read
+  also fails, the line says «עדיין לא משותף» until the listener next answers.
+- **A vehicle's lasting `off` (v184) is shared with the list**, as 3.1 said a new field
+  would be: the list's reader keeps it and both sides compare through that reader. Turning a
+  vehicle off writes the list and no day, locally and in the cloud (measured in Node and on
+  the emulator). The other edge of the same fact: a build that does not know the field
+  (v183 and older) drops it at its next write of the list, and on a phone that shares, this
+  build then sends that as the phone's own change - the vehicle is on again for everybody.
+  No window of an older build may run on a sharing phone (`docs/releases.md`, v185).
+- Not tried on a real phone, and not against the real Firebase SDK in a real page: the
+  adapter's `transportOps` is run by Node against the emulator, and the page-level suite
+  bridges to a fake cloud. **The real project was never touched.**
+
+### 3.12 The rules addition, and what was measured
+
+The whole addition, nested in `match /schedules/{docId}` after the `receipts` block
+(`tests/transport.emulator.test.mjs` checks that with this block removed the file is
+`origin/main`'s byte for byte):
+
+```
+      function transportStamped() {
+        return request.resource.data.v == 1
+          && request.resource.data.revision is int
+          && request.resource.data.updatedAt is string
+          && request.resource.data.updatedAt.size() < 64
+          && request.resource.data.updatedBy is string
+          && request.resource.data.updatedBy.size() < 128;
+      }
+
+      function transportSettingsOk() {
+        return request.resource.data.keys().hasOnly(['v', 'revision', 'updatedAt', 'updatedBy', 'vehicles'])
+          && request.resource.data.vehicles is list
+          && request.resource.data.vehicles.size() <= 60;
+      }
+
+      function transportDayOk(name) {
+        return name.matches('^day_[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.keys().hasOnly(
+               ['v', 'revision', 'updatedAt', 'updatedBy', 'date', 'unavailable', 'status', 'trips'])
+          && request.resource.data.date is string
+          && name == 'day_' + request.resource.data.date
+          && request.resource.data.unavailable is map
+          && request.resource.data.unavailable.size() <= 60
+          && request.resource.data.status is map
+          && request.resource.data.status.size() <= 300
+          && request.resource.data.trips is map
+          && request.resource.data.trips.size() <= 60;
+      }
+
+      function transportOk(name) {
+        return transportStamped()
+          && (name == 'settings' ? transportSettingsOk() : transportDayOk(name));
+      }
+
+      match /transport/{name} {
+        allow read: if allowed();
+        allow create: if allowed()
+          && transportOk(name)
+          && request.resource.data.revision == 1;
+        allow update: if allowed()
+          && transportOk(name)
+          && request.resource.data.revision == resource.data.revision + 1;
+        allow delete: if false;
+      }
+```
+
+| what changes | for whom |
+|---|---|
+| `schedules/{docId}/transport/{name}` becomes readable and writable (create at revision 1, update at exactly the next revision, never delete) | the three addresses of `allowed()`, and nobody else |
+| every other path, every existing rule, every existing function | nothing - no existing line is edited |
+
+What rules cannot check and the client does: what is INSIDE a trip, a vehicle or a status
+(no loops in rules), and that a day's name is a real calendar date (the pattern takes
+`day_2026-13-45`; every client refuses it by `isRealDate`).
+
+**Growth, measured** (`tests/transport.share.test.mjs`, on the documents the shipped client
+writes for a roster of twenty with ids of the roster's own length): a full evening - twenty
+men seated in six vehicles, the seventh kept home - is 971 bytes of JSON; the list of seven
+vehicles 603 bytes. One document per calendar day that has a plan, plus one: at most 367
+documents and about 0.34 MB a year in all, each document a thousandth of the 1 MiB ceiling
+- and none of it in the schedule document. A phone listens from 35 days back, so what it
+reads when it opens does not grow with the years.
+
+### 3.13 The rollout order, measured
+
+`tests/transport.emulator.test.mjs`, on the Firestore emulator: the rules as they would be
+pasted and the rules in the field today (read out of Git: `origin/main:firestore.rules`,
+which the owner verified is what is live); this build's client and adapter; and v180 and
+v182 - their own files and their own adapter, out of Git. Plus every emulator suite that
+existed before this work (rules, cas-emulator, rollout, bootstrap, bootstrap-rules,
+money-concurrency, rollout-matrix, reminders-emulator), run UNCHANGED under the new file.
+
+| client | rules | records a day | the shared plans | what transport says |
+|---|---|---|---|---|
+| older (v180, v182) | today's | yes | none can exist: no rule matches the path | nothing - its own plans, on its own phone |
+| older (v180, v182) | **new** | **yes**, at the record's next revision, synced | **never touched**: its adapter has no call to them; two documents put there beforehand are byte for byte the same afterwards | nothing - its own plans, on its own phone |
+| this build, gate SHUT (as merged) | either | yes | **never touched**: the transport cloud is not called at all (Node, counted; Chromium, counted) | nothing: today's screen, today's sentence on the switch |
+| this build, gate OPEN | today's | **yes**, at its own revision, no error on the record's line | cannot be created: a direct write is `permission-denied`, nothing exists under the path afterwards | «השיבוץ עדיין לא משותף: הענן אינו מאפשר זאת כרגע. הוא שמור במכשיר הזה בלבד.» - and the plan works on the phone as before |
+| this build, gate OPEN | **new** | yes; the schedule document, its revision and its receipts do not move for any transport write, and the reverse | shared: created at revision 1, changed by compare-and-set, never deleted | «השיבוץ משותף עם הטלפונים האחרים ומעודכן.» |
+
+Every cell is safe, in every order - which is what a pure addition to the rules, behind a
+gate, with a client that fails soft, was built to give. So the order is chosen for the
+owner's convenience and for one thing that is NOT symmetric (step 5):
+
+1. **Save what is live.** Firebase console → Firestore Database → Rules: copy what is
+   there to a file and compare it with `git show origin/main:firestore.rules`. If they
+   differ, stop: the block was written against a file that is not the live one.
+2. **Publish the new rules** (paste this branch's `firestore.rules` → Publish). No phone
+   needs to update first and none is refused anything: the first two rows of the table.
+3. **Ship this build with the gate shut** (as merged). Nothing about הסעות changes on any
+   phone. This step and step 2 can be done in either order.
+4. **Update all three phones**, and check each in ⋯ - not assumed.
+5. **Only then open the gate** (`TRANSPORT_SHARE = true`, a later build, stamps moved), and
+   **the owner's phone takes that build first**: opened, signed in, with a signal, before
+   the other two are updated. Sharing does not wait for the הסעות screen - a phone whose
+   switch is on starts when the app opens signed in - and the first phone to connect with
+   an edited list or a planned day becomes the author of the shared one; the others meet
+   it, and a phone that had its own is told once and can put its own back (3.7). If
+   another phone gets there first nothing is lost - the owner is the one told, and
+   «להשתמש בשלי» puts his back - but it is a needless conversation.
+
+**If the gate is opened before step 2**, nothing breaks and nothing is lost: every phone
+says «עדיין לא משותף» and keeps its plans on itself, and the day the rules are pasted each
+phone finds out by itself (it asks again on a ladder that tops out at five minutes, when
+the screen is opened, and when the signal returns) - the fourth row, measured.
+
+**A phone still on an older build after step 5** keeps its own local plans and is simply
+not in the shared plan. It cannot say so (it is already shipped). Its plans are not lost
+when it updates: they meet the shared ones by 3.7.
+
+**Rolling back the rules** (republishing `origin/main`'s file): the shared documents stay
+where they are, unreadable and unwritable; every phone with the gate open says «עדיין לא
+משותף» and goes on from its own copy; nothing of the record is affected. Republishing the
+new rules brings them back, and changes made meanwhile meet them by the ordinary rule
+(the loser's copy aside, said).
+
+**Rolling back the build** (shutting the gate again): each phone keeps the plans it holds;
+the share records and copies aside stay on the disk, unread; the documents stay in the
+cloud.
+
+---
+
 **The v171 design follows.** Its status line at the time: phase 1 built as the v171 candidate
 (`js/model/transport.js`, `js/ui/transport.js`, `tests/transport.test.mjs`,
 `tests/transport.browser.mjs`; `docs/releases.md`, v171). Where that build differed from the

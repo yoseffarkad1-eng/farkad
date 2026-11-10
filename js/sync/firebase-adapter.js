@@ -29,7 +29,10 @@ import {
     deleteField,
     onSnapshot,
     runTransaction,
-    FieldPath
+    FieldPath,
+    query,
+    where,
+    documentId
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 import { firebaseConfig, SCHEDULE_DOC_PATH } from './firebase-config.js';
@@ -332,6 +335,84 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
     };
 }
 
+// ---------------------------------------------------------------- הסעות, shared
+//
+// The plans of the rides, as documents OF THEIR OWN beside the schedule:
+//   schedules/<doc>/transport/settings       the list of vehicles
+//   schedules/<doc>/transport/day_<date>     one day
+// Nothing here reads or writes the schedule document, its receipts or its revision, and
+// nothing above this line knows these exist: a transport write that is refused or lost is
+// not an error of the record. The client half is js/ui/transport-share.js, and it is
+// handed THIS object and nothing else (window.FarkadTransportShare.connect, below).
+//
+// At module scope for the same reason as firestoreOps: so that
+// tests/transport.emulator.test.mjs can run these exact functions against a real
+// Firestore, under the real rules.
+export function transportOps(db, collectionRef, docRef) {
+    return {
+        // The compare-and-set. `base` is the revision the caller's copy was built on (0:
+        // it believes there is no document), and `data.revision` must be base + 1. Read
+        // and written in ONE transaction, so of two phones that built on the same
+        // revision exactly one lands; the other is refused with `conflict` and handed
+        // the document the transaction read - not whatever the listener last delivered,
+        // which is a different channel with no ordering against this read (the lesson of
+        // withReceipt above). The rules ask the same question again on the server.
+        //
+        // AND A RACE LOST AT THE COMMIT SAYS `conflict` TOO. Measured on the emulator
+        // (tests/transport.emulator.test.mjs): two transactions that both read revision N
+        // both pass the check below; one commits; the other's commit is then judged by
+        // the rules against the document as it NOW is - revision N+1, and N+1 is not
+        // (N+1)+1 - and comes back `permission-denied`, the same word as "this address is
+        // not on the list" and as "these rules have no such path". The client would have
+        // said «עדיין לא משותף» to a phone that had merely been a moment late. So a
+        // refusal is looked at once more: the document is read again, and if it is no
+        // longer at the revision this write was built on, that is what happened and it is
+        // said as such, with the document. If it IS still there, or cannot be read, the
+        // rules refused this write as it stands and their word is passed on.
+        write(name, base, data) {
+            const ref = docRef(name);
+            const moved = snapshot => {
+                const held = snapshot.exists() ? snapshot.data().revision : 0;
+                const error = new Error('the transport document moved while this write was being prepared');
+                error.code = 'conflict';
+                error.revision = Number.isInteger(held) ? held : null;
+                error.document = snapshot.exists() ? JSON.parse(JSON.stringify(snapshot.data())) : null;
+                return error;
+            };
+            return runTransaction(db, transaction => transaction.get(ref).then(snapshot => {
+                const held = snapshot.exists() ? snapshot.data().revision : 0;
+                if (held !== base || data.revision !== base + 1) throw moved(snapshot);
+                transaction.set(ref, data);
+                return { revision: data.revision };
+            })).catch(refusal => {
+                if (!refusal || refusal.code !== 'permission-denied') throw refusal;
+                return getDoc(ref).then(snapshot => {
+                    const held = snapshot.exists() ? snapshot.data().revision : 0;
+                    throw (held !== base ? moved(snapshot) : refusal);
+                }, () => { throw refusal; });
+            });
+        },
+        // Every document from `from` on, by name: the days from that date, and `settings`
+        // (which sorts after every `day_…`). Each delivery is the whole list, with
+        // `live: false` when it is the SDK's cache speaking - the signal is gone, or has
+        // not come yet - so the client never takes "nothing cached" for "nothing there".
+        // includeMetadataChanges is what makes the SDK say when that flips.
+        subscribe(from, onDocs, onError) {
+            return onSnapshot(
+                query(collectionRef(), where(documentId(), '>=', String(from))),
+                { includeMetadataChanges: true },
+                snapshot => {
+                    onDocs(snapshot.docs.map(entry => ({
+                        name: entry.id,
+                        data: JSON.parse(JSON.stringify(entry.data()))
+                    })), { live: !snapshot.metadata.fromCache });
+                },
+                onError
+            );
+        }
+    };
+}
+
 function isConfigured() {
     return Boolean(firebaseConfig && firebaseConfig.projectId && firebaseConfig.apiKey);
 }
@@ -444,6 +525,11 @@ if (!isConfigured()) {
         if (button) button.style.display = '';
 
         if (!user) {
+            // The shared rides let go first, and on their own: nothing they do may stand
+            // between a sign-out and the record's own disconnect.
+            try {
+                if (window.FarkadTransportShare) window.FarkadTransportShare.disconnect();
+            } catch (error) { console.warn('transport: disconnect', error); }
             window.FarkadSync.disconnect();
             if (button) {
                 button.textContent = '☁️ התחבר לענן';
@@ -543,5 +629,20 @@ if (!isConfigured()) {
                 );
             }
         });
+
+        // הסעות, shared - AFTER the record is connected, and inside a try: a throw here
+        // must not be able to stop the record from syncing. The object handed over is
+        // transportOps and nothing of the record's; js/ui/transport-share.js does nothing
+        // with it unless its own gate is open and this phone turned הסעות on.
+        try {
+            if (window.FarkadTransportShare) {
+                const under = SCHEDULE_DOC_PATH.split('/');
+                window.FarkadTransportShare.connect(transportOps(
+                    db,
+                    () => collection(db, ...under, 'transport'),
+                    name => doc(db, ...under, 'transport', String(name))
+                ));
+            }
+        } catch (error) { console.warn('transport: connect', error); }
     });
 }

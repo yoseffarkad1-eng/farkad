@@ -40,6 +40,14 @@
 //     must not stop anybody recording who worked. What will not read is copied aside,
 //     said on the screen, and started again from empty (below, "the store").
 //
+// SHARED, LATER, AND NOT HERE (the owner, 2026-11-10: one plan on all three phones).
+// Everything above is still true of THIS FILE: it keeps its things on this phone and
+// knows no cloud. The shared plan is js/ui/transport-share.js, behind a gate of its own
+// that is shut in this build, and it is told of this file's writes at five marked places
+// (transportShareTell). Where that gate is open and a phone is signed in, the plans and
+// the list are also in documents of their own beside the schedule - still never in the
+// record, the outbox, a backup or the rescue file - and a lost phone no longer loses them.
+//
 // Entered from the WhatsApp dialog (#shareModal), under the seder's own row, and from
 // nowhere on the day screen - the owner had said that screen has too many buttons.
 //
@@ -257,8 +265,48 @@ const TRANSPORT_TEXT = Object.freeze({
     rIdle: list => `רכבים בלי עובדים בימים עם שיבוץ: ${list}`,
     rDriversTitle: 'נהגים בתקופה:',
     rDriver: (name, days, vehicles) => `- ${name} – ${days}: ${vehicles}`,
-    rDriverVehicle: (v, n) => `${v} (${n})`
+    rDriverVehicle: (v, n) => `${v} (${n})`,
+
+    // --- SHARED (js/ui/transport-share.js; shown only where that file's gate is open).
+    // PROPOSED. The switch's sentence in ⋯ when the plan is shared, in place of
+    // `switchLead`, which says it is not:
+    switchLeadShared: 'שיבוץ העובדים לרכבים והודעה לכל נהג. מופעל בכל מכשיר בנפרד. במכשיר שמחובר לענן, השיבוץ ורשימת הרכבים משותפים עם הטלפונים האחרים שהפעילו הסעות. לא נכלל בגיבוי.',
+    // the one line under the head: is what is drawn the shared plan, and is it current
+    shareChecking: 'בודק את השיבוץ המשותף…',
+    shareShared: 'השיבוץ משותף עם הטלפונים האחרים ומעודכן.',
+    shareWaiting: 'השינוי שמור במכשיר הזה ועדיין לא התעדכן בענן.',
+    shareUnchecked: 'אין חיבור: לא ניתן לבדוק אם השיבוץ מעודכן. מוצג מה ששמור במכשיר הזה.',
+    shareNotShared: 'השיבוץ עדיין לא משותף: הענן אינו מאפשר זאת כרגע. הוא שמור במכשיר הזה בלבד.',
+    shareNoRoom: 'אין מקום במכשיר לשמור בצד את השיבוץ שלך, ולכן השיבוץ המשותף לא הוצג. מוצג מה ששמור במכשיר הזה.',
+    // this phone's copy lost to another phone's, or met the shared one for the first time
+    shareChangedDay: 'השיבוץ של היום הזה שונה בטלפון אחר. מוצג השיבוץ המשותף, והשיבוץ שלך נשמר בצד.',
+    shareChangedList: 'רשימת הרכבים שונתה בטלפון אחר. מוצגת הרשימה המשותפת, והרשימה שלך נשמרה בצד.',
+    shareFirstDay: 'במכשיר הזה היה ליום הזה שיבוץ שונה מהמשותף. מוצג השיבוץ המשותף, והשיבוץ של המכשיר נשמר בצד.',
+    shareFirstList: 'במכשיר הזה הייתה רשימת רכבים שונה מהמשותפת. מוצגת הרשימה המשותפת, והרשימה של המכשיר נשמרה בצד.',
+    shareUseMineDay: 'להשתמש בשיבוץ שלי',
+    shareUseMineList: 'להשתמש ברשימה שלי',
+    shareKeepShared: 'להשאיר את המשותף',
+    shareUseMineDayTitle: 'להחליף את השיבוץ המשותף בשיבוץ שלך?',
+    shareUseMineListTitle: 'להחליף את רשימת הרכבים המשותפת ברשימה שלך?',
+    shareUseMineLead: 'הטלפונים האחרים יראו את שלך במקום מה שמוצג עכשיו.',
+    shareUseMineOk: 'להחליף'
 });
+
+// ================================================================== SHARING: the hook
+//
+// The shared plan is js/ui/transport-share.js, loaded after this file and gated there.
+// This is the ONE way this file speaks to it, at five marked places (a write, the
+// switch, the opening, a redraw, the switch's sentence), and always AFTER this file has
+// done what it does without it. A build where that file is absent, shut or broken is
+// today's build: a throw from it is swallowed here, because a plan that cannot be shared
+// is still a plan on this phone.
+function transportShareTell(what, arg) {
+    if (typeof TransportShare === 'undefined' || !TransportShare || typeof TransportShare[what] !== 'function') return undefined;
+    try { return TransportShare[what](arg); } catch (error) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('transport: sharing', what, error);
+        return undefined;
+    }
+}
 
 // ================================================================== the store
 //
@@ -322,6 +370,7 @@ function transportSetEnabled(on) {
     if (!transportOn) closeTransport();
     transportInstallEntry();
     transportRenderSwitch();
+    transportShareTell('switched');           // SHARING hook 2 of 5
     return transportOn;
 }
 
@@ -484,6 +533,7 @@ function transportLoad(key, read, empty) {
 function transportWrite(key, value) {
     if (transportHeld[key]) { transportKept = false; return false; }
     transportKept = Store.setVerified(key, JSON.stringify(value), { optional: true }) === true;
+    transportShareTell('changed', key);       // SHARING hook 1 of 5: after the phone has it
     return transportKept;
 }
 
@@ -986,6 +1036,7 @@ function openTransport(date) {
     transportAwayOpen = false;
     transportFleetOpen = false;
     transportPrune(todayStr());
+    transportShareTell('opened');             // SHARING hook 3 of 5
     // One dialog at a time: the WhatsApp dialog this was entered from steps aside.
     if (typeof closeShareModal === 'function') closeShareModal();
     renderTransport();
@@ -1175,6 +1226,7 @@ function renderTransport() {
     if (!transportKept) notes.push(T.notKept);
     parts.note.textContent = notes.join(' ');
     parts.note.hidden = notes.length === 0;
+    transportShareTell('draw');               // SHARING hook 4 of 5: its own line, in its own node
 
     // A live region outside the rebuilt body, written only when its sentence changes
     // (sayOnce, js/sync/status.js): one that is destroyed and rebuilt announces nothing.
@@ -2436,7 +2488,9 @@ function transportInstallSwitch() {
     head.appendChild(titles);
     card.appendChild(head);
     const body = el('div', 'settings-fold-body');
-    body.appendChild(el('p', 'hint', T.switchLead));
+    const lead = el('p', 'hint', T.switchLead);
+    lead.id = 'transportSwitchLead';
+    body.appendChild(lead);
     const state = el('p', 'hint settings-status');
     state.id = 'transportSwitchState';
     body.appendChild(state);
@@ -2457,6 +2511,11 @@ function transportRenderSwitch() {
     toggle.textContent = on ? TRANSPORT_TEXT.switchOff : TRANSPORT_TEXT.switchOn;
     toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
     state.textContent = on ? TRANSPORT_TEXT.switchStateOn : TRANSPORT_TEXT.switchStateOff;
+    // SHARING hook 5 of 5: where the plan is shared, the sentence must not say it is not.
+    // Here and not where the card is built: the card is built when this file loads, and
+    // the share file loads after it (and calls this once, if its gate is open).
+    const lead = document.getElementById('transportSwitchLead');
+    if (lead && transportShareTell('on')) lead.textContent = TRANSPORT_TEXT.switchLeadShared;
 }
 
 // Back from WhatsApp, the marks are brought up to date. Gone to the background with a
