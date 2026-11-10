@@ -262,8 +262,10 @@ file, right after the receipts block. **The owner pastes ONE file holding both.*
 - **The file as built on 2026-11-10** (a working file handed over with the branch, not
   committed - it belongs to whichever branch is merged second): this branch's rules plus
   the 67 lines of the transport block, 41,260 bytes. **Every emulator suite of this
-  branch is run with it in place of `firestore.rules` before it is pasted** - «What was
-  NOT verified» says whether that was done.
+  branch is run with it in place of `firestore.rules` before it is pasted**, and that
+  proves ONE thing: the pay book's rules are not disturbed by the block beside them.
+  Nothing on this branch exercises the transport block itself - its own suites are on
+  its own branch, and they are run against the same one file too.
 - **Whichever branch is merged second** carries the combined file as its
   `firestore.rules`, so that the file in the repository is again exactly what is live.
   The probe's name does **not** move for the transport block: no client refuses to run

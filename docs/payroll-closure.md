@@ -302,9 +302,11 @@ instrument the «מקדמות» tab is the first-run card, not the accounts list
 record itself is measured, on the build as it ships, in `tests/activation.test.mjs` and
 `tests/activation.browser.mjs`.
 
-**The run: 121 suites (84 node, 37 browser). 108 say with the gates open exactly what they
-say shut. 13 differ, and every one was read.** (A count belongs to a commit: these are from
-the run recorded in the report for this phase; `npm run test:gate-open` re-measures.)
+**The run: 121 suites (84 node, 37 browser). In the first full run 108 said with the
+gates open exactly what they say shut and 13 differed; every one was read. One of the 13
+was a defect of this phase and was fixed, so the list holds 12.** (A count belongs to a
+commit: these are from the runs recorded in the hand-over report of this phase;
+`npm run test:gate-open` re-measures.)
 
 | suite | with the gates open | kind | what is different, and where the guarantee is held with the pay book on |
 |---|---|---|---|
@@ -355,6 +357,9 @@ check.
 | `tests/paybook.world.mjs` | `payDevice()`: the flags named; `shipped: true`: no flags | the same, **and the record's switch not honoured** unless `activation: true` | nearly every record in those suites holds an opening, which now turns a build on. The suites go on measuring a BUILD with the flags named |
 | `tests/payroll.test.mjs` | «HISTORY (the gate shut)» on an opened record, asked of a device with no flags | asked of a build that does not honour the opening; the build as it ships is asserted beside it (on) | the same |
 | `tests/paybook.split.emulator.test.mjs` | an older build beside a pay book «STILL RECORDS A DAY» | «ITS DAY IS REFUSED» | `activatedNeedsPaybook` - see The rules |
+| `tests/paybook.split.emulator.test.mjs` | section R: «an ordinary day, sent at protocol 1 ..., is accepted beside a pay book» | «... is REFUSED once there is a pay book» | the same rule, asked by a hand-written write |
+| `tests/paybook.split.emulator.test.mjs` | each O section left its phones connected | each takes them off the cloud before the next reseeds the document | an old phone now holds two refused DAYS, a refused day is retried, and it wrote them into the next section's document (measured on the emulator) |
+| `tests/months.emulator.test.mjs` | an older phone is handed the suite's base record as its disk and its restore file | the base record **less «עובדי יוסף גבס»** | the base carries the count since this phase (duty 1), and an older build reads a disk that holds the layer as damaged - it never has one |
 | `tests/accounts.browser.mjs`, `tests/archive.browser.mjs`, `tests/cold.browser.mjs` | the flags each names through the seam | the same flags **and** `paybookActivation: false` | the same rule for pages as for devices: the flags named decide, on whatever record |
 | `tests/archive.browser.mjs` | «with the gate shut none of it exists», asked of a phone with no flags on a record that holds an opening | asked of the build with the pay book shut (`paybookActivation: false`); the build as it ships is asserted beside it: on, the tab the accounts home | an opening now turns the build as it ships on |
 | `tests/settings-order.browser.mjs` | «every control» and «every sentence» of the sheet equal the v171 lists | the v171 lists, untouched, **plus `ADDED_SINCE`** - one sentence and one button, named apart | the pay book's row: the one thing a person sees of it in the build as it ships |
