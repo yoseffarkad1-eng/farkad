@@ -307,9 +307,78 @@ service cloud.firestore {
         && closed.revision == request.resource.data.revision;
     }
 
+    // ---------------------------------------------------------------- what has left
+    //
+    // A settled closure leaves this document for its closed copy, and one row of
+    // `payIndex.rows` stays in its place (docs/payroll-closure.md, Phase 5). The row is
+    // the only thing in this document that says those entries exist at all, so it is
+    // guarded the way the entries were:
+    //
+    //   1. the index only grows. No row is removed and none is changed, by anybody. A
+    //      whole document written by a build that has never heard of the index carries
+    //      none - and is refused, with that phone's work still on the phone;
+    //   2. a row arrives one at a time, in a write that NAMES it (`archivedId`), speaks
+    //      protocol 2, and whose closed document of that name ALREADY EXISTS. exists(),
+    //      not getAfter: the copy is made and read back first, in a commit of its own,
+    //      and only then may anything leave;
+    //   3. pay entries may leave this document in such a write and in no other - and
+    //      such a write adds no pay entry and changes none.
+    //
+    // WHAT THESE RULES CANNOT DO, said plainly as above: they cannot check that the
+    // entries leaving are the ones the closed documents hold. There are no loops here and
+    // an update shows the merged document. That comparison is the client's, made inside
+    // the transaction that drops them (archiveClosed in js/sync/firebase-adapter.js),
+    // and it is measured in tests/paybook.archive.emulator.test.mjs.
+    function indexBefore() {
+      return resource.data.get('payIndex', {}).get('rows', {});
+    }
+
+    function indexAfter() {
+      return request.resource.data.get('payIndex', {}).get('rows', {});
+    }
+
+    function touchesIndex() {
+      return indexAfter() != indexBefore();
+    }
+
+    function archivesOne(docId) {
+      return speaksPaybook()
+        && request.resource.data.archivedId is string
+        && request.resource.data.archivedId.size() > 0
+        && request.resource.data.archivedId.size() < 128
+        && indexAfter().diff(indexBefore()).removedKeys().size() == 0
+        && indexAfter().diff(indexBefore()).changedKeys().size() == 0
+        && indexAfter().diff(indexBefore()).addedKeys().hasOnly([request.resource.data.archivedId])
+        && indexAfter().diff(indexBefore()).addedKeys().size() == 1
+        && exists(/databases/$(database)/documents/schedules/$(docId)/closed/$(request.resource.data.archivedId));
+    }
+
+    function payOnlyLeaves() {
+      return payAfter().diff(payBefore()).addedKeys().size() == 0
+        && payAfter().diff(payBefore()).changedKeys().size() == 0;
+    }
+
+    function indexGuard(docId) {
+      return !touchesIndex() || archivesOne(docId);
+    }
+
+    // A PHONE THAT DOES NOT KEEP THE PAY BOOK MAY NOT WRITE OVER AN INDEX.
+    //
+    // Once a closure has left this document, a build from before the pay book that is
+    // installed afresh reads that period as never closed and its advances as never
+    // deducted - and would let somebody close it again, the old way, through a field
+    // path these rules do not look inside. Its screens cannot be made right from here;
+    // its writes can be stopped. A build that has been syncing all along still holds the
+    // entries (the ledger is merged by union) - but nothing here can tell the two apart,
+    // and the rollout rule already says every phone updates before the first closure.
+    function indexedNeedsPaybook() {
+      return indexBefore().size() == 0 || speaksPaybook();
+    }
+
     function payGuard(docId) {
       return !touchesPay()
-        || (speaksPaybook() && payOnlyGrows() && carriesClosed(docId));
+        || (speaksPaybook() && payOnlyGrows() && carriesClosed(docId))
+        || (payOnlyLeaves() && touchesIndex() && archivesOne(docId));
     }
 
     // The first write of a project has nothing to compare against. It may carry a pay
@@ -317,6 +386,12 @@ service cloud.firestore {
     function payGuardOnCreate(docId) {
       return payAfter().size() == 0
         || (speaksPaybook() && carriesClosed(docId));
+    }
+
+    // And it may not begin with an index: a row stands for closed documents, and a
+    // project that does not exist yet has none.
+    function indexGuardOnCreate() {
+      return request.resource.data.get('payIndex', {}).get('rows', {}).size() == 0;
     }
 
     // AND THE SCHEDULE MUST MOVE IN THIS COMMIT. Measured before the last line existed:
@@ -346,6 +421,7 @@ service cloud.firestore {
         && firstRevision()
         && carriesReceipt(docId)
         && payGuardOnCreate(docId)
+        && indexGuardOnCreate()
         && (!isFullReplacement() || fullDocumentOk());
 
       allow update: if allowed()
@@ -366,6 +442,11 @@ service cloud.firestore {
         // Whichever branch let it in: nothing changes the pay book except a protocol-2
         // write that only adds to it and creates its closed copy in the same commit.
         && payGuard(docId)
+        // And nothing changes the index of what has left except the one write that
+        // archives one closure; and once there is an index, only a build that keeps
+        // the pay book writes at all.
+        && indexGuard(docId)
+        && indexedNeedsPaybook()
         && (!isFullReplacement() || fullDocumentOk());
 
       // Nothing deletes the schedule. It is the record of who worked where.

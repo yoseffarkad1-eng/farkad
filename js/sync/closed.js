@@ -50,6 +50,7 @@ Object.assign(FarkadSync, {
     _closedWaiting: null,
     _closedFetching: null,
     _closedTimer: null,
+    _closedRetrying: false,
     _archiving: false,
 
     // ------------------------------------------------------------ on the way in
@@ -82,7 +83,9 @@ Object.assign(FarkadSync, {
         // «מסונכרן» over a document this phone has not adopted would be the lie the whole
         // status line exists to prevent.
         if (this.status === 'synced') this.setStatus('connecting');
-        this.fetchClosed();
+        // Not from inside the retry itself: a fetch that failed is tried again on the
+        // ladder, never at once - a phone with no signal would otherwise spin.
+        if (!this._closedRetrying) this.fetchClosed();
         if (typeof renderAccountsNotice === 'function') {
             try { renderAccountsNotice(); } catch (error) { /* a notice, not the record */ }
         }
@@ -118,7 +121,9 @@ Object.assign(FarkadSync, {
             // Through the front door, so the gate judges it afresh with what was fetched.
             this._closedHeld = null;
             const before = this._closedWaiting ? this._closedWaiting.tries : 0;
+            this._closedRetrying = true;
             try { this.receive(held); } catch (error) { /* receive reports its own trouble */ }
+            this._closedRetrying = false;
             if (this._closedWaiting) {
                 this._closedWaiting.tries = before + 1;
                 const wait = CLOSED_RETRY_MS[Math.min(before, CLOSED_RETRY_MS.length - 1)];
@@ -304,7 +309,9 @@ Object.assign(FarkadSync, {
                     if (round >= CLOSED_REBASE_LIMIT) return fail('busy');
                     return this.archiveDrop(bundle, row, used, live.revision).then(next);
                 });
-        }, () => fail('offline'));
+        // A read that failed - of the document or of any closed document - is no signal.
+        // Nothing was written on the strength of a read that did not come back.
+        }).catch(() => fail('offline'));
     },
 
     // THE COPY: one create-once closed document holding the entries no closed document
