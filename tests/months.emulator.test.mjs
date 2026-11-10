@@ -206,6 +206,16 @@ function phone(id, env, options = {}) {
     device.Sync.connect(adapterFor(as(env, options.email || ALLOWED), opsOf.new));
     return device;
 }
+// AN OLDER BUILD'S OWN COPY NEVER HELD «עובדי יוסף גבס» (v183): it drops the layer from what
+// it adopts and reads a disk that holds one as damaged (tests/yosefgeves.test.mjs). The
+// record these suites start from carries the count since Phase 8, so the copy handed to
+// an older phone - its disk, and the file it restores - is that record less the layer.
+// The SERVER's documents keep it; that is what the newer phones in this file measure.
+const withoutSecondCount = record => {
+    const out = clone(record);
+    Object.keys(out.days || {}).forEach(date => { delete out.days[date].yosefGeves; });
+    return out;
+};
 function oldPhone(name, sources, id, env, storage) {
     const device = makeDevice({ sources, appVersion: name, deviceId: id, storage });
     device.setToday(TODAY);
@@ -582,14 +592,14 @@ for (const [name, sha] of OLDER) {
 
     suite(`Y6 / ${name} x the new rules x TODAY'S document (no pay book, no month out): publishing the rules first`);
     await reseed(envNew, TODAYS());
-    const first = oldPhone(name, sources, `d_r1_${name}`, envNew, { [SCHEDULE]: JSON.stringify(BASE.bare) });
+    const first = oldPhone(name, sources, `d_r1_${name}`, envNew, { [SCHEDULE]: JSON.stringify(withoutSecondCount(BASE.bare)) });
     await reached(() => first.Sync.status === 'synced', 15000, 20);
     day(first, 'w_nasser', '2026-11-10');
     await reached(() => first.Sync.pendingCount() === 0 && first.Sync.status === 'synced', 15000, 20);
     const one = await server(envNew);
     cell.recordsToday = Boolean(one.days['2026-11-10']);
     check('it RECORDS A DAY', cell.recordsToday, first.Sync.status);
-    const file = clone(BASE.bare);
+    const file = withoutSecondCount(BASE.bare);
     file.days['2026-11-02'].actual.w_salim.entries[0].placeId = 'p_b';
     const restored = await Promise.race([first.Sync.replaceEverything(first.call('normaliseSchedule', file)).catch(error => ({ ok: false, error })), settle(8000).then(() => ({ ok: false, timeout: true }))]);
     await settle(500);
@@ -608,7 +618,7 @@ for (const [name, sha] of OLDER) {
     const stood = raw => [monthsOut(raw), datesOf(raw), daysIn(raw, OCT), raw.revision];
 
     // A phone that held the whole record on the older build all along.
-    const old = oldPhone(name, sources, `d_r2o_${name}`, envNew, { [SCHEDULE]: JSON.stringify(BASE.bare) });
+    const old = oldPhone(name, sources, `d_r2o_${name}`, envNew, { [SCHEDULE]: JSON.stringify(withoutSecondCount(BASE.bare)) });
     await reached(() => old.Sync.status === 'synced' || old.Sync.status === 'error', 15000, 20);
     await settle(500);
     cell.statusOnOpen = old.Sync.status;
@@ -622,7 +632,7 @@ for (const [name, sha] of OLDER) {
     check('so IT MAY NOT WRITE: the day it records does not reach the server, and the revision does not move', cell.dayRefused, JSON.stringify(stood(afterDay)));
     check('it does not say synced', old.Sync.status !== 'synced', old.Sync.status);
     same('the day is still on that phone', Boolean(old.State.schedule.days['2026-11-11'].actual.w_nasser), true);
-    const restoring = old.Sync.replaceEverything(old.call('normaliseSchedule', clone(BASE.bare)));
+    const restoring = old.Sync.replaceEverything(old.call('normaliseSchedule', withoutSecondCount(BASE.bare)));
     await Promise.race([restoring.catch(() => null), settle(6000)]);
     await settle(1500);
     const afterRestore = await server(envNew);

@@ -359,7 +359,11 @@ function pairWrite(db, options = {}) {
             tx.set(doc(me, ...PATH), next);
             tx.set(doc(me, ...PATH, 'receipts', 'op_keep'), { revision: next.revision, opFingerprint: 'f_keep' });
         }));
-    await passes('and an ordinary day, sent at protocol 1 by a phone that has not updated, is accepted beside a pay book',
+    // MOVED AT PHASE 8, deliberately: «is accepted beside a pay book» is now REFUSED. A
+    // record with a pay book is a record that has been turned on, and a build below
+    // protocol 2 may write nothing to it (activatedNeedsPaybook) - see section O, and
+    // tests/activation.emulator.test.mjs on v180, v183 and v184.
+    await denied('and an ordinary day, sent at protocol 1 by a phone that has not updated, is REFUSED once there is a pay book',
         runTransaction(me, async tx => {
             const snap = await tx.get(doc(me, ...PATH));
             tx.update(doc(me, ...PATH), new FieldPath('days', '2026-10-18', 'actual', 'w_nasser'), { entries: [{ placeId: 'p_a' }] },
@@ -514,6 +518,13 @@ for (const [name, sha] of OLDER) {
             cell.oldRecordsAfterRefusedRestore, false);
         same('that day is on the old phone\'s own disk, and nothing of the pay book moved',
             [Boolean(old.State.schedule.days['2026-10-19'].actual.w_salim), canonical(later.pay) === before], [true, true]);
+        // OFF THE CLOUD, both of them, before the next section reseeds the document. Since
+        // Phase 8 this old phone holds two REFUSED DAYS as well as its refused restore,
+        // and a refused day is retried: left connected, it sent them the moment the next
+        // section's document (which has no pay book) would take them - measured: that
+        // document at revision 5, signed by this phone, and the next phone's restore
+        // losing the race. A phone of one section must not write into the next.
+        [n, old].forEach(device => device.Sync.disconnect());
     }
 
     suite(`O / ${name} under the NEW rules, a document with NO pay book (the real one, today)`);
@@ -530,6 +541,7 @@ for (const [name, sha] of OLDER) {
         cell.restoreNoPay = result.ok === true && after.updatedBy === old.id && dayOn(after);
         same('it records a day, and its restore is ACCEPTED - there is no pay book for it to erase, so nothing is refused',
             [cell.dayNoPay, cell.restoreNoPay, old.Sync.status], [true, true, 'synced']);
+        old.Sync.disconnect();
     }
 
     suite(`O / ${name} under the rules AS PUBLISHED TODAY, a document with a pay book - the hazard, on the real rules`);
