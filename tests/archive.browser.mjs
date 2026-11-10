@@ -158,6 +158,7 @@ await a.page.waitForTimeout(200);
 
     await reopen(a);
     await showAccounts(a.page);
+    const reloaded = await disk(a.page);          // a reload writes its own keys; this is the disk after it
     same('AFTER A RELOAD the list offers to go on with it, by name',
         [await screen(a.page), await txt(a.page, `${V} .acc-draft-link`)], ['list', 'המשך סגירה שהתחלת: חאלד']);
     await tap(a.page, `${V} .acc-draft-link`);
@@ -168,7 +169,7 @@ await a.page.waitForTimeout(200);
             await a.page.locator(`${V} input[aria-label="סיבת הניכוי"]`).inputValue(), await txt(a.page, `${V} .acc-draft-restored`)],
         ['review', '200', '1500', '50', 'כלי עבודה', T.restored]);
     await geometry(a.page, 'a review with its draft put back', 1);
-    same('still nothing of the record and nothing on the cloud', [await disk(a.page) === before, net.cloud.writes.length], [true, sent]);
+    same('putting it back wrote nothing of the record and nothing on the cloud', [await disk(a.page) === reloaded, net.cloud.writes.length], [true, sent]);
 
     // The account changes under the draft: another advance is recorded for him.
     await a.page.evaluate(() => { accGo('list'); });
@@ -186,8 +187,9 @@ await a.page.waitForTimeout(200);
     await type(a.page, a.page.locator(`${V} .acc-adv input`).nth(0), '300');
     given('a draft is written again', (await draftOf(a.page)).alloc[KHALED_ADV[0]] === '300');
     await a.page.evaluate(draft => { const held = JSON.parse(localStorage.getItem(draft)); held.day = '2026-10-14';
-        localStorage.setItem(draft, JSON.stringify(held)); accGo('list'); }, DRAFT);
-    await a.page.waitForTimeout(120);
+        localStorage.setItem(draft, JSON.stringify(held)); }, DRAFT);
+    await reopen(a);                              // the app, opened the next morning with yesterday's draft on its disk
+    await showAccounts(a.page);
     same('a draft from another day is not offered on the list', await a.page.locator(`${V} .acc-draft-link`).isVisible(), false);
     await tapText(a.page, 'סגירת חשבון ואיפוס', row('w_khaled'));
     same('nor put back into the review', [await a.page.locator(`${V} .acc-adv input`).nth(0).inputValue(), await draftOf(a.page)], ['500', null]);
@@ -255,7 +257,7 @@ await a.page.waitForTimeout(200);
 
     // the statement of an archived closure still has its detail
     await tapText(a.page, 'היסטוריית סגירות חשבון');
-    await a.page.locator(`${V} .acc-row`, { hasText: 'נאסר' }).first().locator('button').first().click();
+    await tap(a.page, `${V} .acc-history-row[data-worker="w_nasser"]`);
     await a.page.waitForTimeout(200);
     same('THE STATEMENT OF AN ARCHIVED CLOSURE has its day list, and does not say the detail is absent',
         [await screen(a.page), await a.page.locator(`${V} .acc-days .acc-day`).count() > 0,
