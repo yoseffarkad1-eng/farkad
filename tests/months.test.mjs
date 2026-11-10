@@ -18,6 +18,7 @@
 //   M8  a restore never changes an archived month: before, after, a tampered file
 //   M9  the files: the backup, the rescue file, the daily cloud copy
 //   M10 the gates: either flag shut and nothing moves; reading is not behind them
+//   M11 with Phase 5: closures that have left and months that have left, in both orders
 //
 // The fake cloud runs with `payRules: true`: it refuses what firestore.rules refuse. The
 // real rules and the production adapter are measured in tests/months.emulator.test.mjs.
@@ -717,6 +718,44 @@ const WANT = {
     reader.said.length = 0;
     same('and still refuses an edit of an archived day, in the same sentence',
         [reader.State.commit(reader.call('setRimaCount', reader.State.schedule, '2026-10-05', 'p_a', 9)), reader.said.length], [false, 1]);
+}
+
+// ------------------------------------------------------------------------------------
+{
+    suite('M11: with Phase 5 - the closures leave first (after 14 days), the months after (six months): both orders, one record');
+
+    const payRows = source => Object.keys(((source && source.payIndex) || {}).rows || {}).sort();
+    {
+        // The order life will produce: every settled closure is already out when its month goes.
+        const { cloud, a, b } = await closedWorld({ tag: '11a' });
+        const whole = figures(a);
+        const closures = await a.Sync.archiveClosed({ today: LATER });
+        await settled([a, b]);
+        given('the closures left first', closures.ok === true && payRows(cloud.doc).length === 5, JSON.stringify([closures, payRows(cloud.doc)]));
+        const plan = a.call('planMonths', a.State.schedule, LATER, {});
+        same('A CLOSURE THAT HAS ITSELF LEFT THE LIVE DOCUMENT STILL SETTLES ITS MONTH: September and October are ready',
+            plan.months.map(one => [one.month, one.state]), [[SEP, 'ready'], [OCT, 'ready'], [NOV, 'held']]);
+        const months = await a.Sync.archiveMonths({ today: LATER });
+        await settled([a, b]);
+        same('and they leave', [months.ok, months.moved, monthsOut(cloud.doc), payRows(cloud.doc).length], [true, [SEP, OCT], [SEP, OCT], 5]);
+        same('the live document now holds neither the closures\' entries nor the months\' days',
+            [Object.keys(cloud.doc.pay).filter(id => id !== 'po_open'), daysIn(cloud.doc, OCT)], [[], []]);
+        same('and both phones hold all of both, and every figure', [figures(a) === whole, figures(b) === whole], [true, true]);
+        const fresh = phone('d_new11', cloud, { storage: {} });
+        await settled([fresh]);
+        same('A PHONE INSTALLED AFTER BOTH fetches the closed documents and the month documents and reads the same', figures(fresh) === whole, true);
+    }
+    {
+        // And the other order.
+        const { cloud, a, b } = await closedWorld({ tag: '11b' });
+        const whole = figures(a);
+        given('the months left first', (await a.Sync.archiveMonths({ today: LATER })).ok === true);
+        await settled([a, b]);
+        const closures = await b.Sync.archiveClosed({ today: LATER });
+        await settled([a, b]);
+        same('THE OTHER ORDER: the closures leave after their months, from the other phone', [closures.ok, payRows(cloud.doc).length, monthsOut(cloud.doc)], [true, 5, [SEP, OCT]]);
+        same('and nothing moved on either phone', [figures(a) === whole, figures(b) === whole], [true, true]);
+    }
 }
 
 report();

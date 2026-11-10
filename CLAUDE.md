@@ -70,6 +70,16 @@ different from what was done.
    transaction that drops them. A PHONE'S RECORD KEEPS EVERY ENTRY: no fold reads the
    index, a server document that cannot be made whole is not adopted, and a
    whole-document write leaves out what a row stands for.
+   **Phase 6 does the same for the DAYS, behind a flag of its own** (`months: false`,
+   which needs `paybook` too): a calendar month whose every worker-day is inside a closed,
+   settled account, six months on, leaves for `schedules/{doc}/months/{YYYY-MM}_{digest}`
+   and `monthIndex` stays (js/model/months.js, js/sync/months.js; the gate and the strip
+   are closed.js's own). The phone keeps every day; a day of such a month is NOT EDITED -
+   `State.commit` refuses it in a sentence before the journal, a queued one is held and
+   never sent, and the rules refuse any write to one of its dates. No screen calls the
+   move. Measured there: with the pay book in use A PHONE'S STORAGE FILLS BEFORE THE
+   SERVER'S DOCUMENT DOES (docs/payroll-closure.md, «Phase 6», Capacity) - a blocker of
+   the gate.
    **And the one-debt ruling moves with that gate (v175).** An advance from a period
    nobody closed stays a full debt until a person deducts it (the owner, 2026-11-10):
    `advanceDebtStays()` in `js/model/schema.js` is `FARKAD_FLAGS.paybook`, read in one
@@ -196,6 +206,13 @@ written down so it cannot happen twice.
                                server transaction with its create-once closed document - never the queue;
                                the durable intent (farkad:payIntent); a lost answer settled by reading the
                                receipt, never by sending again
+    js/model/months.js         Phase 6, SHIPPED SHUT (`months: false`): closed months of days leaving the live
+                               document - eligibility and the dry run (planMonths), the month document and
+                               its digest, the row, whole (monthsWhole) and stripped (monthsStripCovered),
+                               what a restore keeps (layMonthsKept), and every Hebrew word of the phase in
+                               one block (MONTH_TEXT, proposed). Pure
+    js/sync/months.js          Phase 6, the move of one month: copy, read back, compare, drop; keeps no state
+                               of its own; and the retiring of a held edit of an archived day by a person
     js/sync/closed.js          Phase 5, SHIPPED SHUT with the pay book: what has left the live document. The
                                gate at the top of receive() that lays an archived closure's entries back
                                (from this phone's record or its closed documents) or does NOT adopt; the
@@ -378,6 +395,16 @@ written down so it cannot happen twice.
                                the shekel on the glass, a blank field refused on its row, offline writing
                                nothing, two taps one closure, a second phone's conflict, the walk and the
                                batch, history five ways, corrections, the first run, 44px/16px/200% text
+    tests/months.test.mjs      Phase 6 on the fake cloud: what may move and the words, the move on three
+                               phones, never before the copy is confirmed, a phone that lacks the month,
+                               resumable, an edit of an archived day refused / held / retired, the server's
+                               refusals, the restores, the files, the gates, and both orders with Phase 5
+    tests/months.capacity.test.mjs 20 men: the server's document with months leaving, what still grows, and
+                               a phone's storage - which wall is first, counted and on a device with an edge
+    tests/months.emulator.test.mjs EMULATOR: the rules for months by hand-written transactions, the
+                               production adapter's copy and drop, two phones at once, the published
+                               rules, and v167/v171/v172 x the new rules x a document with and without
+                               a month out
     tests/paybook.archive.test.mjs Phase 5 on the fake cloud (which refuses what the rules refuse of a whole
                                document): the move, and the same money on five kinds of phone; never before
                                the copy is confirmed; a phone that cannot fetch adopts nothing; resumable;

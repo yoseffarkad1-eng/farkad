@@ -1,4 +1,4 @@
-# Worker accounts, closure and payment — the design as built (Phases 0 to 5)
+# Worker accounts, closure and payment — the design as built (Phases 0 to 6)
 
 Status: **the model, its storage and sync, the server-first closure, the rules for it, the
 screens, and closed accounts leaving the live document — shipped shut, on a development
@@ -8,7 +8,10 @@ gate, and the screens are reached by nothing. **v176 is not served and not merge
 here has touched a real record, no rules were published, and the gate has never been open
 outside a test.** Phase 5 as built comes first below, then Phase 4, then Phase 3; **the
 gate may still not be opened**, and [What is still NOT built after Phase
-5](#what-is-still-not-built-after-phase-5) says exactly why.
+5](#what-is-still-not-built-after-phase-5) says exactly why. **Phase 6 comes before all of
+them**: closed months of days leaving the live document, behind a second flag
+(`months`, shipped `false`) - with what it measured about the phone's own storage, which
+is now the first wall and a blocker of the gate.
 
 Phases 0 and 1 were built on `bd59a68` (v169); Phase 2 on `0acaceb` (v171); Phase 3 on
 Phase 2 merged with main at v172 (`8c943fa`); Phase 4 on Phase 3 merged with main at
@@ -66,7 +69,7 @@ from. It writes nothing. One row per calendar month that holds at least one day:
 | `archived` | already out of the live document |
 | `ready` | every man's every day in it is inside a closed, settled account, and at least six calendar months have passed since the later of its last such closure and its last day |
 | `waiting` | the same, and younger than that |
-| `held` | it stays - `why`: `current` (the month is not over), `open` (some man has a day in it that no closed account covers - named), `unsettled` (a covering closure is owed, unanswered, disputed, overpaid, corrected or irregular - named), `unreadable` (a day this build cannot read: law 10, it stays where a person can see it), `too-large` (over 900 KB: one document could not hold it) |
+| `held` | it stays - `why`: `current` (the month is not over), `open` (some man has a day in it that no closed account covers - named), `before-opening` (the same, and every such day is from before the tracking day, so no account ever will: decision 55), `unsettled` (a covering closure is owed, unanswered, disputed, overpaid, corrected or irregular - named), `unreadable` (a day this build cannot read: law 10, it stays where a person can see it), `too-large` (over 900 KB: one document could not hold it) |
 
 "Settled" is Phase 5's word and Phase 5's function: a closure `planArchive` would call
 `ready`, `waiting` or `archived`. A month with a Rima count and no worker-day is settled by
@@ -182,6 +185,293 @@ touches an archived date or drops a row. Older builds are measured out of Git.
 **5. Rules.** Above; the rollout table is re-measured below.
 
 **6. Capacity.** Re-measured below, with what still grows.
+
+### Phase 6 as built
+
+    node tests/months.test.mjs                  # the model, the move, the gate, the refusals, the restores, the files - on the fake cloud
+    node tests/months.capacity.test.mjs         # 20 men: the server's document and a phone's storage, weighed
+    npm run -s test:months-emulator             # the rules, the production adapter, three older builds (needs Java)
+
+**Built, behind `FARKAD_FLAGS.months` (shipped `false`; it needs `paybook` as well):**
+
+| | where |
+|---|---|
+| the model: eligibility, the dry run and its words, the month document, the row, whole and stripped, what a restore keeps | `js/model/months.js` (pure) |
+| the move: copy, read back, compare, drop; the retiring of a held edit | `js/sync/months.js` |
+| the gate on the way in and the strip on the way out - Phase 5's two functions, now doing both | `js/sync/closed.js` |
+| `copyMonth`, `archiveMonth` (the confirmation inside the transaction), `readMonth` | `js/sync/firebase-adapter.js` |
+| the rules for both the pay book and the months, one file | `firestore.rules` |
+| an edit of an archived day refused before the journal | `State.refuseArchivedMonth`, called by `commit` and `commitMany` |
+| a queued edit of an archived day held and never sent; «mine» refused as an answer | `sendClaimed`, `contestedPaths`, `heldRecords`, `answerHold` |
+| a restore keeps every archived month as the archive holds it | `layMonthsKept`, called twice in `js/sync/restore.js` |
+| the index carried by every door a record comes through | `normaliseSchedule`, `replacementContent`, the echo test in `receive()` |
+| the backup and rescue files say what they carry; the rescue's comparison knows each month | `js/ui/backup.js` |
+| the fake cloud speaks the same contract | `tests/harness.mjs`, `tests/accounts.cloud.mjs` |
+
+**NOT built - where the work stopped, exactly:**
+
+1. **No screen.** The dry run is a function (`planMonths`) and its words (`monthsPlanLines`);
+   nothing draws it and no button calls `archiveMonths`. With both flags open a month still
+   moves only if code calls the function. Three sentences ARE wired to existing screens - the
+   refusal dialog of an edit, the row of a held edit in ⋯ (one sentence, one button), and
+   the waiting sentence on the accounts page - and **none of the three has been seen in a
+   browser**: they are asserted in Node only.
+2. **A phone's copy does not shrink**, and with the pay book in use that is the wall that
+   is hit first. See Capacity. This is the largest thing the phase leaves (decision 58).
+3. **The server's document is still not bounded.** The days are; the index of closures is
+   not. See Capacity (decision 59).
+4. **Nothing before the tracking day is eligible**, by the shipped default: today's 185 KB
+   of history stays in the live document for good unless the owner says the opening
+   settles what came before it (`planMonths(..., { beforeOpening: true })`, decision 55).
+   `archiveMonths` does not pass that option today, so even the function cannot move it.
+5. **Bringing a month back** (decision 54), and **an automatic move** (decision 57).
+6. **A restore that meets a month archived by another phone while it was waiting to be
+   sent** (`restore.js`, the second call of `layMonthsKept`) is written and not tested. The
+   fallback is: the server refuses the write and the restore stays owed.
+7. **The oracle on main was not merged in.** Question 3 is answered by the proof described
+   under it below, not by `tests/oracle.mjs`.
+
+### The six questions, answered with what was measured
+
+**1. The phone keeps the archived days - and that only moves the wall.**
+`tests/months.capacity.test.mjs`, C2, at 5 MiB of localStorage and two bytes a character
+(2,621,440 characters for everything the app keeps), 20 men, closed fortnightly, on top of
+today's 185 KB:
+
+| what the phone keeps | year 1 | year 3 | the record AND one copy of it stop fitting | the record ALONE stops fitting |
+|---|---|---|---|---|
+| **as built: every day and every closure entry** | 1,715 K chars | 5,152 K | **after 0.7 years** | **after 1.4 years** |
+| archived days dropped, closure entries kept | 1,493 K | 4,014 K | 0.7 years | 1.7 years |
+| only what the live document holds (days and closures both dropped) | 428 K | 736 K | 5.1 years | 13.3 years |
+| nobody closes: days and advances only | 503 K | 1,502 K | 2.2 years | 4.8 years |
+
+"One copy" is `scheduleData:v2backup`, which every adopted snapshot writes; the reclaim
+ladder gives it and the restore points up before it refuses. Measured on a device with a
+real five-megabyte edge: a record of 2.0 million characters is adopted, one of 3.0 million
+is not («no room to store the update; it was not adopted»), and the phone does not say
+synced.
+
+**Read it plainly.** Once the pay book is in use the PHONE is full before the SERVER is
+(1.4 years against 4.3), and it loses its way back from a bad snapshot after about eight
+months. Dropping archived days from the phone would not fix it: the closure entries are
+three quarters of the weight, and Phase 5 chose to keep them too. **Nobody is at this wall
+today** - with nobody closing through the pay book a phone has 4.8 years - but opening the
+gate starts this clock, so this is a blocker of the gate, not a note.
+
+**Proposed, not built (decision 58):** the phone keeps in localStorage only what the
+server's live document holds, and keeps what has left - archived months, archived closure
+entries - in IndexedDB (hundreds of megabytes on the same phones), loaded into memory at
+boot and laid at the same paths. Every fold and report still reads one whole record, so no
+arithmetic changes; what changes is `State.load`, `State.persist`, `Recovery` and the
+backup doors, which is why it is a phase of its own. Until then the invariant "a phone's
+record never has a hole" is paid for in the phone's storage.
+
+**2. An edit of an archived day is refused in a sentence; one already queued is held.**
+Measured in `tests/months.test.mjs`, M6: the commit answers false, the dialog says «החודש
+הזה בארכיון» and the sentence below, nothing is journalled or sent, the disk is byte for
+byte what it was, and memory is put back. A Rima count, a batch with one such day in it
+(refused whole), and a brand-new day on a date of that month that held nothing are refused
+the same way; a day in a month that has not left is recorded as ever. An edit made with no
+signal BEFORE the phone heard: never sent (no write to that date leaves the phone, through
+a reopen too), the ordinary day queued behind it IS sent, the phone does not say synced,
+the row is in ⋯ with the archive's value beside it, «mine» is refused as an answer, and a
+person retires it - after which the phone holds the archive's value and says synced.
+The server refuses such a write in any case (Y2). **What this costs, said:** a Rima count
+in an archived month can never be corrected - the client's invoice for it is final six
+months after its last day. A wage has the adjustment on the statement; a Rima count has
+nothing. Decision 54.
+
+**3. Reports over a range that includes archived months: the same figures.** Proved as one
+string - `payrollReport`, `invoiceReport`, every man's `workerDaysReport`, `rimaReport`
+over September to November, `accountsList`, and `days` itself - equal before and after, on
+the phone that moved the months, a phone that watched, a phone reopened from its disk, a
+phone that was away for the move, a phone installed afterwards (fake cloud and emulator),
+a phone with the flag shut, and with Phase 5's move before and after this one. **Not
+compared byte for byte:** the xlsx, the CSV, the week grid, the printed pay sheet and the
+picture. They read `days` and the roster through those same functions and `days` is
+asserted identical, which is an argument from construction for those five, not a
+measurement of them.
+
+**4. A restore never loses or duplicates an archived month.** M8 and Y1: a file from
+before the move, one from after, a daily cloud copy (no archived days in it), and a file
+whose October disagrees with the archive and whose November was really changed - each is
+accepted by a server that refuses any write to an archived date; the index, the dates and
+the month documents are exactly what they were; the document sent carries the index and no
+day of an archived month; both phones hold October as the archive does; and November - a
+month that has not left - is the file's, as asked. A phone that holds nothing with the
+archive's digest does not run a restore at all (`prepare`, record untouched). From a build
+that does not know archiving (v167, v171, v172, out of Git, on the emulator): the whole
+document it sends - October back in it, no index - is **refused**, with the index, the
+dates, the days and the revision exactly where they were. The backup and the rescue file
+carry every day and say so in the file (`aboutArchivedMonths`); with no month out the
+backup file is byte for byte what it was. The daily cloud copy is the live document's
+shape.
+
+**5. The rules, and whether publishing them first is still safe.** See the next section.
+
+**6. Capacity.** See the section after it.
+
+### The rollout table, re-measured
+
+`tests/months.emulator.test.mjs`, Y5 and Y6: v167 (`a25566f`), v171 (`0acaceb`) and v172
+(`8c943fa`), their own files and their own adapter out of Git, and this build. All three
+older builds answer every question the same way. Rows about the pay book alone are Phase
+3's and Phase 5's, measured by their own suites under THESE rules in the same chain.
+
+| client | rules | document | records a day | restores | moves a month |
+|---|---|---|---|---|---|
+| older | new | today's: no pay book, no month out | **yes** | **yes** | - |
+| older | new | with a pay book, no index (Phase 3) | yes | REFUSED, nothing erased | - |
+| older | new | a closure has left (Phase 5) | REFUSED | REFUSED | - |
+| older | new | **a month has left** | **REFUSED** - the day stays on that phone, the revision does not move, it does not say synced | **REFUSED** - the index, the dates, the days and the revision exactly where they were; the month documents untouched | - |
+| this build | today's | either | yes | yes | **REFUSED whole** - those rules have no `months/`; the read is refused, nothing is copied, nothing leaves (`server`) |
+| this build | new | a month has left | yes, in a month that has not left; an archived date is refused on the phone and by the server | yes; archived months kept as they are | yes |
+
+**Measured, and the reason for the fourth row:** an older build that adopts a document
+with a month out **loses those days from its own copy** - it reads October as empty (0 of
+12 days, all three builds). Its screens cannot be made right from here; its writes are
+stopped (`monthsNeedPaybook`).
+
+**Is publishing these rules BEFORE any phone updates still safe? Yes - measured, for the
+document as it is today.** Every new guard is vacuous while the document has no month
+index and no pay book: all three older builds record a day and restore a file under the
+new rules (first row). The order of Phase 3 stands unchanged, with one line added to its
+last step:
+
+1. Save the published rules and compare with `docs/firestore.rules.before-paybook`.
+2. Publish `firestore.rules` - **once, for the pay book and the months together.**
+3. Update the phones. 4. Check each phone in ⋯.
+5. Only then open the gates. **From the first month that leaves, as from the first closure
+   that leaves, a phone on an older build can no longer write at all** and must be updated
+   before it is used again. THE ROLLOUT RULE already says every phone updates first.
+
+**Protocol 2 now means "keeps the pay book AND knows the months".** No build that speaks
+protocol 2 has ever been served (v175 and v176 are this branch), so there is no phone in
+the field that speaks 2 and does not know the months. The first build served with
+protocol 2 must carry this phase's reading half - which it does, flag shut or not.
+
+**What the server enforces, and what it does not** (Y2, Y3): enforced - everything in
+[The rules](#the-rules-extended-on-this-branch-nothing-published), including that the days
+leaving are exactly the days the month document holds, by date. **Not enforced: that their
+values are equal.** Measured by writing the drop by hand, around the adapter, on a copy
+with the right dates and one wrong value: the rules accept it. The production adapter
+refuses the same drop inside its transaction (`month-unconfirmed`, nothing written). The
+three people on the allowlist are trusted not to write transactions by hand; the rules are
+there for builds and bugs.
+
+### Capacity, for 20 men, with months leaving
+
+`tests/months.capacity.test.mjs`, C1 - the method and assumptions of Phase 3's table,
+entries from the shipped writers, the document weighed by Firestore's count; a closure
+leaves 14 days after it is settled, a month six months after its last closure.
+
+| 20 men | year 1 | year 2 | year 3 | year 5 | year 10 | grows by then | full, from empty | **full, on top of today's 185 KB** |
+|---|---|---|---|---|---|---|---|---|
+| nobody closes (no month is ever eligible) | 415 KB | 825 KB | 1,236 KB | 2,056 KB | 4,106 KB | 410 KB a year | 2.5 years | **2.0 years** |
+| closed fortnightly, closures leave (Phase 5), days stay | 545 KB | 1,051 KB | 1,558 KB | 2,571 KB | 5,104 KB | 507 KB a year | 2.0 years | **1.6 years** |
+| **closed fortnightly, closures AND months leave (Phase 6)** | 366 KB | 503 KB | 640 KB | 948 KB | 1,637 KB | **138 KB a year** | 5.7 years | **4.3 years** |
+| closed weekly, closures leave (Phase 5), days stay | 684 KB | 1,290 KB | 1,897 KB | 3,110 KB | 6,142 KB | 606 KB a year | 1.6 years | **1.3 years** |
+| **closed weekly, closures AND months leave (Phase 6)** | 505 KB | 742 KB | 979 KB | 1,486 KB | 2,675 KB | **238 KB a year** | 3.1 years | **2.3 years** |
+
+(Phase 5's rows here are heavier than Phase 3's "with the split" rows because they carry
+the row as it is actually stored, and the two weeks of closures that have not left yet.)
+
+Read it this way:
+
+- **The days are bounded now**: the live document holds about eight months of them, 211 KB
+  for 20 men, at year 1 and at year 10.
+- **The document is not.** It hits 1 MiB **4.3 years from today closed fortnightly, 2.3
+  years closed weekly** - against 1.6 and 1.3 without this phase.
+- **And if nobody closes through the pay book, this phase buys nothing at all**: no month
+  is ever eligible, and the days fill the document in two years, as measured at Phase 3.
+- **What still grows without bound**, a year, fortnightly (weekly in brackets):
+
+| | grows | held at year 10 |
+|---|---|---|
+| the index of closures - one row per closure, never folded | 96 KB (196 KB) | 961 KB (1,956 KB) |
+| advances and their ledger origin - none ever leaves, repaid or not | 37 KB | 375 KB |
+| the month index - a row and the calendar dates of each month | 5 KB | 48 KB |
+| an unpaid closure - never leaves, and holds its month with it | not modelled: everybody is paid at the closing here | |
+| the roster | nothing while the crew is 20 | 2 KB |
+
+- **Today's 185 KB is counted as a constant**, because by the shipped default none of it
+  is eligible (it is from before the tracking day). If the owner rules that the opening
+  settles it (decision 55) most of it leaves and each "from today" figure moves towards
+  its "from empty" one.
+- **The next two things to leave** are therefore named by the table: the rows of the
+  closure index older than a horizon (to create-once index pages - the same mechanism a
+  third time), and settled advances. Neither is designed in detail; neither is built.
+
+### Hebrew in Phase 6
+
+All **proposed**, in one block (`MONTH_TEXT` in `js/model/months.js`), pinned word for word
+in `tests/months.test.mjs`.
+
+| string | where |
+|---|---|
+| החודש הזה בארכיון | the title of the refusal of an edit |
+| החודש הזה נסגר לכל העובדים והועבר לארכיון, ולכן אי אפשר לשנות בו ימים. הרישום לא שונה ודבר לא נשמר. לתיקון שכר של תקופה סגורה רושמים התאמה בחשבון העובד. | the refusal of an edit of an archived day |
+| השינוי הזה נרשם במכשיר לפני שנודע לו שהחודש הועבר לארכיון. הוא לא נשלח ולא יישלח. מה שמופיע בארכיון הוא הרישום הקובע. | the row of such an edit in ⋯, above its one button («לקחת מהענן», an existing string) |
+| המכשיר עוד לא קיבל מהשרת את הימים של חודש שהועבר לארכיון, ולכן לא עדכן את הרישום. הוא ינסה שוב כשיהיה קליטה. עד אז מוצג הרישום שהיה במכשיר. | the accounts page, while a month document is being fetched |
+| העברת חודשים סגורים לארכיון - בדיקה בלבד, דבר לא הועבר | the dry run, first line (no screen draws it yet) |
+| גודל הרישום בשרת עכשיו: {now} ק״ב מתוך 1,024. אחרי העברת החודשים המוכנים: {after} ק״ב. | the dry run |
+| אין חודש שמוכן להעברה. | the dry run |
+| {n} ימים | the dry run, per month |
+| בארכיון | a month that has left |
+| מוכן להעברה | a month that may leave |
+| סגור לכולם; יוכל לעבור החל מ-{date} | a month that is settled and not yet six months old |
+| החודש עוד לא הסתיים | the current month |
+| יש ימים שעוד לא נסגר עליהם חשבון: {names} | a month somebody has an open day in |
+| יש בו ימים מלפני תחילת המעקב, ולא נסגר עליהם חשבון: {names} | a month from before the tracking day |
+| יש חשבון סגור שעוד לא הוסדר: {names} | a month with an unsettled closure |
+| יש בו יום שאי אפשר לקרוא. הוא נשאר במקומו | a month with an unreadable day |
+| החודש גדול מדי למסמך אחד. הוא נשאר במקומו | a month over 900 KB |
+
+### Pinned expectations this phase moved
+
+None was weakened. Two moved, each in the commit that moved it:
+
+- `tests/gate.integrity.test.mjs`: «the shipped flags are the five that were argued over»
+  is now SIX - `months` is declared so that it can be declared shut - and a line beside it
+  asserts that it ships `false`. What is open in the shipped build did not move.
+- Four lists of file names gained the two new files, because each names what this build
+  loads that an older one did not: `NOT_IN_V165` in `tests/rima.test.mjs`, and `NEW_HERE`
+  in `tests/paybook.oldbuilds.test.mjs`, `tests/paybook.split.emulator.test.mjs` and
+  `tests/paybook.archive.emulator.test.mjs`.
+
+**Found, not caused, and not fixed:** `CLAUDE.md`, `docs/architecture.md`,
+`docs/releases.md` and `docs/sync-protocol.md` each carry Phase 5's paragraph three times
+over (the script that inserted it ran three times). Left as found; it is one edit for
+whoever squashes the branch.
+
+### An open risk this phase did not create and could not measure
+
+**Firestore also limits a document to 40,000 index entries**, and by default indexes every
+field of every map and every element of every list. The emulator does not enforce it, no
+suite here can see it, and nothing in this repository says whether the real project has a
+single-field index exemption on `days`, `ledger` or `pay`. A document of worker-days is
+mostly small fields, so this limit may bind BEFORE the mebibyte does - and
+`monthIndex.dates` adds entries of its own (one list element per archived date, about 365
+a year). **The owner or whoever holds the console should look once:** Firestore → Indexes
+→ Single field → exemptions. If there is none, add exemptions for `days`, `ledger`,
+`pay`, `payIndex`, `monthIndex`, `roster`, `advances` (the app never queries inside the
+document; it reads it whole) BEFORE the document grows much further. This is said here
+because the capacity tables of Phases 2, 3 and 6 all weigh bytes and none weighs this.
+
+### Decisions for the owner (54 to 63)
+
+| # | the question | recommended default |
+|---|---|---|
+| 54 | A late correction to a day in an archived month: refused with a sentence (built), or the month brought back? | **Refused.** The wage has the adjustment on the statement. Say plainly to the owner that a Rima count is final six months after the month ends. |
+| 55 | Days from before the tracking day are covered by no account and never leave - today's 185 KB. Does the opening settle everything before it? | **Yes, once the owner confirms nothing from before that day is still owed** - one answer, recorded, and `archiveMonths` then passes `beforeOpening`. Until he does, it stays. |
+| 56 | The horizon: six months after the later of the month's last closure and its last day. | **Six months**, as he was told. |
+| 57 | Does a month move by itself (as a closure does after 14 days) or only when somebody asks? | **Only when asked**, from a screen that shows the dry run first - to be built on «ארכיון סגירות». Automatic later, after it has been watched on real data. |
+| 58 | **The phone is full before the server is** (1.4 years against 4.3, closing fortnightly). | **Build the cold store (IndexedDB) before the gate is opened.** This is a blocker of the gate. |
+| 59 | The index of closures grows 96 KB a year (196 weekly) and is what fills the document now. | **Index pages**: rows older than a horizon move to create-once documents. Design next; not urgent before 58. |
+| 60 | Advances and their ledger origin never leave, repaid or not (37 KB a year). | Leave them. Revisit with 59. |
+| 61 | Once one month has left, an older build cannot write at all. | **Accept**, as decision 46: every phone updates before the first month moves. |
+| 62 | The server checks WHICH days leave, not that their values equal the copy's; that is the adapter's. | **Accept.** The alternative is a Cloud Function, which this project does not have. |
+| 63 | Protocol 2 now means "pay book and months". | **Ship them in one release**, with the rules pasted once. |
 
 ## Phase 5 — what leaves the live document, and the screens Phase 4 left (v176)
 

@@ -5,6 +5,16 @@ no rules were published.** Built on Phase 3 (`239ff66`, v175) merged with main a
 (`893def8`). No gate result is written here: validation is recorded against the exact clean
 commit, and no count is carried over.
 
+**Phase 6 is in the same build number too**, behind a flag of its own (`months`, `false`):
+closed MONTHS of days leave the server's live document for `months/{YYYY-MM}_{digest}` and
+`monthIndex` stays; a phone keeps every day; a day of such a month is no longer edited
+(refused on the phone in a sentence, and by the rules); no screen calls the move. KNOWN
+NOT TO COVER: any screen for it; a browser run of the three sentences it wires into
+existing screens; the xlsx, CSV, week grid and print compared byte for byte; a real
+phone; a real record. And what it MEASURED and did not fix: with the pay book in use a
+phone's storage fills before the server's document does. `docs/payroll-closure.md`,
+«Phase 6».
+
 **Phase 5 is in the same build number** (the stamps did not move again; this branch is
 squashed before anything is served). What it adds, all of it behind the same shut gate and
 all of it in `docs/payroll-closure.md` («Phase 5»): a settled closure LEAVES the server's

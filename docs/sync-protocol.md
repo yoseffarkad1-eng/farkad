@@ -235,6 +235,15 @@ index only grows; a row arrives one at a time, in a protocol-2 write that names 
 (`archivedId`) and whose closed document of that name already exists; a pay entry may
 leave in such a write and in no other; and once a document has an index, a writer that
 does not speak protocol 2 may not write to it at all. The client's half is
+**Phase 6 (shipped shut) adds a second thing that leaves, by the same gate**: the days of a
+closed month, to `schedules/{doc}/months/{YYYY-MM}_{digest}`, with `monthIndex` (a row per
+month and the calendar dates of those months) in the live document. Two new write shapes,
+both protocol 2 and both the adapter's own transactions: `copyMonth` (the month document,
+created once, in a commit that moves the revision and changes no business field) and
+`archiveMonth` (the days leave, the row and the dates arrive; the adapter confirms the
+copy inside the transaction). After it, no write of any shape may touch a date in
+`monthIndex.dates`. `docs/payroll-closure.md`, «Phase 6»; `tests/months.emulator.test.mjs`.
+
 `js/sync/closed.js`: every server document passes one gate at the top of `receive()`,
 which lays the archived entries back from this phone's own record or from the closed
 documents - or does not adopt the document; and a whole-document write (`save`, `create`,

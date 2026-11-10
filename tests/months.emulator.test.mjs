@@ -13,6 +13,7 @@
 //   Y5  the rules as PUBLISHED TODAY: the move is refused whole and nothing is lost
 //   Y6  THE ROLLOUT TABLE: v167, v171 and v172 x the new rules x a document with and
 //       without archived months
+//   Y7  ten years on: the rules still answer over an index of 120 months and 3,650 dates
 //
 // Never touches a real project: the emulator host is asserted local, the project ids are
 // demo- ones, and the shims are written beside the adapter and removed.
@@ -575,9 +576,9 @@ for (const [name, sha] of OLDER) {
     suite(`Y6 / ${name} x the new rules x TODAY'S document (no pay book, no month out): publishing the rules first`);
     await reseed(envNew, TODAYS());
     const first = oldPhone(name, sources, `d_r1_${name}`, envNew, { [SCHEDULE]: JSON.stringify(BASE.bare) });
-    await settleUntil(() => first.Sync.status === 'synced', 15000, 20);
+    await reached(() => first.Sync.status === 'synced', 15000, 20);
     day(first, 'w_nasser', '2026-11-10');
-    await settleUntil(() => first.Sync.pendingCount() === 0 && first.Sync.status === 'synced', 15000, 20);
+    await reached(() => first.Sync.pendingCount() === 0 && first.Sync.status === 'synced', 15000, 20);
     const one = await server(envNew);
     cell.recordsToday = Boolean(one.days['2026-11-10']);
     check('it RECORDS A DAY', cell.recordsToday, first.Sync.status);
@@ -601,7 +602,7 @@ for (const [name, sha] of OLDER) {
 
     // A phone that held the whole record on the older build all along.
     const old = oldPhone(name, sources, `d_r2o_${name}`, envNew, { [SCHEDULE]: JSON.stringify(BASE.bare) });
-    await settleUntil(() => old.Sync.status === 'synced' || old.Sync.status === 'error', 15000, 20);
+    await reached(() => old.Sync.status === 'synced' || old.Sync.status === 'error', 15000, 20);
     await settle(500);
     cell.statusOnOpen = old.Sync.status;
     cell.octoberDaysAfterAdopting = daysIn(old.State.schedule, OCT).length;
@@ -636,6 +637,36 @@ for (const [name, sha] of OLDER) {
         OLDER.map(([name]) => [found[name].recordsToday, found[name].restoresToday, found[name].octoberDaysAfterAdopting, found[name].dayRefused, found[name].restoreRefused]),
         OLDER.map(() => [true, true, 0, true, true]));
     console.log('\n  measured, per older build: ' + JSON.stringify(found));
+}
+
+// ------------------------------------------------------------------------------------
+{
+    suite('Y7: ten years on - the rules still answer over an index of 120 months and their 3,652 dates');
+
+    // The list of dates is what daysGuard asks, on EVERY write, for as long as the app
+    // lives. A rule that works over sixty-one dates and is refused for its cost over
+    // three thousand would stop every phone on some ordinary morning years from now.
+    const seed = WITH_PAY();
+    const index = { v: 1, rows: {}, dates: [] };
+    for (let n = 0; n < 120; n += 1) {
+        const month = `${2014 + Math.floor(n / 12)}-${String((n % 12) + 1).padStart(2, '0')}`;
+        index.rows[month] = { d: `${month}_0123456789abcdef`, h: '0123456789abcdef', n: 26, b: 34000, at: '2026-01-01T00:00:00.000Z' };
+        index.dates = index.dates.concat(clone(model.call('monthCalendar', month)));
+    }
+    seed.monthIndex = index;
+    await reseed(envNew, seed);
+    const db = as(envNew, ALLOWED);
+    same('the index holds ten years', [Object.keys(index.rows).length, index.dates.length], [120, 3652]);
+    await passes('ACCEPTED: an ordinary day, in a month that has not left', pathWrite(db, { 'days.2026-11-09.actual.w_salim': { entries: [] } }));
+    await denied('REFUSED: a write to a date ten years back', pathWrite(db, { 'days.2014-03-05.actual.w_salim': { entries: [] } }));
+    await denied('REFUSED: a write to the last archived date', pathWrite(db, { 'days.2023-12-31.rima.p_a': 2 }));
+    await passes('ACCEPTED: a whole document that carries that index as it is', wholeWrite(db, () => undefined));
+    await denied('REFUSED: a whole document that adds a day ten years back', wholeWrite(db, data => { data.days['2015-06-01'] = { plan: {}, actual: {} }; }));
+    // And the 121st month leaves, through the production adapter.
+    const a = phone('d_y7', envNew, { storage: {} });
+    await settle(1500);
+    same('MEASURED: a phone handed an index it has no month documents for does not adopt, and says what it waits for',
+        [a.State.schedule.workers.length, (a.Sync.closedWaiting() || { months: [] }).months.length], [0, 120]);
 }
 
 await envNew.cleanup();

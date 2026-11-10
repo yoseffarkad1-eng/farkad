@@ -347,9 +347,15 @@ function commitSubject(git, sha) {
     // door - an entry journalled as an edit and sent by the ordinary queue - and it is
     // declared so that it can be declared SHUT: since v175 a closure is one server
     // transaction (js/sync/transact.js). What is open in the shipped build has not moved.
-    same('and the shipped flags are the five that were argued over',
+    //
+    // MOVED AT PHASE 6, deliberately: five became six. `months` is the gate of closed
+    // months of days leaving the live document (js/model/months.js), declared so that it
+    // can be declared SHUT - the owner approved building and testing it on 2026-11-10,
+    // not publishing it. What is open in the shipped build has not moved.
+    same('and the shipped flags are the six that were argued over',
         declared.map(one => one.flag).sort(),
-        ['carryAdvances', 'paybook', 'paybookQueue', 'permanentDeletion', 'vehicles']);
+        ['carryAdvances', 'months', 'paybook', 'paybookQueue', 'permanentDeletion', 'vehicles']);
+    same('closed months leaving the live document ships shut', declared.filter(one => one.flag === 'months').map(one => one.value), ['false']);
     same('the pay book\'s writer ships shut, and so does its old door through the queue',
         declared.filter(one => one.flag === 'paybook' || one.flag === 'paybookQueue').map(one => one.value),
         ['false', 'false']);
