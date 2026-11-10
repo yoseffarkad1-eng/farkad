@@ -154,6 +154,10 @@ function renderDay() {
         dayTearingDown = false;
     }
     if (anchor) keepDayAnchor(root, anchor);
+    // The day's check, when it is open over this day: it was read off the record that has
+    // just been drawn again - a snapshot from another phone, most likely - and a man moved
+    // under it must show as moved. It reads; it writes nothing (js/ui/daycheck.js).
+    if (typeof renderDayCheckIfOpen === 'function') renderDayCheckIfOpen();
     // Asked again on every render, not only on scroll: a render can arrive with the page
     // already scrolled - coming back to the day from the week, a snapshot landing under a
     // scrolled list - and a header drawn full under a scrolled page is a header that
@@ -295,8 +299,15 @@ function buildDay(root) {
     tools.appendChild(renderProgress());
     root.appendChild(bulk);
 
+    // «בדיקת היום» (js/ui/daycheck.js): one button at the FOOT of the list, in both views -
+    // under the last thing read on the way down and above the dock that sends the day.
+    // Not on the header and not on the dock: both are measured to the pixel, and the
+    // owner has said the day has enough buttons where the thumb works.
+    const check = () => { if (typeof dayCheckEntry === 'function') root.appendChild(dayCheckEntry()); };
+
     if (dayMode === 'workers') {
         root.appendChild(renderDayWorkerList());
+        check();
         return;
     }
 
@@ -307,6 +318,7 @@ function buildDay(root) {
     root.appendChild(renderAbsentTray());
     const vehicles = renderVehicleTray();
     if (vehicles) root.appendChild(vehicles);
+    check();
 }
 
 function renderSetupCard(glyph, title, text, label, onClick) {

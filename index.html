@@ -19,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v181">
+<meta name="farkad-build" content="v182">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -410,6 +410,34 @@
     </div>
 </div>
 
+<!-- THE REPORT OF A PERIOD'S RIDES: over a week or a month, each vehicle - on how many days
+     it went out, who drove it, how many seats were filled - and each driver, from the plans
+     kept on THIS phone and from nothing else; a day this phone has no plan for is counted
+     and said, never shown as a vehicle that stayed home. Opened only by its one button on
+     the panel above. The summary's dialog over again, with four buttons that choose the
+     range; the same tier, the same three ways out. It writes nothing anywhere, and every
+     word on it is set by js/ui/transport.js from that file's one block. -->
+<div class="modal" id="transportReportModal">
+    <div class="modal-content">
+        <h3 id="transportReportTitle" tabindex="-1"></h3>
+        <div class="transport-report-ranges" id="transportReportRanges" role="group">
+            <button type="button" class="btn-secondary" data-range="thisWeek" aria-pressed="false" onclick="transportReportPick('thisWeek')"></button>
+            <button type="button" class="btn-secondary" data-range="lastWeek" aria-pressed="false" onclick="transportReportPick('lastWeek')"></button>
+            <button type="button" class="btn-secondary" data-range="thisMonth" aria-pressed="false" onclick="transportReportPick('thisMonth')"></button>
+            <button type="button" class="btn-secondary" data-range="lastMonth" aria-pressed="false" onclick="transportReportPick('lastMonth')"></button>
+        </div>
+        <label class="field-label" for="transportReportText" id="transportReportLabel"></label>
+        <textarea id="transportReportText" rows="12" readonly></textarea>
+        <div class="modal-actions">
+            <button type="button" class="btn-success" id="transportReportSend" onclick="transportReportSend()"></button>
+            <button type="button" class="btn-secondary" id="transportReportCopy" onclick="transportReportCopy()"></button>
+            <button type="button" class="btn-secondary" id="transportReportPicture" onclick="transportReportPicture()"></button>
+            <button type="button" class="btn-secondary" id="transportReportClose" onclick="closeTransportReport()"></button>
+            <span class="share-status" id="transportReportStatus" role="status" aria-live="polite"></span>
+        </div>
+    </div>
+</div>
+
 <div class="modal sheet" id="assignSheet">
     <div class="modal-content sheet-content">
         <div class="sheet-head">
@@ -636,6 +664,22 @@
     </div>
 </div>
 
+<!-- «בדיקת היום»: what may have been forgotten on the day on screen, read off the record
+     and compared with the working day before it. Entered from the one button at the foot
+     of the day's list. It only shows: nothing in it writes, and a name or a site in it
+     only navigates. Every word is in js/ui/daycheck.js, in one block; this is the frame. -->
+<div class="modal" id="dayCheckModal">
+    <div class="modal-content">
+        <h3 id="dayCheckTitle" tabindex="-1"></h3>
+        <p id="dayCheckContext" class="picker-context"></p>
+        <div id="dayCheckList" class="daycheck-list"></div>
+        <p id="dayCheckLead" class="daycheck-lead"></p>
+        <div class="daycheck-foot">
+            <button type="button" class="btn-secondary" id="dayCheckClose" onclick="closeDayCheck()"></button>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="migrationModal">
     <div class="modal-content modal-wide">
         <h3>רישומים שדורשים החלטה</h3>
@@ -756,6 +800,10 @@
 <!-- After share.js (its dialog is the way in) and day.js (its drawn speech bubble);
      everything else it reads is above both. -->
 <script src="js/ui/seder.js"></script>
+<!-- «בדיקת היום». Runs nothing at load and reads nothing: everything it calls - the model's
+     readers, the dates, day.js and sheet.js - is above it, and day.js asks for it by name
+     only when the day is drawn. -->
+<script src="js/ui/daycheck.js"></script>
 <!-- v171, הסעות. After seder.js: it reads the day through sederCrew and takes the seder's
      own rule for a phone number, and its row in the WhatsApp dialog goes under the seder's.
      The engine first - the screen calls it. Neither is part of the sync group, and neither
