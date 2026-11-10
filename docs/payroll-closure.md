@@ -147,10 +147,13 @@ still safe - with no pay book on the document both additions are vacuous.
 
 ### Older builds, measured on their real bytes
 
-`tests/activation.emulator.test.mjs`, O: v180 (`d3103d6`), v183 (`1af6729`) and v184
-(`990f5b4`), their own files and their own adapter out of Git, under the rules of this
-branch. *(The table is filled from the run on the final commit; see «Not verified» if the
-emulator was not available.)*
+v180 (`d3103d6`), v183 (`1af6729`) and v184 (`990f5b4`), their own files out of Git, asked
+twice: by `tests/activation.test.mjs`, V9b, on the fake cloud that speaks these rules; and
+by `tests/activation.emulator.test.mjs`, O, on the REAL rules through each build's own
+adapter. The second is in `test:emulator`. **Whether it had been run when this branch was
+handed over is in the hand-over report and not in this file** - a result belongs to a
+commit - and the runbook's step A1 runs it on the commit that is served. The table is
+what V9b measured; the last row is the emulator suite's alone.
 
 | | before the record is on | after |
 |---|---|---|
@@ -158,7 +161,7 @@ emulator was not available.)*
 | a closure made the old way | (yes) | **REFUSED** - never reaches the server |
 | its restore | **yes** | **REFUSED** - the opening and the revision exactly where they were |
 | what it shows | today's arithmetic | **still today's arithmetic** - it drops `pay` from its own copy and reads the old walk. This cannot be changed from here; it is why every phone updates first, and why its writes are stopped |
-| under the rules PUBLISHED TODAY, on a record that is on | | its restore is accepted and **the opening is gone** - so the new rules are never rolled back once a closure exists |
+| under the rules PUBLISHED TODAY, on a record that is on *(the emulator suite only; the same cell was measured for a pay book at Phase 3 on v167, v171, v172)* | | its restore is accepted and **the pay book is gone** - so the new rules are never rolled back once a closure exists |
 
 "Stopped loudly" for a build already in the field means exactly this: every write refused,
 a sync error instead of «מסונכרן», the work kept on the phone. Nothing gives such a build

@@ -26,8 +26,9 @@ Two people act here:
 4. Every phone that holds the record reads the same entry, so **all phones are on
    together** and none can be half on (`tests/activation.test.mjs`, V4).
 5. From that moment a phone on a build from before the pay book **cannot write at all** —
-   it shows a sync error and keeps its work until it is updated
-   (`tests/activation.emulator.test.mjs`, O).
+   it shows a sync error and keeps its work until it is updated (`tests/activation.test.mjs`,
+   V9b, on the real bytes of v180, v183 and v184 against the fake rules;
+   `tests/activation.emulator.test.mjs`, O, against the real ones).
 
 ## The point of no return
 
@@ -62,7 +63,7 @@ an advance in a period nobody closed (the one-debt ruling of 2026-11-10).
 
 | # | do | check | if the check fails |
 |---|---|---|---|
-| A1 | On the exact commit to be served, from one clean detached worktree: `npm ci`, `npm test`, `npm run test:release`. | Every check passes. Say which commit. | Stop. Nothing is served. |
+| A1 | On the exact commit to be served, from one clean detached worktree: `npm ci`, `npm test`, `npm run test:release`. **`test:release` includes the emulator suites - the only place the REAL rules are run**, among them `test:activation-emulator`. | Every check passes. Say which commit. | Stop. Nothing is served. An emulator suite that was "not run" is a stop, not a note. |
 | A2 | On the same commit: `npm run test:gate-open`. | It ends with «what differs is exactly tests/gate-open.expected.mjs». | A NEW difference is a guarantee nobody has read with the pay book on. Read it, fix it or add it to the list with its reason. Do not serve until it is the list. |
 | A3 | Prepare the ONE rules file to paste: see [The rules file](#the-rules-file). | `diff` against the file the gates ran with shows only the other feature's block, if any. | Rebuild the file; run `npm run test:emulator` against it. |
 | A4 | Firestore console → Indexes → Single field → exemptions. | There are exemptions for `days`, `ledger`, `pay`, `payIndex`, `monthIndex`, `roster`, `advances` — or the owner adds them. (Firestore also limits a document to 40,000 index entries; the emulator does not enforce it and no suite here can see it. Phase 6, open risk.) | Add them before step 5. Not adding them does not block activation today; it brings a wall closer that nobody can measure from here. |
@@ -98,10 +99,12 @@ Firebase console → Firestore Database → Rules.
 
 - **Check, on any phone, still on the build it had:** the status line says «מסונכרן»;
   record a day and remove it again — both go through.
-  Why it must: with no pay book on the record every new rule is vacuous. Measured with the
-  real bytes of v180, v183 and v184 under these rules: each records a day and restores a
-  file exactly as before (`tests/activation.emulator.test.mjs`, O, "BEFORE the record is
-  on"; `tests/months.emulator.test.mjs`, Y5).
+  Why it must: with no pay book on the record every new rule is vacuous. Asked of the real
+  bytes of v180, v183 and v184: each records a day (`tests/activation.test.mjs`, V9b) and,
+  on the real rules, records a day and restores a file exactly as before
+  (`tests/activation.emulator.test.mjs`, O, "BEFORE the record is on"). The same was
+  measured for the rules of Phases 3 to 6 on v167, v171 and v172
+  (`tests/months.emulator.test.mjs`, Y5).
 - **If a phone shows a sync error after publishing:** paste the saved text back and
   Publish. At this step that is completely safe — nothing has been written that the old
   rules do not know. Tell the maintainer what the phone said.
@@ -277,10 +280,11 @@ file, right after the receipts block. **The owner pastes ONE file holding both.*
 | after step 5, **before the first closure** | serve this build with `paybookActivation: false`. Every phone updates. | **leave the new rules.** | nothing: every figure reads as before the button; three inert entries stay in the record |
 | after the first closure | — | **never.** | there is no way back; fix forward |
 
-Why the rules are never rolled back once the record is on, measured on v180, v183 and v184
-(`tests/activation.emulator.test.mjs`, O, the last section of each): under the rules
-published today an older build's restore is **accepted and the pay book is gone from the
-server**. Under the new rules the same restore is refused and nothing moves. And the
+Why the rules are never rolled back once the record is on: under the rules published
+today an older build's restore is **accepted and the pay book is gone from the server**.
+Measured at Phase 3 on v167, v171 and v172 (`tests/paybook.split.emulator.test.mjs`, «the
+hazard, on the real rules»), and asked again of v180, v183 and v184
+(`tests/activation.emulator.test.mjs`, O, the last section of each). Under the new rules the same restore is refused and nothing moves. And the
 closed documents become unreadable to the app under rules that have no `closed/`.
 
 If the new rules were ever replaced by mistake after step 5: paste the new file back at
@@ -301,6 +305,12 @@ once. Nothing is lost by the mistake itself unless an older build restored in be
   record (14 days after the first paid closure at the earliest).
 
 ## What was NOT verified, and stays open on the day
+
+- **Whether the emulator suites - the only place the REAL rules are run - had been run on
+  the served commit, and against the ONE file that is pasted.** That is step A1 and A3,
+  not an assumption. `tests/activation.emulator.test.mjs` was written in the session that
+  built the activation, when the emulator was held by another job; the hand-over report of
+  that session says whether it was run.
 
 - **No real phone.** Every screen here was driven in Chromium with emulated touch. The
   keyboard over the review page, the date control in the iPhone's own locale, and a slow
