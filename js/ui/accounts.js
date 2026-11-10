@@ -1028,6 +1028,10 @@ function accDrawReview(node) {
     const worker = form && State.worker(form.workerId);
     if (!form || !worker) { accGo('list'); return; }
     const leave = () => (form.group ? accGo('group') : accGo('list'));
+    // Asked once BEFORE a single control is built: this is where the fields get what
+    // they start with - the model's suggestion, or the draft that was typed here before
+    // a reload - and the controls below are built from the form as it then stands.
+    accReviewPlan(form);
 
     const sub = el('p', 'acc-sub');
     sub.appendChild(el('strong', 'acc-name', isolate(worker.name)));
