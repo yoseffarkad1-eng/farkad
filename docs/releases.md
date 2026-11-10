@@ -1,8 +1,31 @@
-## v174 — הסעות as a picture: the cars drawn from above, men dragged to their seats (candidate, not served)
+## v178 — one sub-title in ⋯ says what its section holds (candidate, not served)
 
-**Not served. Not merged. On no phone.** Built on `8c943fa` (v172). No gate result is written
-here: validation is recorded against the exact clean commit, and no count is carried over.
-v173 is the number of another branch that has not been published.
+**Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `893def8` (v174). v175 and v176 are numbers of an unpublished development branch.
+v177 was never served: `tests/mobile.test.mjs` proves the diagnostic block carries no amount
+out of the record by looking for the seeded rates as digits, one of them 77, and the build
+stamp `v177` in that block reads as a leak. The check is right to be that blunt, so the
+number was skipped and the check was left alone.
+
+**What changed: two words.** In ⋯ the first section, «כללי», carried the sub-title
+«חיבור ועדכונים». Since v172 the update card lives in «מכשיר ועזרה», and «כללי» holds the cloud
+connection, the advances carry and the phone reminders. The sub-title is now
+«חיבור ותזכורות». The owner asked for the sheet to be put in strict order (2026-11-09) and
+approved professional wording in general; this string is PROPOSED, not approved word by word,
+and he corrects it on sight. It is pinned in `tests/settings-order.browser.mjs`.
+
+**What did not change.** No control, handler, order, stored key or data path. Nothing in
+`js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js` or the rules. The three
+stamps moved because `index.html` is a cached file.
+
+**Known not covered.** Not looked at on a real phone.
+
+## v174 — הסעות as a picture: the cars drawn from above, men dragged to their seats (served 2026-11-10)
+
+**Served.** Merged to `main` as `893def8` (PR #58) on 2026-11-10; the Pages deployment for that
+commit succeeded at 04:44 UTC. Built on `8c943fa` (v172). Both gates exited 0 on the exact
+commit that was merged; no count is carried here. v173 is the number of another branch that
+has not been published. THE DRAG HAS STILL NOT BEEN CONFIRMED ON A REAL PHONE.
 
 **The owner tried v171 on his phone and sent the screen back** (2026-11-10, his words,
 translated): *"Very hard and complicated and it will take us a lot of time. I want the CAR
