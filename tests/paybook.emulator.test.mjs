@@ -23,6 +23,17 @@
 //       the ledger's rule, the loser stopped, no double deduction. A write built on a
 //       stale revision is rebased when it collides with nothing, and held when it does.
 //
+// MOVED AT v175, deliberately - WHICH RULES THIS FILE LOADS. It loaded firestore.rules,
+// "unchanged", and its premise was that those rules know nothing of the pay book. v175
+// changes the rules (payGuard, closed/): a pay path arriving by the ordinary update - the
+// only way this suite sends one - is now refused outright, which is the point of that
+// change and is measured in tests/paybook.split.emulator.test.mjs. What THIS suite
+// measures is still worth having, and still true of what is PUBLISHED: the rules every
+// phone is running against today, and what the ordinary queue does to a closure under
+// them. So it loads those rules by name - docs/firestore.rules.before-paybook, the
+// rollback artifact, asserted there to be byte for byte what main carries - and every
+// «TODAY» below is about them. Nothing else in the file moved.
+//
 // Synthetic data only.
 
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
@@ -36,7 +47,7 @@ import {
 } from './paybook.world.mjs';
 
 const EMULATOR = emulatorHost();
-const RULES_FILE = fileURLToPath(new URL('../firestore.rules', import.meta.url));
+const RULES_FILE = fileURLToPath(new URL('../docs/firestore.rules.before-paybook', import.meta.url));
 const ADAPTER = fileURLToPath(new URL('../js/sync/firebase-adapter.js', import.meta.url));
 const SHIM = fileURLToPath(new URL('../js/sync/_adapter-paybook-test.mjs', import.meta.url));
 const CONFIG = fileURLToPath(new URL('../js/sync/_paybook-test-config.mjs', import.meta.url));
@@ -64,7 +75,7 @@ const rewritten = source
     // is checked rather than assumed: the day somebody adds a `pay` rule, R's «TODAY»
     // checks are the ones that must move, and this is what says so first.
     const rules = readFileSync(RULES_FILE, 'utf8');
-    check('firestore.rules does not mention the pay book at all - it is the file every earlier build ran against',
+    check('the published rules (docs/firestore.rules.before-paybook) do not mention the pay book at all - they are what every earlier build ran against',
         !/\bpay\b|paybook|payConflicted/.test(rules.replace(/\/\/.*$/gm, '')));
     given('the emulator is a local one', /^(127\.0\.0\.1|localhost)$/.test(EMULATOR.host), EMULATOR.host);
 }
@@ -101,6 +112,8 @@ const BASE = (() => {
 })();
 const [K1, K2] = BASE.advances;
 const SEED = () => Object.assign(clone(BASE.wire), { protocol: 1, revision: 1, lastOpId: 'op_seed' });
+// (`protocol: 1` on the seed is what a document written before v175 carries. This build
+// sends 2 since v175; the published rules ask only for one or more.)
 
 async function reseed() {
     await env.clearFirestore();

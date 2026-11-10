@@ -239,61 +239,113 @@ Object.assign(FarkadSync, {
     },
 
     // Committed, says the server. Now make it true on this phone, and check.
-    confirmPayIntent(intent, revision) {
+    confirmPayIntent(intent, revision, attempt) {
         const want = Object.assign({}, intent.closed, { revision });
+        const tried = attempt || 0;
         return Promise.all([
             Promise.resolve(this.adapter.readClosed(intent.closedId)),
             Promise.resolve(this.adapter.read())
         ]).then(([closed, live]) => {
-            const copyOk = closed && canonicalJson(closed) === canonicalJson(want);
-            const liveOk = live && Object.keys(intent.entries).every(path =>
+            const copyOk = Boolean(closed) && canonicalJson(closed) === canonicalJson(want);
+            const liveOk = Boolean(live) && Object.keys(intent.entries).every(path =>
                 canonicalJson(readPath(live, path)) === canonicalJson(intent.entries[path]));
+            // A READ CAN BE A MOMENT BEHIND THE COMMIT IT FOLLOWS. Measured on the
+            // emulator: the phone whose closure had just committed read the schedule back
+            // and was handed the revision before it, and reported «unverified» about a
+            // write that was whole on the server. A read that is merely early catches up;
+            // a server that really holds something else does not - so it is read again, a
+            // bounded number of times, and only then is the mismatch believed.
+            if ((!copyOk || !liveOk) && tried < 20
+                && !(live && Number.isInteger(live.revision) && live.revision >= revision && closed)) {
+                return new Promise(resolve => setTimeout(resolve, 100))
+                    .then(() => this.confirmPayIntent(intent, revision, tried + 1));
+            }
             if (!copyOk || !liveOk) {
                 // It committed and what the server holds is not what was sent. Nothing
                 // here can repair that and nothing here may hide it: the intent stays, so
                 // nothing further is sent on top of it, and the caller is told.
                 return { ok: false, state: 'unknown', reasons: ['unverified'], revision,
-                    closedId: intent.closedId };
+                    closedId: intent.closedId, detail: { closed: copyOk, schedule: liveOk,
+                        readRevision: live && Number.isInteger(live.revision) ? live.revision : null,
+                        opId: intent.id, closedOpId: closed ? closed.opId : null } };
             }
             // Adopted through the door every other phone's work comes through. The
             // snapshot for this revision may already have arrived; then this is a no-op.
             try { this.receive(live); } catch (error) { /* judged just below */ }
-            const held = Object.keys(intent.entries).every(path =>
+            const held = () => Object.keys(intent.entries).every(path =>
                 canonicalJson(readPath(State.schedule, path)) === canonicalJson(intent.entries[path]));
-            if (!held) {
-                return { ok: false, state: 'unknown', reasons: ['unadopted'], revision,
-                    closedId: intent.closedId };
-            }
-            this.clearPayIntent();
-            return { ok: true, state: 'closed', reasons: [], revision, closedId: intent.closedId,
-                opId: intent.id };
+            // ON A REAL CONNECTION THE RECORD CAN TRAIL THE READ BY A MOMENT: the listener
+            // is delivering the same revision, and the adoption it started has not
+            // finished when the direct read comes back (measured on the emulator - one
+            // run in two answered «unknown» about a closure that was whole on the server
+            // and whole on the phone a few milliseconds later). So it is looked at again,
+            // a bounded number of times, before anything is said - and never said true
+            // unless the record really holds every path.
+            const wait = left => (held() || left === 0 ? Promise.resolve(held())
+                : new Promise(resolve => setTimeout(resolve, 50)).then(() => {
+                    if (!held()) { try { this.receive(live); } catch (error) { /* judged below */ } }
+                    return wait(left - 1);
+                }));
+            return wait(60).then(there => {
+                if (!there) {
+                    return { ok: false, state: 'unknown', reasons: ['unadopted'], revision,
+                        closedId: intent.closedId };
+                }
+                this.clearPayIntent();
+                return { ok: true, state: 'closed', reasons: [], revision, closedId: intent.closedId,
+                    opId: intent.id };
+            });
         }, () => ({ ok: false, state: 'unknown', reasons: ['unconfirmed'], revision,
             closedId: intent.closedId }));
     },
 
+    // THE DOCUMENT MOVED, or the account already has its closed document. Nothing of this
+    // operation was applied, so the intent is over. The fresh document is adopted, and the
+    // plan is asked again of the record as it now is.
+    payLostTheRace(intent, plan, rebases, code, document) {
+        this.clearPayIntent();
+        if (document) {
+            try { this.receive(document); } catch (ignored) { /* judged below */ }
+        }
+        const fresh = plan ? stillValid(State.schedule, plan) : { ok: false, reasons: ['stale'] };
+        if (!fresh.ok && fresh.reasons.indexOf('done') !== -1) {
+            return { ok: true, state: 'done', reasons: [] };
+        }
+        const blocked = fresh.ok ? this.payTransactRefusalAfterAdopt() : null;
+        if (fresh.ok && code === 'conflict' && !blocked && rebases < PAY_REBASE_LIMIT) {
+            // Somebody recorded a day; the account is as it was reviewed. The same
+            // operation, under the same name, aimed at the revision that is there.
+            return this.sendPayIntent(intent, plan, rebases + 1);
+        }
+        return { ok: false, state: 'stale', reasons: fresh.ok ? [blocked || 'stale'] : fresh.reasons,
+            fresh: fresh.fresh || null };
+    },
+
     failedPayIntent(intent, plan, rebases, error) {
         const code = error && error.code;
-        // THE DOCUMENT MOVED, or the account already has its closed document. Nothing of
-        // this operation was applied - the transaction threw before its first write - so
-        // the intent is over. The fresh document is adopted, and the plan is asked again
-        // of the record as it now is.
         if (code === 'conflict' || code === 'closed-exists') {
-            this.clearPayIntent();
-            if (error.document) {
-                try { this.receive(error.document); } catch (ignored) { /* judged below */ }
-            }
-            const fresh = plan ? stillValid(State.schedule, plan) : { ok: false, reasons: ['stale'] };
-            if (!fresh.ok && fresh.reasons.indexOf('done') !== -1) {
-                return { ok: true, state: 'done', reasons: [] };
-            }
-            const blocked = fresh.ok ? this.payTransactRefusalAfterAdopt() : null;
-            if (fresh.ok && code === 'conflict' && !blocked && rebases < PAY_REBASE_LIMIT) {
-                // Somebody recorded a day; the account is as it was reviewed. The same
-                // operation, under the same name, aimed at the revision that is there.
-                return this.sendPayIntent(intent, plan, rebases + 1);
-            }
-            return { ok: false, state: 'stale', reasons: fresh.ok ? [blocked || 'stale'] : fresh.reasons,
-                fresh: fresh.fresh || null };
+            return this.payLostTheRace(intent, plan, rebases, code, error.document || null);
+        }
+        // "PERMISSION DENIED" IS TWO DIFFERENT ANSWERS, and only looking tells them apart.
+        // Two phones that both read revision N both prepare N + 1. The first commits; the
+        // second's commit is then judged by the rules against a document already at
+        // N + 1, and refused - as permission-denied, the same words as "you are not on the
+        // list", because from the server's side a write claiming a spent revision simply
+        // is not allowed. Measured on the emulator with two phones closing one account in
+        // the same instant: the loser was told «server» about a race it had merely lost.
+        // Either way NOTHING of it was applied - a refused commit writes no document - so
+        // the document is read, and if it has moved this was the race.
+        if (code === 'permission-denied' && this.adapter && typeof this.adapter.read === 'function') {
+            return Promise.resolve(this.adapter.read()).then(live => {
+                if (live && Number.isInteger(live.revision) && live.revision !== intent.base) {
+                    return this.payLostTheRace(intent, plan, rebases, 'conflict', live);
+                }
+                this.clearPayIntent();
+                return { ok: false, state: 'refused', reasons: ['server'], code };
+            }, () => {
+                this.clearPayIntent();
+                return { ok: false, state: 'refused', reasons: ['server'], code };
+            });
         }
         if (error && error.unsent === true) {
             // Never got as far as its writes: no signal for the first read.

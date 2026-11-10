@@ -319,11 +319,22 @@ service cloud.firestore {
         || (speaksPaybook() && carriesClosed(docId));
     }
 
+    // AND THE SCHEDULE MUST MOVE IN THIS COMMIT. Measured before the last line existed:
+    // the schedule stays pointing at its latest operation until the next write, so a
+    // closed document naming THAT operation and revision satisfied the first three lines
+    // with no schedule write anywhere near it - a second "closure" hung on an operation
+    // that never created it. The revision before this commit has to be exactly one less
+    // than the revision the closed document claims, which is true only of the commit
+    // that takes the schedule there. A schedule that does not exist yet is the first
+    // write of a project, and counts as revision nothing.
     function closedMatchesSchedule(docId) {
       let after = getAfter(/databases/$(database)/documents/schedules/$(docId)).data;
       return after.lastOpId == request.resource.data.opId
         && after.revision == request.resource.data.revision
-        && after.protocol >= 2;
+        && after.protocol >= 2
+        && (!exists(/databases/$(database)/documents/schedules/$(docId))
+            || get(/databases/$(database)/documents/schedules/$(docId)).data.get('revision', 0)
+                 == request.resource.data.revision - 1);
     }
 
     match /schedules/{docId} {
