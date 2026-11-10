@@ -272,7 +272,36 @@ Run through `tests/gate-open.preload.mjs`, which gives every page any suite open
 seam with `paybook: true` before the app's scripts load, without changing the suite or a
 shipped byte.
 
-(measured table pending)
+The eight browser suites that open the «מקדמות» tab, an advance form or the worker-days
+dialog: the seven Phase 4 named, and `print`. No count is written here - a count belongs
+to a commit; run them on the commit you are asking about.
+
+| suite | with the gate open | why |
+|---|---|---|
+| `simple-advances.browser.mjs` | **ABORTS at its third step** (a locator times out) | **By design.** It taps a man's card on the «מקדמות» tab; with the gate open that tab is the accounts home and has no such card. Read, not run, the rest of it: its first section (the card, a repayment, «תיקון טעות») reaches one man's advances page through the tab's old list; its second («קיזוז מהשכר», a typed deduction, «סגירת חשבון התקופה») IS the old closure dialog, which decision 29 replaces with the review page; its fourth measures the layout of the old list. Its third (the worker picker of the reports and the files) does not touch either and would pass. All three that fail are the gate's own design; the suite is rewritten in the commit that opens the gate. |
+| `forms.browser.mjs` | passes whole | It drives the advance and correction FORMS, which are the existing ones on one man's advances page - unchanged with the gate open. |
+| `reports.browser.mjs` | passes whole | It opens the worker-days dialog and reads it; it does not close an account through it. |
+| `navigation.browser.mjs` | passes whole | It taps the «מקדמות» tab and asks that the tab is current and its page is up - true of the accounts home too. |
+| `design.browser.mjs` | passes whole | Does not depend on what the tab holds. |
+| `mobile.test.mjs` | passes whole | The same. |
+| `smoke.mjs` | passes whole | It counts the five tabs and their labels - unchanged, the label included. |
+| `print.test.mjs` | passes whole | Everything it reads off the paper and the PDF is unchanged. **Not asked by it, and not checked here:** whether the one button the dialog's closure block becomes with the gate open appears on a printed worker-days page. |
+
+So Phase 4's prediction - that all seven would have expectations to move - was wrong for
+six of them: **one suite moves** when the gate opens, and it moves because the thing it
+tests is the thing the gate replaces.
+
+**One real defect was found by this run, and fixed.** Following `simple-advances` by hand
+past the point where it stops: before the tracking day is chosen the accounts home is one
+screen, and its «מקדמות» button opened the advances page of the FIRST man on the roster -
+whose «חזרה לכל העובדים» leads back to that same screen. So until somebody chose the day,
+an advance could be given or handed back for one man only. The button now opens the
+roster, a name a button, each to that man's own page (`tests/archive.browser.mjs`, first
+section).
+
+**Not run with the gate open:** every other browser suite (they do not open the tab, a
+form of it or the dialog), and the node suites - whose eight expectations the one-debt
+ruling moves were measured at Phase 3 and are unchanged.
 
 ### What is still NOT built after Phase 5
 

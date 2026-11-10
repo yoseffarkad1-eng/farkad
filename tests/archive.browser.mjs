@@ -144,11 +144,6 @@ given('the crew is on the cloud', net.cloud.doc.workers.length === 5);
     same('and the way back from it is the activation screen, with the roster one tap away again',
         [await a.page.evaluate(() => ADVANCE_WORKER), await shown(a.page, `${V} .acc-opening-advances`)], [null, true]);
 }
-given('the book is opened', (await transact(a.page, 'planOpening', ['2026-10-02'])).ok);
-given('Nasser\'s fortnight closes, paid in full', (await transact(a.page, 'planClosure',
-    ['w_nasser', FORTNIGHT, { allocations: {}, paid: 3000, method: 'cash' }])).ok);
-given('Ahmad\'s first week closes, paid in full', (await transact(a.page, 'planClosure',
-    ['w_ahmad', WEEK1, { allocations: {}, paid: 1800, method: 'transfer' }], '2026-10-09')).ok);
 const KHALED_ADV = await a.page.evaluate(() => {
     const held = currentAdvances(State.schedule);
     return Object.keys(held).filter(id => held[id].workerId === 'w_khaled').sort((x, y) => (held[x].date < held[y].date ? -1 : 1));
@@ -158,6 +153,12 @@ await a.page.waitForTimeout(200);
 // =====================================================================================
 {
     suite('a draft: what was typed into a closure survives a reload - against the same account only');
+
+    given('the book is opened', (await transact(a.page, 'planOpening', ['2026-10-02'])).ok);
+    given('Nasser\'s fortnight closes, paid in full', (await transact(a.page, 'planClosure',
+        ['w_nasser', FORTNIGHT, { allocations: {}, paid: 3000, method: 'cash' }])).ok);
+    given('Ahmad\'s first week closes, paid in full', (await transact(a.page, 'planClosure',
+        ['w_ahmad', WEEK1, { allocations: {}, paid: 1800, method: 'transfer' }], '2026-10-09')).ok);
 
     await showAccounts(a.page);
     const before = await disk(a.page);
