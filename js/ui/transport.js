@@ -43,7 +43,7 @@
 // SHARED, LATER, AND NOT HERE (the owner, 2026-11-10: one plan on all three phones).
 // Everything above is still true of THIS FILE: it keeps its things on this phone and
 // knows no cloud. The shared plan is js/ui/transport-share.js, behind a gate of its own
-// that is shut in this build, and it is told of this file's writes at five marked places
+// (shut in v185, open since v186), and it is told of this file's writes at five marked places
 // (transportShareTell). Where that gate is open and a phone is signed in, the plans and
 // the list are also in documents of their own beside the schedule - still never in the
 // record, the outbox, a backup or the rescue file - and a lost phone no longer loses them.

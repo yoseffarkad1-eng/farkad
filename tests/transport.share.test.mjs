@@ -9,7 +9,8 @@
 // measured the production adapter and the real rules to do.
 //
 // What is pinned, block by block:
-//   the gate is SHUT in this build, and shut it is today's app byte for byte;
+//   the gate is OPEN in this build (v186) - and SHUT, through the test seam, it is still
+//     the app of before byte for byte, so the way back stays measured;
 //   open, a phone that never turned הסעות on reads, listens to and writes nothing;
 //   a phone with no cloud works as before;
 //   a change goes up, the other phone draws it, and neither touches the RECORD's
@@ -77,12 +78,14 @@ function loadScripts(device, withShare = true) {
     return device;
 }
 
-// A phone. `gate` opens the build's gate the way a build with it open would (the test
-// seam); `on` is the phone's own switch; `storage` is a disk carried over.
+// A phone. As shipped (no flag at all) the gate is open; `gate: false` shuts it the only
+// way a suite can, the test seam - which is what a later build with the line put back to
+// false would be. (Before v186 it was the other way round: shut as shipped, opened by
+// the seam.) `on` is the phone's own switch; `storage` is a disk carried over.
 function phone(id, options = {}) {
     const storage = options.storage || (options.on === false ? undefined : { [ENABLED]: '1' });
     const device = makeDevice({ deviceId: id, storage: options.sharedStorage ? undefined : storage,
-        sharedStorage: options.sharedStorage, flags: options.gate === false ? null : { transportShare: true } });
+        sharedStorage: options.sharedStorage, flags: options.gate === false ? { transportShare: false } : null });
     device.Sync.pushDelayMs = TICK;
     device.setToday(options.today || DAY);
     device.ctx.askTell = () => Promise.resolve();
@@ -138,8 +141,13 @@ const dayDoc = (trips, revision, extra = {}) => stamp(Object.assign({ date: DAY,
 
 // ================================================================== the gate
 
-await block('the gate is shut in this build, and shut it is today\'s app byte for byte', async () => {
-    check('the shipped constant says false', /\nconst TRANSPORT_SHARE = false;\n/.test(SHARE));
+// MOVED in v186, deliberately: this block was 'the gate is shut in this build, and shut it
+// is today's app byte for byte', and its first check was that the shipped constant says
+// false. The build now ships it true. Everything else the block measures is kept, about
+// the SHUT path, reached through the seam.
+await block('the gate is open in this build - and shut again (the seam) it is the app of before, byte for byte', async () => {
+    check('the shipped constant says true', /\nconst TRANSPORT_SHARE = true;\n/.test(SHARE));
+    same('a phone as shipped, with no flag of any kind, reads the gate open', shareOf(phone('d_shipped')).on(), true);
     check('and nothing the app ships defines the test seam that opens it',
         !/FARKAD_FLAG_OVERRIDES\s*=[^=]/.test(SHARE + SCREEN + ADAPTER));
 

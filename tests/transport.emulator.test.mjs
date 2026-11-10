@@ -68,11 +68,14 @@ const { doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapsh
     disableNetwork, enableNetwork } = await import('firebase/firestore');
 
 const NEW_RULES = read('../firestore.rules');
-// The rules in the field today. The owner pastes rules by hand, and what is live was
-// verified byte-identical to origin/main's file on 2026-11-10; this branch's base carries
-// the same file, so the base commit is where "today's rules" are read from.
+// The rules in the field BEFORE the transport block. The owner pastes rules by hand, and
+// what was live on 2026-11-10 was verified byte-identical to main's file of that morning
+// (d3103d6; v184's 990f5b4 carries the same bytes). NOT origin/main: since v185 was merged
+// main's file HAS the block - merging it published nothing - and reading "the rules of
+// before" from there made this suite compare the new rules with themselves (seen the first
+// time it was run on top of v185: the phone under "the old rules" said shared).
 const git = (...args) => execFileSync('git', args, { cwd: sourceRoot(), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-const oldRulesFrom = ['origin/main', 'e2fd07a'].find(revision => {
+const oldRulesFrom = ['d3103d6', '990f5b4', 'e2fd07a'].find(revision => {
     try { git('cat-file', '-e', `${revision}:firestore.rules`); return true; } catch (error) { return false; }
 });
 const OLD_RULES = oldRulesFrom ? git('show', `${oldRulesFrom}:firestore.rules`) : null;
@@ -147,7 +150,7 @@ const refused = async promise => {
 
 // ================================================================== ADD
 
-await block('ADD: the new rules are main\'s rules plus one block', async () => {
+await block('ADD: the new rules are the rules of before plus one block', async () => {
     given('the rules in the field could be read out of Git', OLD_RULES !== null, String(oldRulesFrom));
     const from = NEW_RULES.indexOf('\n\n      // הסעות, shared: who rides to work in which vehicle.');
     const to = NEW_RULES.indexOf('\n    }\n\n    // One copy of the schedule per day');
@@ -358,7 +361,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
 // A device running the shipped client, its transport wired to the PRODUCTION adapter on
 // the emulator. Across the realm boundary a document is JSON, as on the wire.
 function phone(id, in_, email, options = {}) {
-    const device = makeDevice({ deviceId: id, storage: options.storage || { 'farkadTransport:enabled': '1' }, flags: { transportShare: true } });
+    const device = makeDevice({ deviceId: id, storage: options.storage || { 'farkadTransport:enabled': '1' } });   // no flag: the gate as this commit ships it
     device.Sync.pushDelayMs = 5;
     device.setToday(DAY);
     device.ctx.askTell = () => Promise.resolve();
@@ -653,6 +656,25 @@ await block('OLD: this build under the rules in the field today', async () => {
         same('at the record\'s next revision', record.revision, revisionBefore + 1);
         check('and the record has no word of transport', !/transport|tv_0/.test(JSON.stringify(record)));
         same('transport still says not shared - it did not borrow the record\'s success', one.share.state(), 'notShared');
+
+        // THE OWNER PASTES THE NEW RULES - later, with this phone open and nobody touching
+        // it. The same project, the same signed-in connection, no reload: publishing rules
+        // is the one thing done.
+        const attemptsBefore = one.share.state();
+        await initializeTestEnvironment({
+            projectId: 'farkad-transport-oldrules',
+            firestore: { rules: NEW_RULES, host: EMULATOR.host, port: EMULATOR.port }
+        });
+        const started = await settleUntil(async () => one.share.state() === 'shared' && one.share.owed() === null
+            && (await readRaw(old, ...PATH, 'transport', DOC)) !== null, 30000, 50);
+        check('the phone finds out by itself and says shared - it was saying not shared a moment before', started && attemptsBefore === 'notShared',
+            `${attemptsBefore} -> ${one.share.state()}`);
+        same('and the plan it made under the old rules is on the server', seatsOf(await readRaw(old, ...PATH, 'transport', DOC)), 'tv_01=w_01+[]');
+        same('at revision 1, as a document of its own', [(await readRaw(old, ...PATH, 'transport', DOC)).revision, await listRaw(old, ...PATH, 'transport')], [1, [DOC]]);
+        same('an untouched list of seven was not uploaded with it', await readRaw(old, ...PATH, 'transport', 'settings'), null);
+        const recordThen = await readRaw(old, ...PATH);
+        check('the record did not move for it', recordThen.revision === record.revision && !/transport|tv_0/.test(JSON.stringify(recordThen)));
+        same('and still says synced', one.device.Sync.status, 'synced');
         one.share.disconnect();
         one.device.Sync.disconnect();
     } finally {
