@@ -113,7 +113,24 @@ const FARKAD_SHIPPED_FLAGS = {
     // left out of the record, and no database is opened. READING is not behind it once a
     // phone has moved something (a mark on the disk): a build that could not read what an
     // earlier session moved would read a record with holes.
-    cold: false
+    cold: false,
+
+    // THE RECORD'S OWN SWITCH FOR THE THREE ABOVE (Phase 8): `paybook`, `months` and `cold`
+    // stay false in every build a person installs, and are NOT how the pay book is turned
+    // on. It is turned on for ONE RECORD, by a person, from the app, and the fact is an
+    // entry in that record: the opening, `pay.po_open`, written by one server transaction
+    // that only the new rules accept (js/model/payroll.js, planOpening;
+    // docs/payroll-activation.md). From the moment a phone holds that entry every reader
+    // below answers as a build with the three flags on answers - on every phone that
+    // holds it, at once, and on no other record.
+    //
+    // THIS flag says only that this build OFFERS that step and HONOURS that entry. With
+    // it true and no opening on the record the app is the build main serves, plus one
+    // row in the settings sheet. With it false the row is gone AND an opening already on
+    // the record is not honoured: that is the way back for whoever maintains this, and it
+    // is safe only until the first closure or payment is recorded (the point of no return
+    // - see docs/payroll-activation.md). It is not a second way to turn anything on.
+    paybookActivation: true
 };
 
 // FROZEN. `const` binds the name, not the object: anything holding a reference could set
@@ -2400,8 +2417,77 @@ function advanceCarryInto(schedule, workerId, fromDate) {
 // man owes, and a sheet that reprints differently from the one somebody was paid against
 // is the thing he ruled out. It cannot open after it because the pay book's closure lets
 // a person deduct an old advance, which the old walk refuses.
-function advanceDebtStays() {
-    return FARKAD_FLAGS.paybook === true;
+//
+// PER RECORD since Phase 8: the rule is in force on a build with the flag on (the test
+// seam), or on a RECORD somebody has activated (paybookOn, below). Every caller has the
+// schedule in hand and passes it; one called with none answers for the build alone, which
+// in everything a person installs is false.
+function advanceDebtStays(schedule) {
+    return paybookOn(schedule);
+}
+
+// ---------------------------------------------------------------- the record's own switch
+//
+// IS THE PAY BOOK ON FOR THIS RECORD? One question, one function, asked by the one-debt
+// ruling above, the pay book's planners and screens, the month archive and the phone's
+// cold store. No other line in this app reads FARKAD_FLAGS.paybook, .months or .cold for
+// "is it on" - tests/activation.test.mjs reads the source and counts.
+//
+//   the build's flag    FARKAD_FLAGS.paybook, false in everything a person installs. The
+//                       suites open it through the test seam, and then every record is
+//                       on, as it always was for them.
+//   the record's entry  `pay.po_open`, the opening: the day tracking begins. It is
+//                       written once, by one server transaction of its own
+//                       (js/sync/transact.js), under an id two phones cannot hold twice,
+//                       and is never rewritten or removed - by the client, by a restore
+//                       (the pay book is unioned) or by the server's rules.
+//
+// WHY THE OPENING AND NOT A NEW KIND OF ENTRY. It is already the first thing the pay book
+// needs (every planner answers `inactive` without it), it is already append-only on the
+// wire and in the rules, every build that keeps `pay` already carries it, and "tracking
+// began on a day" is exactly what was approved. A second entry beside it would be a
+// second fact that could disagree with the first.
+//
+// A phone cannot be half on: there is no setting, no local key and no per-phone answer.
+// The same record gives the same answer on every phone that holds it, and a phone that
+// has not heard yet is on the old arithmetic for the WHOLE record until it has.
+const PAYBOOK_ACTIVATION_ENTRY = 'po_open';
+const PAYBOOK_ACTIVATION_SEEN = (typeof WeakMap === 'function') ? new WeakMap() : null;
+
+function paybookActivationOffered() {
+    return FARKAD_FLAGS.paybookActivation === true;
+}
+
+function paybookActivated(schedule) {
+    if (!paybookActivationOffered()) return false;
+    const book = schedule && isPlainObject(schedule.pay) ? schedule.pay : null;
+    if (!book || !Object.prototype.hasOwnProperty.call(book, PAYBOOK_ACTIVATION_ENTRY)) return false;
+    const entry = book[PAYBOOK_ACTIVATION_ENTRY];
+    if (!isPlainObject(entry)) return false;
+    // Asked thousands of times in one account walk: the entry object is judged once.
+    if (PAYBOOK_ACTIVATION_SEEN && PAYBOOK_ACTIVATION_SEEN.has(entry)) return PAYBOOK_ACTIVATION_SEEN.get(entry);
+    // An entry this build could not have written is not an activation: it is an
+    // unreadable pay entry, and Recovery stops the phone over it (law 10) - loudly.
+    const good = entry.kind === 'opening' && typeof entry.date === 'string' && isRealDate(entry.date)
+        && (typeof payEntryProblems !== 'function'
+            || payEntryProblems(PAYBOOK_ACTIVATION_ENTRY, entry).length === 0);
+    if (PAYBOOK_ACTIVATION_SEEN) PAYBOOK_ACTIVATION_SEEN.set(entry, good);
+    return good;
+}
+
+function paybookOn(schedule) {
+    return FARKAD_FLAGS.paybook === true || paybookActivated(schedule);
+}
+
+// The month archive needs the pay book as well as its own flag (a month is eligible only
+// through closed and settled accounts); an activated record has both.
+function monthsOn(schedule) {
+    return (FARKAD_FLAGS.months === true && FARKAD_FLAGS.paybook === true) || paybookActivated(schedule);
+}
+
+// The phone's cold store WRITES (the reader is never behind a switch once a mark exists).
+function coldOn(schedule) {
+    return FARKAD_FLAGS.cold === true || paybookActivated(schedule);
 }
 
 // WHAT IS STILL THERE TO TAKE, when an account is closed out of order.
@@ -2421,7 +2507,7 @@ function advanceDebtStays() {
 // gate shut computes exactly what it always did. `stays` is the rule the caller is
 // computing under; left out, it is this build's own.
 function advanceLiveRoom(schedule, workerId, toDate, stays) {
-    const ruled = stays === undefined ? advanceDebtStays() : stays === true;
+    const ruled = stays === undefined ? advanceDebtStays(schedule) : stays === true;
     if (!ruled || typeof outstandingWithout !== 'function'
         || typeof advanceOutstanding !== 'function') return Infinity;
     return agoraRound(advancesFor(schedule, workerId, '0000-01-01', toDate)
@@ -2452,7 +2538,7 @@ function advanceCreditInto(schedule, workerId, fromDate) {
 // them zero or more, so that no screen and no payslip can show a debt of less than
 // nothing.
 function advancePositionInto(schedule, workerId, fromDate) {
-    return advancePositionIntoUnder(schedule, workerId, fromDate, advanceDebtStays());
+    return advancePositionIntoUnder(schedule, workerId, fromDate, advanceDebtStays(schedule));
 }
 
 // THE TWO RULINGS MEET HERE, in one walk (the merge of v180 into the pay book's branch).
@@ -2894,7 +2980,7 @@ function planAdvanceCarry(schedule) {
 // last day anything about this man is dated on the record, so the report is a function of
 // the record alone.
 function planDebtRuling(schedule, today) {
-    const out = { rule: 'debt-stays-until-deducted', active: advanceDebtStays(),
+    const out = { rule: 'debt-stays-until-deducted', active: advanceDebtStays(schedule),
         through: null, workers: [], changes: [] };
     const all = (schedule && Array.isArray(schedule.workers)) ? schedule.workers : [];
     const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};

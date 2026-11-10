@@ -51,9 +51,23 @@ export const SERVER_FIRST = { paybook: true };
 let made = 0;
 export function payDevice(options = {}) {
     made += 1;
+    // SINCE PHASE 8 A RECORD CAN TURN THE PAY BOOK ON BY ITSELF (the opening,
+    // paybookActivated in js/model/schema.js), and nearly every record in these suites
+    // holds an opening. So that the suites go on measuring what they were written to
+    // measure - a BUILD with the flags named, on whatever record - a device made here
+    // does not honour the record's switch unless it asks to (`activation: true`):
+    //
+    //   default            the flags named through the seam, and nothing else, decide
+    //   shipped: true      «the pay book shut»: the three flags false and the record's
+    //                      switch not honoured - the build main served before Phase 8,
+    //                      and this build's own way back (docs/payroll-activation.md)
+    //   activation: true   the build exactly as it ships: the record decides
+    //
+    // tests/activation.test.mjs is where the build as it ships meets an activated record.
+    const honoured = options.activation === true ? {} : { paybookActivation: false };
     const device = makeDevice(Object.assign({ deviceId: `d_book${made}` }, options, {
-        flags: options.shipped ? (options.flags || null)
-            : Object.assign({}, WRITER_ON, options.flags || {})
+        flags: options.shipped ? Object.assign({}, honoured, options.flags || {})
+            : Object.assign({}, honoured, WRITER_ON, options.flags || {})
     }));
     device.setToday(options.today || TODAY);
     // Every dialog the data layer raises, recorded rather than answered into the void: a

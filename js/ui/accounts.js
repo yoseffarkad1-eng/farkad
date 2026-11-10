@@ -258,7 +258,52 @@ const ACC_TEXT = Object.freeze({
     whyIrregular: 'רישום ישן שאי אפשר להעביר',
     // a phone that lacks the detail of a closure in the archive
     closedWaiting: 'במכשיר הזה חסר הפירוט של סגירות שכבר בארכיון. עד שהוא יירד מהשרת המכשיר לא מתעדכן, ואי אפשר לרשום ממנו סגירה או תשלום. זה קורה מעצמו כשיש חיבור.',
-    closedBroken: 'סגירה שבארכיון בשרת אינה שלמה. המכשיר הזה לא מתעדכן עד שזה ייבדק. הראה את המסך הזה למי שמתחזק את האפליקציה.'
+    closedBroken: 'סגירה שבארכיון בשרת אינה שלמה. המכשיר הזה לא מתעדכן עד שזה ייבדק. הראה את המסך הזה למי שמתחזק את האפליקציה.',
+    // Phase 8: turning the pay book on for this record - the row in the settings sheet,
+    // the screen that is read first, and what the server may answer
+    activationRowOff: 'פנקס שכר (סגירת חשבון, תשלומים וארכיון): עוד לא הופעל ברישום הזה.',
+    activationRowOn: 'פנקס השכר פעיל ברישום הזה. יום תחילת המעקב:',
+    activationEntry: 'פנקס שכר - הכנה והפעלה',
+    activationTitle: 'פנקס שכר - הכנה והפעלה',
+    activationLead: 'כאן רואים מה ישתנה לפני שמפעילים. המסך הזה לא רושם ולא משנה דבר עד שלוחצים על הכפתור שבסופו ומאשרים.',
+    activationWhat: 'אחרי ההפעלה לשונית «מקדמות» היא עמוד חשבונות העובדים: סגירת חשבון ותשלום נרשמים מול השרת, ומקדמה נשארת חוב עד שמקזזים אותה או עד שהעובד מחזיר אותה.',
+    activationDebtTitle: 'חוב מקדמות שיוצג אחרת',
+    activationDebtLead: 'היום האפליקציה מניחה שמקדמה מתקופה שלא נסגרה כבר ירדה מהשכר. אחרי ההפעלה היא נשארת חוב עד שמישהו מקזז אותה. אצל העובדים האלה החוב יוצג אחרת:',
+    activationDebtNone: 'אין עובד שהחוב שלו יוצג אחרת.',
+    activationDebtNow: 'היום',
+    activationDebtAfter: 'אחרי ההפעלה',
+    activationDebtCheck: 'אם תקופה כזאת כבר הוסדרה ביד, רושמים לעובד החזר אחרי ההפעלה. שום דבר לא נמחק ושום יום עבודה לא משתנה.',
+    activationLegacyTitle: 'סגירות ישנות',
+    activationLegacy: 'סגירות שנעשו לפני פנקס השכר יופיעו ברשימה «סגירות ישנות לבדיקה», ועונים עליהן מתי שנוח:',
+    activationLegacyNone: 'אין סגירות ישנות לבדיקה.',
+    activationSizeTitle: 'גודל הרישום והארכיון',
+    activationSize: 'גודל הרישום בשרת היום',
+    activationArchiveNote: 'חשבון שנסגר ושולם במלואו עובר אחרי 14 יום לארכיון בשרת. חודש שנסגר לכל העובדים יכול לעבור לארכיון אחרי חצי שנה, ורק כשמבקשים. שום דבר לא נמחק והכול נשאר במכשיר - אבל יום בחודש שעבר לארכיון כבר אי אפשר לשנות.',
+    activationCarry: 'ההפעלה מאשרת גם, פעם אחת, שיתרת מקדמה עוברת לחשבון הבא. שורות שישתנו:',
+    activationBeforeTitle: 'לפני שמפעילים',
+    activationBeforePhones: 'כל הטלפונים מעודכנים לגרסה הזאת.',
+    activationBeforeBackup: 'נלקח היום גיבוי מהטלפון הזה (⋯ ← גיבוי).',
+    activationBeforeRules: 'הכללים החדשים פורסמו ב-Firebase. האפליקציה בודקת את זה בעצמה, ובלעדיהם לא תפעיל.',
+    activationNoReturn: 'אחרי ההפעלה אי אפשר לכבות את פנקס השכר מהאפליקציה. עד הסגירה או התשלום הראשון לא נרשם שום דבר כספי חדש.',
+    activationRun: 'הפעל את פנקס השכר',
+    activationConfirmTitle: 'להפעיל את פנקס השכר?',
+    activationConfirm: 'ההפעלה חלה על כל הטלפונים שמחוברים לרישום הזה, ואי אפשר לכבות אותה מהאפליקציה. יום תחילת המעקב:',
+    activationConfirmYes: 'הפעל',
+    activationChecking: 'בודק את השרת…',
+    activationRules: 'השרת עדיין עובד עם הכללים הישנים. פנקס השכר לא הופעל ודבר לא נרשם. מפרסמים את הכללים החדשים ב-Firebase ומנסים שוב.',
+    activationCarryWait: 'אישור המעבר נשמר במכשיר ועוד לא הגיע לשרת. פנקס השכר עוד לא הופעל. חכה רגע ולחץ שוב.',
+    activationDone: 'פנקס השכר הופעל.',
+    activationElsewhere: 'פנקס השכר כבר הופעל מטלפון אחר. לא נרשם דבר נוסף.',
+    // Phase 8: the months that may leave (decision 57) - the dry run is Phase 6's own
+    // words (MONTH_TEXT); these are the page around it
+    monthsEntry: 'ארכיון חודשים',
+    monthsLead: 'חודש שכל ימי העבודה שבו נסגרו ושולמו, ועברה חצי שנה, יכול לעבור מהרישום החי לארכיון בשרת. הימים נשארים במכשיר הזה ובכל דוח בדיוק כמו שהם. אחרי ההעברה אי אפשר לשנות יום באותו חודש.',
+    monthsRun: 'העבר את החודשים המוכנים לארכיון',
+    monthsConfirmTitle: 'להעביר חודשים לארכיון?',
+    monthsConfirm: 'אחרי ההעברה אי אפשר לשנות יום בחודשים האלה, גם לא רישום לרימא או ליוסף גבס. חודשים להעברה:',
+    monthsConfirmYes: 'העבר',
+    monthsMoved: 'חודשים שהועברו לארכיון',
+    monthsDiffers: 'ימי החודש בשרת אינם זהים למה שבמכשיר הזה. החודש נשאר ברישום.'
 });
 
 // EVERY REFUSAL CODE THE MODEL CAN ANSWER WITH, as the sentence a person reads. The model
@@ -422,14 +467,57 @@ function accDraftFor(form, review) {
 }
 
 function accountsOpen() {
-    return typeof paybookWritesEnabled === 'function' && paybookWritesEnabled() === true;
+    return typeof paybookWritesEnabled === 'function'
+        && paybookWritesEnabled(typeof State !== 'undefined' && State ? State.schedule : null) === true;
 }
 
 // Does the accounts home take the «מקדמות» tab right now? Not while one man's advances
 // page or the old ordering page is up: both are the existing screens, unchanged, and are
 // still how an advance is given or handed back.
+//
+// AND WHILE A RECORD IS BEING TURNED ON (Phase 8): the one screen that prepares it is
+// drawn here too, reached only from its row in the settings sheet, and only on a record
+// that is not on yet. Leaving it - «חזרה», or the record coming on - gives the tab back.
 function accountsTakesTab() {
-    return accountsOpen() && !ADVANCE_WORKER && !ADVANCE_ORDER_DRAFT;
+    return (accountsOpen() || accountsActivationUp()) && !ADVANCE_WORKER && !ADVANCE_ORDER_DRAFT;
+}
+
+function accountsActivationUp() {
+    return ACC.activating === true && typeof paybookActivating === 'function'
+        && paybookActivating(typeof State !== 'undefined' && State ? State.schedule : null);
+}
+
+// THE ROW IN THE SETTINGS SHEET (Phase 8) - the ONE way to the activation screen, and
+// the one thing a person sees of the pay book on a record that is not on. Called by
+// renderSettings (js/ui/settings.js); draws into a box of its own that it makes beside
+// the carry review, so index.html holds no element for it. Nothing while the build does
+// not offer the step.
+function accountsActivationRow() {
+    if (typeof document === 'undefined' || typeof planActivation !== 'function') return;
+    const before = document.getElementById('carryMigrationBox');
+    if (!before || !before.parentNode) return;
+    let box = document.getElementById('paybookActivationBox');
+    // Three cheap questions - never the dry runs, which this row does not show.
+    const offered = typeof paybookActivationOffered === 'function' && paybookActivationOffered();
+    const opening = offered && accountsOpen() ? paybookFold(State.schedule).opening : null;
+    const state = !offered ? 'off' : (accountsOpen() ? (opening ? 'on' : 'off') : 'offered');
+    if (state === 'off') { if (box) box.remove(); return; }
+    if (!box) {
+        box = el('section', 'acc-activation-row');
+        box.id = 'paybookActivationBox';
+        before.parentNode.insertBefore(box, before.nextSibling);
+    }
+    clear(box);
+    if (state === 'on') {
+        box.appendChild(el('p', 'hint', `${ACC_TEXT.activationRowOn} ${isolateLtr(accDay(opening ? opening.date : ''))}`));
+        return;
+    }
+    box.appendChild(el('p', 'hint', ACC_TEXT.activationRowOff));
+    box.appendChild(button(ACC_TEXT.activationEntry, 'btn-secondary acc-activation-entry', () => {
+        if (typeof closeSettings === 'function') closeSettings();
+        ADVANCE_WORKER = null;
+        accGo('activate', { activating: true, activation: null, flash: '' });
+    }));
 }
 
 // THE OLD CLOSURE DIALOG'S DOOR (decision 29). With the gate open there is ONE way to
@@ -777,9 +865,21 @@ function accCarryBox(form) {
 // ---------------------------------------------------------------- the tab's one entry
 function renderAccounts(root) {
     accWatchIntent();
-    if (ACC.node && ACC.node.parentNode === root && typeof ACC.live === 'function') {
+    if (ACC.node && ACC.node.parentNode === root && typeof ACC.live === 'function'
+        && (ACC.screen === 'activate') === accountsActivationUp()) {
         ACC.live();
         return;
+    }
+    // The activation screen belongs to a record that is NOT on; every other screen to
+    // one that is. Whichever the record is now decides - never what was last drawn.
+    if (accountsActivationUp()) ACC.screen = 'activate';
+    else if (ACC.screen === 'activate') {
+        // It was up and the record came on under it - from another phone, since this
+        // phone's own success has already left the screen with its own line.
+        ACC.screen = 'list';
+        ACC.activating = false;
+        ACC.activation = null;
+        if (accountsOpen() && !ACC.flash) ACC.flash = ACC_TEXT.activationElsewhere;
     }
     clear(root);
     const node = el('div', 'acc-screen acc-screen-' + ACC.screen);
@@ -789,7 +889,8 @@ function renderAccounts(root) {
     const draw = {
         list: accDrawList, review: accDrawReview, pay: accDrawPay, group: accDrawGroup,
         summary: accDrawSummary, history: accDrawHistory, statement: accDrawStatement,
-        correct: accDrawCorrect, legacy: accDrawLegacy, look: accDrawLook, archive: accDrawArchive
+        correct: accDrawCorrect, legacy: accDrawLegacy, look: accDrawLook, archive: accDrawArchive,
+        activate: accDrawActivate, months: accDrawMonths
     }[ACC.screen] || accDrawList;
     draw(node);
 }
@@ -2188,6 +2289,260 @@ function accDrawOpening(node) {
     paint();
 }
 
+// ---------------------------------------------------------------- turning it on (Phase 8)
+//
+// THE SCREEN A PERSON READS BEFORE THE PAY BOOK IS ON FOR THIS RECORD, and the one button
+// that turns it on. Reached only from the row in the settings sheet, only on a record
+// that is not on.
+//
+// EVERYTHING ON IT IS planActivation's (js/model/payroll.js): the dry runs the docs have
+// required since Phase 3 - what the one-debt ruling moves, the older closures that will
+// wait for an answer, the size of the record, the months - computed on the record as it
+// will read once it is on, by the functions that already existed. Drawing the page writes
+// nothing, to the disk or the cloud (tests/activation.test.mjs holds every key).
+//
+// THE BUTTON, in order, and each step can be the last with nothing lost:
+//   1. the app's own confirmation, which says it cannot be turned off from the app;
+//   2. THE SERVER IS ASKED WHICH RULES IT RUNS (FarkadSync.activationRefusal: a read that
+//      only these rules allow). Older rules: one sentence, nothing written;
+//   3. the carry approval, if this record does not carry one - the entry the existing
+//      review in the settings sheet writes, by the ordinary path. It is not a pay entry.
+//      If it has not reached the server yet the person is asked to press again;
+//   4. THE OPENING, by the server-first door: one transaction, one closed document, or
+//      nothing. This is the entry that turns the record on, on every phone that holds it.
+function accDrawActivate(node) {
+    const form = ACC.activation || (ACC.activation = { date: periodRangeFor({}, todayStr()).from,
+        busy: false, message: '', attempted: false });
+    const leave = () => { ACC.activating = false; ACC.activation = null; accGo('list', { flash: '' }); };
+    accHead(node, ACC_TEXT.activationTitle, null, leave);
+    const banner = accBanner();
+    node.appendChild(banner);
+    node.appendChild(el('p', 'acc-note acc-activation-lead', ACC_TEXT.activationLead));
+    node.appendChild(el('p', 'acc-hint', ACC_TEXT.activationWhat));
+    const report = el('div', 'acc-activation-report');
+    node.appendChild(report);
+
+    node.appendChild(el('h3', 'acc-h3', ACC_TEXT.openingDay));
+    node.appendChild(el('p', 'acc-hint', ACC_TEXT.openingLead));
+    const date = accDateInput(ACC_TEXT.openingDay, form.date, todayStr());
+    date.addEventListener('change', () => { form.date = date.value; paint(); });
+    node.appendChild(accField(ACC_TEXT.openingDay, date));
+    const echo = el('p', 'acc-hint');
+    node.appendChild(echo);
+
+    node.appendChild(el('h3', 'acc-h3', ACC_TEXT.activationBeforeTitle));
+    const checks = el('ul', 'acc-activation-before');
+    [ACC_TEXT.activationBeforePhones, ACC_TEXT.activationBeforeBackup, ACC_TEXT.activationBeforeRules]
+        .forEach(text => checks.appendChild(el('li', null, text)));
+    node.appendChild(checks);
+    node.appendChild(el('p', 'acc-note acc-note-warn acc-activation-noreturn', ACC_TEXT.activationNoReturn));
+    const message = accError('');
+    message.classList.add('acc-message');
+    node.appendChild(message);
+
+    const fail = text => { form.busy = false; form.message = text; render(); };
+    const run = () => {
+        const stamp = accStamp();
+        const drawn = planActivation(State.schedule, form.date, stamp);
+        if (drawn.state === 'on') { accGo('list', { activating: false, activation: null, flash: ACC_TEXT.activationElsewhere }); return; }
+        const other = drawn.reasons.filter(code => code !== 'carry-approval-needed')[0];
+        if (drawn.state !== 'offered' || other) { fail(accRefusalText(other || 'gate')); return; }
+        form.busy = true;
+        form.message = ACC_TEXT.activationChecking;
+        render();
+        Promise.resolve(FarkadSync.activationRefusal()).then(refused => {
+            if (refused) { fail(refused === 'rules' ? ACC_TEXT.activationRules : accServerText([refused])); return; }
+            // THE CARRY, when this record has none: the ledger's own entry, the ordinary path.
+            if (drawn.reasons.indexOf('carry-approval-needed') !== -1) {
+                const carry = planCarryApproval(State.schedule, accStamp());
+                if (!carry.ok) { fail(accRefusalText(carry.reasons[0])); return; }
+                if (!carry.already) {
+                    const change = recordCarryApproval(State.schedule,
+                        { id: carry.carryApproval.id, rows: carry.carryApproval.rows }, stamp.at, stamp.by);
+                    if (!change || State.commitMany([change]) !== true) { fail(ACC_TEXT.carryFailed); return; }
+                    // It travels by the queue; the opening may not be sent over unsent work.
+                    fail(ACC_TEXT.activationCarryWait);
+                    accActivationRetry(form, run);
+                    return;
+                }
+            }
+            const plan = planOpening(State.schedule, form.date, accStamp());
+            if (!plan.ok) { fail(accRefusalText(plan.reasons[0])); return; }
+            if (plan.already) { accGo('list', { activating: false, activation: null, flash: ACC_TEXT.activationElsewhere }); return; }
+            form.busy = false;
+            accSend(plan, form, () => accGo('list', { activating: false, activation: null, flash: ACC_TEXT.activationDone }));
+        }, () => fail(ACC_TEXT.offline));
+    };
+    const go = accPrimary(ACC_TEXT.activationRun, () => {
+        if (form.busy) return;
+        form.attempted = true;
+        askConfirm({ title: ACC_TEXT.activationConfirmTitle,
+            message: `${ACC_TEXT.activationConfirm} ${isolateLtr(accDay(form.date))}`,
+            ok: ACC_TEXT.activationConfirmYes }).then(yes => { if (yes) run(); });
+    });
+    node.appendChild(go);
+
+    const kb = bytes => `${Math.ceil(bytes / 1024).toLocaleString('en-US')} KB`;
+    function paint() {
+        accPaintBanner(banner);
+        const parsed = parseLocalDate(form.date);
+        echo.textContent = parsed ? `${hebrewDayName(parsed)}, ${formatFullDate(parsed)}` : '';
+        // The dry runs walk every man's every account: drawn once per record and day, not
+        // once per repaint.
+        const key = `${State.schedule.updatedAt}|${form.date}|${todayStr()}`;
+        if (!form.drawn || form.drawnFor !== State.schedule || form.drawnKey !== key) {
+            form.drawn = planActivation(State.schedule, form.date, accStamp());
+            form.drawnFor = State.schedule;
+            form.drawnKey = key;
+        }
+        const drawn = form.drawn;
+        clear(report);
+        if (drawn.report) {
+            const facts = drawn.report;
+            // What the one-debt ruling moves, man by man.
+            const debt = el('section', 'acc-activation-part acc-activation-debt');
+            debt.appendChild(el('h3', 'acc-h3', ACC_TEXT.activationDebtTitle));
+            if (facts.debt.length === 0) debt.appendChild(emptyHint(ACC_TEXT.activationDebtNone));
+            else {
+                debt.appendChild(el('p', 'acc-hint', ACC_TEXT.activationDebtLead));
+                facts.debt.forEach(row => {
+                    const line = el('div', 'acc-archive-row acc-activation-man');
+                    line.dataset.worker = row.workerId;
+                    line.appendChild(el('strong', 'acc-name', isolate(row.name)));
+                    line.appendChild(accLine(ACC_TEXT.activationDebtNow, accMoney(row.old), '', 'old'));
+                    line.appendChild(accLine(ACC_TEXT.activationDebtAfter, accMoney(row.new), '', 'new'));
+                    debt.appendChild(line);
+                });
+                debt.appendChild(el('p', 'acc-hint', ACC_TEXT.activationDebtCheck));
+            }
+            report.appendChild(debt);
+            // The older closures.
+            const legacy = el('section', 'acc-activation-part acc-activation-legacy');
+            legacy.appendChild(el('h3', 'acc-h3', ACC_TEXT.activationLegacyTitle));
+            legacy.appendChild(facts.legacy.paymentUnknown > 0
+                ? accLine(ACC_TEXT.activationLegacy, String(facts.legacy.paymentUnknown), '', 'legacy')
+                : emptyHint(ACC_TEXT.activationLegacyNone));
+            report.appendChild(legacy);
+            // The carry, when it is part of this step.
+            if (!facts.carry.approved) {
+                const carry = el('section', 'acc-activation-part acc-activation-carry');
+                carry.appendChild(accLine(ACC_TEXT.activationCarry, String(facts.carry.rows), '', 'carry'));
+                report.appendChild(carry);
+            }
+            // The size of the record, and what leaves it afterwards.
+            const size = el('section', 'acc-activation-part acc-activation-size');
+            size.appendChild(el('h3', 'acc-h3', ACC_TEXT.activationSizeTitle));
+            size.appendChild(accLine(ACC_TEXT.activationSize,
+                `${kb(facts.archive.liveBytes)} ${ACC_TEXT.groupOf} ${kb(facts.archive.limitBytes)}`, '', 'size'));
+            size.appendChild(el('p', 'acc-hint', ACC_TEXT.activationArchiveNote));
+            report.appendChild(size);
+        }
+        const other = drawn.reasons.filter(code => code !== 'carry-approval-needed')[0];
+        message.textContent = form.message || (form.attempted && other ? accRefusalText(other) : '');
+        accPaintBusy(go, form, ACC_TEXT.activationRun);
+    }
+    ACC.live = paint;
+    paint();
+}
+
+// The carry approval is on its way to the server: look again a few times, and finish the
+// activation by itself once the queue is empty. Never more than a minute, and only while
+// this screen is still the one on the glass.
+function accActivationRetry(form, run) {
+    let tries = 0;
+    const again = () => {
+        tries += 1;
+        if (!accountsActivationUp() || ACC.activation !== form || form.busy) return;
+        const sync = typeof FarkadSync !== 'undefined' ? FarkadSync : null;
+        const drained = sync && sync.pendingCount() === 0 && sync._sending.size === 0;
+        if (drained) { form.message = ''; run(); return; }
+        if (tries < 20) setTimeout(again, 3000);
+    };
+    setTimeout(again, 1500);
+}
+
+// ---------------------------------------------------------------- the months that may leave
+//
+// DECISION 57: a month moves only when somebody asks, from a screen that shows the dry
+// run first. This is that screen, reached from «ארכיון סגירות». The dry run is Phase 6's
+// own (planMonths, and its words in MONTH_TEXT through monthsPlanLines); the move is
+// Phase 6's own (FarkadSync.archiveMonths), which can be pressed again after any
+// interruption. Reading the page writes nothing.
+function accDrawMonths(node) {
+    const form = ACC.months || (ACC.months = { busy: false, message: '', moved: null });
+    accHead(node, ACC_TEXT.monthsEntry, null, () => accGo('archive', { months: null }));
+    const banner = accBanner();
+    node.appendChild(banner);
+    node.appendChild(el('p', 'acc-hint acc-months-lead', ACC_TEXT.monthsLead));
+    const list = el('div', 'acc-months-list');
+    node.appendChild(list);
+    const message = accError('');
+    message.classList.add('acc-message');
+    node.appendChild(message);
+    const send = () => {
+        form.busy = true;
+        form.message = '';
+        form.moved = null;
+        paint();
+        const done = answer => {
+            form.busy = false;
+            form.moved = answer && Array.isArray(answer.moved) ? answer.moved.slice() : [];
+            if (!answer || answer.state === 'refused') {
+                const said = answer ? answer.reasons : ['server'];
+                form.message = said[0] === 'gate' ? ACC_REFUSALS.gate
+                    : (said[0] === 'offline' ? ACC_TEXT.archiveOffline : accServerText(said));
+            } else if (Array.isArray(answer.failed) && answer.failed.length > 0) {
+                form.message = `${accMonthsWord(answer.failed[0].reason)} ${ACC_TEXT.archiveStopped}`;
+            }
+            render();
+        };
+        let sent;
+        try { sent = FarkadSync.archiveMonths({ today: todayStr() }); } catch (error) { sent = Promise.reject(error); }
+        Promise.resolve(sent).then(done, () => done({ state: 'refused', reasons: ['server'], moved: [], failed: [] }));
+    };
+    const run = accPrimary(ACC_TEXT.monthsRun, () => {
+        if (form.busy) return;
+        const ready = planMonths(State.schedule, todayStr()).months.filter(one => one.state === 'ready').map(one => one.month);
+        if (ready.length === 0) return;
+        askConfirm({ title: ACC_TEXT.monthsConfirmTitle,
+            message: `${ACC_TEXT.monthsConfirm} ${isolateLtr(ready.join(', '))}`,
+            ok: ACC_TEXT.monthsConfirmYes }).then(yes => { if (yes) send(); });
+    });
+    node.appendChild(run);
+
+    function paint() {
+        accPaintBanner(banner);
+        const drawn = planMonths(State.schedule, todayStr());
+        clear(list);
+        if (form.moved !== null && form.moved.length > 0) {
+            list.appendChild(el('p', 'acc-note acc-note-ok acc-months-moved',
+                `${ACC_TEXT.monthsMoved}: ${isolateLtr(form.moved.join(', '))}`));
+        }
+        monthsPlanLines(drawn).forEach((line, at) => {
+            const row = el(at === 0 ? 'h3' : 'p', at === 0 ? 'acc-h3' : 'acc-months-line', line);
+            if (at > 1 && drawn.months[at - 2 - (drawn.totals.ready === 0 ? 1 : 0)]) {
+                const one = drawn.months[at - 2 - (drawn.totals.ready === 0 ? 1 : 0)];
+                row.dataset.month = one.month;
+                row.dataset.state = one.state;
+            }
+            list.appendChild(row);
+        });
+        message.textContent = form.message || '';
+        run.textContent = form.busy ? ACC_TEXT.archiveRunning : ACC_TEXT.monthsRun;
+        run.disabled = Boolean(form.busy);
+        run.setAttribute('aria-busy', form.busy ? 'true' : 'false');
+        run.hidden = drawn.totals.ready === 0 && !form.busy;
+    }
+    ACC.live = paint;
+    paint();
+}
+
+function accMonthsWord(reason) {
+    if (reason === 'differs') return ACC_TEXT.monthsDiffers;
+    if (reason === 'busy') return ACC_TEXT.archiveBusy;
+    return ACC_TEXT.archiveServer;
+}
+
 // The older closures nobody recorded a payment for. Each is answered in one tap, or left;
 // nothing here blocks the daily list, and «לא ידוע» writes nothing at all.
 function accDrawLegacy(node) {
@@ -2419,6 +2774,11 @@ function accDrawArchive(node) {
         Promise.resolve(sent).then(done, () => done({ state: 'refused', reasons: ['server'], moved: [], failed: [] }));
     });
     node.appendChild(run);
+    // THE MONTHS (decision 57): the same archive, one page further - the dry run first.
+    // Offered only where this record moves months at all.
+    const months = button(ACC_TEXT.monthsEntry, 'acc-link acc-months-link', () => accGo('months', { months: null, flash: '' }));
+    months.hidden = !(typeof monthWritesEnabled === 'function' && monthWritesEnabled(State.schedule));
+    node.appendChild(months);
 
     const kb = bytes => `${Math.ceil(bytes / 1024).toLocaleString('en-US')} KB`;
     const why = { owed: ACC_TEXT.whyOwed, unanswered: ACC_TEXT.statusUnknown, overpaid: ACC_TEXT.lookOverpaid,

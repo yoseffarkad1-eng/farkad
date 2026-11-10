@@ -79,9 +79,13 @@ const MONTH_TEXT = {
 
 // Does this BUILD move months? Both gates: a month is eligible only through closed and
 // settled accounts, which only the pay book writes.
-function monthWritesEnabled() {
-    return typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS.months === true
-        && FARKAD_FLAGS.paybook === true;
+//
+// PER RECORD since Phase 8 (monthsOn, js/model/schema.js): both flags through the test
+// seam, or a record somebody activated.
+function monthWritesEnabled(schedule) {
+    return typeof monthsOn === 'function' ? monthsOn(schedule) === true
+        : (typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS.months === true
+            && FARKAD_FLAGS.paybook === true);
 }
 
 function isMonthKey(value) {
@@ -440,7 +444,7 @@ function planMonths(schedule, today, options) {
     const want = monthIsRecord(options) ? options : {};
     const after = Number.isInteger(want.afterMonths) && want.afterMonths >= 0
         ? want.afterMonths : MONTHS_ARCHIVE_AFTER_MONTHS;
-    const reasons = monthWritesEnabled() ? [] : ['gate'];
+    const reasons = monthWritesEnabled(schedule) ? [] : ['gate'];
     const index = monthStoredIndex(schedule);
     const names = {};
     ((schedule && schedule.workers) || []).forEach(man => {

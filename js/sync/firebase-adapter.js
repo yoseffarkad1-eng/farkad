@@ -74,7 +74,7 @@ export function patchToUpdateArgs(patch) {
     return args;
 }
 
-export function firestoreOps(db, scheduleRef, receiptRef, closedRef, monthRef) {
+export function firestoreOps(db, scheduleRef, receiptRef, closedRef, monthRef, probeRef) {
     // One write, one receipt, one transaction. `apply` does the schedule half.
     //
     // A FAILURE BEFORE ANYTHING WAS WRITTEN SAYS SO (`unsent`, v166). The client keeps a note
@@ -497,6 +497,20 @@ export function firestoreOps(db, scheduleRef, receiptRef, closedRef, monthRef) {
             return getDoc(monthRef(id)).then(snapshot =>
                 (snapshot.exists() ? JSON.parse(JSON.stringify(snapshot.data())) : null));
         },
+        // WHICH RULES DOES THE SERVER RUN? (Phase 8) A READ, of a document that need not
+        // exist: firestore.rules on this branch allow `get` of probe/<generation> for
+        // exactly the generation they are, and no rules published before them have that
+        // block at all - they answer permission-denied. True: these rules. False: older
+        // ones (or this account is not on the list - in which case nothing else works
+        // either). Anything else - no signal, a server error - is thrown, because "could
+        // not ask" must never be read as either answer. Nothing is written.
+        probeRules(generation) {
+            if (typeof probeRef !== 'function') return Promise.resolve(false);
+            return getDoc(probeRef(generation)).then(() => true, error => {
+                if (error && error.code === 'permission-denied') return false;
+                throw error;
+            });
+        },
         save(data) {
             return withReceipt(data, transaction => {
                 transaction.set(scheduleRef, data);
@@ -667,7 +681,11 @@ if (!isConfigured()) {
         const monthRef = id =>
             doc(db, ...SCHEDULE_DOC_PATH.split('/'), 'months', String(id));
 
-        const ops = firestoreOps(db, scheduleRef, receiptRef, closedRef, monthRef);
+        // And the one path that says which rules the server runs (probeRules).
+        const probeRef = generation =>
+            doc(db, ...SCHEDULE_DOC_PATH.split('/'), 'probe', String(generation));
+
+        const ops = firestoreOps(db, scheduleRef, receiptRef, closedRef, monthRef, probeRef);
 
         window.FarkadSync.connect({
             // Firestore merges dotted field paths server-side, so two people writing
@@ -722,6 +740,9 @@ if (!isConfigured()) {
             copyMonth: ops.copyMonth,
             archiveMonth: ops.archiveMonth,
             readMonth: ops.readMonth,
+            // Which rules the server runs: asked before the pay book is turned on for a
+            // record (FarkadSync.activationRefusal). A read; it writes nothing.
+            probeRules: ops.probeRules,
 
             // Sync is not a backup: a deletion syncs as faithfully as a correction, and
             // by the time it is noticed every phone agrees with it. These are the copies

@@ -149,6 +149,32 @@ Object.assign(FarkadSync, {
         return null;
     },
 
+    // ------------------------------------------------------------ may it be turned on
+    //
+    // THE ACTIVATION'S OWN PRE-FLIGHT (Phase 8). Resolves to null, or to the one word for
+    // why the pay book may not be turned on for this record from this phone right now:
+    //
+    //   everything payTransactRefusal says (offline, unsupported, restoring, unsent-work,
+    //   pending, busy, waiting) - the opening goes through that same door;
+    //   protocol   this build does not speak the protocol the pay book's rules ask for;
+    //   rules      THE SERVER STILL RUNS OLDER RULES. Asked by reading a path only the
+    //              rules of this generation allow (adapter.probeRules) - a read, so asking
+    //              changes nothing anywhere. Under older rules the opening would be
+    //              refused whole by the server in any case (they have no closed/); this
+    //              says so BEFORE anything is attempted, in a sentence a person can act on.
+    //
+    // It never answers "may" on the strength of not having been able to ask.
+    RULES_GENERATION: 'paybook-8',
+    activationRefusal() {
+        const blocked = this.payTransactRefusal();
+        if (blocked) return Promise.resolve(blocked);
+        if (!(this.PROTOCOL >= 2)) return Promise.resolve('protocol');
+        if (typeof this.adapter.probeRules !== 'function') return Promise.resolve('unsupported');
+        let asked;
+        try { asked = this.adapter.probeRules(this.RULES_GENERATION); } catch (error) { asked = Promise.reject(error); }
+        return Promise.resolve(asked).then(runs => (runs === true ? null : 'rules'), () => 'offline');
+    },
+
     // The envelope, stamped onto a copy. NOT stampProtocol: that freezes the queue's own
     // send base, and this write is not the queue's.
     payPayload(intent, revision) {

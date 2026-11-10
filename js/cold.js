@@ -67,8 +67,13 @@ const COLD_TEXT = {
     deviceNone: 'ארכיון במכשיר: אין בדפדפן הזה אחסון נפרד, ולכן הכול נשמר באחסון הרגיל'
 };
 
+// PER RECORD since Phase 8 (coldOn, js/model/schema.js): the flag through the test seam,
+// or the record this phone holds has been activated. Before the record is loaded there
+// is nothing to move, and the answer is the flag's.
 function coldWriterEnabled() {
-    return typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS.cold === true;
+    const schedule = (typeof State !== 'undefined' && State && State.schedule) ? State.schedule : null;
+    return typeof coldOn === 'function' ? coldOn(schedule) === true
+        : (typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS.cold === true);
 }
 
 // Is there anything this build must read from the cold store, or may write to it?

@@ -42,6 +42,7 @@ window.FarkadSync.connect({
     copyMonth: (patch, month) => call('copyMonth', [patch, month]),
     archiveMonth: (patch, month, id) => call('archiveMonth', [patch, month, id]),
     readMonth: id => call('readMonth', [id]),
+    probeRules: generation => call('probeRules', [generation]),
     archive: () => Promise.resolve(),
     archiveDates: () => Promise.resolve([]),
     archiveRead: () => Promise.resolve(null),

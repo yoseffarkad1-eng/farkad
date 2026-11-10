@@ -1096,6 +1096,16 @@ button.acc-row { border: 0 !important; text-align: start; align-items: stretch; 
 .acc-archive-row > .acc-name { overflow-wrap: anywhere; }
 .acc-archive-why { flex-basis: 100%; }
 .acc-draft-restored { background: var(--surface-2); }
+/* Phase 8: the activation screen, its row in the settings sheet, and the months page. */
+.acc-activation-row { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.acc-activation-row .btn-secondary { min-height: 44px; min-width: 44px; font-size: 16px; }
+.acc-activation-part { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line-soft); }
+.acc-activation-man { align-items: center; }
+.acc-activation-man .acc-line { flex: 1 1 140px; }
+.acc-activation-before { margin: 0; padding-inline-start: 22px; display: flex; flex-direction: column; gap: 6px; font-size: 16px; line-height: 1.5; }
+.acc-activation-noreturn { font-weight: 700; }
+.acc-months-list { display: flex; flex-direction: column; gap: 6px; }
+.acc-months-line { margin: 0; padding: 8px 0; border-top: 1px solid var(--line-soft); font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
 .report-weekly-mark { margin-inline-start: 8px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 13px; font-weight: 700; white-space: nowrap; }
 
 }

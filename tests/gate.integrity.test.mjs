@@ -364,7 +364,15 @@ function commitSubject(git, sha) {
     given('the block declares flags', declared.length > 0, String(declared.length));
 
     const open = declared.filter(one => one.value !== 'false').map(one => one.flag);
-    same('carry and deletion are authorized', open, ['permanentDeletion', 'carryAdvances']);
+    // MOVED AT PHASE 8, deliberately, and this is the line that had never moved: what is
+    // OPEN in the shipped build gains one flag. `paybookActivation` does not turn the pay
+    // book on - `paybook`, `months` and `cold` are still false, asserted below - it says
+    // that this build OFFERS a person the step of turning it on for one record, and
+    // honours a record that was (js/model/schema.js, paybookOn; tests/activation.test.mjs).
+    // On a record nobody activated the build is what it was, plus one row in the
+    // settings sheet. Shut, it is the way back.
+    same('carry and deletion are authorized, and the activation step is offered', open,
+        ['permanentDeletion', 'carryAdvances', 'paybookActivation']);
     // MOVED AT v173, deliberately: three flags became four. `paybook` is the pay book's
     // writer, and it arrives the way this section asks a flag to arrive - with a decision
     // about its default, which is SHUT. The line above did not move: what is open in the
@@ -381,9 +389,10 @@ function commitSubject(git, sha) {
     // not publishing it. What is open in the shipped build has not moved.
     // MOVED AT PHASE 7, deliberately: six became seven. `cold` is the gate of the phone's
     // cold store (js/cold.js), declared so that it can be declared shut.
-    same('and the shipped flags are the seven that were argued over',
+    // MOVED AT PHASE 8, deliberately: seven became eight. `paybookActivation` - see above.
+    same('and the shipped flags are the eight that were argued over',
         declared.map(one => one.flag).sort(),
-        ['carryAdvances', 'cold', 'months', 'paybook', 'paybookQueue', 'permanentDeletion', 'vehicles']);
+        ['carryAdvances', 'cold', 'months', 'paybook', 'paybookActivation', 'paybookQueue', 'permanentDeletion', 'vehicles']);
     same('the phone\'s cold store ships shut', declared.filter(one => one.flag === 'cold').map(one => one.value), ['false']);
     same('closed months leaving the live document ships shut', declared.filter(one => one.flag === 'months').map(one => one.value), ['false']);
     same('the pay book\'s writer ships shut, and so does its old door through the queue',

@@ -267,6 +267,10 @@ function renderSettings() {
     // the block at the foot of this file for what it may and may not carry.
     renderDiagnostic();
     renderCarryMigration();
+    // Phase 8: the pay book's one row - turning it on for this record, or the day it was
+    // turned on. Drawn by js/ui/accounts.js into a box of its own beside the carry
+    // review; nothing while this build does not offer the step.
+    if (typeof accountsActivationRow === 'function') accountsActivationRow();
     // Last, over what was just drawn: a row with something to show is opened, once.
     revealSettingsFolds();
 }

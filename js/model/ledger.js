@@ -1131,7 +1131,7 @@ function planPeriodClosure(schedule, workerId, from, to, at, deduction) {
     // judge will compute and is what the entry's balanceAfter is taken from - a closure
     // whose carried balance is not `judged - amount` is held aside by every phone. `cap`
     // is the most this closure may take.
-    const stays = typeof advanceDebtStays === 'function' && advanceDebtStays();
+    const stays = typeof advanceDebtStays === 'function' && advanceDebtStays(schedule);
     const leftOf = id => (at
         ? outstandingWithout(schedule, id, null, to, at)
         : advanceOutstanding(schedule, id));

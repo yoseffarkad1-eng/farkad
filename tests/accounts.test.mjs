@@ -233,7 +233,49 @@ const WANT_TEXT = {
     whyCorrected: 'יש תיקון למקדמה שקוזזה בסגירה הזאת',
     whyIrregular: 'רישום ישן שאי אפשר להעביר',
     closedWaiting: 'במכשיר הזה חסר הפירוט של סגירות שכבר בארכיון. עד שהוא יירד מהשרת המכשיר לא מתעדכן, ואי אפשר לרשום ממנו סגירה או תשלום. זה קורה מעצמו כשיש חיבור.',
-    closedBroken: 'סגירה שבארכיון בשרת אינה שלמה. המכשיר הזה לא מתעדכן עד שזה ייבדק. הראה את המסך הזה למי שמתחזק את האפליקציה.'
+    closedBroken: 'סגירה שבארכיון בשרת אינה שלמה. המכשיר הזה לא מתעדכן עד שזה ייבדק. הראה את המסך הזה למי שמתחזק את האפליקציה.',
+    // Phase 8: the activation and the months page
+    activationRowOff: 'פנקס שכר (סגירת חשבון, תשלומים וארכיון): עוד לא הופעל ברישום הזה.',
+    activationRowOn: 'פנקס השכר פעיל ברישום הזה. יום תחילת המעקב:',
+    activationEntry: 'פנקס שכר - הכנה והפעלה',
+    activationTitle: 'פנקס שכר - הכנה והפעלה',
+    activationLead: 'כאן רואים מה ישתנה לפני שמפעילים. המסך הזה לא רושם ולא משנה דבר עד שלוחצים על הכפתור שבסופו ומאשרים.',
+    activationWhat: 'אחרי ההפעלה לשונית «מקדמות» היא עמוד חשבונות העובדים: סגירת חשבון ותשלום נרשמים מול השרת, ומקדמה נשארת חוב עד שמקזזים אותה או עד שהעובד מחזיר אותה.',
+    activationDebtTitle: 'חוב מקדמות שיוצג אחרת',
+    activationDebtLead: 'היום האפליקציה מניחה שמקדמה מתקופה שלא נסגרה כבר ירדה מהשכר. אחרי ההפעלה היא נשארת חוב עד שמישהו מקזז אותה. אצל העובדים האלה החוב יוצג אחרת:',
+    activationDebtNone: 'אין עובד שהחוב שלו יוצג אחרת.',
+    activationDebtNow: 'היום',
+    activationDebtAfter: 'אחרי ההפעלה',
+    activationDebtCheck: 'אם תקופה כזאת כבר הוסדרה ביד, רושמים לעובד החזר אחרי ההפעלה. שום דבר לא נמחק ושום יום עבודה לא משתנה.',
+    activationLegacyTitle: 'סגירות ישנות',
+    activationLegacy: 'סגירות שנעשו לפני פנקס השכר יופיעו ברשימה «סגירות ישנות לבדיקה», ועונים עליהן מתי שנוח:',
+    activationLegacyNone: 'אין סגירות ישנות לבדיקה.',
+    activationSizeTitle: 'גודל הרישום והארכיון',
+    activationSize: 'גודל הרישום בשרת היום',
+    activationArchiveNote: 'חשבון שנסגר ושולם במלואו עובר אחרי 14 יום לארכיון בשרת. חודש שנסגר לכל העובדים יכול לעבור לארכיון אחרי חצי שנה, ורק כשמבקשים. שום דבר לא נמחק והכול נשאר במכשיר - אבל יום בחודש שעבר לארכיון כבר אי אפשר לשנות.',
+    activationCarry: 'ההפעלה מאשרת גם, פעם אחת, שיתרת מקדמה עוברת לחשבון הבא. שורות שישתנו:',
+    activationBeforeTitle: 'לפני שמפעילים',
+    activationBeforePhones: 'כל הטלפונים מעודכנים לגרסה הזאת.',
+    activationBeforeBackup: 'נלקח היום גיבוי מהטלפון הזה (⋯ ← גיבוי).',
+    activationBeforeRules: 'הכללים החדשים פורסמו ב-Firebase. האפליקציה בודקת את זה בעצמה, ובלעדיהם לא תפעיל.',
+    activationNoReturn: 'אחרי ההפעלה אי אפשר לכבות את פנקס השכר מהאפליקציה. עד הסגירה או התשלום הראשון לא נרשם שום דבר כספי חדש.',
+    activationRun: 'הפעל את פנקס השכר',
+    activationConfirmTitle: 'להפעיל את פנקס השכר?',
+    activationConfirm: 'ההפעלה חלה על כל הטלפונים שמחוברים לרישום הזה, ואי אפשר לכבות אותה מהאפליקציה. יום תחילת המעקב:',
+    activationConfirmYes: 'הפעל',
+    activationChecking: 'בודק את השרת…',
+    activationRules: 'השרת עדיין עובד עם הכללים הישנים. פנקס השכר לא הופעל ודבר לא נרשם. מפרסמים את הכללים החדשים ב-Firebase ומנסים שוב.',
+    activationCarryWait: 'אישור המעבר נשמר במכשיר ועוד לא הגיע לשרת. פנקס השכר עוד לא הופעל. חכה רגע ולחץ שוב.',
+    activationDone: 'פנקס השכר הופעל.',
+    activationElsewhere: 'פנקס השכר כבר הופעל מטלפון אחר. לא נרשם דבר נוסף.',
+    monthsEntry: 'ארכיון חודשים',
+    monthsLead: 'חודש שכל ימי העבודה שבו נסגרו ושולמו, ועברה חצי שנה, יכול לעבור מהרישום החי לארכיון בשרת. הימים נשארים במכשיר הזה ובכל דוח בדיוק כמו שהם. אחרי ההעברה אי אפשר לשנות יום באותו חודש.',
+    monthsRun: 'העבר את החודשים המוכנים לארכיון',
+    monthsConfirmTitle: 'להעביר חודשים לארכיון?',
+    monthsConfirm: 'אחרי ההעברה אי אפשר לשנות יום בחודשים האלה, גם לא רישום לרימא או ליוסף גבס. חודשים להעברה:',
+    monthsConfirmYes: 'העבר',
+    monthsMoved: 'חודשים שהועברו לארכיון',
+    monthsDiffers: 'ימי החודש בשרת אינם זהים למה שבמכשיר הזה. החודש נשאר ברישום.'
 };
 
 const WANT_REFUSALS = {
@@ -464,6 +506,13 @@ const plain = value => JSON.parse(JSON.stringify(value));
     same('no other shipped script calls into the screens', others.filter(file =>
         /\b(renderAccounts|accountsTakesTab|accountsRoutesClosure|accountsClosureDoor|accGo|accOpen\w+)\b/
             .test(readFileSync(join(ROOT, file), 'utf8'))), []);
+    // PHASE 8: ONE more entry, and it is named. The row in the settings sheet is drawn by
+    // this file and asked for by js/ui/settings.js in one guarded line - the only way to
+    // the activation screen, and nothing else in the app reaches it.
+    same('the activation row is asked for by the settings sheet, and by nothing else',
+        others.filter(file => /\baccountsActivationRow\b/.test(readFileSync(join(ROOT, file), 'utf8'))), ['js/ui/settings.js']);
+    check('- in one guarded line', /if \(typeof accountsActivationRow === 'function'\) accountsActivationRow\(\);/.test(
+        readFileSync(join(ROOT, 'js/ui/settings.js'), 'utf8')));
     const before = git(['show', '990f5b4:index.html']);
     const tabs = text => text.slice(text.indexOf('<nav class="tabs"'), text.indexOf('</nav>', text.indexOf('<nav class="tabs"')));
     same('the tab bar is main\'s, byte for byte: five tabs, the same label', tabs(PAGE) === tabs(before), true);
@@ -484,8 +533,13 @@ const plain = value => JSON.parse(JSON.stringify(value));
     same('no markup from strings: textContent only', code.match(/innerHTML|insertAdjacentHTML|outerHTML/g), null);
     same('a pay entry is written by ONE door', (code.match(/transactPaybook\(/g) || []).length, 2);
     same('never by the queue, the journal or a bare save', code.match(/commitPaybook|State\.commit\(|State\.save\(|\.persist\(|queueOperations/g), null);
-    same('the one ordinary commit is the carry approval, by the ledger\'s own writer',
-        [(code.match(/State\.commitMany\(/g) || []).length, (code.match(/recordCarryApproval\(/g) || []).length], [1, 1]);
+    // MOVED AT PHASE 8, deliberately: one became two. The carry approval is written in two
+    // places now - on the spot where a closure first needs it (Phase 4), and as a step of
+    // turning the pay book on (accDrawActivate). Both are the ledger's own writer and the
+    // ordinary path, and both write the one entry `cm_carry`; nothing else is committed.
+    same('the two ordinary commits are the carry approval, by the ledger\'s own writer',
+        [(code.match(/State\.commitMany\(/g) || []).length, (code.match(/recordCarryApproval\(/g) || []).length], [2, 2]);
+    same('- and each is followed by nothing but that one change', code.match(/State\.commitMany\(\[change\]\)/g).length, 2);
     same('the old closure writer is not called from here', code.match(/closePeriodChanges|planPeriodClosure|recordPeriodClosed/g), null);
     // MOVED AT PHASE 5, deliberately. Phase 4 pinned «nothing is kept in storage»: what was
     // typed into a closure lived in memory and a reload lost it. The owner's list asks for

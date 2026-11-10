@@ -200,7 +200,7 @@ Object.assign(FarkadSync, {
     //
     // Null, or the one word for why nothing may be moved right now.
     archiveRefusal() {
-        if (typeof paybookWritesEnabled !== 'function' || !paybookWritesEnabled()) return 'gate';
+        if (typeof paybookWritesEnabled !== 'function' || !paybookWritesEnabled(State.schedule)) return 'gate';
         if (this._archiving) return 'busy';
         if (this._closedWaiting) return 'waiting';
         if (!this.adapter || typeof this.adapter.archiveClosed !== 'function') {

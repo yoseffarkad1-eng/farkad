@@ -30,7 +30,7 @@ Object.assign(FarkadSync, {
 
     // Null, or the one word for why no month may be moved right now.
     monthArchiveRefusal() {
-        if (typeof monthWritesEnabled !== 'function' || !monthWritesEnabled()) return 'gate';
+        if (typeof monthWritesEnabled !== 'function' || !monthWritesEnabled(State.schedule)) return 'gate';
         if (this._archivingMonths || this._archiving) return 'busy';
         if (this._closedWaiting) return 'waiting';
         if (!this.adapter || typeof this.adapter.archiveMonth !== 'function'

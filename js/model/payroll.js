@@ -518,8 +518,13 @@ function paybookSameFact(one, two) {
 // Does this BUILD create pay entries? One answer, read off the frozen flags, so that a
 // planner, the commit and a future screen cannot each have their own idea of it. Reading,
 // keeping, merging and sending are deliberately not behind it - see FARKAD_SHIPPED_FLAGS.
-function paybookWritesEnabled() {
-    return typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS.paybook === true;
+//
+// PER RECORD since Phase 8 (paybookOn, js/model/schema.js): the build's flag through the
+// test seam, or a record somebody activated. Called with no schedule it answers for the
+// build alone - false in everything a person installs.
+function paybookWritesEnabled(schedule) {
+    return typeof paybookOn === 'function' ? paybookOn(schedule) === true
+        : (typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS.paybook === true);
 }
 
 // ---------------------------------------------------------------- two documents, one book
@@ -715,7 +720,7 @@ function paybookCommitPlan(schedule, changes) {
     const reasons = [];
     const write = [];
     const same = [];
-    if (!paybookWritesEnabled()
+    if (!paybookWritesEnabled(schedule)
         || (typeof financialWritingEnabled === 'function' && !financialWritingEnabled(schedule))) {
         paybookAddReason(reasons, 'gate');
     } else if (!paybookQueueEnabled()) {
@@ -1415,7 +1420,7 @@ function paybookGateReasons(schedule, stamp) {
     // spot, with one sentence and one button. Answered as its own code so that a screen
     // never has to translate "everything financial is locked" as "not available": the
     // owner's requirement of 2026-11-10. paybookCarryApproval has what the screen shows.
-    if (!paybookWritesEnabled()
+    if (!paybookWritesEnabled(schedule)
         || (typeof ledgerWritesEnabled === 'function' && !ledgerWritesEnabled())
         || (typeof advanceCarryEnabled === 'function' && !advanceCarryEnabled())) {
         out.push('gate');
@@ -2013,6 +2018,96 @@ function planAdjustment(schedule, statementId, delta, options, stamp) {
         changes: [{ path: paybookPath(id), value }] });
 }
 
+// ---------------------------------------------------------------- the activation (Phase 8)
+//
+// IS THIS RECORD BEING TURNED ON RIGHT NOW? The build offers the step
+// (FARKAD_FLAGS.paybookActivation) and the record is not on. With the test seam's
+// `paybook: true` every record is already on and this is always false - which is why the
+// suites that open the gate through the seam see exactly the planners they always saw.
+function paybookActivating(schedule) {
+    return typeof paybookActivationOffered === 'function' && paybookActivationOffered()
+        && !paybookWritesEnabled(schedule);
+}
+
+// THE RECORD AS IT WILL READ ONCE THE OPENING HAS LANDED: a copy of the top level and of
+// the pay map with the opening laid in, sharing everything else. Never written anywhere,
+// never handed to a writer - it exists so that the dry runs and the gates can be asked of
+// the record a person is about to have rather than the one they have.
+function paybookActivationView(schedule, date, stamp) {
+    const view = Object.assign({}, schedule);
+    const book = Object.assign({}, paybookMap(schedule));
+    putKey(book, PAYBOOK_OPENING_ID, paybookSigned({ id: PAYBOOK_OPENING_ID, kind: 'opening', date }, stamp));
+    view.pay = book;
+    return view;
+}
+
+// planActivation(schedule, date, stamp) -> the whole of what a person reads before turning
+// the pay book on, and the two plans that turn it on. IT WRITES NOTHING: `changes` is
+// empty, and the plans inside it are plans.
+//
+//   state      'off'      this build does not offer the step
+//              'on'       the record is on already - `since` is its opening day
+//              'offered'  it may be turned on (subject to `reasons`)
+//   reasons    the opening plan's own: `stamp`, `gate`, `permission`, `date`,
+//              `carry-approval-needed` (answered by `carry`, in the same step)
+//   opening    planOpening(schedule, date, stamp) - the entry that turns it on
+//   carry      planCarryApproval(schedule, stamp) - `already` when the record has it
+//   report     the dry runs the docs require a person to read first, each computed on the
+//              record AS IT WILL READ (paybookActivationView), by the functions that
+//              already exist and by nothing new:
+//       debt       planDebtRuling: every man whose open debt reads differently, old and new
+//       debtTotals the two sums, and how many men move
+//       legacy     planPayMigration: the older closures that will be «לבדיקה» (count), the
+//                  unclosed periods inside tracking, what is held or disputed
+//       archive    planArchive's totals: the record's size, what could leave it
+//       months     planMonths (when that file is loaded): its plan, for monthsPlanLines
+//       carry      the carry approval's state and how many rows it moves
+//
+// The screen draws this and computes nothing (js/ui/accounts.js, accDrawActivate).
+function planActivation(schedule, date, stamp) {
+    const out = { kind: 'activation', state: 'off', ok: false, reasons: [], since: null,
+        opening: null, carry: null, report: null, changes: [] };
+    if (typeof paybookActivationOffered !== 'function' || !paybookActivationOffered()) return out;
+    const fold = paybookFold(schedule);
+    if (paybookWritesEnabled(schedule)) {
+        out.state = 'on';
+        out.since = fold.opening ? String(fold.opening.date) : null;
+        return out;
+    }
+    out.state = 'offered';
+    const stampBad = paybookStampReasons(stamp);
+    if (stampBad.length > 0) { out.reasons = stampBad; return out; }
+    const day = (typeof date === 'string' && isRealDate(date) && date <= stamp.today) ? date : stamp.today;
+    const view = paybookActivationView(schedule, day, stamp);
+    out.opening = planOpening(schedule, date, stamp);
+    out.carry = planCarryApproval(schedule, stamp);
+    out.reasons = out.opening.reasons.slice();
+    out.ok = out.opening.ok === true
+        || (out.reasons.length === 1 && out.reasons[0] === 'carry-approval-needed' && out.carry.ok === true);
+
+    const ruling = typeof planDebtRuling === 'function' ? planDebtRuling(schedule, stamp.today) : { workers: [] };
+    const debt = ruling.workers.filter(row => row.debt.old !== row.debt.new).map(row => ({
+        workerId: row.workerId, name: row.name, asOf: row.debt.asOf,
+        old: row.debt.old, new: row.debt.new, recorded: row.debt.recorded,
+        advances: row.advances.length }));
+    const migration = planPayMigration(view, stamp.today);
+    const archive = planArchive(view, stamp.today);
+    const months = typeof planMonths === 'function' ? planMonths(view, stamp.today) : null;
+    const carry = paybookCarryApproval(view);
+    out.report = {
+        debt,
+        debtTotals: { men: debt.length, old: paybookSum(debt.map(row => row.old)), new: paybookSum(debt.map(row => row.new)) },
+        legacy: { paymentUnknown: migration.paymentUnknown.length, unclosed: migration.unclosed.length,
+            held: migration.held.length, conflicts: migration.conflicts.length,
+            debtDisagreements: migration.debtDisagreements.length },
+        archive: { liveBytes: archive.totals.liveBytes, limitBytes: archive.totals.limitBytes,
+            closures: archive.bundles.length, held: archive.totals.held },
+        months,
+        carry: { needed: carry.needed, approved: carry.approved, rows: carry.rows.length }
+    };
+    return out;
+}
+
 // ---------------------------------------------------------------- the two decisions
 //
 // planOpening(schedule, date, stamp): the day tracking begins - one entry, one id, so two
@@ -2021,15 +2116,37 @@ function planAdjustment(schedule, statementId, delta, options, stamp) {
 //   date      not a day, or a day that has not come.
 //   opened    tracking already began on a different day. Moving it would reclassify
 //             periods people have already been shown as waiting.
+//
+// AND IT IS THE ACTIVATION (Phase 8). On a record that is not on yet, in a build that
+// offers the step (paybookActivating), this same plan is how the pay book is turned on:
+// the opening is the record's own switch (paybookOn, js/model/schema.js). It is then
+// judged AS IF it had landed - on a view of the record with the opening laid in - because
+// the question "may this record be written against" has a different answer the moment it
+// lands: the one-debt ruling comes into force with it, and with the ruling the carry
+// (cm_carry) may be needed where it was not before. So `carry-approval-needed` here means
+// "needed once this is on", and ALSO "not on the record at all": an activation never
+// leaves a record whose carry nobody approved, because until it is approved every older
+// surface - the pay sheet, the statement, the worker's card - reads what was handed over
+// while the accounts page reads what is left (measured: tests/workercard.test.mjs).
+// `activating: true` on the answer says which of the two plans this was.
 function planOpening(schedule, date, stamp) {
     const input = paybookClone({ date, stamp });
     const reasons = paybookStampReasons(stamp);
+    const activating = paybookActivating(schedule);
     const done = extra => Object.assign({ kind: 'opening', ok: false, already: false,
-        reasons, changes: [], input, expects: null }, extra || {});
+        reasons, changes: [], input, expects: null, activating }, extra || {});
     if (reasons.length > 0) return done();
-    paybookGateReasons(schedule, stamp).forEach(code => paybookAddReason(reasons, code));
-    if (typeof date !== 'string' || !isRealDate(date) || date > stamp.today) paybookAddReason(reasons, 'date');
-    if (reasons.length > 0) return done();
+    const dateOk = typeof date === 'string' && isRealDate(date) && date <= stamp.today;
+    const judged = activating ? paybookActivationView(schedule, dateOk ? date : stamp.today, stamp) : schedule;
+    paybookGateReasons(judged, stamp).forEach(code => paybookAddReason(reasons, code));
+    if (activating && reasons.indexOf('gate') === -1 && !paybookCarryApproval(judged).approved) {
+        paybookAddReason(reasons, 'carry-approval-needed');
+    }
+    if (!dateOk) paybookAddReason(reasons, 'date');
+    if (reasons.length > 0) {
+        return done(reasons.indexOf('carry-approval-needed') !== -1
+            ? { carryApproval: paybookCarryApproval(judged) } : {});
+    }
     const value = paybookSigned({ id: PAYBOOK_OPENING_ID, kind: 'opening', date }, stamp);
     if (ownsKey(paybookMap(schedule), PAYBOOK_OPENING_ID)) {
         if (paybookSameFact(paybookMap(schedule)[PAYBOOK_OPENING_ID], value)) {
@@ -2568,14 +2685,19 @@ function planCarryApproval(schedule, stamp) {
     const done = extra => Object.assign({ kind: 'carry-approval', ok: false, already: false,
         reasons, changes: [], carryApproval: null }, extra || {});
     if (reasons.length > 0) return done();
-    if (!paybookWritesEnabled() || !ledgerWritesEnabled() || !advanceCarryEnabled()) {
+    // While a record is being ACTIVATED (Phase 8) the approval is part of that step: it is
+    // judged on the record as it will read once the opening lands, which is the only
+    // reading under which "what will the carry move" has the answer the person needs.
+    const activating = paybookActivating(schedule);
+    const judged = activating ? paybookActivationView(schedule, stamp.today, stamp) : schedule;
+    if (!(paybookWritesEnabled(schedule) || activating) || !ledgerWritesEnabled() || !advanceCarryEnabled()) {
         paybookAddReason(reasons, 'gate');
     }
     if (!paybookMayClose(stamp)) paybookAddReason(reasons, 'permission');
-    const state = paybookCarryApproval(schedule);
+    const state = paybookCarryApproval(judged);
     if (reasons.length > 0) return done({ carryApproval: state });
     if (state.approved) return done({ ok: true, already: true, carryApproval: state });
-    const draft = paybookClone(schedule);
+    const draft = paybookClone(judged);
     const written = recordCarryApproval(draft, planCarryMigration(draft), stamp.at, stamp.by);
     if (!written || written.already || journalEntryProblems(written.path, written.value).length > 0) {
         return done({ reasons: ['rejected'], carryApproval: state });
@@ -3232,7 +3354,7 @@ function planArchive(schedule, today, options) {
     const derived = paybookIndexFrom(schedule).rows;
     const fold = paybookFold(schedule);
     const ledger = paybookLedger(schedule);
-    const reasons = paybookWritesEnabled() ? [] : ['gate'];
+    const reasons = paybookWritesEnabled(schedule) ? [] : ['gate'];
     const horizon = Number.isInteger(want.olderThanDays) && want.olderThanDays > 0 && typeof today === 'string'
         ? advanceDayStep(today, -want.olderThanDays) : null;
     const names = {};

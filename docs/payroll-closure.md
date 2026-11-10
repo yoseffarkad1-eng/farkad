@@ -1503,6 +1503,47 @@ Existing words reused as they are: «מקדמות», «חיפוש עובד», «
 | `whyIrregular` | רישום ישן שאי אפשר להעביר | Phase 5: the archive |
 | `closedWaiting` | במכשיר הזה חסר הפירוט של סגירות שכבר בארכיון. עד שהוא יירד מהשרת המכשיר לא מתעדכן, ואי אפשר לרשום ממנו סגירה או תשלום. זה קורה מעצמו כשיש חיבור. | Phase 5: a phone that lacks the detail |
 | `closedBroken` | סגירה שבארכיון בשרת אינה שלמה. המכשיר הזה לא מתעדכן עד שזה ייבדק. הראה את המסך הזה למי שמתחזק את האפליקציה. | Phase 5: a phone that lacks the detail |
+| `activationRowOff` | פנקס שכר (סגירת חשבון, תשלומים וארכיון): עוד לא הופעל ברישום הזה. | Phase 8: the row in the settings sheet |
+| `activationRowOn` | פנקס השכר פעיל ברישום הזה. יום תחילת המעקב: | Phase 8: the row in the settings sheet |
+| `activationEntry` | פנקס שכר - הכנה והפעלה | Phase 8: the row in the settings sheet |
+| `activationTitle` | פנקס שכר - הכנה והפעלה | Phase 8: the activation screen |
+| `activationLead` | כאן רואים מה ישתנה לפני שמפעילים. המסך הזה לא רושם ולא משנה דבר עד שלוחצים על הכפתור שבסופו ומאשרים. | Phase 8: the activation screen |
+| `activationWhat` | אחרי ההפעלה לשונית «מקדמות» היא עמוד חשבונות העובדים: סגירת חשבון ותשלום נרשמים מול השרת, ומקדמה נשארת חוב עד שמקזזים אותה או עד שהעובד מחזיר אותה. | Phase 8: the activation screen |
+| `activationDebtTitle` | חוב מקדמות שיוצג אחרת | Phase 8: the activation screen |
+| `activationDebtLead` | היום האפליקציה מניחה שמקדמה מתקופה שלא נסגרה כבר ירדה מהשכר. אחרי ההפעלה היא נשארת חוב עד שמישהו מקזז אותה. אצל העובדים האלה החוב יוצג אחרת: | Phase 8: the activation screen |
+| `activationDebtNone` | אין עובד שהחוב שלו יוצג אחרת. | Phase 8: the activation screen |
+| `activationDebtNow` | היום | Phase 8: the activation screen |
+| `activationDebtAfter` | אחרי ההפעלה | Phase 8: the activation screen |
+| `activationDebtCheck` | אם תקופה כזאת כבר הוסדרה ביד, רושמים לעובד החזר אחרי ההפעלה. שום דבר לא נמחק ושום יום עבודה לא משתנה. | Phase 8: the activation screen |
+| `activationLegacyTitle` | סגירות ישנות | Phase 8: the activation screen |
+| `activationLegacy` | סגירות שנעשו לפני פנקס השכר יופיעו ברשימה «סגירות ישנות לבדיקה», ועונים עליהן מתי שנוח: | Phase 8: the activation screen |
+| `activationLegacyNone` | אין סגירות ישנות לבדיקה. | Phase 8: the activation screen |
+| `activationSizeTitle` | גודל הרישום והארכיון | Phase 8: the activation screen |
+| `activationSize` | גודל הרישום בשרת היום | Phase 8: the activation screen |
+| `activationArchiveNote` | חשבון שנסגר ושולם במלואו עובר אחרי 14 יום לארכיון בשרת. חודש שנסגר לכל העובדים יכול לעבור לארכיון אחרי חצי שנה, ורק כשמבקשים. שום דבר לא נמחק והכול נשאר במכשיר - אבל יום בחודש שעבר לארכיון כבר אי אפשר לשנות. | Phase 8: the activation screen |
+| `activationCarry` | ההפעלה מאשרת גם, פעם אחת, שיתרת מקדמה עוברת לחשבון הבא. שורות שישתנו: | Phase 8: the activation screen |
+| `activationBeforeTitle` | לפני שמפעילים | Phase 8: the activation screen |
+| `activationBeforePhones` | כל הטלפונים מעודכנים לגרסה הזאת. | Phase 8: the activation screen |
+| `activationBeforeBackup` | נלקח היום גיבוי מהטלפון הזה (⋯ ← גיבוי). | Phase 8: the activation screen |
+| `activationBeforeRules` | הכללים החדשים פורסמו ב-Firebase. האפליקציה בודקת את זה בעצמה, ובלעדיהם לא תפעיל. | Phase 8: the activation screen |
+| `activationNoReturn` | אחרי ההפעלה אי אפשר לכבות את פנקס השכר מהאפליקציה. עד הסגירה או התשלום הראשון לא נרשם שום דבר כספי חדש. | Phase 8: the activation screen |
+| `activationRun` | הפעל את פנקס השכר | Phase 8: the activation screen |
+| `activationConfirmTitle` | להפעיל את פנקס השכר? | Phase 8: the activation screen |
+| `activationConfirm` | ההפעלה חלה על כל הטלפונים שמחוברים לרישום הזה, ואי אפשר לכבות אותה מהאפליקציה. יום תחילת המעקב: | Phase 8: the activation screen |
+| `activationConfirmYes` | הפעל | Phase 8: the activation screen |
+| `activationChecking` | בודק את השרת… | Phase 8: the activation screen |
+| `activationRules` | השרת עדיין עובד עם הכללים הישנים. פנקס השכר לא הופעל ודבר לא נרשם. מפרסמים את הכללים החדשים ב-Firebase ומנסים שוב. | Phase 8: the activation screen |
+| `activationCarryWait` | אישור המעבר נשמר במכשיר ועוד לא הגיע לשרת. פנקס השכר עוד לא הופעל. חכה רגע ולחץ שוב. | Phase 8: the activation screen |
+| `activationDone` | פנקס השכר הופעל. | Phase 8: the activation screen |
+| `activationElsewhere` | פנקס השכר כבר הופעל מטלפון אחר. לא נרשם דבר נוסף. | Phase 8: the activation screen |
+| `monthsEntry` | ארכיון חודשים | Phase 8: the months page |
+| `monthsLead` | חודש שכל ימי העבודה שבו נסגרו ושולמו, ועברה חצי שנה, יכול לעבור מהרישום החי לארכיון בשרת. הימים נשארים במכשיר הזה ובכל דוח בדיוק כמו שהם. אחרי ההעברה אי אפשר לשנות יום באותו חודש. | Phase 8: the months page |
+| `monthsRun` | העבר את החודשים המוכנים לארכיון | Phase 8: the months page |
+| `monthsConfirmTitle` | להעביר חודשים לארכיון? | Phase 8: the months page |
+| `monthsConfirm` | אחרי ההעברה אי אפשר לשנות יום בחודשים האלה, גם לא רישום לרימא או ליוסף גבס. חודשים להעברה: | Phase 8: the months page |
+| `monthsConfirmYes` | העבר | Phase 8: the months page |
+| `monthsMoved` | חודשים שהועברו לארכיון | Phase 8: the months page |
+| `monthsDiffers` | ימי החודש בשרת אינם זהים למה שבמכשיר הזה. החודש נשאר ברישום. | Phase 8: the months page |
 
 #### Proposed: one sentence per refusal code (47)
 

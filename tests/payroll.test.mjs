@@ -1208,7 +1208,14 @@ const without = (record, fields) => {
     const oldWorld = world({ days: [['w_khaled', '2026-09-20']], advances: [['w_khaled', '2026-09-20', 500]] });
     const O0 = opened(oldWorld);
     const oldAdvance = advancesOf(O0, 'w_khaled')[0];
-    const shutBuild = makeDevice({ deviceId: 'd_shut_vocab' });
+    // (Phase 8: «the gate shut» on THIS record means a build that does not honour the
+    // record's own switch - O0 holds an opening, and the build as it ships now reads an
+    // opening as "on". The old refusal is the old build's, and is asserted on one.)
+    const shutBuild = makeDevice({ deviceId: 'd_shut_vocab', flags: { paybookActivation: false } });
+    const shippedBuild = makeDevice({ deviceId: 'd_shipped_vocab' });
+    check('PHASE 8: the build as it ships, on that same OPENED record, is under the ruling - 150.01 is an ordinary answer there too',
+        shippedBuild.call('planClosure', clone(O0), 'w_khaled', FORTNIGHT, { allocations: { [oldAdvance]: 150.01 } }, st).ok === true
+        && shippedBuild.call('advanceDebtStays', clone(O0)) === true && shippedBuild.call('advanceDebtStays', clone(oldWorld.State ? oldWorld.State.schedule : {})) === false);
     const refusedThen = shutBuild.call('planClosure', clone(O0), 'w_khaled', FORTNIGHT, { allocations: { [oldAdvance]: 150.01 } }, st);
     check('HISTORY (the gate shut): the account walk allows 150 of the 500 and refuses 150.01 with «deduction»',
         refusedThen.ok === false && refusedThen.reasons.includes('deduction') && refusedThen.review.walkRoom === 150,

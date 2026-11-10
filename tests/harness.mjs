@@ -672,6 +672,11 @@ export function makeCloud(options = {}) {
     // document may not change the `pay` map at all (it cannot create a closed document),
     // may not change the index, and - once an index exists - must speak protocol 2.
     cloud.payRules = options.payRules === true;
+    // THE RULES PUBLISHED TODAY (main's file), for the one thing Phase 8 asks of them:
+    // they have no closed/ and no probe/, so a pay book transaction is refused whole and
+    // the question "which rules are these" is refused too.
+    cloud.oldRules = options.oldRules === true;
+    cloud.probes = [];
     function payRulesProblem(data) {
         if (!cloud.payRules || !cloud.doc) return null;
         const flat = value => JSON.stringify(Object.keys(value || {}).sort().map(key => [key, value[key]]));
@@ -681,6 +686,17 @@ export function makeCloud(options = {}) {
         if (flat(rowsOf(data)) !== flat(rowsOf(cloud.doc))) return deny('a whole document may not change the index');
         if (Object.keys(rowsOf(cloud.doc)).length > 0 && !(data.protocol >= 2)) {
             return deny('a build that does not keep the pay book may not write over an index');
+        }
+        return activatedProblem(data);
+    }
+    // activatedNeedsPaybook (Phase 8): once the document holds a pay book at all, a write
+    // of ANY shape from a build that does not speak protocol 2 is refused.
+    function activatedProblem(data) {
+        if (!cloud.payRules || !cloud.doc) return null;
+        if (Object.keys(cloud.doc.pay || {}).length > 0 && !(data.protocol >= 2)) {
+            const error = new Error('once the pay book is on, a build that does not keep it may not write');
+            error.code = 'permission-denied';
+            return error;
         }
         return null;
     }
@@ -842,6 +858,13 @@ export function makeCloud(options = {}) {
             return Promise.resolve(cloud.months.has(String(id))
                 ? JSON.parse(JSON.stringify(cloud.months.get(String(id)))) : null);
         },
+        // Which rules the server runs (Phase 8): a read of probe/<generation>. A cloud
+        // made with `oldRules: true` is the rules published today - it has no such path.
+        probeRules(generation) {
+            if (!cloud.online) return Promise.reject(offlineError('read'));
+            cloud.probes.push(String(generation));
+            return Promise.resolve(cloud.oldRules !== true && String(generation) === 'paybook-8');
+        },
         // The envelope travels IN the patch, exactly as it does on the wire: the client
         // sets protocol, revision and lastOpId as ordinary fields of the same write.
         update(patch) {
@@ -866,7 +889,7 @@ export function makeCloud(options = {}) {
                 }
                 const said = protocolProblem(patch, false);
                 if (said) throw said;
-                const refused = monthRulesProblem(patch, false);
+                const refused = monthRulesProblem(patch, false) || activatedProblem(patch);
                 if (refused) throw refused;
                 Object.keys(patch).forEach(path => setByPath(cloud.doc, path, patch[path]));
                 landReceipt(patch);
@@ -903,6 +926,10 @@ export function makeCloud(options = {}) {
                 if (said) throw said;
                 if (cloud.protocol && patch.protocol < 2) {
                     throw refuse('permission-denied', 'the pay book needs protocol 2');
+                }
+                // The rules published today have no closed/: the pair is refused whole.
+                if (cloud.oldRules === true) {
+                    throw refuse('permission-denied', 'these rules have no closed documents');
                 }
                 const there = docs.filter(one => cloud.closed.has(String(one.id))).map(one => String(one.id));
                 if (there.length > 0) {

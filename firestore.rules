@@ -375,6 +375,24 @@ service cloud.firestore {
       return indexBefore().size() == 0 || speaksPaybook();
     }
 
+    // ONCE THE PAY BOOK IS ON, ONLY A BUILD THAT KEEPS IT WRITES AT ALL (Phase 8).
+    //
+    // A record is turned on by its first pay entry - the opening (docs/payroll-
+    // activation.md). From that write on, every phone that holds the record reads a
+    // man's advance debt under the one-debt ruling and closes accounts through the pay
+    // book. A build from before the pay book does neither: it would go on showing the
+    // old arithmetic, and - the part that matters here - it could still close an account
+    // the old way, with no signal, through field paths these rules do not look inside,
+    // and send it later. Its screens cannot be made right from here; its writes can be
+    // stopped, and a phone whose every write is refused says so and is not «מסונכרן».
+    // Such a build speaks protocol 1 (v184 and everything before it); every build that
+    // keeps the pay book speaks 2. With no pay book on the document this is vacuous,
+    // which is what makes publishing these rules BEFORE any phone updates safe
+    // (measured: tests/activation.emulator.test.mjs).
+    function activatedNeedsPaybook() {
+      return payBefore().size() == 0 || speaksPaybook();
+    }
+
     function payGuard(docId) {
       return !touchesPay()
         || (speaksPaybook() && payOnlyGrows() && carriesClosed(docId))
@@ -552,6 +570,8 @@ service cloud.firestore {
         // the pay book writes at all.
         && indexGuard(docId)
         && indexedNeedsPaybook()
+        // And once the pay book is on at all, the same: only a build that keeps it writes.
+        && activatedNeedsPaybook()
         // And the months that have left: nothing writes to one of their dates, nothing
         // changes their index except the one write that archives one month, and once
         // one has left only a build that knows of them writes at all.
@@ -652,7 +672,20 @@ service cloud.firestore {
           && closedMatchesSchedule(docId);
         allow update, delete: if false;
       }
+
+      // WHICH RULES ARE THESE? (Phase 8) Nothing is ever stored here. The app reads
+      // probe/paybook-8 before it turns the pay book on for a record: under these rules
+      // the read is allowed (and finds nothing), and under every set of rules published
+      // before them it is refused, because they have no such block. So a phone can tell
+      // "the new rules are live" from "they are not" without writing anything. The name
+      // moves when the rules a client must not run without move - never otherwise.
+      match /probe/{generation} {
+        allow get: if allowed() && generation == 'paybook-8';
+        allow list, create, update, delete: if false;
+      }
     }
+
+    // (The block that says WHICH rules these are is inside match /schedules above.)
 
     // One copy of the schedule per day, and the reason sync is not the same thing as a
     // backup. Everything above is a mirror: a deletion propagates to all three phones as
