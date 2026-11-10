@@ -381,6 +381,110 @@ service cloud.firestore {
         || (payOnlyLeaves() && touchesIndex() && archivesOne(docId));
     }
 
+    // ---------------------------------------------------------------- months that have left
+    //
+    // A closed month of days leaves this document for a document of its own under
+    // months/, and `monthIndex` stays in its place: one row per month, and the calendar
+    // dates of those months as one flat list (docs/payroll-closure.md, Phase 6). The
+    // list is here for these rules and for nothing else - there are no loops in this
+    // language and no way to take the month out of a date inside a set, but two sets can
+    // be asked whether they meet.
+    //
+    //   1. NO WRITE, BY ANYBODY, OF ANY SHAPE, adds, changes or removes a day whose date
+    //      is in the list (daysGuard). That is what refuses a whole document that would
+    //      put an archived day back, and a queued edit from a phone that had not heard.
+    //      The one write that removes such days is the write that archives them - and it
+    //      is judged against the list as it stood BEFORE, which does not yet hold them;
+    //   2. the index only grows: no row removed or changed, no date removed;
+    //   3. a row arrives one at a time, in a write that names the month and its month
+    //      document, speaks protocol 2, and whose month document ALREADY EXISTS, is of
+    //      that month, and carries the digest the row carries. The dates added are that
+    //      document's dates. AND THE DAYS THAT LEAVE ARE EXACTLY THE DAYS IT HOLDS, key
+    //      for key - nothing leaves that the copy lacks, nothing stays that it has;
+    //   4. once a month has left, a writer that does not speak protocol 2 may not write
+    //      at all: a build from before this, installed afresh, reads those months as
+    //      empty, and its screens cannot be made right from here.
+    //
+    // WHAT THESE RULES CANNOT DO, said plainly: compare the VALUE of each day leaving
+    // with the copy's, or check that every date in a month document belongs to its
+    // month. Both are the client's, made inside the transaction that drops them
+    // (archiveMonth in js/sync/firebase-adapter.js) and measured in
+    // tests/months.emulator.test.mjs.
+    function monthRowsBefore() {
+      return resource.data.get('monthIndex', {}).get('rows', {});
+    }
+
+    function monthRowsAfter() {
+      return request.resource.data.get('monthIndex', {}).get('rows', {});
+    }
+
+    function monthDatesBefore() {
+      return resource.data.get('monthIndex', {}).get('dates', []);
+    }
+
+    function monthDatesAfter() {
+      return request.resource.data.get('monthIndex', {}).get('dates', []);
+    }
+
+    function daysBefore() {
+      return resource.data.get('days', {});
+    }
+
+    function daysAfter() {
+      return request.resource.data.get('days', {});
+    }
+
+    function touchesMonths() {
+      return monthRowsAfter() != monthRowsBefore()
+        || monthDatesAfter() != monthDatesBefore();
+    }
+
+    function daysGuard() {
+      return monthDatesBefore().size() == 0
+        || !daysAfter().diff(daysBefore()).affectedKeys().hasAny(monthDatesBefore());
+    }
+
+    function archivesMonth(docId) {
+      let month = request.resource.data.archivedMonth;
+      let copy = get(/databases/$(database)/documents/schedules/$(docId)/months/$(request.resource.data.monthDoc)).data;
+      let rows = monthRowsAfter().diff(monthRowsBefore());
+      let days = daysAfter().diff(daysBefore());
+      return speaksPaybook()
+        && month is string
+        && month.matches('^[0-9]{4}-[0-9]{2}$')
+        && request.resource.data.monthDoc is string
+        && rows.removedKeys().size() == 0
+        && rows.changedKeys().size() == 0
+        && rows.addedKeys().hasOnly([month])
+        && rows.addedKeys().size() == 1
+        && monthRowsAfter()[month].d == request.resource.data.monthDoc
+        && monthRowsAfter()[month].h == copy.digest
+        && copy.month == month
+        && monthDatesAfter().size() == monthDatesBefore().size() + copy.dates.size()
+        && monthDatesAfter().toSet().hasAll(monthDatesBefore())
+        && monthDatesAfter().toSet().hasAll(copy.dates)
+        && !monthDatesBefore().toSet().hasAny(copy.dates)
+        && days.addedKeys().size() == 0
+        && days.changedKeys().size() == 0
+        && days.removedKeys() == copy.days.keys().toSet();
+    }
+
+    function monthGuard(docId) {
+      return !touchesMonths() || archivesMonth(docId);
+    }
+
+    function monthsNeedPaybook() {
+      return (monthRowsBefore().size() == 0 && monthDatesBefore().size() == 0)
+        || speaksPaybook();
+    }
+
+    // A project may not begin with a month index either: a row stands for a month
+    // document, and a project that does not exist yet has none.
+    function monthGuardOnCreate() {
+      return request.resource.data.get('monthIndex', {}).get('rows', {}).size() == 0
+        && request.resource.data.get('monthIndex', {}).get('dates', []).size() == 0;
+    }
+
     // The first write of a project has nothing to compare against. It may carry a pay
     // book only on the same terms: protocol 2, and its closed copy beside it.
     function payGuardOnCreate(docId) {
@@ -422,6 +526,7 @@ service cloud.firestore {
         && carriesReceipt(docId)
         && payGuardOnCreate(docId)
         && indexGuardOnCreate()
+        && monthGuardOnCreate()
         && (!isFullReplacement() || fullDocumentOk());
 
       allow update: if allowed()
@@ -447,6 +552,12 @@ service cloud.firestore {
         // the pay book writes at all.
         && indexGuard(docId)
         && indexedNeedsPaybook()
+        // And the months that have left: nothing writes to one of their dates, nothing
+        // changes their index except the one write that archives one month, and once
+        // one has left only a build that knows of them writes at all.
+        && daysGuard()
+        && monthGuard(docId)
+        && monthsNeedPaybook()
         && (!isFullReplacement() || fullDocumentOk());
 
       // Nothing deletes the schedule. It is the record of who worked where.
@@ -507,6 +618,37 @@ service cloud.firestore {
           && request.resource.data.opId.size() < 128
           && request.resource.data.revision is int
           && request.resource.data.revision >= 1
+          && closedMatchesSchedule(docId);
+        allow update, delete: if false;
+      }
+
+      // THE MONTHS THAT HAVE LEFT: one document per archived month, created once.
+      //
+      // Named by its content - {YYYY-MM}_{digest of its days} - so a copy made before a
+      // late edit to that month is simply a document nothing points at, and never a
+      // name the true copy can no longer take. CREATE only, like a closed document, and
+      // NEVER ALONE for the same reason: creatable only in the commit that takes the
+      // schedule to the revision it names, pointing at the operation it names, written
+      // by a build that speaks protocol 2. Every day it holds must be one of the dates
+      // it lists - the dates are what the schedule will refuse writes to.
+      match /months/{monthId} {
+        allow read: if allowed();
+        allow create: if allowed()
+          && request.resource.data.opId is string
+          && request.resource.data.opId.size() > 0
+          && request.resource.data.opId.size() < 128
+          && request.resource.data.revision is int
+          && request.resource.data.revision >= 1
+          && request.resource.data.month is string
+          && request.resource.data.month.matches('^[0-9]{4}-[0-9]{2}$')
+          && request.resource.data.digest is string
+          && monthId == request.resource.data.month + '_' + request.resource.data.digest
+          && request.resource.data.days is map
+          && request.resource.data.days.size() > 0
+          && request.resource.data.dates is list
+          && request.resource.data.dates.size() >= 28
+          && request.resource.data.dates.size() <= 31
+          && request.resource.data.dates.toSet().hasAll(request.resource.data.days.keys())
           && closedMatchesSchedule(docId);
         allow update, delete: if false;
       }
