@@ -30,9 +30,16 @@
 //   3. The census. A generator can quietly stop producing the hard cases; the last suite
 //      counts them.
 //
-// WHERE THE TWO ARE KNOWN TO PART, the case is not in this file: it is in
-// tests/oracle.findings.mjs, which is red on purpose and is in no gate. This suite keeps
-// such records out of its own comparison by NAME (see `known`), counts them, and says so.
+// NOTHING IS LEFT OUT. Up to v179 the two calculators were known to part on two things
+// and those cases were kept out of this comparison by name and proved red in
+// tests/oracle.findings.mjs, a file no gate ran: a closed period that carried forward
+// less than nothing, and a wage finer than an agora closed against a debt at least as
+// large. v180 repaired both. Their fixtures are green in tests/overpayment.test.mjs,
+// which also opens what v179 already wrote, and every account and every close downstream
+// of such a period is compared here like any other - the list of exclusions is gone, not
+// emptied. A wage finer than an agora is still not GENERATED here (see HOURLY): the
+// rounding is a rule now, and tests/overpayment.test.mjs holds both calculators to it on
+// the one wage where it decides anything.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -99,8 +106,11 @@ const STARTS = ['2026-03-06', '2026-03-13', '2026-03-20', '2026-10-02', '2026-10
 
 const DAILY = [300, 350, 400, 412.5, 450, 480, 520, 600, 333.33];
 // Every hourly rate is a whole number of agorot for every half hour, so no wage here is
-// finer than an agora: how half an agora is rounded is written down nowhere, and a
-// comparison of two guesses would prove nothing.
+// finer than an agora. How the half is rounded is a rule since v180 and
+// tests/overpayment.test.mjs holds both calculators to it; it stays out of the generator
+// because a sum the app holds in binary can sit a hair under the half the second
+// calculator's whole agorot see (16.665), and that comparison would be about floating
+// point and not about anybody's pay.
 const HOURLY = [0, 40, 45.5, 50, 62.5, 37.4];
 const HANDED = [200, 300, 500, 750, 1000, 1500, 2500, 5000, 120.5, 333.33];
 
@@ -323,8 +333,6 @@ function makeRecord(seed, app) {
                 Math.min(open.limit, 10000)]);
         }
         const plan = oracle.closePlan(record, worker.id, period.from, period.to, chosen);
-        // Asked now, of the record as the close finds it - see KNOWN.
-        const floored = oracle.floorBit(record, worker.id, period.from, period.to);
         const stamp = at();
         const appPlan = app.planPeriodClosure(record, worker.id, period.from, period.to, stamp,
             chosen === undefined ? undefined : shekels(chosen));
@@ -334,7 +342,7 @@ function makeRecord(seed, app) {
                 chosen === undefined ? undefined : shekels(chosen))
             : [];
         made.closes.push({
-            workerId: worker.id, from: period.from, to: period.to, chosen, plan, floored,
+            workerId: worker.id, from: period.from, to: period.to, chosen, plan,
             appReasons: appPlan.reasons.slice().sort(),
             written: Object.keys(record.ledger.advances).filter(id => !before.has(id))
                 .map(id => clone(record.ledger.advances[id])),
@@ -541,16 +549,13 @@ function periodsOf(made, worker) {
 // says. Returns sentences; an empty list is agreement. `tally` counts what was actually
 // compared, so a family that compared nothing cannot report itself green.
 //
-// `known` is the list of cases this suite leaves to tests/oracle.findings.mjs: each is a
-// predicate on what is being compared, and what it matches is counted and not judged.
-//
 // `only` asks one family of questions and no other - what a mutant run needs.
-function compareRecord(app, made, tally, known = [], only = null) {
+function compareRecord(app, made, tally, only = null) {
     // One reading: nothing below changes the record.
-    return oracle.reading(made.record, () => compared(app, made, tally, known, only));
+    return oracle.reading(made.record, () => compared(app, made, tally, only));
 }
 
-function compared(app, made, tally, known, only) {
+function compared(app, made, tally, only) {
     const out = { payroll: [], days: [], invoice: [], advances: [], accounts: [] };
     const wanted = family => only === null || only === family;
     const record = made.record;
@@ -731,9 +736,10 @@ function compared(app, made, tally, known, only) {
         // by walking every period before this one - so asking it of every period walks
         // the first of them a dozen times. One period in four (and the last) is asked
         // that way, whole. The rest are asked of advanceWalk, the function advanceAccount
-        // is built from, handed what the APP's own previous period carried forward:
-        // «each handing the next what it carried forward» is the documented chain, and
-        // the whole ones are what hold the app's own chaining to it.
+        // is built from, handed where the APP's own previous period left the man (its
+        // `position`: what he owes, or below zero what he is in credit): «each handing
+        // the next where it left him» is the documented chain, and the whole ones are
+        // what hold the app's own chaining to it.
         const periods = periodsOf(made, worker);
         let opening = null;
         periods.forEach((period, index) => {
@@ -742,18 +748,19 @@ function compared(app, made, tally, known, only) {
             const account = whole
                 ? app.advanceAccount(schedule, worker.id, period.from, period.to)
                 : app.advanceWalk(schedule, worker.id, period.from, period.to, opening);
-            opening = plain ? null : account.carriedForward;
+            opening = plain ? null : account.position;
             const want = oracle.accountOf(record, worker.id, period.from, period.to);
             const where = `${worker.id} ${period.from}..${period.to}`;
-            const subject = { kind: 'account', record, workerId: worker.id, period };
-            const left = known.find(one => one.matches(subject));
-            if (left) { count(`left to the findings: ${left.name}`); return; }
             count('accounts');
+            if (want.creditIn > 0) count('accounts opening on a credit');
+            if (want.creditIn > want.creditForward) count('accounts where a credit came off new money');
+            if (want.closed && want.creditForward > 0) count('closed accounts handing a credit forward');
             if (whole) count('accounts asked whole');
             if (want.closed) count('closed accounts');
             if (want.lateSinceClose !== 0) count('accounts with movement after the close');
-            ['carriedIn', 'given', 'repaid', 'reversed', 'gross', 'deducted', 'carriedOut',
-                'carriedForward', 'lateSinceClose', 'overpaid', 'net'].forEach(field => {
+            ['carriedIn', 'creditIn', 'given', 'repaid', 'reversed', 'gross', 'deducted',
+                'carriedOut', 'carriedForward', 'creditForward', 'position', 'lateSinceClose',
+                'overpaid', 'net'].forEach(field => {
                 if (!sameMoney(account[field], want[field])) {
                     say('accounts', `${where}: ${field} app ${show(account[field])}, by rule ${show(shekels(want[field]))}`);
                 }
@@ -763,11 +770,21 @@ function compared(app, made, tally, known, only) {
                     say('accounts', `${where}: ${field} app ${show(account[field])}, by rule ${show(want[field])}`);
                 }
             });
-            // And the opening balance on its own, the way the sheet's carry asks for it.
+            // And the opening balance on its own, the way the sheet's carry asks for it -
+            // both halves, neither ever below zero.
             if (whole && !sameMoney(app.advanceCarryInto(schedule, worker.id, period.from),
                 oracle.openingBalance(record, worker.id, period.from))) {
                 say('accounts', `${where}: opens owing app ${app.advanceCarryInto(schedule, worker.id, period.from)}, by rule ${shekels(oracle.openingBalance(record, worker.id, period.from))}`);
             }
+            if (whole && !sameMoney(app.advanceCreditInto(schedule, worker.id, period.from),
+                oracle.openingCredit(record, worker.id, period.from))) {
+                say('accounts', `${where}: opens in credit app ${app.advanceCreditInto(schedule, worker.id, period.from)}, by rule ${shekels(oracle.openingCredit(record, worker.id, period.from))}`);
+            }
+            // No figure a surface prints is below zero, whatever the two agree on.
+            ['carriedIn', 'creditIn', 'carriedOut', 'carriedForward', 'creditForward',
+                'deducted'].forEach(field => {
+                if (account[field] < 0) say('accounts', `${where}: ${field} is ${account[field]}, below zero`);
+            });
         });
     });
     return out;
@@ -775,16 +792,11 @@ function compared(app, made, tally, known, only) {
 
 // What the app wrote when it closed a period, against what the second calculator said a
 // close would write - judged from the entries themselves, as they sit on the record.
-function compareCloses(made, tally, known = []) {
+function compareCloses(made, tally) {
     const out = [];
     const say = text => out.push(`seed ${made.seed}: ${text}`);
     made.closes.forEach(close => {
         const where = `${close.workerId} ${close.from}..${close.to}`;
-        const left = known.find(one => one.matches({ kind: 'close', close }));
-        if (left) {
-            tally[`left to the findings: ${left.name}`] = (tally[`left to the findings: ${left.name}`] || 0) + 1;
-            return;
-        }
         tally.closes = (tally.closes || 0) + 1;
         if (show(close.appReasons) !== show(close.plan.reasons.slice().sort())) {
             say(`${where}: refused for app ${show(close.appReasons)}, by rule ${show(close.plan.reasons)}`);
@@ -803,10 +815,18 @@ function compareCloses(made, tally, known = []) {
             return;
         }
         tally['closes written'] = (tally['closes written'] || 0) + 1;
+        if (close.plan.creditIn > 0) {
+            tally['closes written on a credit'] = (tally['closes written on a credit'] || 0) + 1;
+        }
         tally['deductions written'] = (tally['deductions written'] || 0) + taken.length;
         if (artifact.periodTo !== close.to || artifact.date !== close.to
             || !sameMoney(artifact.gross, close.plan.gross)
             || !sameMoney(artifact.carriedIn, close.plan.carriedIn)
+            // The credit is on the payslip only where there was one; a payslip never
+            // opens on less than nothing.
+            || !sameMoney(artifact.creditIn || 0, close.plan.creditIn)
+            || (close.plan.creditIn === 0 && artifact.creditIn !== undefined)
+            || artifact.carriedIn < 0
             || !sameMoney(artifact.net, close.plan.net)
             || !sameMoney(artifact.balanceAfter, close.plan.carriedForward)) {
             say(`${where}: payslip app ${show([artifact.gross, artifact.carriedIn, artifact.net, artifact.balanceAfter])}, by rule ${show([close.plan.gross, close.plan.carriedIn, close.plan.net, close.plan.carriedForward].map(shekels))}`);
@@ -1269,25 +1289,6 @@ const tally = {};
 const census = {};
 const records = [];
 
-// A case the two calculators are KNOWN to answer differently, where the documented rule
-// supports the second one. Each is proved, red, in tests/oracle.findings.mjs - which no
-// gate runs - and is kept out of the comparison here by this predicate and by nothing
-// broader. An empty list would mean nothing is being left out.
-//
-// FINDING 1. A closed period whose balance was taken below what had already come off
-// the wage - a repayment or a correction dated into it after it shut - carries forward
-// less than nothing in the app, and the credit is then netted against the man's next
-// advance if it falls in the very next period and dropped if it does not. The second
-// calculator carries zero. The predicate is the second calculator's own account of
-// where that floor decided anything: in this period, or in one on the way to it. It
-// does not look at what the app said.
-const KNOWN = [{
-    name: 'a closed period carried forward below zero',
-    matches: subject => (subject.kind === 'close'
-        ? subject.close.floored
-        : oracle.floorBit(subject.record, subject.workerId, subject.period.from, subject.period.to))
-}];
-
 {
     suite(`${RECORDS} synthetic records: every figure the app reports, worked out twice`);
 
@@ -1311,9 +1312,9 @@ const KNOWN = [{
         }
         APP.impossibleClosures(schedule).forEach(id => condemned.push(`seed ${seed}: ${id}`));
 
-        const found = compareRecord(APP, made, tally, KNOWN);
+        const found = compareRecord(APP, made, tally);
         Object.keys(split).forEach(family => split[family].push(...found[family]));
-        closes.push(...compareCloses(made, tally, KNOWN));
+        closes.push(...compareCloses(made, tally));
         writers.push(...compareWriters(APP, made, tally));
     }
 
@@ -1347,15 +1348,21 @@ const KNOWN = [{
     check('and no closure the app wrote is one its own judge calls impossible',
         condemned.length === 0, few(condemned));
 
-    const left = Object.keys(tally).filter(name => name.indexOf('left to the findings') === 0);
-    same('the cases left to tests/oracle.findings.mjs are the ones named above, and no others',
-        left.sort(), KNOWN.map(one => `left to the findings: ${one.name}`).sort());
-    if (left.length > 0) console.log(`        ${left.map(name => `${name}: ${tally[name]}`).join('; ')}`);
+    // THE ACCOUNTS THAT USED TO BE LEFT OUT. Up to v179 every account and close downstream
+    // of a closed period that carried forward less than nothing was excluded by name. They
+    // are compared now, and these counts are what says the generator still makes them.
+    check('a credit: periods that open on one, periods where it comes off new money, closed periods that hand one on',
+        split.accounts.length === 0 && tally['accounts opening on a credit'] >= 20
+        && tally['accounts where a credit came off new money'] >= 5
+        && tally['closed accounts handing a credit forward'] >= 5,
+        `${tally['accounts opening on a credit']} open on a credit, ${tally['accounts where a credit came off new money']} use one, ${tally['closed accounts handing a credit forward']} closed periods hand one on, ${tally['closes written on a credit'] || 0} payslips written on one`);
+    same('and nothing is left out of the comparison under any name',
+        Object.keys(tally).filter(name => name.indexOf('left to') === 0), []);
 }
 
 // ---------------------------------------------------------------- 4. the mutants
 //
-// One line of js/model/money.js changed - or, for the last three, one line of the account
+// One line of js/model/money.js changed - or, for the last five, one line of the account
 // walk in js/model/schema.js and of the fold in js/model/ledger.js - in memory, never on
 // disk, and the comparison run again on the first dozen records. Each mutant is a wrong
 // sum that still looks like a sum. The suite is only worth its runtime if every one of
@@ -1391,6 +1398,14 @@ const KNOWN = [{
         { name: 'a deduction larger than the wage', family: 'accounts', file: 'js/model/schema.js',
             from: ': agoraRound(Math.min(balance, Math.max(gross, 0))));',
             to: ': agoraRound(balance));' },
+        { name: 'a credit dropped at the end of the period it arose in', family: 'accounts',
+            file: 'js/model/schema.js',
+            from: 'const creditForward = keeps ? excess : 0;',
+            to: 'const creditForward = 0;' },
+        { name: 'a debt of less than nothing carried forward', family: 'accounts',
+            file: 'js/model/schema.js',
+            from: 'const live = moved > 0 ? moved : 0;',
+            to: 'const live = moved;' },
         { name: 'what came off a wage forgotten by the advance it came off', family: 'advances',
             file: 'js/model/ledger.js',
             from: 'const settled = agoraRound(effectiveRepaid + effectiveDeducted);',
@@ -1409,7 +1424,7 @@ const KNOWN = [{
         const counted = {};
         const found = { payroll: [], days: [], invoice: [], advances: [], accounts: [] };
         records.slice(0, MUTANT_RECORDS).forEach(made => {
-            const one = compareRecord(broken, made, counted, KNOWN, mutant.family);
+            const one = compareRecord(broken, made, counted, mutant.family);
             Object.keys(found).forEach(family => found[family].push(...one[family]));
         });
         check(`${mutant.name}: caught`, found[mutant.family].length > 0,
@@ -1419,7 +1434,7 @@ const KNOWN = [{
     // And the same dozen records against the app as shipped are clean - so what each
     // mutant turned up is the mutant, and not noise that was there all along.
     const counted = {};
-    const clean = records.slice(0, MUTANT_RECORDS).map(made => compareRecord(APP, made, counted, KNOWN))
+    const clean = records.slice(0, MUTANT_RECORDS).map(made => compareRecord(APP, made, counted))
         .reduce((sum, one) => sum + Object.values(one).reduce((n, list) => n + list.length, 0), 0);
     check('and the same dozen records are clean against the app as shipped', clean === 0, String(clean));
 }

@@ -1,8 +1,209 @@
-## v179 — הסעות: the summary of the day (candidate, not served)
+## v180 — the credit, and the wage rounded once (CANDIDATE - NOT SERVED - AWAITING THE OWNER'S APPROVAL)
 
-**Not served until the merge and the Pages deployment are recorded here by the next release.**
-Built on `e4070e5` (v178). One commit of shipped files; its gate results belong to that commit
-and no count is carried here.
+**Not served, and not to be served until the owner has seen it.** On 2026-11-10 he approved
+repairing both faults below ON A SEPARATE BRANCH, to be shown to him before anything is
+published. This is that branch: one commit of shipped files on top of `622d80a`. Its gate
+results belong to that commit and no count is carried here. Every phone is on v179 or older.
+
+**Who found it.** Not a person on a site: the second calculator (`tests/oracle.mjs`, merged
+as tests only in `622d80a`), which works every figure out a second way from the written
+rules. It disagreed with the app on two things, and both were left red and unrepaired in
+`tests/oracle.findings.mjs` until the owner was asked. In its words:
+
+> «A CLOSED PERIOD CAN CARRY FORWARD LESS THAN NOTHING, and what happens to that credit
+> depends on which fortnight the man's next advance falls in. [...] The same cash, handed
+> over to the same man, is a different debt depending on the week.»
+
+> «A CLOSE CAN TAKE HALF AN AGORA MORE THAN THE MAN EARNED, AND THE APP THEN CALLS ITS OWN
+> CLOSURE IMPOSSIBLE AND STOPS WRITING.»
+
+### 1. The credit
+
+**What was wrong.** A man takes 2,000, his fortnight is closed and 2,000 comes off his
+wage; a repayment of 500 he made to the foreman, whose phone was offline, arrives
+afterwards dated inside that fortnight. He has paid 2,500 against 2,000. v179 handed the
+next fortnight a balance of **minus 500** and kept it for exactly one boundary: 1,500 taken
+in the very next fortnight read as 1,000 owed, the same 1,500 taken a fortnight later read
+as 1,500. The account and the sum of his advances disagreed (1,000 against 1,500), the
+sheet's note read «חוב פתוח -500 ₪», and a fortnight closed in between froze
+`carriedIn: -500` onto a payslip.
+
+**The ruling this is built to** - recommended to the owner on 2026-11-10; he has NOT yet
+confirmed it word for word, which is why the other ruling is one line away:
+
+> Money a man gave back beyond what he owed stays his credit until it is used. It comes
+> off whatever advance he takes next, however many periods later, and is never dropped at
+> a boundary.
+
+**What changes on a phone.**
+
+- The same 1,500 is 1,000 owed whichever fortnight it is taken in, on the sheet, on the
+  man's statement, in the sum at the top of his advances and in the sentence shown before
+  he is put away.
+- The credit is its own figure, zero or more, beside a debt that is zero or more. No
+  balance is printed below zero anywhere. **It is never wages**: a credit with nothing to
+  come off changes no wage and no «לתשלום»; paying it back to him in cash is still a
+  conversation the app does not have.
+- Where there is a credit it is NAMED - on the statement («יתרת זכות מחשבון קודם: 500»,
+  «יתרת זכות: 500») and in the sheet's note, which is also the screen's, the paper's, the
+  CSV's and the workbook's («500 ₪ יתרת זכות מחשבון קודם», «יתרת זכות 500 ₪»). A man with
+  no credit sees neither phrase.
+- A fortnight closed on a credit records it: `carriedIn: 0` and `creditIn: 500`, so the
+  payslip adds up - 1,500 handed over, 500 of it already his, 1,000 off the wage. A
+  payslip with no credit is byte for byte what v179 wrote.
+- **IT ALSO APPLIES TO AN OPEN FORTNIGHT, and this is the widest change.** v179 dropped an
+  excess at the end of an OPEN period in silence (it only ever carried one out of a closed
+  period). Under the ruling it is carried from either. The case to know about: the pay
+  sheet takes a past fortnight that was never closed to have deducted what it could, while
+  the advances screen counts only deductions a close wrote down and so still shows that
+  advance as open and offers «העובד החזיר כסף». Money recorded there is, to the sheet,
+  money beyond what he owed - and from v180 it becomes a credit that comes off his next
+  advance, with the note saying so, where v179 let it vanish. If the wage really was
+  docked that fortnight, that is right. If the sheet's deduction was only ever a preview,
+  the fortnight should be closed with the amount that really came off.
+
+**What it does NOT change, and what the owner has to decide.** While one of a man's
+advances has had more settled against it than was handed over (the offline-phone case
+above is one), the account says «החשבון דורש בדיקה», the automatic deduction stops on every
+open fortnight and a close is refused - the older rule, pinned in `tests/wording.test.mjs`,
+and left exactly as it is. So in that case v180 shows the right DEBT (1,000) in every fortnight
+alike, and takes none of it off his wage until a person has looked. The ruling says the
+credit «comes off whatever advance he takes next»; the older rule says an over-settled
+advance is «a conversation, not an arithmetic result». Both cannot be finished by
+arithmetic alone. **Not decided, and not built:** whether a credit that has been used up
+against a later advance should lift «דורש בדיקה» by itself. Until it is decided the way out
+is the one that exists: «תיקון טעות» on that advance, if the repayment was entered twice.
+
+**The other ruling** - no credit at all; the excess is dropped at the end of the period it
+arrived in and that period is marked for review - is `OVERPAYMENT_STAYS_CREDIT = false` in
+`js/model/schema.js`, one line. `tests/overpayment.test.mjs` runs the app that way through
+the test seam: 1,500 owed in whichever fortnight, by the account and by the advances. The
+two phrases and the note lines then never appear, and the second calculator's rule
+(`tests/oracle.mjs`: `walked`, `openBalance`) and its fixtures move back with it.
+
+### 2. The wage rounded once
+
+**What was wrong.** 610 a day and half an extra hour at 41.25 is a wage of 630.625. Every
+sheet prints 630.63. Closed against a debt at least that large, v179 took 630.63 off and
+recorded it beside a wage of 630.625 - and its own check («a closure deducting more than
+the wage it came off») then refused the closure it had just written: at the next open the
+deduction was held aside as unreadable and the phone stopped writing, over a fortnight
+nobody disagreed about. It needs an hourly rate with an odd number of agorot, a half hour,
+and a debt at least as large as the wage.
+
+**The repair, and why there.** The wage of an ACCOUNT is rounded to the agora once, where
+the account reads it (`advanceWalk`), by the same rounding every surface prints with. That
+one figure is what the deduction is measured against, what a closure records, and the most
+a person may choose to take off: 630.63 earned, 630.63 off, 0 to pay, 4,369.37 carried, on
+the sheet and on the statement, open, closed and reopened. Flooring the deduction to
+630.62 instead would have left the closure recording a wage no payslip prints, a net of
+half an agora and one agora of debt carried for ever. `payrollReport` is not touched: days
+and their sum are unrounded as before, and are printed as before.
+
+**A phone that already holds such a closure.** Nothing is rewritten. The judge now reads a
+closure's recorded wage to the agora, which accepts a deduction EQUAL to the wage as
+printed and nothing above it: 630.64 off 630.625, and 630.63 off a wage of 630.62, are
+refused as before. A copy the phone had already put under `ledger.unreadable` is taken
+back - that exact shape only, only if this build reads it whole, only if the record does
+not hold different bytes under the same id, and only if taking it back makes no OTHER
+closure impossible. Measured on v179's own bytes in three states (closed and never
+reopened; held aside, acknowledged and saved; held aside with the held copy the only
+copy): v180 opens unblocked, the entry is exactly as v179 wrote it, 630.63 counts as
+deducted and 4,369.37 is carried.
+
+### What existing records will show
+
+- **A payslip v179 froze with `carriedIn: -500`** opens, is not held aside, and is not
+  changed by one byte. It is read as what it was: «יתרת זכות מחשבון קודם: 500», 1,500 given,
+  1,000 off, the money columns as they were closed. Nothing prints «-500».
+- **A closed fortnight that v179 carried forward as minus 500** now hands on 0 owed and 500
+  in credit. Its own payslip - what it opened on, what came off, what it closed on - is the
+  record and does not move; its note reads «חוב פתוח 0 ₪ · יתרת זכות 500 ₪» where v179
+  printed «חוב פתוח -500 ₪».
+- **The figure that moves:** an advance taken TWO OR MORE periods after such a credit
+  arose. v179 showed the whole advance as owed; v180 shows it less the credit. An advance
+  taken in the very next period shows what it showed. And an excess from an OPEN period,
+  which v179 dropped, is now a credit (above).
+- **A closure of 630.63 against a recorded 630.625** counts, and the phone holding it
+  writes again.
+
+### The rollout rule
+
+**Every phone on v180 before the next account is closed.** A closure's id is its period, so
+two phones closing the same account write the same field - and where the man is in credit
+or his wage is finer than an agora, a v179 phone and a v180 phone write DIFFERENT bytes
+there (`carriedIn: -500` against `carriedIn: 0, creditIn: 500`; `gross: 630.625` against
+`630.63`), which is two bodies under one id - measured for the half agora, v179's own
+bytes against this build's - and that is a disagreement the app holds and asks a person
+about. An ordinary account closed by the two builds is the same bytes, entry for entry. A
+v179 phone that only READS what v180 wrote is not blocked by it and keeps the new field to
+the byte (measured, both cases). Until every phone is updated the two builds also SHOW
+different debts in exactly the cases above.
+
+### Hebrew - PROPOSED, the owner has not read them
+
+Two phrases, in one place (`ADVANCE_CREDIT_LABEL`, `js/ui/reports.js`), pinned in
+`tests/overpayment.test.mjs`. No existing string was changed.
+
+| where | proposed Hebrew |
+|---|---|
+| statement, opening | יתרת זכות מחשבון קודם: 500 |
+| statement, closing | יתרת זכות: 500 |
+| sheet note (screen, paper, CSV, workbook), opening | 500 ₪ יתרת זכות מחשבון קודם |
+| sheet note, closing | יתרת זכות 500 ₪ |
+
+### What it touches
+
+`js/model/schema.js` (`advanceWalk`, `advanceAccount`, `advanceCarryInto` and the two new
+readers beside it, `openAdvanceBalance`, `planAdvanceCarry`'s stop, the closure validator's
+list of figures), `js/model/ledger.js` (`closureProblems`, `closureWithinRoundedWage`,
+`closureFacts`, the two closure writers, `closedPeriods`), `js/state.js` (the one re-admission
+in `normaliseSchedule`), `js/ui/reports.js` (the two phrases, the statement, the note, the
+summary over a man's advances), and the three stamps. Nothing in `js/sync`, the rules, the
+functions, the service worker's logic or any stylesheet. No migration, no entry edited or
+deleted, no stamped day restated.
+
+### Tests
+
+`tests/overpayment.test.mjs` is new and in `npm test`. `tests/oracle.findings.mjs` is gone:
+its fixtures are in the new suite, green. `tests/oracle.mjs` was changed to the ruling and
+`tests/oracle.test.mjs` no longer excludes anything - the `KNOWN` list and `floorBit` are
+removed, and the accounts and closes that used to be left out are compared and counted; two
+mutants were added (the credit dropped at a boundary; a debt below zero carried forward).
+No pinned expectation in any other suite moved.
+
+### Known not covered
+
+- **Not tried on a phone.** Node, real Chromium for the suites named in the commit, and the
+  emulator for the two named there.
+- **The second calculator is not independent evidence for the credit.** It was changed to
+  the new rule in the same commit, by the same hand. What a person can check is the
+  fixtures.
+- **The account and the advances screen can still differ** where a past fortnight was never
+  closed (the sheet assumes its deduction, the advances count only recorded ones). Older
+  than v180, not changed by it, and the reason for the open-fortnight paragraph above.
+- **Each advance's own card** still shows what THAT advance has left and what it was
+  over-settled by; only the sum at the top is net of the credit.
+- **A correction dated into a closed fortnight** reaches the credit by the same arithmetic
+  as a late repayment; only the repayment is on a hand fixture (the generated records have
+  both).
+- **A half the app cannot hold exactly.** Half an hour at 33.33 is 16.665 on paper and
+  16.66499... in binary; the app prints, pays and deducts 16.66, consistently. Not new.
+- **A held closure that has been built on** - the phone carried on without it and closed a
+  later fortnight - stays held, and the phone stays blocked until a person looks.
+- **What the cloud holds under `ledger.unreadable`**, and a v179 and a v180 phone on one
+  cloud, were not run.
+- `corrected` and `cancelled` entries, as before (`tests/README.md`).
+
+## v179 — הסעות: the summary of the day (served 2026-11-10)
+
+**Served.** Merged to `main` as `17788f8` (PR #60) on 2026-11-10; the Pages deployment for that
+commit succeeded at 09:54 UTC. As with the builds before it, "served" means Pages reported the
+deployment of that commit; the served page itself was not read from the container that built
+it. Built on `e4070e5` (v178). One commit of shipped files; its gate results belong to that
+commit and no count is carried here. `622d80a` (PR #61), merged after it, is tests only - the
+second calculator, `tests/oracle.mjs`, its suite and its two findings - changes no shipped
+file, moved no stamp, and serves the same v179.
 
 **The owner asked** (2026-11-10, in Arabic): *"is there a report for the cars?"* There was
 none. The הסעות screen offered a message to each driver, one car at a time, and nothing that

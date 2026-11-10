@@ -183,8 +183,8 @@ export function isPeriodOf(worker, from, to) {
 // ---------------------------------------------------------------- money, in agorot
 
 // A figure off the record, in whole agorot. The record holds shekels to the agora; a
-// value finer than that is a value three surfaces would round three ways, and this
-// calculator refuses to pick one.
+// RECORDED value finer than that is refused here. (A wage can come out at half an agora
+// by multiplication - half an hour at 41.25 - and that one has a rule: see `walk`.)
 export function agorot(value) {
     if (value === undefined || value === null) return 0;
     if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -562,16 +562,21 @@ export function overpaidBy(record, workerId) {
     return sum;
 }
 
-// What still has to be settled with a man: what is left on each of his advances, added up.
+// What still has to be settled with a man: what is left on each of his advances, added
+// up - LESS HIS CREDIT. «Money a man gave back beyond what he owed stays his credit until
+// it is used - it comes off whatever advance he takes next» (docs/architecture.md, «The
+// credit»): what one advance was over-settled by comes off what the others have left,
+// and the sum never goes below zero, because a credit is not a debt of the other sign.
 export function openBalance(record, workerId) {
     let sum = 0;
     let count = 0;
     advancesOf(record).forEach((of, id) => {
         if (of.workerId !== String(workerId)) return;
         count += 1;
-        sum += outstanding(record, id).left;
+        const state = outstanding(record, id);
+        sum += state.left - state.overpaid;
     });
-    return { count, total: sum };
+    return { count, total: Math.max(0, sum) };
 }
 
 // Movements dated inside a range, for one man, by kind - and a correction by what it
@@ -642,6 +647,9 @@ function closedFor(record, workerId) {
             }
             if (at.carriedIn === undefined && entry.carriedIn !== undefined) {
                 at.carriedIn = readable(entry.carriedIn);
+            }
+            if (at.creditIn === undefined && entry.creditIn !== undefined) {
+                at.creditIn = readable(entry.creditIn);
             }
             if (at.basis === undefined && entry.basis && typeof entry.basis === 'object') {
                 at.basis = entry.basis;
@@ -822,8 +830,16 @@ function billed(record, from, to) {
 //    what was handed back inside it, and deducts from the wage only what is left - never
 //    more than the man earned. The order is load-bearing: repayments come off before the
 //    wage is asked to cover the rest. A man with no rate is owed an unknown amount, not
-//    zero, so the balance passes through him untouched. An overpayment does not become a
-//    negative balance.»
+//    zero, so the balance passes through him untouched.»
+//
+//   «The wage of an account is the sum of its days rounded to the agora once, half up» -
+//   the figure every sheet prints - and the deduction is measured against that.
+//
+//   «The credit»: «Money a man gave back beyond what he owed stays his credit until it
+//    is used. It comes off whatever advance he takes next, however many periods later,
+//    and is never dropped at a boundary. It is never a negative debt and never wages: a
+//    period carries forward what he owes, zero or more, and beside it what he is in
+//    credit, zero or more.»
 //
 //   «Every figure is a function of what is dated on or before its own account's last
 //    day, and of nothing else.»
@@ -836,7 +852,8 @@ function billed(record, from, to) {
 //   While more has been settled against a man's advances than he was ever given, the
 //   automatic deduction STOPS on every open period and the row says `review`.
 //
-// `opening` is what the period started out owing; `accountOf` works it out.
+// `opening` is where the man stood when the period started, in agorot and SIGNED: above
+// zero he owed it, below zero he was in credit. `accountOf` works it out.
 export function walk(record, workerId, from, to, opening) {
     return reading(record, () => once(record, `walk|${workerId}|${from}|${to}|${opening}`,
         () => walked(record, workerId, from, to, opening)));
@@ -848,31 +865,44 @@ function walked(record, workerId, from, to, opening) {
     const moved = movements(record, workerId, from, to);
     const closed = frozenFor(record, workerId, from, to);
 
-    const live = worker ? liveRow(record, worker, from, to).amount : null;
+    // The wage, to the agora, half up, once. A sum of days can come out at half an
+    // agora (an hourly rate with an odd number of agorot, times half an hour); nothing
+    // finer can be recorded.
+    const summed = worker ? liveRow(record, worker, from, to).amount : null;
+    const live = summed === null ? null : Math.floor(summed + 0.5);
     const gross = closed !== undefined && closed.gross !== undefined ? closed.gross : live;
 
-    // Cash back first, each correction against its own target, and never below zero.
-    const balance = Math.max(0, opening + given - (moved.repaid - moved.undoneRepaid)
-        - moved.undoneGiven + moved.undoneDeducted);
+    // Cash back first, each correction against its own target. What he OWES is never
+    // below zero; what the sum comes to below zero is his credit.
+    const standing = opening + given - (moved.repaid - moved.undoneRepaid)
+        - moved.undoneGiven + moved.undoneDeducted;
+    const balance = Math.max(0, standing);
 
     const overpaid = overpaidBy(record, workerId);
     const deducted = closed !== undefined
         ? closed.deducted
         : (gross === null || overpaid > 0 ? 0 : Math.min(balance, Math.max(gross, 0)));
 
-    // BY THE RULE, AND THE SUITE SAYS WHERE THE APP PARTS FROM IT: «an overpayment does
-    // not become a negative balance, which would quietly add itself to his next wage as
-    // though the firm owed him for it.» On an open period the sum cannot go below zero.
-    // On a closed one it can - a repayment dated into the period after it shut, larger
-    // than what the close left - and the rule is the same rule.
-    const forward = Math.max(0, balance - deducted);
+    // «The credit». On an open period the deduction is never more than the balance. On
+    // a closed one it is a record and the money goes on moving - a repayment dated into
+    // the period after it shut, larger than what the close left - and what that takes
+    // below zero is not a debt of less than nothing: it is carried beside the debt.
+    const position = standing - deducted;
+    const forward = Math.max(0, position);
+    const credit = Math.max(0, -position);
     const out = closed !== undefined && closed.left !== undefined ? closed.left : forward;
+
+    // What the period opened on, by its record where it has one. A payslip frozen before
+    // the credit had a name of its own holds it as an opening balance below zero; it is
+    // read as what it was, and never restated.
+    const opened = closed !== undefined && closed.carriedIn !== undefined
+        ? closed.carriedIn - (closed.creditIn || 0) : opening;
 
     return {
         from,
         to,
-        carriedIn: closed !== undefined && closed.carriedIn !== undefined
-            ? closed.carriedIn : opening,
+        carriedIn: Math.max(0, opened),
+        creditIn: Math.max(0, -opened),
         given,
         repaid: moved.repaid,
         reversed: moved.reversed,
@@ -880,9 +910,11 @@ function walked(record, workerId, from, to, opening) {
         deducted,
         carriedOut: out,
         carriedForward: forward,
-        // What the sum comes to before the floor, so a reader can see when it bit.
-        unflooredForward: balance - deducted,
-        lateSinceClose: forward - out,
+        creditForward: credit,
+        // Where he stands going into the next period, signed.
+        position,
+        // The whole of what moved after the close, through the credit.
+        lateSinceClose: position - out,
         overpaid,
         review: overpaid > 0 && closed === undefined,
         net: gross === null ? null : gross - deducted,
@@ -907,35 +939,31 @@ export function periodsBefore(record, workerId, from) {
     return out;
 }
 
-// What the period beginning `from` opens owing: every account before it, walked in order,
-// each handing the next what it carried FORWARD - «the payslip is frozen, the money is
-// not».
-export function openingBalance(record, workerId, from) {
+// Where the man stands when the period beginning `from` opens: every account before it,
+// walked in order, each handing the next where it left him - «the payslip is frozen, the
+// money is not». Signed: above zero he owes it, below zero it is his credit.
+export function openingPosition(record, workerId, from) {
     return reading(record, () => {
-        let balance = 0;
+        let position = 0;
         periodsBefore(record, workerId, from).forEach(period => {
-            balance = walk(record, workerId, period.from, period.to, balance).carriedForward;
+            position = walk(record, workerId, period.from, period.to, position).position;
         });
-        return balance;
+        return position;
     });
+}
+
+// The two halves, each zero or more: what he owes, and what he is in credit.
+export function openingBalance(record, workerId, from) {
+    return Math.max(0, openingPosition(record, workerId, from));
+}
+
+export function openingCredit(record, workerId, from) {
+    return Math.max(0, -openingPosition(record, workerId, from));
 }
 
 export function accountOf(record, workerId, from, to) {
     return reading(record, () =>
-        walk(record, workerId, from, to, openingBalance(record, workerId, from)));
-}
-
-// Whether the floor in `walk` decided anything on the way to this period or inside it:
-// the one place this calculator knowingly reads the rule where the app reads the sum.
-export function floorBit(record, workerId, from, to) {
-    let balance = 0;
-    let bit = false;
-    periodsBefore(record, workerId, from).concat([{ from, to }]).forEach(period => {
-        const one = walk(record, workerId, period.from, period.to, balance);
-        if (one.unflooredForward < 0) bit = true;
-        balance = one.carriedForward;
-    });
-    return bit;
+        walk(record, workerId, from, to, openingPosition(record, workerId, from)));
 }
 
 // ---------------------------------------------------------------- closing, predicted
@@ -981,6 +1009,8 @@ function planned(record, workerId, from, to, deduction) {
         reasons,
         gross: account.gross,
         carriedIn: account.carriedIn,
+        // Written on the payslip only where there was one.
+        creditIn: account.creditIn,
         deducted: off,
         carriedForward: balance - off,
         net: account.gross === null ? null : account.gross - off,
