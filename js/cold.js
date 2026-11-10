@@ -409,8 +409,14 @@ const Cold = {
             if (!coldOwns(this.raw, unit.key)) return;
             let value = null;
             try { value = JSON.parse(this.raw[unit.key]); } catch (error) { value = null; }
+            // ONLY AGAINST ITS MARK. A unit with no mark is a copy whose move was cut
+            // short before the read-back was written down (found in Chromium, by closing
+            // the page between the copy and the mark): the record still holds it, the
+            // move makes the copy again and marks it. Believing it by its shape alone
+            // would let a closure's entries be left out of the record on the strength of
+            // a copy nobody ever compared.
             const mark = this.mark(unit.key);
-            const problem = coldValueProblem(unit, value, mark === null ? undefined : mark);
+            const problem = mark === null ? 'no mark' : coldValueProblem(unit, value, mark);
             if (problem === '') this.verified[unit.key] = true;
             else this.problems[unit.key] = problem;
         });
@@ -548,7 +554,8 @@ const Cold = {
         const unit = coldUnitsNamed(State.schedule).filter(one => one.key === unitKey)[0];
         if (!unit) return Promise.resolve(false);
         return this.readUnit(unitKey).then(back => {
-            if (coldValueProblem(unit, back, this.mark(unitKey) === null ? undefined : this.mark(unitKey)) !== '') return false;
+            const mark = this.mark(unitKey);
+            if (mark === null || coldValueProblem(unit, back, mark) !== '') return false;
             this.raw[unitKey] = JSON.stringify(back);
             this.verified[unitKey] = true;
             return true;

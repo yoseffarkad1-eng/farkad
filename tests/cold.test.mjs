@@ -139,16 +139,18 @@ function coldPhone(id, options = {}) {
 const reopen = (from, fake, options = {}) => phone(from.id, options.cloud || null, Object.assign({ flags: FLAGS_ON,
     storage: from.dump ? from.dump() : from, indexedDB: fake ? fake.indexedDB : undefined }, options));
 
-// Every unit is in the record, or in the cold store with the digest its mark names (and,
-// for a month, its index row's): the one invariant of the move.
+// Every unit is in the record, or in the cold store UNDER A MARK ON THE DISK whose digest
+// the cold copy has (and, for a month, its index row's): the one invariant of the move.
+// A copy with no mark does not count - nothing ever compared it.
 function nowhereLost(storage, fake) {
     const record = onDisk(storage[SCHEDULE]);
     const probe = payDevice({ deviceId: 'd_probe', flags: FLAGS_ON });
     const held = fake.disk.dump(DB, UNITS);
     return probe.call('coldUnitsNamed', record).map(unit => {
         const inRecord = probe.call('coldUnitHeld', record, unit);
-        const inCold = Object.prototype.hasOwnProperty.call(held, unit.key)
-            && probe.call('coldValueProblem', unit, held[unit.key]) === '';
+        const mark = storage[MARK + unit.key];
+        const inCold = typeof mark === 'string' && Object.prototype.hasOwnProperty.call(held, unit.key)
+            && probe.call('coldValueProblem', unit, held[unit.key], mark) === '';
         return inRecord || inCold ? null : unit.key;
     }).filter(Boolean);
 }
