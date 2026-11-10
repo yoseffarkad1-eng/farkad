@@ -443,8 +443,9 @@ function accField(labelText, control) {
     return wrap;
 }
 
-function accLine(labelText, valueText, className) {
+function accLine(labelText, valueText, className, key) {
     const row = el('div', 'acc-line' + (className ? ' ' + className : ''));
+    if (key) row.dataset.line = key;
     row.appendChild(el('span', 'acc-line-label', labelText));
     row.appendChild(el('strong', 'acc-num', valueText));
     return row;
@@ -888,7 +889,7 @@ function accDrawReview(node) {
     node.appendChild(page);
     const facts = el('div', 'acc-facts');
     node.appendChild(facts);
-    const gross = accLine(ACC_TEXT.gross, '', 'acc-line-strong');
+    const gross = accLine(ACC_TEXT.gross, '', 'acc-line-strong', 'gross');
     node.appendChild(gross);
     const before = el('div', 'acc-before');
     node.appendChild(before);
@@ -913,9 +914,9 @@ function accDrawReview(node) {
     }));
 
     const result = el('div', 'acc-result');
-    const deducted = accLine(ACC_TEXT.advanceDeducted, '');
-    const extraSum = accLine(ACC_TEXT.extrasTitle, '');
-    const net = accLine(ACC_TEXT.netDue, '', 'acc-line-net');
+    const deducted = accLine(ACC_TEXT.advanceDeducted, '', '', 'advances');
+    const extraSum = accLine(ACC_TEXT.extrasTitle, '', '', 'extras');
+    const net = accLine(ACC_TEXT.netDue, '', 'acc-line-net', 'net');
     result.appendChild(deducted);
     result.appendChild(extraSum);
     result.appendChild(net);
@@ -938,9 +939,9 @@ function accDrawReview(node) {
     node.appendChild(paidError);
 
     const after = el('div', 'acc-result acc-after');
-    const paidLine = accLine(ACC_TEXT.paidTitle, '');
-    const balance = accLine(ACC_TEXT.balanceAfter, '', 'acc-line-strong');
-    const debtLine = accLine(ACC_TEXT.debtAfter, '');
+    const paidLine = accLine(ACC_TEXT.paidTitle, '', '', 'paid');
+    const balance = accLine(ACC_TEXT.balanceAfter, '', 'acc-line-strong', 'balance');
+    const debtLine = accLine(ACC_TEXT.debtAfter, '', '', 'debt');
     after.appendChild(paidLine);
     after.appendChild(balance);
     after.appendChild(debtLine);
@@ -959,10 +960,13 @@ function accDrawReview(node) {
         form.stale = false;
         const plan = paint();
         if (!plan.ok) {
-            form.message = plan.reasons.some(code => ACC_FIELD_CODES.indexOf(code) !== -1)
-                ? ACC_TEXT.fixFirst : accRefusalText(plan.reasons[0]);
+            const fields = plan.reasons.filter(code => ACC_FIELD_CODES.indexOf(code) !== -1);
+            // The carry approval has its own box, with its own sentence and button, right
+            // above this one: nothing to add to it.
+            form.message = fields.length === 1 && fields[0] === 'carry-approval-needed' ? ''
+                : (fields.length > 0 ? ACC_TEXT.fixFirst : accRefusalText(plan.reasons[0]));
             paint();
-            const first = node.querySelector('.acc-error:not(:empty), .acc-page-reasons .acc-note');
+            const first = node.querySelector('.acc-error:not(:empty):not(.acc-message), .acc-page-reasons .acc-note, .acc-carry');
             if (first && typeof first.scrollIntoView === 'function') first.scrollIntoView({ block: 'center' });
             return;
         }
@@ -1060,6 +1064,8 @@ function accDrawReview(node) {
             .map(accRefusalText).filter((text, at, list) => list.indexOf(text) === at)
             .forEach(text => page.appendChild(el('p', 'acc-note acc-note-warn', text)));
         accPaintBusy(confirm, form, ACC_TEXT.confirm);
+        // "A field needs fixing" is true only until it is fixed.
+        if (form.message === ACC_TEXT.fixFirst && plan.ok) form.message = '';
         message.textContent = form.message || '';
         clear(carry);
         if (plan.reasons.indexOf('carry-approval-needed') !== -1) carry.appendChild(accCarryBox(form));
@@ -1193,7 +1199,7 @@ function accDrawPay(node) {
 
     const pick = el('div', 'acc-pick');
     body.appendChild(pick);
-    const owed = accLine(ACC_OWNER.wageDue, '', 'acc-line-net acc-sum-due');
+    const owed = accLine(ACC_OWNER.wageDue, '', 'acc-line-net acc-sum-due', 'owed');
     body.appendChild(owed);
     const amount = accInput(ACC_TEXT.payAmount, '');
     amount.addEventListener('input', () => { form.amountText = amount.value; paint(); });
@@ -1207,7 +1213,7 @@ function accDrawPay(node) {
     body.appendChild(dateError);
     body.appendChild(accChoice(ACC_TEXT.methodTitle, [['cash', ACC_TEXT.methodCash],
         ['transfer', ACC_TEXT.methodTransfer]], form.method, value => { form.method = value; }));
-    const after = accLine(ACC_TEXT.payOwed, '');
+    const after = accLine(ACC_TEXT.payOwed, '', '', 'after');
     body.appendChild(after);
     const message = accError('');
     message.classList.add('acc-message');
@@ -1721,10 +1727,10 @@ function accDrawStatement(node) {
         if (row.status === 'unknown') body.appendChild(el('p', 'acc-note acc-note-warn', ACC_TEXT.legacyUnknown));
 
         const sums = el('div', 'acc-result');
-        sums.appendChild(accLine(ACC_TEXT.gross, row.gross === null ? '—' : accMoney(row.gross), 'acc-line-strong'));
-        sums.appendChild(accLine(ACC_TEXT.advanceDeducted, accMoney(-row.advanceDeducted || 0)));
-        if (row.extraDeducted > 0) sums.appendChild(accLine(ACC_TEXT.extrasTitle, accMoney(-row.extraDeducted)));
-        sums.appendChild(accLine(ACC_TEXT.netDue, row.netDue === null ? '—' : accMoney(row.netDue), 'acc-line-net'));
+        sums.appendChild(accLine(ACC_TEXT.gross, row.gross === null ? '—' : accMoney(row.gross), 'acc-line-strong', 'gross'));
+        sums.appendChild(accLine(ACC_TEXT.advanceDeducted, accMoney(-row.advanceDeducted || 0), '', 'advances'));
+        if (row.extraDeducted > 0) sums.appendChild(accLine(ACC_TEXT.extrasTitle, accMoney(-row.extraDeducted), '', 'extras'));
+        sums.appendChild(accLine(ACC_TEXT.netDue, row.netDue === null ? '—' : accMoney(row.netDue), 'acc-line-net', 'net'));
         body.appendChild(sums);
 
         // THE DETAIL. Balances never wait for it; the day list does. When the entries are
@@ -1753,14 +1759,18 @@ function accDrawStatement(node) {
         body.appendChild(el('h3', 'acc-h3', ACC_TEXT.advancesTitle));
         if (row.advanceDeductions.length === 0) body.appendChild(emptyHint(ACC_TEXT.noAdvances));
         const given = currentAdvances(State.schedule);
-        row.advanceDeductions.forEach(one => {
+        // Oldest advance first, as the review page listed them when they were answered.
+        const dated = id => String((given[id] || {}).date || '');
+        row.advanceDeductions.slice().sort((x, y) => (dated(x.advanceId) < dated(y.advanceId) ? -1
+            : (dated(x.advanceId) > dated(y.advanceId) ? 1 : (x.advanceId < y.advanceId ? -1 : 1)))).forEach(one => {
             const card = el('div', 'acc-adv');
             const of = given[one.advanceId];
             card.appendChild(el('p', 'acc-adv-info', of
                 ? `${accDay(of.date)} · ${ACC_TEXT.advanceGiven} ${accMoney(advanceOutstanding(State.schedule, one.advanceId).given)}` : ''));
-            card.appendChild(accLine(ACC_TEXT.deducted, accMoney(one.amount)));
-            if (one.after !== null) card.appendChild(accLine(ACC_TEXT.leftThen, accMoney(one.after)));
-            card.appendChild(accLine(ACC_TEXT.leftNow, accMoney(one.leftNow)));
+            card.dataset.advance = one.advanceId;
+            card.appendChild(accLine(ACC_TEXT.deducted, accMoney(one.amount), '', 'deducted'));
+            if (one.after !== null) card.appendChild(accLine(ACC_TEXT.leftThen, accMoney(one.after), '', 'left-then'));
+            card.appendChild(accLine(ACC_TEXT.leftNow, accMoney(one.leftNow), '', 'left-now'));
             if (one.reversed > 0) card.appendChild(accLine(ACC_TEXT.voided, accMoney(one.reversed)));
             body.appendChild(card);
         });
@@ -1781,6 +1791,7 @@ function accDrawStatement(node) {
             const card = el('div', 'acc-adv');
             const how = payment.method === 'transfer' ? ACC_TEXT.methodTransfer
                 : (payment.method === 'cash' ? ACC_TEXT.methodCash : '');
+            card.dataset.payment = payment.id;
             card.appendChild(accLine(`${accDay(payment.date)}${how ? ' · ' + how : ''}`, accMoney(payment.amount)));
             accVoidLine(card, payment.id, row);
             body.appendChild(card);
@@ -1795,9 +1806,9 @@ function accDrawStatement(node) {
 
         if (row.owed !== null) {
             const end = el('div', 'acc-result acc-after');
-            end.appendChild(accLine(ACC_TEXT.owed, accMoney(row.owed)));
-            end.appendChild(accLine(ACC_TEXT.paidSoFar, accMoney(row.paid)));
-            end.appendChild(accLine(ACC_OWNER.wageDue, accMoney(row.due), 'acc-line-strong acc-sum-due'));
+            end.appendChild(accLine(ACC_TEXT.owed, accMoney(row.owed), '', 'owed'));
+            end.appendChild(accLine(ACC_TEXT.paidSoFar, accMoney(row.paid), '', 'paid'));
+            end.appendChild(accLine(ACC_OWNER.wageDue, accMoney(row.due), 'acc-line-strong acc-sum-due', 'due'));
             if (row.debtAfter !== null) end.appendChild(accLine(ACC_TEXT.debtAfter, accMoney(row.debtAfter)));
             body.appendChild(end);
         }
@@ -1869,7 +1880,7 @@ function accDrawCorrect(node) {
     node.appendChild(accField(label, reason));
     const reasonError = accError('');
     node.appendChild(reasonError);
-    const after = accLine(ACC_OWNER.wageDue, '');
+    const after = accLine(ACC_OWNER.wageDue, '', '', 'after');
     node.appendChild(after);
     const message = accError('');
     message.classList.add('acc-message');
@@ -1937,8 +1948,9 @@ function accDrawOpening(node) {
         const plan = planOpening(State.schedule, form.date, accStamp());
         if (plan.ok && plan.already) { accGo('list', { flash: ACC_TEXT.openingDone }); return; }
         if (!plan.ok) {
-            form.message = accRefusalText(plan.reasons.filter(code => code !== 'carry-approval-needed')[0]
-                || 'carry-approval-needed');
+            // The carry approval has its own box, sentence and button right above.
+            const other = plan.reasons.filter(code => code !== 'carry-approval-needed')[0];
+            form.message = other ? accRefusalText(other) : '';
             paint();
             return;
         }

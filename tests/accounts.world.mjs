@@ -91,6 +91,13 @@ export async function seed(page, options = {}) {
             put('w_khaled', day, 'p_01', at === 0 ? 4 : 0);
             if (at < 3) put('w_salim', day, 'p_02', 0);
         });
+        // TWO CLOSURES FROM BEFORE THE PAY BOOK, made the way the old dialog makes them
+        // (closePeriodChanges, one journal batch): frozen payslips with no payment record.
+        if (wanted.legacy) {
+            ['w_nasser', 'w_salim'].forEach(w => ['2026-09-20', '2026-09-21'].forEach(day => put(w, day, 'p_01', 0)));
+            ['w_nasser', 'w_salim'].forEach(w => need(`old closure ${w}`, State.commitMany(closePeriodChanges(
+                State.schedule, w, '2026-09-18', '2026-10-01', '2026-10-02T08:00:00.000Z', syncDeviceId(), 0)) === true));
+        }
         (wanted.advances || []).forEach(([worker, date, amount]) => need(`advance ${worker} ${amount}`,
             State.commitMany(recordNewAdvance(State.schedule, worker, date, amount, 'בדיקה',
                 `${date}T09:00:00.000Z`, syncDeviceId(), 'cash')) === true));
@@ -100,7 +107,8 @@ export async function seed(page, options = {}) {
         }
         return true;
     }, [W1, W2, { advances: options.advances || [['w_khaled', '2026-10-03', 500], ['w_khaled', '2026-10-06', 400],
-        ['w_khaled', '2026-10-10', 300], ['w_salim', '2026-10-05', 5000]], approveCarry: options.approveCarry }]);
+        ['w_khaled', '2026-10-10', 300], ['w_salim', '2026-10-05', 5000]], approveCarry: options.approveCarry,
+        legacy: options.legacy === true }]);
     await settled(page);
     return answer;
 }
