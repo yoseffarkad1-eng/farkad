@@ -509,7 +509,15 @@ const FARKAD_RECORD_KEYS = [
     // was made in an earlier session, its original has since been written over by an
     // ordinary save, and the copy was the only trace of those bytes left anywhere. That is
     // the exact failure the sweep was added to prevent, on the one record that is money.
-    'scheduleData:v2:ledger'
+    'scheduleData:v2:ledger',
+    // THE PAY BOOK'S TWO QUARANTINES (v173), for the reason written above the ledger's.
+    // js/state.js hands Recovery the pay entries this build cannot read under the first
+    // name and a `pay` container that is not a record under the second; neither is a live
+    // record, only `:damaged` copies exist, and without these two lines a copy made in an
+    // earlier session - of somebody's statement or payment - is not one the rescue file's
+    // sweep recognises as this app's.
+    'scheduleData:v2:pay',
+    'scheduleData:v2:pay:container'
 ];
 
 function isFarkadRecordKey(key) {

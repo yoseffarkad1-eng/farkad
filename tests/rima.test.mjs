@@ -30,6 +30,22 @@ import { makeDevice, makeCloud, settle, settleUntil, loadOrder, sourceRoot } fro
 import { suite, check, same, given, report } from './runner.mjs';
 
 const ROOT = sourceRoot();
+
+// THE OLDER BUILDS' OWN FILE LIST (moved at v173, deliberately).
+//
+// Three places below build v145 and v165 out of Git and demanded "every file this build
+// loads". That was true only while this build loaded nothing those builds lacked. v173
+// puts js/model/payroll.js in the load order - a file neither of them ever had - and a
+// demand that the past contain the present refused to build either one, with every check
+// about what they do to a Rima count going unasked. tests/fence.legacy.test.mjs met the
+// same thing at the v102 split and answers it the same way.
+//
+// NAMED, not filtered by "whatever happens to be there": a list that quietly shrinks is
+// how a suite stops testing. Anything this build loads that is not on this list must
+// still be in the older commit, and the three `given`s still stop the run if it is not.
+// v175 adds js/sync/transact.js (the pay book's server-first door) on the same terms.
+const NOT_IN_V165 = ['js/model/payroll.js', 'js/sync/transact.js'];
+const olderOrder = () => loadOrder().filter(file => NOT_IN_V165.indexOf(file) === -1);
 const REPORTS = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
 const SETTINGS = readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8');
 const TICK = 6;
@@ -750,9 +766,9 @@ function heldCards(box) {
     const show = file => execFileSync('git', ['-C', ROOT, 'show', `${V165}:${file}`],
         { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
     let sources = [];
-    try { sources = loadOrder().map(file => ({ file, code: show(file) })); } catch (error) { sources = []; }
-    given('v165 is in this repository, with every file this build loads', sources.length === loadOrder().length,
-        `${sources.length} of ${loadOrder().length}`);
+    try { sources = olderOrder().map(file => ({ file, code: show(file) })); } catch (error) { sources = []; }
+    given('v165 is in this repository, with every file this build loads that it had', sources.length === olderOrder().length,
+        `${sources.length} of ${olderOrder().length}`);
     const stamp = (/const APP_VERSION = '([^']+)'/.exec(show('js/app.js')) || [])[1];
     given('the older build is v165 and does not know the layer',
         stamp === 'v165' && !sources.some(source => /\brima\b/i.test(source.code)), String(stamp));
@@ -1874,11 +1890,11 @@ for (const [name, sha] of OLDER) {
     let present = false;
     try { present = git(['cat-file', '-t', sha]).toString().trim() === 'commit'; } catch (error) { present = false; }
     given(`the ${name} commit is in this repository`, present, sha);
-    const files = loadOrder().filter(file => {
+    const files = olderOrder().filter(file => {
         try { git(['cat-file', '-e', `${sha}:${file}`]); return true; } catch (error) { return false; }
     });
-    given(`${name} has every file this build loads`, files.length === loadOrder().length,
-        `${files.length} of ${loadOrder().length}`);
+    given(`${name} has every file this build loads that it had`, files.length === olderOrder().length,
+        `${files.length} of ${olderOrder().length}`);
     const sources = files.map(file => ({ file, code: git(['show', `${sha}:${file}`]).toString('utf8') }));
     const stamp = (/const APP_VERSION = '([^']+)'/.exec(git(['show', `${sha}:js/app.js`]).toString('utf8')) || [])[1];
     given(`the older build names itself ${name}`, stamp === name, String(stamp));
@@ -1961,11 +1977,11 @@ for (const [name, sha] of OLDER) {
 for (const [name, sha] of OLDER) {
     suite(`a phone that wrote last on ${name}, opened on this build, shows the cloud's count at once`);
 
-    const files = loadOrder().filter(file => {
+    const files = olderOrder().filter(file => {
         try { git(['cat-file', '-e', `${sha}:${file}`]); return true; } catch (error) { return false; }
     });
-    given(`${name} has every file this build loads`, files.length === loadOrder().length,
-        `${files.length} of ${loadOrder().length}`);
+    given(`${name} has every file this build loads that it had`, files.length === olderOrder().length,
+        `${files.length} of ${olderOrder().length}`);
     const sources = files.map(file => ({ file, code: git(['show', `${sha}:${file}`]).toString('utf8') }));
     const stamp = (/const APP_VERSION = '([^']+)'/.exec(git(['show', `${sha}:js/app.js`]).toString('utf8')) || [])[1];
     given(`the older build is ${name} and does not know the layer`,

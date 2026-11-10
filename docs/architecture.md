@@ -23,6 +23,7 @@ One document, held in memory by `State.schedule` and on disk under `scheduleData
       },
       advances: { "a_x": { id, workerId, date, amount, note } },
       ledger:   { advances: { "le_x": { id, advanceId, kind, ... } } },
+      pay:      { "ps_w_01_20261002": { id, kind, workerId, ... } },   // v173, append-only; writer shut
       updatedAt, updatedBy
     }
 
@@ -72,10 +73,18 @@ never removed. What the screens would read is a FOLD over the entries
 (`foldAdvance`/`foldLedger`), derived and never stored, with every entry that produced
 it still there to be read out loud.
 
-But the ledger is **off**. `LEDGER_WRITES = false` (`js/model/ledger.js:49`), and only
-a person who knows all three phones are past v79 may flip it — a v79 phone writes
-`advances.<id>` and cannot read entries, so a v80 phone that stopped writing the old
-field would make its advances invisible on the other two. Until the flip:
+**The ledger's writer is ON.** This section said for a long time that it was off, and
+that sentence outlived the fact: `const LEDGER_WRITES = true;` (`js/model/ledger.js:49`)
+and `carryAdvances: true` (`FARKAD_SHIPPED_FLAGS`, `js/model/schema.js:63`), opened
+together at v116 on the owner's authorization - the pair `tests/data.test.mjs` and
+`tests/gate.integrity.test.mjs` pin. What still stands between a phone and a financial
+write is the RECORD's own gate, `financialWritingEnabled(schedule)`
+(`js/model/ledger.js:1587`): the writer on AND the carry migration either unnecessary or
+approved on that record (`ledger.migrations.cm_carry`). The reason the gate existed is
+unchanged and worth keeping in view - a v79 phone writes `advances.<id>` and cannot read
+entries, which is why the legacy field is still written beside every entry. What follows
+describes machinery that is all still there; where a bullet says "until the flip", the
+flip has happened:
 
 - **The screens still read the legacy field.** Nothing in the UI depends on the fold;
   the only ledger consumer on screen is the parity line in settings.
@@ -167,16 +176,28 @@ fortnight's figure as what is still owed. A carried balance also keeps a row ali
 `payrollRows` — a man who owes 1,950 and worked no days this fortnight had no row to owe
 it on, and dropped off the sheet with the debt.
 
-**Two gates, both shut.** `FARKAD_FLAGS.carryAdvances` is off because turning the
+**Two gates, both OPEN since v116 - and a third, per record, that is not a flag.** (This
+paragraph was headed "both shut" until v173; `js/model/schema.js:63` and
+`js/model/ledger.js:49` say otherwise, and the audit that found it is why it is corrected
+here.) What it describes is why they were shut and why they had to open together, which is
+still the reason they must MOVE together: `FARKAD_FLAGS.carryAdvances` was off because turning the
 carry on RESTATES accounts that may already have been paid — both of them, in the
 worked case: the fortnight the 5,000 was taken in stops deducting 5,000 and starts
 deducting the 3,200 he earned, and the next one deducts the rest. This app does not
 know which fortnights have been handed over, so `planAdvanceCarry` reports every
 account and man it would move, with both answers side by side, and changes nothing —
 the same refusal `planRateStamping` makes about stamping old days. And the writer
-gate stays shut, because a repayment IS a ledger entry: recording one with the gate
+gate moved with it, because a repayment IS a ledger entry: recording one with the gate
 closed writes something the other two phones cannot read, which is the failure the
-gate exists to prevent, pointed the other way.
+gate exists to prevent, pointed the other way. With both open, the restating is what the
+per-record approval is for: `planCarryMigration` lists what would move on THIS record, and
+until a person approves it `financialWritingEnabled` answers false and no financial
+control writes.
+
+**The pay book (v173) is a fourth gate, and it is shut.** `paybook: false`
+(`js/model/schema.js:83`) is the writer of `schedule.pay` - statements, payments, extra
+deductions (`js/model/payroll.js`). The map itself is stored, merged and sent by every
+v173 phone with the gate off; `docs/payroll-closure.md` has the whole of it.
 
 `ledgerWritesEnabled()` now also honours `FARKAD_FLAGS.ledgerWrites`. The const
 stays where iron law 1 puts it and its shipped value is unchanged; what it gains is
@@ -184,6 +205,27 @@ the seam every other gate has, so a suite can measure the build somebody eventua
 ships. `tests/build.test.mjs` fails if any shipped file mentions
 `FARKAD_FLAG_OVERRIDES`, the page included — a browser cannot reach it and neither
 can a phone. That is a stronger gate than a bare const, which nothing enforces.
+
+
+### One debt, and where closed history goes (v175, behind the pay book's gate)
+
+Two things about money and the single document are decided and built SHUT; neither is what
+a phone runs today.
+
+- **One debt.** An advance from a period nobody closed stays a full debt until a person
+  deducts it (the owner, 2026-11-10). `advanceDebtStays()` in `js/model/schema.js` is the
+  one place the rule is read, and it is `FARKAD_FLAGS.paybook`: with the gate shut the
+  account walk settles such a period by itself, as it always has. `planDebtRuling` reports
+  what the rule would move on a record and writes nothing.
+- **The schedule is one document, and it is on a clock.** Firestore refuses a document over
+  1 MiB; about 20 men's days alone fill it in about two years from today's 185 KB, and
+  closures written into it fill it in months. A pay book operation is therefore ONE server
+  transaction of its own (`js/sync/transact.js`) that also creates a create-once document
+  under `schedules/{doc}/closed/{id}` holding what it adds - never through the queue.
+  Dropping the live copy, and moving the days of closed months out, are not built.
+
+`docs/payroll-closure.md` has all of it, with the measured capacity curve and the order in
+which the rules and the phones change.
 
 ## Sync
 
@@ -199,6 +241,7 @@ carry it:
 | `js/sync/receive.js` | a document arriving from the server: adoption, merge, the client half of the ordering protocol, and every door a poisoned or unreadable record can arrive by. |
 | `js/sync/send.js` | getting this device's work out: the flush, the send claim, the pre-send hold, the create race, the retry ladder. |
 | `js/sync/status.js` | being connected and saying so truthfully; the sentence in the ⋯ panel and the banner above the board. |
+| `js/sync/transact.js` | the pay book's server-first door (v175, shipped shut): one closure, payment or void as one transaction with its create-once closed document; the durable intent; settling a lost answer by reading the receipt, never by sending again. |
 | `js/sync/boot.js` | two lines that RUN at load time. Loaded last, and every later split of the group goes above it — that is the file's whole job. |
 
 The later five extend the object with `Object.assign(FarkadSync, { … })`, because a

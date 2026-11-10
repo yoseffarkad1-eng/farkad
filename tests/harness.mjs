@@ -30,12 +30,17 @@ const FILES = [
     'js/model/money.js',
     'js/model/migrate.js',
     'js/model/ledger.js',
+    // The pay book's model (v173): after the ledger it builds on, and before anything that
+    // reads a queue - a queued `pay.<id>` is validated by payEntryProblems in this file.
+    'js/model/payroll.js',
     'js/state.js',
     'js/sync/sync.js',
     'js/sync/restore.js',
     'js/sync/receive.js',
     'js/sync/send.js',
     'js/sync/status.js',
+    // The pay book's server-first door (v175). Above boot.js, like every split.
+    'js/sync/transact.js',
     // Last of the sync group, and last for a reason - see the file's own header.
     'js/sync/boot.js',
     // For the backup, snapshot and undo-stack machinery. It builds DOM nodes and calls
@@ -579,6 +584,10 @@ export function makeCloud(options = {}) {
     // to model a build in the field, or to check that this build refuses to write to
     // one - sets makeCloud({ protocol: false }).
     cloud.receipts = new Map();
+    // schedules/{doc}/closed/{id}: created once, never changed - see transact below.
+    cloud.closed = new Map();
+    // Set to (kind, payload) => true to let a write LAND and lose its answer.
+    cloud.loseAnswer = options.loseAnswer || null;
 
     function refuse(code, message) {
         const error = new Error(message);
@@ -676,6 +685,74 @@ export function makeCloud(options = {}) {
                 cloud.writes.push({ kind: 'update', patch });
                 publish();
             });
+        },
+        // THE SERVER-FIRST DOOR (v175), modelled on the production adapter's transact and
+        // on what firestore.rules require of it: the same receipt-then-revision order as
+        // update, protocol 2, a closed document that does not exist yet, and BOTH writes
+        // or neither. `cloud.loseAnswer(kind, payload)` returning true lets the write land
+        // and then fails the call the way a dropped connection does - no `unsent`, because
+        // by then something was staged.
+        transact(patch, closed) {
+            const docs = Array.isArray(closed) ? closed : [];
+            if (docs.length === 0) {
+                const none = refuse('no-closed-document', 'a pay book operation with no closed document');
+                return Promise.reject(none);
+            }
+            const problem = guard('transact', patch);
+            if (problem) {
+                if (problem.code === 'unavailable') problem.unsent = true;
+                return Promise.reject(problem);
+            }
+            return landing('transact', patch, () => {
+                if (!cloud.doc) throw refuse('not-found', 'No document to update');
+                if (cloud.protocol && receiptFor(patch.lastOpId)) {
+                    const disagrees = receiptDisagrees(patch);
+                    if (disagrees) throw disagrees;
+                    cloud.writes.push({ kind: 'transact', patch, replayed: true });
+                    return { replayed: true, revision: receiptFor(patch.lastOpId).revision };
+                }
+                const said = protocolProblem(patch, false);
+                if (said) throw said;
+                if (cloud.protocol && patch.protocol < 2) {
+                    throw refuse('permission-denied', 'the pay book needs protocol 2');
+                }
+                const there = docs.filter(one => cloud.closed.has(String(one.id))).map(one => String(one.id));
+                if (there.length > 0) {
+                    const exists = refuse('closed-exists', 'this account already has a closed document');
+                    exists.closed = there;
+                    exists.revision = (cloud.doc && cloud.doc.revision) || 0;
+                    exists.document = JSON.parse(JSON.stringify(cloud.doc));
+                    throw exists;
+                }
+                // What the rules ask of the pair: the closed document names this very
+                // operation and revision, and the schedule names the closed document.
+                if (docs.some(one => !one.data || one.data.opId !== patch.lastOpId
+                    || one.data.revision !== patch.revision) || patch.closedId !== String(docs[0].id)) {
+                    const unpaired = new Error('the closed document and the schedule do not name each other');
+                    unpaired.code = 'permission-denied';
+                    throw unpaired;
+                }
+                Object.keys(patch).forEach(path => setByPath(cloud.doc, path, patch[path]));
+                docs.forEach(one => cloud.closed.set(String(one.id), JSON.parse(JSON.stringify(one.data))));
+                landReceipt(patch);
+                cloud.writes.push({ kind: 'transact', patch, closed: docs.map(one => String(one.id)) });
+                publish();
+                if (cloud.loseAnswer && cloud.loseAnswer('transact', patch)) {
+                    const lost = new Error('the connection dropped before the answer');
+                    lost.code = 'unavailable';
+                    throw lost;
+                }
+            });
+        },
+        readClosed(id) {
+            if (!cloud.online) return Promise.reject(offlineError('read'));
+            return Promise.resolve(cloud.closed.has(String(id))
+                ? JSON.parse(JSON.stringify(cloud.closed.get(String(id)))) : null);
+        },
+        readReceipt(opId) {
+            if (!cloud.online) return Promise.reject(offlineError('read'));
+            const held = receiptFor(String(opId));
+            return Promise.resolve(held ? JSON.parse(JSON.stringify(held)) : null);
         },
         save(data) {
             const problem = guard('save', data);

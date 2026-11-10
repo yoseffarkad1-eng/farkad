@@ -19,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v174">
+<meta name="farkad-build" content="v176">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -704,11 +704,20 @@
 <script src="js/model/money.js"></script>
 <script src="js/model/migrate.js"></script>
 <script src="js/model/ledger.js"></script>
+<!-- v173, the pay book's model - shipped shut (FARKAD_FLAGS.paybook). After ledger.js, whose
+     writers and folds it calls, and ABOVE the sync group: boot.js reads the outbox the
+     moment it loads, that read validates every queued path, and a queued pay.<id> is
+     validated by payEntryProblems in this file. -->
+<script src="js/model/payroll.js"></script>
 <script src="js/sync/sync.js"></script>
 <script src="js/sync/restore.js"></script>
 <script src="js/sync/receive.js"></script>
 <script src="js/sync/send.js"></script>
 <script src="js/sync/status.js"></script>
+<!-- v175, the pay book's server-first door - shipped shut with it (FARKAD_FLAGS.paybook):
+     a closure, a payment or a void as ONE transaction of its own, never through the
+     queue. Above boot.js like every split of this group. -->
+<script src="js/sync/transact.js"></script>
 <!-- boot.js is last of the sync group and must stay last: its two lines RUN at load
      time. Any further split of this group goes ABOVE it. -->
 <script src="js/sync/boot.js"></script>

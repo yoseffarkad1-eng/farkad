@@ -214,6 +214,19 @@ the receipt's fingerprint against the operation it is about to repeat, and a mis
 `receipt-mismatch` — never acknowledged, never pruned from the queue, never reported as
 synced.
 
+## Protocol 2, and the pay book's rules (v175 — a development branch)
+
+`PROTOCOL` is 2 since v175. The envelope did not change shape; the number says "this build
+keeps the pay book", and `firestore.rules` on that branch reads it in exactly one place: a
+write that CHANGES the `pay` map must speak protocol 2, may only add entries, and must
+create its closed copy (`schedules/{doc}/closed/{id}`) in the same commit - `getAfter()`
+from both sides, the device the receipt uses. Every other write is judged as before, so a
+phone at protocol 1 keeps recording days; what it can no longer do is restore a document
+that would erase a pay book. The order in which those rules and the phones change is
+derived by measurement in `tests/paybook.split.emulator.test.mjs` and written as numbered
+steps in `docs/payroll-closure.md` («The rollout order, measured»), with
+`docs/firestore.rules.before-paybook` as the rollback artifact.
+
 **Nothing here has been published to the real project.** The rules in this repository are
 the tested artifact, not the live ones; publishing them is a human operation performed
 deliberately, and this file describes what will happen when someone does. No rules were

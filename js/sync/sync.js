@@ -936,6 +936,14 @@ function marksOf(path, value) {
 function replacesWhole(path) {
     const text = String(path);
     if (text.indexOf('days.') === 0 || text.indexOf('ledger.') === 0) return true;
+    // A PAY BOOK ENTRY (v173), for the ledger's reason and a stricter one. On the wire a
+    // field path REPLACES what is there, and the rules do not look inside the document -
+    // so the only thing between this phone's copy of `pay.<id>` and another phone's
+    // different one already on the server is the hold this classification switches on:
+    // the pre-send pass asks what the server holds now, and a different body there is
+    // held for a person instead of sent over it. Without this line the loser of two
+    // closures REWROTE the winner's statement on the cloud and both phones said synced.
+    if (text.indexOf('pay.') === 0) return true;
     // ONE FIELD OF ONE PERSON, and it is in this family for the same reason a day is.
     //
     // The roster used to be excluded whole, and the reason given was that it merges per
@@ -1086,7 +1094,15 @@ function replacementContent(source) {
         days: schedule.days,
         advances: schedule.advances,
         ledger: schedule.ledger,
-        vehicles: schedule.vehicles
+        vehicles: schedule.vehicles,
+        // The pay book and what is kept beside it (v173). "EVERY subtree" is the claim
+        // at the top of this function, and a device holding the days and the ledger of a
+        // replacement and none of its pay entries must not answer "yes, I have it". Both
+        // sides of every comparison come through normaliseSchedule just above, so a
+        // document from before the pay book reads `{}` and nothing-beside on both of
+        // them and compares exactly as it did.
+        pay: schedule.pay,
+        payConflicted: schedule.payConflicted
     });
 }
 
@@ -1687,6 +1703,53 @@ const FarkadSync = {
         // claim of one still unanswered passes to the operation that supersedes it.
         const handedOver = path => isRimaFieldPath(path)
             && all.some(op => op.path === path && (op.sent || this.tryMarkOf(op) !== null));
+        // A PAY BOOK ENTRY IS CREATED ONCE AND NEVER REWRITTEN (v173), and this is the
+        // one place that can be made true for every caller at once.
+        //
+        // The journal takes any (path, value): nothing here ever asked whether a value
+        // is one this app writes - only the READER does, which is how a bad entry used
+        // to cost the whole queue at the next open - and nothing could ask whether a
+        // path already holds something else. For `pay.<id>` both are asked, before a
+        // single operation is minted, and the answer is for the WHOLE batch, because a
+        // batch is one write and half a closure is not a closure:
+        //
+        //   a value the reader would refuse     a null is a deletion, and the rest is
+        //                                       an entry no build could have written
+        //   the id already queued here, or      with DIFFERENT content. The same content
+        //   already on this disk                under a second hand is the same fact and
+        //                                       passes - the send settles it against the
+        //                                       server's copy without replacing it
+        //   one id twice in the batch           with different content
+        //
+        // State.commitPaybook asks all of this first and answers with a reason; a batch
+        // refused HERE got past it, or never went through it, and is answered the only
+        // way this function can - not written. Asked of the DISK and of the QUEUE, never
+        // of memory: by the time a commit reaches the journal, memory already holds the
+        // entry being written.
+        // AND NO PAY PATH IS MINTED HERE AT ALL (v175), unless the old door is open - see
+        // paybookQueue in js/model/schema.js. A closure is one server transaction; an
+        // entry that reached this function would wait in the outbox like a day, be sent
+        // whenever the queue next drained and be cut wherever the write limit fell. A
+        // queue ALREADY holding one (written by an earlier build of this app) is still
+        // read and still sent - this is the minting path, not the reader.
+        if (typeof paybookQueueEnabled === 'function' && !paybookQueueEnabled()
+            && entries.some(entry => entry && typeof entry.path === 'string'
+                && entry.path.indexOf('pay.') === 0)) return false;
+        const payInBatch = new Map();
+        const rewritesPay = entries.some(entry => {
+            if (!entry || typeof entry.path !== 'string' || entry.path.indexOf('pay.') !== 0) {
+                return false;
+            }
+            if (journalEntryProblems(entry.path, entry.value).length > 0) return true;
+            const differs = held => held !== undefined && !ledgerPathSupersededBy(
+                entry.path, entry.value, held);
+            if (payInBatch.has(entry.path) && differs(payInBatch.get(entry.path))) return true;
+            payInBatch.set(entry.path, entry.value);
+            const queued = live.get(entry.path);
+            if (queued && differs(queued.value)) return true;
+            return Boolean(stored.schedule) && differs(readPath(stored.schedule, entry.path));
+        });
+        if (rewritesPay) return false;
         const inherited = new Map();
         entries.forEach(entry => {
             if (!entry || !entry.path) return;
@@ -3006,7 +3069,9 @@ const FarkadSync = {
         return entries.some(([path, item]) => {
             const parts = path.split('.');
             if (parts[0] === 'days' && parts.length === 4) return parts[3] === id;
-            if (parts[0] === 'advances' || parts[0] === 'ledger') {
+            // And a pay book entry (v173): a payment still on its way out names its man
+            // exactly as an advance does.
+            if (parts[0] === 'advances' || parts[0] === 'ledger' || parts[0] === 'pay') {
                 return Boolean(item && item.value && String(item.value.workerId) === id);
             }
             return false;

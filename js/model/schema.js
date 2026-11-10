@@ -60,7 +60,43 @@ const FARKAD_SHIPPED_FLAGS = {
     // same direction. The repayment control needs both gates: with the carry shut nothing
     // reads a repayment, and a man who hands back 200 is still deducted 500. A build that
     // opened one without the other would ship that, so tests/data.test.mjs pins the pair.
-    carryAdvances: true
+    carryAdvances: true,
+
+    // THE PAY BOOK'S WRITER (v173): statements, extra deductions, payments, voids,
+    // adjustments, the opening and the legacy answers - `pay.<id>`, js/model/payroll.js.
+    //
+    // OFF, and what that means is narrower than it sounds. A phone with this off does not
+    // CREATE a pay entry: every planner refuses with `gate` and State.commitPaybook
+    // refuses whatever reaches it. It still READS, KEEPS, MERGES, BACKS UP and RE-SENDS
+    // every pay entry that arrives from somewhere else - a gate that made a phone drop
+    // what it does not write would be the Rima exposure again (docs/releases.md, v166),
+    // on a record that says whether a man was paid.
+    //
+    // It is not `ledgerWrites`: the closure's own ledger entries are written today, by
+    // every phone, through the existing dialog. This gates only the new map, so opening
+    // it is a decision about a feature and not about the advances record.
+    //
+    // It opens when the owner says so and not before - and only after every phone is on
+    // a build that keeps `pay` (v173 or later): see THE ROLLOUT RULE in
+    // docs/payroll-closure.md, which is derived from what v167, v169 and v171 were
+    // measured doing with a document that carries one.
+    paybook: false,
+
+    // THE PAY BOOK'S OLD DOOR (v175): a pay entry journalled as an edit and sent by the
+    // ordinary queue. OFF IN EVERY BUILD, and not a feature waiting to be switched on.
+    //
+    // Phase 2 measured what that door does: a closure accepted with no signal, and one
+    // cut in two by the 296-path limit when a long queue is ahead of it. Since v175 a
+    // closure, a payment or a void is ONE server transaction of its own
+    // (js/sync/transact.js) and reaches this phone's record by being adopted from the
+    // server's document. With this off, State.commitPaybook answers `server-first` and
+    // the queue's one minting path refuses a `pay.` path whoever asks.
+    //
+    // It exists as a flag for one reason: the union, the conflict rule and the restore
+    // rule of Phase 2 are about two phones holding DIFFERENT pay entries, and the only
+    // way to produce that state in a suite is the door that used to produce it. The
+    // Phase 2 suites open it through the test seam; nothing else does.
+    paybookQueue: false
 };
 
 // FROZEN. `const` binds the name, not the object: anything holding a reference could set
@@ -133,6 +169,13 @@ function emptySchedule() {
         // Before it, normaliseSchedule left such an entry out of the object it built,
         // save() serialised that object over the record, and the only copy was gone.
         ledger: { advances: {}, unreadable: {} },
+        // THE PAY BOOK (v173) - see js/model/payroll.js. One entry per id, created once,
+        // never rewritten, never removed, merged by union: the ledger's laws on a map of
+        // its own. Named here because normaliseSchedule starts from this object and
+        // copies across what it recognises - a map it did not name is a map that leaves
+        // at the next save, which is what every build before v173 does with this one
+        // (measured in tests/paybook.oldbuilds.test.mjs).
+        pay: {},
         updatedAt: null,
         updatedBy: null
     };
@@ -431,7 +474,30 @@ function poisonedContainers(raw) {
         ['advances', 'migrations', 'unreadable', 'unreadableMigrations'].forEach(family =>
             look(ledger[family], `ledger.${family}`));
     }
+    // The pay book (v173) and the map that keeps the other side of a disagreement about
+    // one of its entries. Both are read by id, so both can be reparented by a name.
+    look(raw && raw.pay, 'pay');
+    look(raw && raw.payConflicted, 'payConflicted');
     return out;
+}
+
+// THE PAY BOOK'S CONTAINER, asked the question ledgerContainerProblem asks of the ledger's
+// and for the same reason: every check on an ENTRY needs a map to be an entry of. A `pay`
+// that arrived as a string or a list read as "no entries" - and the next whole-record
+// write would have put an empty pay book over whatever those bytes were.
+//
+// Absent and null are not malformed: every record written before v173 has neither.
+// Returns a reason in English, or null.
+function payContainerProblem(raw) {
+    const pay = raw && raw.pay;
+    if (pay !== undefined && pay !== null && !isPlainObject(pay)) {
+        return 'the pay book is not a record';
+    }
+    const beside = raw && raw.payConflicted;
+    if (beside !== undefined && beside !== null && !isPlainObject(beside)) {
+        return 'the held-aside part of the pay book is not a record';
+    }
+    return null;
 }
 
 // EVERY DAY UNDER A NAME THIS APP CANNOT READ AS A DATE - the rest of the same question.
@@ -554,6 +620,14 @@ function fullScheduleProblems(raw) {
     // container has nothing to hold entries in, and the honest answer at this door is no.
     if (typeof ledgerContainerProblem === 'function' && ledgerContainerProblem(raw) !== null) {
         problems.push('היסטוריית המקדמות בקובץ אינה בצורה שאפשר לקרוא.');
+    }
+    // AND THE PAY BOOK'S CONTAINER, on the same terms (v173). A replacement whose `pay`
+    // is a string or a list has nothing its entries could be read out of, and accepting
+    // it would send that to all three phones from a button that promises the opposite.
+    // An unreadable ENTRY is not asked here: it is carried where it lies and held by the
+    // fold - see normaliseSchedule - so the rescue door can still open the file.
+    if (payContainerProblem(raw) !== null) {
+        problems.push('רישום סגירות החשבון בקובץ אינו בצורה שאפשר לקרוא.');
     }
     // A NAME NOBODY CAN USE AS A KEY is deliberately NOT asked here.
     //
@@ -1221,6 +1295,25 @@ function journalEntryProblems(path, value) {
         return ['a ledger path nobody wrote'];
     }
 
+    // pay.<entry id> (v173) - one entry of the pay book. Append-only on the wire as on
+    // the disk, exactly as a ledger entry is: an entry may be CREATED and nothing else,
+    // so a null - a deletion in flight - is refused by payEntryProblems rather than
+    // applied, and so is anything this build could not itself have written. Whether the
+    // id already holds a DIFFERENT entry is not a question a path and a value can
+    // answer; the one minting path asks it of the disk (queueOperations in
+    // js/sync/sync.js), and the merge asks it of the other side (paybookUnion).
+    //
+    // Accepted whatever the `paybook` gate says. The gate decides whether this phone
+    // WRITES one; the queue of a phone that was handed one - by a restore, by a build
+    // with the gate open sharing its disk - still has to be readable, or the queue is
+    // quarantined and recording stops over a record this build understands perfectly.
+    if (parts[0] === 'pay') {
+        if (parts.length !== 2) return ['a pay path with the wrong number of segments'];
+        if (!isSafeSegment(parts[1])) return ['a pay path with an unusable id'];
+        if (typeof payEntryProblems !== 'function') return ['a pay path this build cannot read'];
+        return payEntryProblems(parts[1], value);
+    }
+
     // advances.<id> - or a deletion of one, which travels as null.
     if (parts[0] === 'advances') {
         if (parts.length !== 2) return ['an advance path with the wrong number of segments'];
@@ -1405,6 +1498,15 @@ function workerFootprint(schedule, workerId) {
     // Those immutable entries, and zero-advance period closures, are still history.
     const ledger = Object.keys((schedule && schedule.ledger && schedule.ledger.advances) || {})
         .filter(key => String(schedule.ledger.advances[key]?.workerId) === id);
+    // AND THE PAY BOOK (v173): a statement, a payment or a deduction naming him is his
+    // financial history exactly as a closure is, and it can be here without one - the
+    // wire does not promise order, so a payment may arrive before the closure it settles.
+    // Counted with the ledger's entries because the sentence the delete dialog already
+    // says about those - saved payment history or accounts - is the true one for these.
+    const payBook = (schedule && isPlainObject(schedule.pay)) ? schedule.pay : {};
+    Object.keys(payBook).forEach(key => {
+        if (isPlainObject(payBook[key]) && String(payBook[key].workerId) === id) ledger.push(key);
+    });
     const vehicles = ((schedule && schedule.vehicles) || [])
         .filter(vehicle => String(vehicle.ownerId) === id).map(vehicle => vehicle.id);
     Object.keys(allDays).forEach(date => {
@@ -1647,6 +1749,13 @@ function referencedEntityIds(schedule) {
     Object.values((schedule && schedule.ledger && schedule.ledger.advances) || {})
         .forEach(entry => {
             if (entry && isSafeId(String(entry.workerId || ''))) workers.add(String(entry.workerId));
+        });
+    // And the pay book's (v173), for the same reason: a payment recorded for a man who
+    // was deleted on another phone is still a payment, and it needs somebody to be to.
+    Object.values((schedule && isPlainObject(schedule.pay)) ? schedule.pay : {})
+        .forEach(entry => {
+            if (isPlainObject(entry) && typeof entry.workerId === 'string'
+                && isSafeId(entry.workerId)) workers.add(entry.workerId);
         });
     ((schedule && schedule.vehicles) || []).forEach(vehicle => {
         if (isSafeId(String(vehicle.ownerId || ''))) workers.add(String(vehicle.ownerId));
@@ -2196,12 +2305,77 @@ function accountsBefore(schedule, workerId, fromDate) {
 // on or before its own last day, so an entry made in September cannot move a number on a
 // fortnight somebody was already paid from in August.
 function advanceCarryInto(schedule, workerId, fromDate) {
+    return advanceCarryIntoUnder(schedule, workerId, fromDate, advanceDebtStays());
+}
+
+// ONE DEBT (the owner's ruling, 2026-11-10): an advance from a period that was never
+// closed stays a full debt until a person deducts it or the man hands it back.
+//
+// The walk used to settle such a period by itself. A fortnight nobody closed was read as
+// though it HAD been: min(what he owed, what he earned) came off inside the walk, nothing
+// was recorded anywhere, and the next account opened owing the remainder. advanceOutstanding
+// - the per-advance fold every card and every closure is judged by - never heard of that
+// deduction, because there was none. So one record gave two answers: «נשאר: 500» on the
+// advance and «nothing carried» on the account, and the dialog refused to deduct at a
+// later closure the very 500 the card said was still owed (Phase 1's finding 1, measured
+// on unchanged code and pinned as history in tests/payroll.test.mjs).
+//
+// With `stays`, a period with no closure passes its whole balance on: what was given,
+// less what came back, less what a correction says never moved - and no deduction, since
+// none was recorded. A CLOSED period is untouched: it reports its record, as it always
+// did. So the carry into any account is the sum of what advanceOutstanding says was left
+// on each advance as of the day before it opens, and there is one answer.
+//
+// BEHIND THE PAY BOOK'S GATE, and the gate is why there are not two calculators. The rule
+// is read from FARKAD_FLAGS once, here; every reader in the app - the sheet, the
+// statement, the existing dialog, the new planner - comes through advanceCarryInto, so a
+// build answers one way everywhere. It cannot open before the pay book because the owner
+// reads planDebtRuling on his real record first: this restates what open accounts say a
+// man owes, and a sheet that reprints differently from the one somebody was paid against
+// is the thing he ruled out. It cannot open after it because the pay book's closure lets
+// a person deduct an old advance, which the old walk refuses.
+function advanceDebtStays() {
+    return FARKAD_FLAGS.paybook === true;
+}
+
+// WHAT IS STILL THERE TO TAKE, when an account is closed out of order.
+//
+// The walk's balance for [.., toDate] is the debt as it stood on toDate. Under the old
+// rule that was also what could still come off at that account's closure, because the
+// walk had spent every earlier account's share inside that account and nowhere else.
+// Under the ruling a debt travels until somebody deducts it - so by the time an EARLIER
+// account is closed, a later closure or a later repayment may already have settled the
+// very advance its balance is made of. Measured while building this: 500 given in August
+// and never closed, 300 of it deducted at September's closure, and August's own closure
+// then offered the whole 500 again - 800 off a 500 advance.
+//
+// So what an unclosed account may deduct is capped by what the record says is left NOW on
+// the advances dated on or before its last day: for each, the lesser of what was left on
+// that day and what is left today. Infinity when the ruling is off - a build with the
+// gate shut computes exactly what it always did. `stays` is the rule the caller is
+// computing under; left out, it is this build's own.
+function advanceLiveRoom(schedule, workerId, toDate, stays) {
+    const ruled = stays === undefined ? advanceDebtStays() : stays === true;
+    if (!ruled || typeof outstandingWithout !== 'function'
+        || typeof advanceOutstanding !== 'function') return Infinity;
+    return agoraRound(advancesFor(schedule, workerId, '0000-01-01', toDate)
+        .reduce((sum, item) => sum + Math.min(
+            outstandingWithout(schedule, item.id, null, toDate).left,
+            advanceOutstanding(schedule, item.id).left), 0));
+}
+
+function advanceCarryIntoUnder(schedule, workerId, fromDate, stays) {
     let balance = 0;
     accountsBefore(schedule, workerId, fromDate).forEach(account => {
+        const walk = advanceWalk(schedule, workerId, account.from, account.to, balance, stays);
         // carriedForward, not carriedOut: the payslip is frozen, the money is not. See
-        // the two-balance block in advanceWalk.
-        balance = advanceWalk(schedule, workerId, account.from, account.to, balance)
-            .carriedForward;
+        // the two-balance block in advanceWalk. And for a period nobody closed under the
+        // ruling: the deduction the walk PROPOSED for it is put back, because a proposal
+        // is not a record. (carriedForward + deducted is the balance after the clamp at
+        // zero and before anything came off - exactly what advanceAccount rebuilds.)
+        balance = (stays && !walk.closed)
+            ? agoraRound(walk.carriedForward + walk.deducted)
+            : walk.carriedForward;
     });
     return agoraRound(balance);
 }
@@ -2232,7 +2406,11 @@ function frozenPeriodFor(schedule, workerId, fromDate, toDate) {
 // report below cannot disagree about the order of operations - and the order matters:
 // money handed back reduces what is owed BEFORE the wage is asked to cover the rest, or a
 // man who settled in cash is deducted for it a second time out of his pay.
-function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
+//
+// `stays` is the one-debt rule this walk is computed under (advanceDebtStays): left out,
+// it is this build's own, which is what every screen and every writer gets. Only the two
+// callers that compare the rules - advanceCarryIntoUnder and planDebtRuling - pass it.
+function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn, stays) {
     const given = advancesTotal(schedule, workerId, fromDate, toDate);
     const repaid = advanceRepaymentsFor(schedule, workerId, fromDate, toDate);
     // Reported whole, so a statement can name the corrections without calling any of them
@@ -2319,7 +2497,14 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
         ? agoraRound(closed.deducted)
         : (gross === null || overpaid > 0
             ? 0
-            : agoraRound(Math.min(balance, Math.max(gross, 0))));
+            // (advanceLiveRoom is asked only where it could bind. A walk runs on through
+            // empty fortnights for as long as a debt stands - planAdvanceCarry walks four
+            // thousand of them - and a period with no wage proposes nothing whatever is
+            // left on the advances; folding the ledger once per empty period, per advance,
+            // made every planner on a record with an open debt take seconds. Measured.)
+            : (Math.min(balance, Math.max(gross, 0)) <= 0 ? 0
+                : agoraRound(Math.min(balance, Math.max(gross, 0),
+                    advanceLiveRoom(schedule, workerId, toDate, stays)))));
 
     // TWO BALANCES OUT OF A CLOSED PERIOD, and the difference between them is the whole
     // point.
@@ -2385,7 +2570,10 @@ function advanceAccount(schedule, workerId, fromDate, toDate, deduction) {
     // journals the whole account. Historical closed accounts retain their figures.
     if (deduction === undefined || account.closed) return account;
     const balance = agoraRound(account.carriedForward + account.deducted);
-    const limit = account.gross === null ? 0 : Math.min(balance, Math.max(0, account.gross));
+    // And never more than is still on the advances it would come off - see
+    // advanceLiveRoom. Without the ruling that is no cap at all.
+    const limit = account.gross === null ? 0 : Math.min(balance, Math.max(0, account.gross),
+        advanceLiveRoom(schedule, workerId, toDate));
     const invalid = typeof deduction !== 'number' || !Number.isFinite(deduction)
         || deduction < 0 || deduction > limit || account.review;
     const off = invalid ? 0 : agoraRound(deduction);
@@ -2414,9 +2602,26 @@ function planAdvanceCarry(schedule) {
 
         const first = toLocalDateStr(accountStart(parseLocalDate(advances[0].date)));
         const lastDated = advances[advances.length - 1].date;
+        // THE LAST DAY ANYTHING ON THE RECORD IS DATED. Past it there is no wage and no
+        // movement, so no account can produce a row: nothing given, nothing to deduct
+        // from. The walk used to run on regardless while a debt stood - four thousand
+        // empty fortnights, a century and a half - which cost nothing while the old walk
+        // settled every debt out of the next wage it met, and under the one-debt ruling,
+        // where a debt stands until somebody deducts it, cost over a second per call on
+        // the gate every financial control asks (measured: 1,415 ms against 4). The rows
+        // are the same either way; the walk just stops where the record does.
+        let horizon = lastDated;
+        Object.keys((schedule && schedule.days) || {}).forEach(day => { if (day > horizon) horizon = day; });
+        const entries = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+        Object.keys(entries).forEach(id => {
+            const entry = entries[id];
+            if (!entry) return;
+            if (typeof entry.date === 'string' && entry.date > horizon) horizon = entry.date;
+            if (typeof entry.periodTo === 'string' && entry.periodTo > horizon) horizon = entry.periodTo;
+        });
         let at = first;
         let balance = 0;
-        for (let n = 0; n < 4000; n += 1) {
+        for (let n = 0; n < 4000 && at <= horizon; n += 1) {
             const to = advanceDayStep(at, 13);
             const walked = advanceWalk(schedule, workerId, at, to, balance);
             // What the report says TODAY, with the carry off: every advance dated in the
@@ -2442,6 +2647,152 @@ function planAdvanceCarry(schedule) {
         }
     });
 
+    return out;
+}
+
+// WHAT THE ONE-DEBT RULING WOULD CHANGE ON THIS RECORD, without changing any of it.
+//
+// The courtesy planRateStamping and planAdvanceCarry give, for the same reason: the
+// ruling (advanceDebtStays, above) restates what open accounts say a man owes, and this
+// app cannot know which of those unclosed fortnights were in fact settled by hand in an
+// envelope and never closed on a phone. The owner can. So before the gate opens he reads
+// this, on his real record: every advance the old walk had silently counted as taken from
+// the wage of a period nobody closed, and every figure that reads differently because of
+// it. It writes nothing, returns no changes, and nothing in the app applies it.
+//
+// Both answers are computed here by the same walk with the rule passed in, whatever this
+// build's own gate says - so the report reads the same on a phone with the pay book shut
+// (where the old column is what the screens print) and on one with it open.
+//
+// Per man with at least one advance:
+//
+//   advances   one row per (advance, never-closed period): `assumed` is what the old walk
+//              took off that advance inside that period with no record of it. `left` is
+//              advanceOutstanding's answer - the recorded one, the same under both rules.
+//   figures    one row per account figure that moves: carriedIn, deducted (the PROPOSAL
+//              on an open account), net, carriedForward, and lateSinceClose on a closed
+//              one. A closed account's own frozen figures - carriedIn, gross, deducted,
+//              carriedOut - are never in this list, because they never move.
+//   debt       what the account walk says he owes going into the last account walked,
+//              old and new, beside `recorded`: the sum of advanceOutstanding over what was
+//              given before it. Under the ruling `new` and `recorded` are one number.
+//
+// `through` is the day the walk runs to: the caller's today, or - with none given - the
+// last day anything about this man is dated on the record, so the report is a function of
+// the record alone.
+function planDebtRuling(schedule, today) {
+    const out = { rule: 'debt-stays-until-deducted', active: advanceDebtStays(),
+        through: null, workers: [], changes: [] };
+    const all = (schedule && Array.isArray(schedule.workers)) ? schedule.workers : [];
+    const held = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+    const days = Object.keys((schedule && schedule.days) || {}).filter(isRealDate).sort();
+    const asked = (typeof today === 'string' && isRealDate(today)) ? today : null;
+    out.through = asked;
+
+    all.forEach(worker => {
+        if (!worker || worker.id === undefined) return;
+        const workerId = String(worker.id);
+        const advances = advancesFor(schedule, workerId, '0000-01-01', '9999-12-31');
+        if (advances.length === 0) return;
+
+        let last = advances[advances.length - 1].date;
+        Object.keys(held).forEach(id => {
+            const entry = held[id];
+            if (!entry || !isRealDate(entry.date)) return;
+            const of = entry.advanceId ? ((schedule.advances || {})[entry.advanceId] || null) : null;
+            const whose = entry.workerId !== undefined ? String(entry.workerId)
+                : (of ? String(of.workerId) : '');
+            if (whose === workerId && entry.date > last) last = entry.date;
+            if (whose === workerId && isRealDate(entry.periodTo) && entry.periodTo > last) {
+                last = entry.periodTo;
+            }
+        });
+        for (let at = days.length - 1; at >= 0 && days[at] > last; at -= 1) {
+            const day = schedule.days[days[at]];
+            const there = isPlainObject(day) && isPlainObject(day.actual)
+                && Object.prototype.hasOwnProperty.call(day.actual, workerId);
+            if (there) { last = days[at]; break; }
+        }
+        const through = asked !== null ? asked : last;
+        const current = periodRangeFor(worker, through);
+        const periods = accountsBefore(schedule, workerId, current.from)
+            .concat(current.from >= periodRangeFor(worker, advances[0].date).from
+                ? [{ from: current.from, to: current.to }] : []);
+
+        const rows = [];
+        const figures = [];
+        const spent = {};
+        let oldIn = 0;
+        let newIn = 0;
+        periods.forEach((period, index) => {
+            const isLast = index === periods.length - 1;
+            const before = advanceWalk(schedule, workerId, period.from, period.to, oldIn, false);
+            const after = advanceWalk(schedule, workerId, period.from, period.to, newIn, true);
+            const moved = (figure, was, now) => {
+                if (was === now) return;
+                figures.push({ figure, from: period.from, to: period.to,
+                    closed: before.closed, old: was, new: now });
+            };
+            moved('carriedIn', before.carriedIn, after.carriedIn);
+            if (!before.closed) {
+                // On an account nobody closed these are what the sheet PROPOSES, and on
+                // every such account but the last they are what the old walk then treated
+                // as done.
+                moved('deducted', before.deducted, isLast ? after.deducted : 0);
+                moved('net', before.net, isLast ? after.net
+                    : (after.gross === null ? null : after.gross));
+            } else {
+                moved('lateSinceClose', before.lateSinceClose, after.lateSinceClose);
+            }
+
+            if (!before.closed && !isLast && before.deducted > 0) {
+                // WHICH ADVANCE the old walk's silent deduction came off: oldest first
+                // among what the record says was still owed on this period's last day -
+                // the order the existing dialog spends a chosen total in.
+                let room = before.deducted;
+                advances.filter(item => item.date <= period.to).forEach(item => {
+                    if (room <= 0) return;
+                    const state = typeof outstandingWithout === 'function'
+                        ? outstandingWithout(schedule, item.id, null, period.to)
+                        : { left: Number(item.amount) || 0, given: Number(item.amount) || 0 };
+                    const open = agoraRound(state.left - (spent[item.id] || 0));
+                    const off = agoraRound(Math.min(room, open));
+                    if (off <= 0) return;
+                    room = agoraRound(room - off);
+                    spent[item.id] = agoraRound((spent[item.id] || 0) + off);
+                    const live = typeof advanceOutstanding === 'function'
+                        ? advanceOutstanding(schedule, item.id) : state;
+                    rows.push({ advanceId: String(item.id), date: String(item.date),
+                        given: live.given, left: live.left,
+                        from: period.from, to: period.to, assumed: off });
+                });
+            }
+
+            const oldOut = before.carriedForward;
+            const newOut = (!after.closed && !isLast)
+                ? agoraRound(after.carriedForward + after.deducted) : after.carriedForward;
+            if (!isLast) {
+                moved('carriedForward', oldOut, newOut);
+                oldIn = oldOut;
+                newIn = newOut;
+            }
+        });
+
+        const opens = periods.length > 0 ? periods[periods.length - 1].from : current.from;
+        const recorded = agoraRound(advances.filter(item => item.date < opens)
+            .reduce((sum, item) => sum + (typeof outstandingWithout === 'function'
+                ? outstandingWithout(schedule, item.id, null, advanceDayStep(opens, -1)).left
+                : 0), 0));
+        if (rows.length === 0 && figures.length === 0) return;
+        out.workers.push({
+            workerId,
+            name: String(worker.name || ''),
+            through,
+            advances: rows,
+            figures,
+            debt: { asOf: opens, old: agoraRound(oldIn), new: agoraRound(newIn), recorded }
+        });
+    });
     return out;
 }
 

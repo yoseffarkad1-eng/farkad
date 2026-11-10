@@ -244,6 +244,99 @@ service cloud.firestore {
         && receipt.opFingerprint == request.resource.data.opFingerprint;
     }
 
+    // ---------------------------------------------------------------- the pay book
+    //
+    // `pay` is the map that says whether a man was paid: closures, payments, voids. Until
+    // v175 these rules looked at who wrote, at the envelope and at the receipt, and at
+    // nothing inside the document - so, measured on the emulator with the rules as they
+    // stood (tests/paybook.emulator.test.mjs, v173): an account on the list could REWRITE
+    // a pay entry, DELETE one, and write a whole document with no `pay` at all. A build
+    // from before the pay book does the third without meaning to: it has never heard of
+    // the map, drops it from its own copy, and its restore then erases it from the cloud
+    // for all three phones (measured on v167, v169 and v171).
+    //
+    // Three rules close that, and they bind only a write that TOUCHES the map - a phone
+    // that has not updated goes on recording days exactly as before, because a field-path
+    // update of a day leaves `pay` as it was:
+    //
+    //   1. the writer speaks protocol 2. A build that predates the pay book speaks 1, so
+    //      whatever it sends that would change the map - which can only be a whole
+    //      document without it - is refused, loudly, with its work still on the phone;
+    //   2. the map only grows: no entry removed, no entry changed. Append-only on the
+    //      server, where no version of the client can break it;
+    //   3. the write creates, IN THE SAME COMMIT, the document under closed/ that it
+    //      names - a create-once copy of what it adds. See match /closed below.
+    //
+    // An absent map and an empty one are the same thing here, deliberately. This build
+    // writes `pay: {}` in a whole document and an older one writes none; calling that a
+    // touch would refuse every older build's restore the moment a newer one had written,
+    // for a difference that holds nobody's money.
+    function payBefore() {
+      return resource.data.get('pay', {});
+    }
+
+    function payAfter() {
+      return request.resource.data.get('pay', {});
+    }
+
+    function touchesPay() {
+      return payAfter() != payBefore();
+    }
+
+    function speaksPaybook() {
+      return request.resource.data.protocol is int
+        && request.resource.data.protocol >= 2;
+    }
+
+    function payOnlyGrows() {
+      return payAfter().diff(payBefore()).removedKeys().size() == 0
+        && payAfter().diff(payBefore()).changedKeys().size() == 0;
+    }
+
+    // The closed document this write names, as it stands AFTER this commit: it must be
+    // there, and it must say it was written by this very operation at this very revision.
+    // getAfter is what says "together" - the same device carriesReceipt uses - so a pay
+    // entry cannot land in the schedule without its create-once copy, and (from the other
+    // side, closedMatchesSchedule) a copy cannot be created without the schedule write.
+    function carriesClosed(docId) {
+      let closed = getAfter(/databases/$(database)/documents/schedules/$(docId)/closed/$(request.resource.data.closedId)).data;
+      return request.resource.data.closedId is string
+        && request.resource.data.closedId.size() > 0
+        && request.resource.data.closedId.size() < 128
+        && closed.opId == request.resource.data.lastOpId
+        && closed.revision == request.resource.data.revision;
+    }
+
+    function payGuard(docId) {
+      return !touchesPay()
+        || (speaksPaybook() && payOnlyGrows() && carriesClosed(docId));
+    }
+
+    // The first write of a project has nothing to compare against. It may carry a pay
+    // book only on the same terms: protocol 2, and its closed copy beside it.
+    function payGuardOnCreate(docId) {
+      return payAfter().size() == 0
+        || (speaksPaybook() && carriesClosed(docId));
+    }
+
+    // AND THE SCHEDULE MUST MOVE IN THIS COMMIT. Measured before the last line existed:
+    // the schedule stays pointing at its latest operation until the next write, so a
+    // closed document naming THAT operation and revision satisfied the first three lines
+    // with no schedule write anywhere near it - a second "closure" hung on an operation
+    // that never created it. The revision before this commit has to be exactly one less
+    // than the revision the closed document claims, which is true only of the commit
+    // that takes the schedule there. A schedule that does not exist yet is the first
+    // write of a project, and counts as revision nothing.
+    function closedMatchesSchedule(docId) {
+      let after = getAfter(/databases/$(database)/documents/schedules/$(docId)).data;
+      return after.lastOpId == request.resource.data.opId
+        && after.revision == request.resource.data.revision
+        && after.protocol >= 2
+        && (!exists(/databases/$(database)/documents/schedules/$(docId))
+            || get(/databases/$(database)/documents/schedules/$(docId)).data.get('revision', 0)
+                 == request.resource.data.revision - 1);
+    }
+
     match /schedules/{docId} {
       allow read: if allowed();
 
@@ -252,6 +345,7 @@ service cloud.firestore {
         && versioned()
         && firstRevision()
         && carriesReceipt(docId)
+        && payGuardOnCreate(docId)
         && (!isFullReplacement() || fullDocumentOk());
 
       allow update: if allowed()
@@ -269,6 +363,9 @@ service cloud.firestore {
           // Or a phone that has not updated yet, while the document is still legacy.
           || legacyWrite()
         )
+        // Whichever branch let it in: nothing changes the pay book except a protocol-2
+        // write that only adds to it and creates its closed copy in the same commit.
+        && payGuard(docId)
         && (!isFullReplacement() || fullDocumentOk());
 
       // Nothing deletes the schedule. It is the record of who worked where.
@@ -303,6 +400,33 @@ service cloud.firestore {
           && request.resource.data.revision is int
           && request.resource.data.revision >= 1
           && receiptMatchesSchedule(docId, opId);
+        allow update, delete: if false;
+      }
+
+      // CLOSED HISTORY: one document per closure, payment or correction, created once.
+      //
+      // The schedule is one document and Firestore refuses one over a mebibyte; closures
+      // are what fill it (docs/payroll-closure.md, Capacity). So what a closure froze
+      // lives here, in a document of its own - and here it is also something the pay
+      // book has never had on the server: append-only. CREATE only. Not update, so a
+      // frozen payslip can never be restated by a later state of anybody's phone; not
+      // delete, so no tap and no bug in any build can lose one.
+      //
+      // AND NEVER ALONE, for the reason a receipt is never alone. A closed document says
+      // "this closure happened". One that could be created without the schedule write it
+      // belongs to is a closure the account does not know about - a man shown as paid
+      // from a record nothing applied. So it is creatable only in the commit that leaves
+      // the schedule pointing at this operation, at this revision, written by a build
+      // that speaks protocol 2.
+      match /closed/{entryId} {
+        allow read: if allowed();
+        allow create: if allowed()
+          && request.resource.data.opId is string
+          && request.resource.data.opId.size() > 0
+          && request.resource.data.opId.size() < 128
+          && request.resource.data.revision is int
+          && request.resource.data.revision >= 1
+          && closedMatchesSchedule(docId);
         allow update, delete: if false;
       }
     }

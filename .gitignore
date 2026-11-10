@@ -23,6 +23,10 @@ js/sync/_adapter-bootstrap-test.mjs
 js/sync/_bootstrap-test-config.mjs
 js/sync/_adapter-money-test.mjs
 js/sync/_money-test-config.mjs
+js/sync/_adapter-paybook-test.mjs
+js/sync/_paybook-test-config.mjs
+js/sync/_adapter-split-*-test.mjs
+js/sync/_split-test-config.mjs
 
 # The gate logs. Every round writes its release-gate output beside the tree it ran in -
 # .gate-release.log, .gate-node.log, .storm-serial.log - and the numbers that matter are
