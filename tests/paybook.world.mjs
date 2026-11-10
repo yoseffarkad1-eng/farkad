@@ -37,7 +37,16 @@ export const canonical = value => {
 // THE GATE, spelled once. A device built with WRITER_ON is the build somebody will one
 // day ship with the pay book open; a device built with no flags is exactly what a person
 // installs today, and every claim about "the shipped state" is made on one of those.
-export const WRITER_ON = { paybook: true };
+//
+// AND THE OLD DOOR WITH IT (v175). These four suites are about what Phase 2 built: the
+// record's storage, its union between phones, its conflict rule, its restore rule. Every
+// one of those is exercised by putting a pay entry on ONE phone and letting the queue
+// carry it - the only way two phones ever come to hold different pay entries. Since v175
+// that door is shut in every build (FARKAD_FLAGS.paybookQueue; a closure is one server
+// transaction, tests/paybook.transact.test.mjs), so the suites open it here, by name. A
+// device built with SERVER_FIRST is the build that will ship with the pay book open.
+export const WRITER_ON = { paybook: true, paybookQueue: true };
+export const SERVER_FIRST = { paybook: true };
 
 let made = 0;
 export function payDevice(options = {}) {

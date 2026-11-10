@@ -72,7 +72,7 @@ export function patchToUpdateArgs(patch) {
     return args;
 }
 
-export function firestoreOps(db, scheduleRef, receiptRef) {
+export function firestoreOps(db, scheduleRef, receiptRef, closedRef) {
     // One write, one receipt, one transaction. `apply` does the schedule half.
     //
     // A FAILURE BEFORE ANYTHING WAS WRITTEN SAYS SO (`unsent`, v166). The client keeps a note
@@ -80,7 +80,11 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
     // lost after it landed - and an attempt that never got as far as staging its writes
     // (no signal for the first read, a refusal thrown before the writes) is certainly not
     // on it. Any attempt that staged writes may have committed, and is not marked.
-    function withReceipt(payload, apply) {
+    //
+    // `prepare`, when there is one, is every OTHER read the operation needs - Firestore
+    // wants all of a transaction's reads before its first write - and it may refuse. It is
+    // handed the transaction and the schedule as this transaction read it.
+    function withReceipt(payload, apply, prepare) {
         let staged = false;
         return runTransaction(db, transaction =>
             transaction.get(receiptRef(payload.lastOpId)).then(receipt =>
@@ -176,6 +180,8 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
                         error.document = JSON.parse(JSON.stringify(snapshot.data()));
                         throw error;
                     }
+                    return prepare ? prepare(transaction, snapshot) : null;
+                }).then(() => {
                     staged = true;
                     apply(transaction);
                     transaction.set(receiptRef(payload.lastOpId), {
@@ -298,6 +304,61 @@ export function firestoreOps(db, scheduleRef, receiptRef) {
             return withReceipt(patch, transaction => {
                 transaction.update(scheduleRef, ...patchToUpdateArgs(patch));
             });
+        },
+        // A CLOSURE, A PAYMENT, A VOID: the schedule and its closed copy, or neither.
+        //
+        // The same transaction as update() - receipt first, then the compare-and-set on
+        // the revision - with one more document in it: closed/<id>, created once, holding
+        // what this operation adds to the pay book. Firestore commits a transaction's
+        // writes together or not at all, and firestore.rules refuses each half without
+        // the other (carriesClosed and closedMatchesSchedule, both through getAfter), so
+        // there is no instant at which the account says "closed" and the frozen copy does
+        // not exist, or the reverse.
+        //
+        // CREATED ONCE, checked here because the rules cannot say it helpfully. A `set`
+        // over a closed document that already exists is an update, which the rules refuse
+        // as permission-denied - the same words as "you are not on the list". So the
+        // document is read inside the transaction first, and one that is already there is
+        // answered as what it is: somebody else closed this account, here is the document
+        // as it stands, nothing was written.
+        transact(patch, closed) {
+            const docs = Array.isArray(closed) ? closed : [];
+            if (typeof closedRef !== 'function' || docs.length === 0) {
+                const error = new Error('a pay book operation with no closed document to create');
+                error.code = 'no-closed-document';
+                error.unsent = true;
+                return Promise.reject(error);
+            }
+            return withReceipt(patch, transaction => {
+                transaction.update(scheduleRef, ...patchToUpdateArgs(patch));
+                docs.forEach(one => transaction.set(closedRef(one.id), one.data));
+            }, (transaction, snapshot) => Promise.all(
+                docs.map(one => transaction.get(closedRef(one.id)))).then(found => {
+                const there = found.map((entry, at) => (entry.exists() ? docs[at].id : null))
+                    .filter(id => id !== null);
+                if (there.length === 0) return;
+                const error = new Error('this account already has a closed document');
+                error.code = 'closed-exists';
+                error.closed = there;
+                error.revision = snapshot.data().revision;
+                error.document = JSON.parse(JSON.stringify(snapshot.data()));
+                throw error;
+            }));
+        },
+        // The receipt of one operation, or null: the server's own record that it was
+        // applied, and at which revision. How a phone that lost an answer - or was
+        // reloaded before one came - learns what happened WITHOUT sending again.
+        readReceipt(opId) {
+            return getDoc(receiptRef(opId)).then(snapshot =>
+                (snapshot.exists() ? JSON.parse(JSON.stringify(snapshot.data())) : null));
+        },
+        // One closed document, as the server holds it, or null. What the client reads
+        // back before it says «נסגר», and what a phone fetches when somebody opens the
+        // detail of a closure it does not hold.
+        readClosed(id) {
+            if (typeof closedRef !== 'function') return Promise.resolve(null);
+            return getDoc(closedRef(id)).then(snapshot =>
+                (snapshot.exists() ? JSON.parse(JSON.stringify(snapshot.data())) : null));
         },
         save(data) {
             return withReceipt(data, transaction => {
@@ -461,7 +522,11 @@ if (!isConfigured()) {
         const receiptRef = opId =>
             doc(db, ...SCHEDULE_DOC_PATH.split('/'), 'receipts', String(opId));
 
-        const ops = firestoreOps(db, scheduleRef, receiptRef);
+        // And the closed history beside them: schedules/{docId}/closed/{id}.
+        const closedRef = id =>
+            doc(db, ...SCHEDULE_DOC_PATH.split('/'), 'closed', String(id));
+
+        const ops = firestoreOps(db, scheduleRef, receiptRef, closedRef);
 
         window.FarkadSync.connect({
             // Firestore merges dotted field paths server-side, so two people writing
@@ -501,6 +566,12 @@ if (!isConfigured()) {
             // tests/build.test.mjs now reads this literal against firestoreOps.
             bootstrap: ops.bootstrap,
             read: ops.read,
+
+            // The server-first door (js/sync/transact.js): one closure, payment or void
+            // as one transaction with its create-once closed document, and the read-back.
+            transact: ops.transact,
+            readClosed: ops.readClosed,
+            readReceipt: ops.readReceipt,
 
             // Sync is not a backup: a deletion syncs as faithfully as a correction, and
             // by the time it is noticed every phone agrees with it. These are the copies

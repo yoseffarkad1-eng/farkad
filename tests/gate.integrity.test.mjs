@@ -334,11 +334,17 @@ function commitSubject(git, sha) {
     // writer, and it arrives the way this section asks a flag to arrive - with a decision
     // about its default, which is SHUT. The line above did not move: what is open in the
     // shipped build is still exactly carry and deletion.
-    same('and the shipped flags are the four that were argued over',
+    //
+    // MOVED AT v175, deliberately: four became five. `paybookQueue` is the pay book's OLD
+    // door - an entry journalled as an edit and sent by the ordinary queue - and it is
+    // declared so that it can be declared SHUT: since v175 a closure is one server
+    // transaction (js/sync/transact.js). What is open in the shipped build has not moved.
+    same('and the shipped flags are the five that were argued over',
         declared.map(one => one.flag).sort(),
-        ['carryAdvances', 'paybook', 'permanentDeletion', 'vehicles']);
-    same('the pay book\'s writer ships shut',
-        declared.filter(one => one.flag === 'paybook').map(one => one.value), ['false']);
+        ['carryAdvances', 'paybook', 'paybookQueue', 'permanentDeletion', 'vehicles']);
+    same('the pay book\'s writer ships shut, and so does its old door through the queue',
+        declared.filter(one => one.flag === 'paybook' || one.flag === 'paybookQueue').map(one => one.value),
+        ['false', 'false']);
 
     const ledger = readFileSync(join(ROOT, 'js/model/ledger.js'), 'utf8');
     check('the paired ledger writer is enabled in the same build',

@@ -63,7 +63,14 @@ Object.assign(FarkadSync, {
     // The base is READ, never assumed. It comes from the last snapshot the server sent -
     // the only revision this device can honestly claim to have seen - so a write built
     // against a base that has moved is refused rather than landing on somebody's evening.
-    PROTOCOL: 1,
+    //
+    // TWO SINCE v175, and the number is what the rules read. Nothing in the envelope
+    // changed shape: a build that says 2 is saying "I keep the pay book" - it carries
+    // `pay` through every whole-document write and never rewrites an entry of it. The
+    // rules (firestore.rules, payGuard) let only such a build change that map, which is
+    // what turns "no phone on an older build may restore" from a promise into a refusal.
+    // Every other write of an older build - protocol 1 - is accepted exactly as before.
+    PROTOCOL: 2,
     _revision: null,
 
     // THE REVISION THIS DEVICE HAS ADOPTED SURVIVES THE APP BEING CLOSED.
@@ -1400,6 +1407,9 @@ Object.assign(FarkadSync, {
     noteCloudHeard() {
         if (this._heardFromCloud) return;
         this._heardFromCloud = true;
+        // A pay book operation left in doubt by a reload or a lost signal can be
+        // settled now - by looking, never by sending again. js/sync/transact.js.
+        if (typeof this.payCloudHeard === 'function') this.payCloudHeard();
         if (this.adapter && this.pendingCount() > 0) this.scheduleFlush();
     },
 

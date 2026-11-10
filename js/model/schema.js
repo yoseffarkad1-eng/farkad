@@ -80,7 +80,23 @@ const FARKAD_SHIPPED_FLAGS = {
     // a build that keeps `pay` (v173 or later): see THE ROLLOUT RULE in
     // docs/payroll-closure.md, which is derived from what v167, v169 and v171 were
     // measured doing with a document that carries one.
-    paybook: false
+    paybook: false,
+
+    // THE PAY BOOK'S OLD DOOR (v175): a pay entry journalled as an edit and sent by the
+    // ordinary queue. OFF IN EVERY BUILD, and not a feature waiting to be switched on.
+    //
+    // Phase 2 measured what that door does: a closure accepted with no signal, and one
+    // cut in two by the 296-path limit when a long queue is ahead of it. Since v175 a
+    // closure, a payment or a void is ONE server transaction of its own
+    // (js/sync/transact.js) and reaches this phone's record by being adopted from the
+    // server's document. With this off, State.commitPaybook answers `server-first` and
+    // the queue's one minting path refuses a `pay.` path whoever asks.
+    //
+    // It exists as a flag for one reason: the union, the conflict rule and the restore
+    // rule of Phase 2 are about two phones holding DIFFERENT pay entries, and the only
+    // way to produce that state in a suite is the door that used to produce it. The
+    // Phase 2 suites open it through the test seam; nothing else does.
+    paybookQueue: false
 };
 
 // FROZEN. `const` binds the name, not the object: anything holding a reference could set

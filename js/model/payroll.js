@@ -711,6 +711,12 @@ function paybookCommitPlan(schedule, changes) {
     if (!paybookWritesEnabled()
         || (typeof financialWritingEnabled === 'function' && !financialWritingEnabled(schedule))) {
         paybookAddReason(reasons, 'gate');
+    } else if (!paybookQueueEnabled()) {
+        // THE QUEUE IS NOT THE PAY BOOK'S DOOR ANY MORE (v175). A pay entry is written by
+        // one server transaction (js/sync/transact.js) and adopted from the server's
+        // document; committing one here would journal it as an edit and leave it in the
+        // outbox - a closure accepted offline, which the owner ruled out.
+        paybookAddReason(reasons, 'server-first');
     }
     const book = paybookMap(schedule);
     const beside = (schedule && isPlainObject(schedule.payConflicted)) ? schedule.payConflicted : {};
@@ -1372,9 +1378,18 @@ function paybookGateReasons(schedule, stamp) {
     // this phone create pay entries at all"; financialWritingEnabled is the record's
     // answer to "may anything be written against these accounts". Either one shut is
     // `gate` - a caller has nothing different to do about the two.
+    //
+    // THE THIRD ANSWER (v175): `carry-approval-needed`. The build writes money and this
+    // record's carry has not been approved - the one shut gate a person can open, on the
+    // spot, with one sentence and one button. Answered as its own code so that a screen
+    // never has to translate "everything financial is locked" as "not available": the
+    // owner's requirement of 2026-11-10. paybookCarryApproval has what the screen shows.
     if (!paybookWritesEnabled()
-        || (typeof financialWritingEnabled === 'function' && !financialWritingEnabled(schedule))) {
+        || (typeof ledgerWritesEnabled === 'function' && !ledgerWritesEnabled())
+        || (typeof advanceCarryEnabled === 'function' && !advanceCarryEnabled())) {
         out.push('gate');
+    } else if (typeof financialWritingEnabled === 'function' && !financialWritingEnabled(schedule)) {
+        out.push('carry-approval-needed');
     }
     if (!paybookMayClose(stamp)) out.push('permission');
     return out;
@@ -1664,8 +1679,12 @@ function planClosure(schedule, worker, period, choices, stamp) {
     const ids = { statementId, artifactId, deductionIds: [], extraIds: [], paymentId: null };
 
     if (reasons.length > 0) {
-        return { kind: 'closure', ok: false, canClose: false, reasons, changes: [], input,
+        const refused = { kind: 'closure', ok: false, canClose: false, reasons, changes: [], input,
             expects, review, ids };
+        if (reasons.indexOf('carry-approval-needed') !== -1) {
+            refused.carryApproval = paybookCarryApproval(schedule);
+        }
+        return refused;
     }
 
     // --- build it, on a copy, with the ledger's own writers.
@@ -1701,6 +1720,17 @@ function planClosure(schedule, worker, period, choices, stamp) {
     // app would hold aside at the next boot is the fault recordedAfter's block describes -
     // a phone put into recovery by a closure nobody disagreed about.
     if (changes.some(change => closureProblems(draft, change.value).length > 0)) return rejected();
+
+    // AND IT MAY NOT LOCK THE RECORD BEHIND ITSELF. A deduction that is not exactly the
+    // advance given in that fortnight makes the carry "migration" needed (Phase 1,
+    // finding 2), and on a record where nobody has approved the carry that shuts every
+    // financial control the moment this closure lands - with nothing on any screen saying
+    // why. So the closure is refused BEFORE it is written, with the code a screen can act
+    // on; the person approves (planCarryApproval), and closes.
+    if (paybookWouldLock(draft)) {
+        return { kind: 'closure', ok: false, canClose: false, reasons: ['carry-approval-needed'],
+            changes: [], input, expects, review, ids, carryApproval: paybookCarryApproval(draft) };
+    }
 
     const debtAfter = Number.isFinite(Number(artifact.value.balanceAfter))
         ? agoraRound(artifact.value.balanceAfter) : review.debtAfter;
@@ -2419,4 +2449,395 @@ function planPayMigration(schedule, today) {
         advancesWithoutOrigin: withoutOrigin,
         ledgerEntries: Object.keys(ledger).length
     };
+}
+
+// =====================================================================================
+// PHASE 3 (v175): the server-first operation, the closed document, and the index
+// =====================================================================================
+//
+// Three things the phases before this one did not have, all of them pure:
+//
+//   the operation     a plan, turned into the ONE thing that is sent: its field paths, the
+//                     id of the closed document it creates, and that document's body.
+//                     js/sync/transact.js sends it as one transaction and nothing else
+//                     sends a pay path at all.
+//   the carry         `carry-approval-needed` instead of a bare `gate`, with what a screen
+//                     needs to offer the approval on the spot.
+//   the split         what would leave the live document (planHistoryMove), and the small
+//                     index that would stay (paybookIndexFrom) - with the folds from the
+//                     index, so a suite can show they equal the folds from the whole
+//                     history. NOTHING HERE MOVES ANYTHING: the functions report.
+
+// ---------------------------------------------------------------- the queue door, shut
+//
+// Does a pay entry travel through the ORDINARY queue? Since v175: no. A closure, a payment
+// or a void is one transaction of its own (js/sync/transact.js) and is adopted from the
+// server's document when it has committed - it is never journalled as an edit and never
+// waits in the outbox, where Phase 2 measured a closure being cut in two by the 296-path
+// limit and accepted offline. FARKAD_FLAGS.paybookQueue is the old door, off in every
+// build; the Phase 2 suites open it through the test seam, because two phones holding
+// different pay entries - the state the union and the conflict rule exist for - cannot be
+// produced any other way.
+function paybookQueueEnabled() {
+    return typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS.paybookQueue === true;
+}
+
+function isPaybookPath(path) {
+    return typeof path === 'string' && path.indexOf('pay.') === 0;
+}
+
+// ---------------------------------------------------------------- the carry approval
+//
+// WHAT THE OWNER MUST NEVER MEET: every financial control locked, and nothing saying why.
+// financialWritingEnabled goes false on a record whose carry "migration" is needed and
+// not approved (planCarryMigration) - and the first PARTIAL deduction makes it needed
+// (Phase 1, finding 2). The old answer from every planner was `gate`, which a screen can
+// only translate as "not available".
+//
+// { needed, approved, id, rows }: `rows` are planCarryMigration's own, so the screen can
+// lay out exactly what the existing approval dialog in ⋯ lays out. `needed && !approved`
+// is the state that locks.
+function paybookCarryApproval(schedule) {
+    const plan = planCarryMigration(schedule);
+    return {
+        id: plan.id,
+        needed: plan.needed === true,
+        approved: carryMigrationApproved(schedule, plan),
+        rows: paybookClone(plan.rows)
+    };
+}
+
+// The approval itself, as a plan: one field path, ledger.migrations.cm_carry, built by the
+// ledger's own writer on a COPY. It is NOT a pay entry and does not go through the
+// server-first door - it is the record the existing dialog writes, by the existing path
+// (State.commitMany), and three phones approving it are one fact (recordCarryApproval).
+//
+//   stamp, permission   as for a closure
+//   gate                this build does not write the ledger at all
+//   already: true       it is approved; nothing to write, and that is not a refusal
+function planCarryApproval(schedule, stamp) {
+    const reasons = paybookStampReasons(stamp);
+    const done = extra => Object.assign({ kind: 'carry-approval', ok: false, already: false,
+        reasons, changes: [], carryApproval: null }, extra || {});
+    if (reasons.length > 0) return done();
+    if (!paybookWritesEnabled() || !ledgerWritesEnabled() || !advanceCarryEnabled()) {
+        paybookAddReason(reasons, 'gate');
+    }
+    if (!paybookMayClose(stamp)) paybookAddReason(reasons, 'permission');
+    const state = paybookCarryApproval(schedule);
+    if (reasons.length > 0) return done({ carryApproval: state });
+    if (state.approved) return done({ ok: true, already: true, carryApproval: state });
+    const draft = paybookClone(schedule);
+    const written = recordCarryApproval(draft, planCarryMigration(draft), stamp.at, stamp.by);
+    if (!written || written.already || journalEntryProblems(written.path, written.value).length > 0) {
+        return done({ reasons: ['rejected'], carryApproval: state });
+    }
+    return done({ ok: true, changes: [{ path: written.path, value: written.value }], carryApproval: state });
+}
+
+// Would THIS closure, once written, leave the record locked? Asked of the draft the
+// planner has just built - the schedule with the closure's ledger entries laid in.
+function paybookWouldLock(draft) {
+    const plan = planCarryMigration(draft);
+    return plan.needed && !carryMigrationApproved(draft, plan);
+}
+
+// ---------------------------------------------------------------- the operation
+//
+// paybookOperation(plan) -> { ok, reasons, kind, closedId, workerId, entries, paths }
+//
+// A plan's `changes`, as the one thing the server-first door sends. `closedId` names the
+// closed document the transaction creates: the statement's id for a closure (so two phones
+// closing one man's one period aim at ONE document, and the second finds it there), the
+// entry's own id for a payment, a void, an adjustment, the opening or a legacy answer.
+//
+//   plan       not a plan that may be written (ok false, already, or no changes)
+//   paths      a path that is neither pay.<id> nor ledger.advances.<id>, one path twice,
+//              or a value its own reader refuses
+//   no-entry   nothing in it is a pay entry. The server-first door is the pay book's; a
+//              batch of ledger entries alone is the existing dialog's and goes its way.
+function paybookOperation(plan) {
+    const refuse = code => ({ ok: false, reasons: [code], kind: null, closedId: null,
+        workerId: null, entries: {}, paths: [] });
+    if (!isPlainObject(plan) || plan.ok !== true || plan.already === true
+        || !Array.isArray(plan.changes) || plan.changes.length === 0) return refuse('plan');
+    const entries = {};
+    const paths = [];
+    let bad = false;
+    plan.changes.forEach(change => {
+        const path = isPlainObject(change) && typeof change.path === 'string' ? change.path : '';
+        const parts = path.split('.');
+        const isPay = parts.length === 2 && parts[0] === 'pay';
+        const isEntry = parts.length === 3 && parts[0] === 'ledger' && parts[1] === 'advances';
+        if ((!isPay && !isEntry) || ownsKey(entries, path)
+            || journalEntryProblems(path, change.value).length > 0) { bad = true; return; }
+        putKey(entries, path, paybookClone(change.value));
+        paths.push(path);
+    });
+    if (bad) return refuse('paths');
+    const pay = paths.filter(isPaybookPath);
+    if (pay.length === 0) return refuse('no-entry');
+    const statement = pay.map(path => entries[path]).filter(entry => entry.kind === 'statement')[0];
+    const head = statement || entries[pay[0]];
+    const closedId = String(head.id);
+    if (!isSafeId(closedId)) return refuse('paths');
+    return { ok: true, reasons: [], kind: String(plan.kind || head.kind), closedId,
+        workerId: head.workerId === undefined ? null : String(head.workerId), entries, paths };
+}
+
+// The closed document's body. Everything the operation adds to the record, verbatim, under
+// the field paths it adds it at - so the closed documents laid back over a document that
+// has dropped them rebuild it byte for byte, and no second description of a closure exists
+// to drift from the first. `opId` and `revision` are the commit that created it; the rules
+// check both against the schedule in the same commit (closedMatchesSchedule).
+const PAYBOOK_CLOSED_VERSION = 1;
+
+function paybookClosedDocument(operation, opId, revision) {
+    return {
+        v: PAYBOOK_CLOSED_VERSION,
+        id: operation.closedId,
+        kind: operation.kind,
+        workerId: operation.workerId,
+        opId: String(opId),
+        revision,
+        entries: paybookClone(operation.entries)
+    };
+}
+
+// Everything wrong with a closed document as it arrives - from the server, from a backup
+// file. Empty means this build could have written it. The entries are judged by the
+// journal's own grammar, the same as if they were arriving as field paths.
+function paybookClosedProblems(id, value) {
+    if (!isPlainObject(value)) return ['a closed document that is not a record'];
+    const out = [];
+    if (value.v !== PAYBOOK_CLOSED_VERSION) out.push('a closed document of a version this build does not read');
+    if (typeof value.id !== 'string' || value.id !== String(id) || !isSafeId(value.id)) {
+        out.push('a closed document filed under another name');
+    }
+    if (typeof value.opId !== 'string' || value.opId === '' || value.opId.length >= 128) {
+        out.push('a closed document that does not name its operation');
+    }
+    if (!Number.isInteger(value.revision) || value.revision < 1) {
+        out.push('a closed document that does not name its revision');
+    }
+    if (!isPlainObject(value.entries) || Object.keys(value.entries).length === 0) {
+        out.push('a closed document with nothing in it');
+        return out;
+    }
+    Object.keys(value.entries).forEach(path => {
+        const parts = path.split('.');
+        const known = (parts.length === 2 && parts[0] === 'pay')
+            || (parts.length === 3 && parts[0] === 'ledger' && parts[1] === 'advances');
+        if (!known || journalEntryProblems(path, value.entries[path]).length > 0) {
+            out.push(`a closed document carrying something that is not an entry (${path.slice(0, 60)})`);
+        }
+    });
+    return out;
+}
+
+// Is the DETAIL of one closure on this phone? `closed` is whatever closed documents this
+// phone holds, by id (fetched, or written here). The balances never depend on the answer;
+// the day list, the reasons and the notes do.
+//
+//   'record'   the entries are in the schedule itself - every closure made before the split
+//   'fetched'  they are not, and the closed document is on this phone
+//   'absent'   they are not, and it is not: the screen says the detail is not on this
+//              phone yet, and shows no day list rather than a live one
+function paybookDetail(schedule, closed, statementId) {
+    const id = String(statementId);
+    if (ownsKey(paybookMap(schedule), id)) return { state: 'record', closedId: id, entries: null };
+    const held = isPlainObject(closed) && ownsKey(closed, id) ? closed[id] : null;
+    if (held && paybookClosedProblems(id, held).length === 0) {
+        return { state: 'fetched', closedId: id, entries: paybookClone(held.entries) };
+    }
+    return { state: 'absent', closedId: id, entries: null };
+}
+
+// ---------------------------------------------------------------- what would move
+//
+// planHistoryMove(schedule) -> { bundles, totals, changes: [] }
+//
+// A DRY RUN, like planPayMigration: what the split would take out of the live document
+// and what it would leave, on this record, in bytes. It writes nothing and nothing applies
+// it - moving existing history is Phase 5's, and happens only after every phone reads the
+// index.
+//
+// One bundle per closed period per man: the frozen payslip, each `deducted` entry of that
+// period, and - where the pay book has them - the statement, its extra deductions, its
+// payments, voids and adjustments, or the owner's answer about an older closure. Bytes
+// are counted the way Firestore stores a map entry: the key and the JSON of the value.
+// `settled` says whether anything about it can still change: a statement that still owes
+// the man, an unanswered older closure and a disputed id are NOT settled, and the design
+// moves a bundle only when it is.
+function paybookEntryBytes(path, value) {
+    return String(path).length + JSON.stringify(value === undefined ? null : value).length;
+}
+
+function planHistoryMove(schedule) {
+    const fold = paybookFold(schedule);
+    const ledger = paybookLedger(schedule);
+    const book = paybookMap(schedule);
+    const legacyField = (schedule && isPlainObject(schedule.advances)) ? schedule.advances : {};
+    const bundles = [];
+    ((schedule && schedule.workers) || []).filter(man => man && man.id !== undefined).forEach(man => {
+        const workerId = String(man.id);
+        const closed = closedPeriods(schedule, workerId) || {};
+        Object.keys(closed).sort().forEach(from => {
+            const paths = [];
+            const artifactId = periodArtifactId(workerId, from);
+            if (ownsKey(ledger, artifactId)) paths.push(ledgerPath(artifactId));
+            Object.keys(ledger).sort().forEach(id => {
+                const entry = ledger[id];
+                if (!entry || String(entry.kind) !== 'deducted' || String(entry.periodFrom) !== from) return;
+                const whose = ownsKey(legacyField, String(entry.advanceId))
+                    ? (legacyField[String(entry.advanceId)] || {}).workerId : entry.workerId;
+                if (String(whose) === workerId) paths.push(ledgerPath(id));
+            });
+            const statementId = paybookStatementId(workerId, from);
+            const legacyId = paybookLegacyId(artifactId);
+            const of = ownsKey(fold.statements, statementId) ? fold.statements[statementId]
+                : (ownsKey(fold.legacy, legacyId) ? fold.legacy[legacyId] : null);
+            if (of) {
+                paths.push(paybookPath(of.id));
+                (of.deductions || []).concat(of.payments || [], of.adjustments || []).forEach(row => {
+                    paths.push(paybookPath(row.id));
+                    if (ownsKey(book, paybookVoidId(row.id))) paths.push(paybookPath(paybookVoidId(row.id)));
+                });
+            }
+            const read = path => (isPaybookPath(path) ? book[path.split('.')[1]]
+                : ledger[path.split('.')[2]]);
+            const bytes = paths.reduce((sum, path) => sum + paybookEntryBytes(path, read(path)), 0);
+            const disputed = fold.conflicts.some(row => row.workerIds.indexOf(workerId) !== -1);
+            bundles.push({
+                closedId: of && ownsKey(fold.statements, statementId) ? statementId : artifactId,
+                workerId,
+                periodFrom: from,
+                periodTo: closed[from].periodTo === undefined ? null : String(closed[from].periodTo),
+                source: of ? (ownsKey(fold.statements, statementId) ? 'statement' : 'legacy') : 'artifact',
+                paths,
+                bytes,
+                settled: Boolean(of) && of.due === 0 && of.overpaid === 0 && !disputed
+            });
+        });
+    });
+    const index = paybookIndexFrom(schedule);
+    const indexBytes = Object.keys(index.rows).reduce((sum, id) =>
+        sum + paybookEntryBytes(id, index.rows[id]), 0);
+    const whole = JSON.stringify(schedule === undefined ? null : schedule).length;
+    const moving = bundles.reduce((sum, bundle) => sum + bundle.bytes, 0);
+    const settled = bundles.filter(bundle => bundle.settled);
+    return {
+        bundles,
+        totals: {
+            documentBytes: whole,
+            bundles: bundles.length,
+            entries: bundles.reduce((sum, bundle) => sum + bundle.paths.length, 0),
+            bytes: moving,
+            settledBundles: settled.length,
+            settledBytes: settled.reduce((sum, bundle) => sum + bundle.bytes, 0),
+            indexBytes,
+            freed: moving - indexBytes,
+            documentBytesAfter: whole - moving + indexBytes
+        },
+        changes: []
+    };
+}
+
+// ---------------------------------------------------------------- the index
+//
+// What the live document would keep about a closure whose entries have left it: ONE small
+// row per closed period per man, keyed by the closed document's id. Everything a phone
+// must answer OFFLINE, from the live document alone, and nothing it can only want with the
+// detail open:
+//
+//   w, f, t        whose, and which period
+//   at             the moment it was closed (the judge's cut-off, and the history's order)
+//   g, ci, bo      the wage it was closed on, the balance it opened on and the balance it
+//                  left - closedPeriods' figures, so a closed period stays frozen
+//   a              [advanceId, amount, balanceAfter] per advance it deducted - so each
+//                  advance's remaining balance is still the sum of what was recorded
+//   x, n           extra deductions and the net - present only where a statement stands
+//   o, p           owed (the net, corrected) and paid - so «יתרת שכר לתשלום» is o - p
+//   s              'statement' | 'legacy' | 'artifact' - an artifact row is a closure
+//                  nobody has answered for: payment unknown
+//
+// It is DERIVED: every figure is a fold of entries that exist, immutably, in the closed
+// documents. So it can be rebuilt from them, and a suite can show that the folds from it
+// equal the folds from the whole history (tests/paybook.split.test.mjs).
+function paybookIndexFrom(schedule) {
+    const fold = paybookFold(schedule);
+    const ledger = paybookLedger(schedule);
+    const legacyField = (schedule && isPlainObject(schedule.advances)) ? schedule.advances : {};
+    const rows = {};
+    ((schedule && schedule.workers) || []).filter(man => man && man.id !== undefined).forEach(man => {
+        const workerId = String(man.id);
+        const closed = closedPeriods(schedule, workerId) || {};
+        Object.keys(closed).sort().forEach(from => {
+            const artifact = periodArtifactFor(schedule, workerId, from);
+            const statementId = paybookStatementId(workerId, from);
+            const legacyId = paybookLegacyId(periodArtifactId(workerId, from));
+            const statement = ownsKey(fold.statements, statementId) ? fold.statements[statementId] : null;
+            const answer = !statement && ownsKey(fold.legacy, legacyId) ? fold.legacy[legacyId] : null;
+            const row = { w: workerId, f: from };
+            if (closed[from].periodTo !== undefined) row.t = String(closed[from].periodTo);
+            if (artifact && artifact.at) row.at = String(artifact.at);
+            if (Number.isFinite(closed[from].gross)) row.g = agoraRound(closed[from].gross);
+            if (closed[from].carriedIn !== undefined) row.ci = agoraRound(closed[from].carriedIn);
+            if (closed[from].balanceAfter !== undefined) row.bo = agoraRound(closed[from].balanceAfter);
+            row.a = Object.keys(ledger).sort().map(id => ledger[id])
+                .filter(entry => entry && String(entry.kind) === 'deducted' && String(entry.periodFrom) === from
+                    && String(ownsKey(legacyField, String(entry.advanceId))
+                        ? (legacyField[String(entry.advanceId)] || {}).workerId : entry.workerId) === workerId)
+                .map(entry => [String(entry.advanceId), agoraRound(entry.amount),
+                    entry.balanceAfter === undefined ? null : agoraRound(entry.balanceAfter)]);
+            if (statement) {
+                row.s = 'statement';
+                row.x = statement.statement.extraDeducted;
+                row.n = statement.statement.netDue;
+                row.o = statement.owed;
+                row.p = statement.paid;
+            } else if (answer) {
+                row.s = 'legacy';
+                row.o = answer.owed;
+                row.p = answer.paid;
+            } else {
+                row.s = 'artifact';
+            }
+            rows[statement ? statementId : (answer ? legacyId : periodArtifactId(workerId, from))] = row;
+        });
+    });
+    return { v: 1, rows };
+}
+
+// The folds a phone needs offline, from the index and nothing else. Each is one line of
+// arithmetic over the rows, written out so that the suite can hold it against the fold of
+// the whole history: closedPeriods, advanceOutstanding's `deductedGross`, and accountFor's
+// wage balances.
+function paybookIndexFolds(index) {
+    const rows = (isPlainObject(index) && isPlainObject(index.rows)) ? index.rows : {};
+    const closed = {};
+    const deducted = {};
+    const wage = {};
+    Object.keys(rows).sort().forEach(id => {
+        const row = rows[id];
+        if (!ownsKey(closed, row.w)) putKey(closed, row.w, {});
+        const period = { deducted: paybookSum((row.a || []).map(one => one[1])) };
+        if (row.t !== undefined) period.periodTo = row.t;
+        if (row.g !== undefined) period.gross = row.g;
+        if (row.ci !== undefined) period.carriedIn = row.ci;
+        if (row.bo !== undefined) period.balanceAfter = row.bo;
+        putKey(closed[row.w], row.f, period);
+        (row.a || []).forEach(one => {
+            putKey(deducted, one[0], paybookSum([ownsKey(deducted, one[0]) ? deducted[one[0]] : 0, one[1]]));
+        });
+        if (!ownsKey(wage, row.w)) putKey(wage, row.w, { wageDue: 0, wageOverpaid: 0, unpaid: [], paymentUnknown: [] });
+        const mine = wage[row.w];
+        if (row.s === 'artifact') { mine.paymentUnknown.push(row.f); return; }
+        const due = Math.max(0, paybookAgorot(row.o) - paybookAgorot(row.p)) / 100;
+        const over = Math.max(0, paybookAgorot(row.p) - paybookAgorot(row.o)) / 100;
+        mine.wageDue = paybookSum([mine.wageDue, due]);
+        mine.wageOverpaid = paybookSum([mine.wageOverpaid, over]);
+        if (due > 0) mine.unpaid.push({ statementId: id, periodFrom: row.f, owed: row.o, paid: row.p, due });
+    });
+    return { closed, deducted, wage };
 }

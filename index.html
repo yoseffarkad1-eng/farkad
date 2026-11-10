@@ -715,6 +715,10 @@
 <script src="js/sync/receive.js"></script>
 <script src="js/sync/send.js"></script>
 <script src="js/sync/status.js"></script>
+<!-- v175, the pay book's server-first door - shipped shut with it (FARKAD_FLAGS.paybook):
+     a closure, a payment or a void as ONE transaction of its own, never through the
+     queue. Above boot.js like every split of this group. -->
+<script src="js/sync/transact.js"></script>
 <!-- boot.js is last of the sync group and must stay last: its two lines RUN at load
      time. Any further split of this group goes ABOVE it. -->
 <script src="js/sync/boot.js"></script>

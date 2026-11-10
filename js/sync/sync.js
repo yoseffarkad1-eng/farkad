@@ -1726,6 +1726,15 @@ const FarkadSync = {
         // way this function can - not written. Asked of the DISK and of the QUEUE, never
         // of memory: by the time a commit reaches the journal, memory already holds the
         // entry being written.
+        // AND NO PAY PATH IS MINTED HERE AT ALL (v175), unless the old door is open - see
+        // paybookQueue in js/model/schema.js. A closure is one server transaction; an
+        // entry that reached this function would wait in the outbox like a day, be sent
+        // whenever the queue next drained and be cut wherever the write limit fell. A
+        // queue ALREADY holding one (written by an earlier build of this app) is still
+        // read and still sent - this is the minting path, not the reader.
+        if (typeof paybookQueueEnabled === 'function' && !paybookQueueEnabled()
+            && entries.some(entry => entry && typeof entry.path === 'string'
+                && entry.path.indexOf('pay.') === 0)) return false;
         const payInBatch = new Map();
         const rewritesPay = entries.some(entry => {
             if (!entry || typeof entry.path !== 'string' || entry.path.indexOf('pay.') !== 0) {
