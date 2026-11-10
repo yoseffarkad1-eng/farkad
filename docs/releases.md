@@ -1,7 +1,155 @@
-## v178 — one sub-title in ⋯ says what its section holds (candidate, not served)
+## v179 — הסעות: the summary of the day (candidate, not served)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
-Built on `893def8` (v174). v175 and v176 are numbers of an unpublished development branch.
+Built on `e4070e5` (v178). One commit of shipped files; its gate results belong to that commit
+and no count is carried here.
+
+**The owner asked** (2026-11-10, in Arabic): *"is there a report for the cars?"* There was
+none. The הסעות screen offered a message to each driver, one car at a time, and nothing that
+showed the whole day.
+
+**What it is.** One worded button on the הסעות screen, «סיכום הסעות ליום», under the tray and
+above the first car. It opens one of the app's own dialogs with the summary of that day's
+plan in a field nobody types in:
+
+```
+סיכום הסעות ליום שלישי 10/11/2026:
+
+רכב: טויוטה קורולה 2013 – 3 מתוך 5
+נהג: אחמד – הרצליה
+- מוחמד – חיפה
+- עלי – הרצליה
+
+רכב: פולקסווגן 2018 – 1 מתוך 9
+בלי נהג
+- סמיר – נתניה
+
+ממתינים לשיבוץ (2):
+- יוסי – פרדסיה
+- ראמי – פרדסיה
+
+רכבים ריקים: סוואנה 2010, ליפמוטור C10 2026
+
+רכבים שלא זמינים היום: טויוטה קורולה 2016, BYD סיל U 2025
+```
+
+- **Every vehicle that goes out with somebody in it**, in the order of the list: its name and
+  how full it is, its driver (whoever is in seat 1) with his site, then the men in the order
+  of their SEATS, each with his site. Nobody at the wheel: «בלי נהג». A driver alone:
+  «בלי נוסעים.».
+- **Then the men still waiting**, in roster order - only if there are any.
+- **Then the vehicles that go out with nobody in them**, on one line, and **the vehicles kept
+  home**, on one line - each only if there are any.
+- Nobody seated at all: «אף עובד לא שובץ לרכב.», the men waiting, and NOT a line of seven
+  empty vehicles. Nobody on a site that day: «אין ביום הזה עובדים עם אתר עבודה.» and nothing
+  more.
+- A seated man who has no site in today's record is named in his seat with no site made up,
+  as in his driver's message.
+
+**Three ways out, none of them new.**
+
+- **«שליחה בוואטסאפ»** - the day message's own door (`shareTextOut`, `js/ui/share.js`): the
+  phone's share sheet, or where there is none `https://wa.me/?text=…` with NO number. The
+  person picks the chat and presses send.
+- **«העתקה»** - the day message's own copy (`copyTextOut`), which says whether the copy
+  happened.
+- **«שיתוף כתמונה»** - the printout's own door (`sharePrintout('transport')`,
+  `js/ui/printout.js`): a PNG, `farkad-הסעות-<date>.png`, to the share sheet or a download.
+  The picture is READ OFF THE DIALOG'S FIELD, so it carries the words that are on the glass
+  and cannot disagree with them; with the dialog shut there is nothing to draw. Black on
+  white whatever the scheme, like the other printouts; plain lines of text, the first line of
+  each block as its heading - it is not a drawing of the cars.
+
+**The app sends nothing and marks nothing.** It cannot see whether send was pressed, so
+nothing says «נשלח», and no car's «נפתח בוואטסאפ» mark is made or moved by the summary.
+
+**What it does not touch.** Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`,
+`js/recovery.js`, the rules or the functions. **It writes nothing**: no new Store key, nothing
+to a transport key, the record, the outbox, the cloud, a backup or the rescue file - the
+builder (`transportSummaryBlocks`, `js/ui/transport.js`) is a pure reading of the same picture
+the screen draws (`TransportEngine.layout`), and a day written by v171 is read and not
+rewritten. `tests/transport.test.mjs` compares every key on the disk before and after;
+`tests/transport.browser.mjs` does the same through the real buttons. It exists only on a
+phone that turned הסעות on, and only on that screen: no entry on the day screen, in ⋯ or in
+the WhatsApp dialog.
+
+**What changed outside `js/ui/transport.js`, and why it changes nothing for anybody else.**
+
+- `js/ui/share.js`: `sendDayMessage` and `copyDayMessage` were each split in two - the same
+  lines, now taking the text, the status line and the dialog to close as arguments
+  (`shareTextOut`, `copyTextOut`) - so the summary goes out by the very code the day's message
+  does. The day's message calls them with what it used before; its sentences are unchanged.
+- `js/ui/printout.js`: `printoutImage` knows a third kind, `'transport'`, read and planned by
+  `js/ui/transport.js`. `'week'` is the week and anything else is the report, as before.
+- `js/ui/modal.js`: one row in the table of closers.
+- `index.html`: the dialog's frame (`#transportSummaryModal`, no words in it), and the build
+  meta. `css/design.css`: the dialog's look, under `@media screen` - and its tier: the panel
+  it opens over is on the settings sheet's z-index, an ordinary dialog is under that.
+
+**Every new Hebrew string - PROPOSED, the owner corrects on sight.** All in the one block at
+the top of `js/ui/transport.js`, pinned word for word in `tests/transport.test.mjs`. No
+existing string was changed. The summary also reuses, unchanged, `driver` («נהג: אחמד», for a
+driver with no site today), `driverNone`, `mPassenger`, `mPassengerOnly`, `mAlone` and
+`nobody`; and the three status sentences of the day's message (`js/ui/share.js`: «✔️ הועתק»,
+«⚠️ ההעתקה נחסמה - סמן את הטקסט והעתק ידנית», «⚠️ השיתוף לא נפתח - השתמש בהעתק ושלח ידנית»,
+«פותח וואטסאפ…») and the printout's two (`js/ui/printout.js`) appear as they are.
+
+| key | proposed Hebrew | note |
+|---|---|---|
+| `summaryButton` | סיכום הסעות ליום | the button on the screen |
+| `summaryTitle` | סיכום הסעות | the dialog's title |
+| `summaryLabel` | תצוגה מקדימה של הסיכום | above the field |
+| `summarySend` | שליחה בוואטסאפ |  |
+| `summaryCopy` | העתקה |  |
+| `summaryPicture` | שיתוף כתמונה |  |
+| `summaryClose` | סגירה |  |
+| `summaryFile` | farkad-הסעות-2026-11-10.png | the picture's file name; template; sample values |
+| `sHeading` | סיכום הסעות ליום שלישי 10/11/2026: | template; sample values |
+| `sVehicle` | רכב: קורולה 2016 – 3 מתוך 5 | template; sample values |
+| `sDriver` | נהג: אחמד – חדרה | template; sample values |
+| `sNoneSeated` | אף עובד לא שובץ לרכב. |  |
+| `sWaiting` | ממתינים לשיבוץ (2): | template; sample values |
+| `sEmpty` | רכבים ריקים: סוואנה 2010, קורולה 2016 | template; sample values |
+| `sHome` | רכבים שלא זמינים היום: סוואנה 2010, קורולה 2016 | template; sample values |
+
+**Bidi.** A vehicle is always named after a Hebrew word and inside the same right-to-left
+isolate the driver's message uses (`transportRli`): «BYD סיל U 2025» begins with a Latin
+letter and would otherwise turn its line left-to-right. That is why the empty and kept-home
+vehicles are one Hebrew-led line each and not a bulleted list. A man's name and a site are
+isolated as everywhere else.
+
+**Known not covered.**
+
+- **NOT TRIED ON A REAL PHONE.** Everything was measured in desktop Chromium with emulated
+  touch, at 440x956 and 375x667, in both schemes. In the browser suite the share sheet,
+  `window.open` and the clipboard are replaced by recorders: what is proved is what the app
+  hands them, not what WhatsApp, iOS or Android then do with it.
+- **How the text reads inside WhatsApp was not seen** - its line direction and its handling
+  of the isolates around a vehicle's name are WhatsApp's. The lines follow the pattern of the
+  driver's message, which is in use.
+- **On a home-screen iPhone the share sheet for a FILE** is the same call the week's and the
+  reports' pictures make; it was not tried from this dialog on a phone.
+- **The men marked «לא בהסעה שלנו» are not in the summary.** They are in no car and wait for
+  none; the owner asked about the cars. If he wants them listed, that is a line and a string.
+- **No destinations line per car and no totals line.** Every man has his site beside his
+  name; a count of cars and men is not written.
+- **A man on two sites** is named with the first his day holds, as on the screen.
+- **A very long day** scrolls inside the field; the picture grows downward and is not paged.
+  A line too long for the picture wraps and is not cut; a wrapped line of vehicle names can
+  break between two words of one name.
+- The picture's pixels were not compared with anything: the suite checks the words drawn, in
+  order, the file's name and type, and one box per block.
+- Text at 200%, a 320px phone, landscape and a screen reader were not measured for this
+  dialog. The dialog is not on paper (dialogs never are).
+- An update that reloads the page while the dialog is open closes it; nothing is lost,
+  because nothing was kept.
+
+## v178 — one sub-title in ⋯ says what its section holds (served 2026-11-10)
+
+**Served.** Merged to `main` as `e4070e5` (PR #59) on 2026-11-10; the Pages deployment for that
+commit succeeded at 08:16 UTC. As with the builds before it, "served" means Pages reported the
+deployment of that commit; the served page itself was not read from the container that built
+it. Built on `893def8` (v174). v175 and v176 are numbers of an unpublished development branch.
 v177 was never served: `tests/mobile.test.mjs` proves the diagnostic block carries no amount
 out of the record by looking for the seeded rates as digits, one of them 77, and the build
 stamp `v177` in that block reads as a leak. The check is right to be that blunt, so the
