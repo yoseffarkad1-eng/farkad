@@ -2497,8 +2497,14 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn, stays) {
         ? agoraRound(closed.deducted)
         : (gross === null || overpaid > 0
             ? 0
-            : agoraRound(Math.min(balance, Math.max(gross, 0),
-                advanceLiveRoom(schedule, workerId, toDate, stays))));
+            // (advanceLiveRoom is asked only where it could bind. A walk runs on through
+            // empty fortnights for as long as a debt stands - planAdvanceCarry walks four
+            // thousand of them - and a period with no wage proposes nothing whatever is
+            // left on the advances; folding the ledger once per empty period, per advance,
+            // made every planner on a record with an open debt take seconds. Measured.)
+            : (Math.min(balance, Math.max(gross, 0)) <= 0 ? 0
+                : agoraRound(Math.min(balance, Math.max(gross, 0),
+                    advanceLiveRoom(schedule, workerId, toDate, stays)))));
 
     // TWO BALANCES OUT OF A CLOSED PERIOD, and the difference between them is the whole
     // point.
@@ -2596,9 +2602,26 @@ function planAdvanceCarry(schedule) {
 
         const first = toLocalDateStr(accountStart(parseLocalDate(advances[0].date)));
         const lastDated = advances[advances.length - 1].date;
+        // THE LAST DAY ANYTHING ON THE RECORD IS DATED. Past it there is no wage and no
+        // movement, so no account can produce a row: nothing given, nothing to deduct
+        // from. The walk used to run on regardless while a debt stood - four thousand
+        // empty fortnights, a century and a half - which cost nothing while the old walk
+        // settled every debt out of the next wage it met, and under the one-debt ruling,
+        // where a debt stands until somebody deducts it, cost over a second per call on
+        // the gate every financial control asks (measured: 1,415 ms against 4). The rows
+        // are the same either way; the walk just stops where the record does.
+        let horizon = lastDated;
+        Object.keys((schedule && schedule.days) || {}).forEach(day => { if (day > horizon) horizon = day; });
+        const entries = (schedule && schedule.ledger && schedule.ledger.advances) || {};
+        Object.keys(entries).forEach(id => {
+            const entry = entries[id];
+            if (!entry) return;
+            if (typeof entry.date === 'string' && entry.date > horizon) horizon = entry.date;
+            if (typeof entry.periodTo === 'string' && entry.periodTo > horizon) horizon = entry.periodTo;
+        });
         let at = first;
         let balance = 0;
-        for (let n = 0; n < 4000; n += 1) {
+        for (let n = 0; n < 4000 && at <= horizon; n += 1) {
             const to = advanceDayStep(at, 13);
             const walked = advanceWalk(schedule, workerId, at, to, balance);
             // What the report says TODAY, with the carry off: every advance dated in the

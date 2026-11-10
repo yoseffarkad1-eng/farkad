@@ -239,8 +239,12 @@ function updatedPhone(id) {
     check('the correction another phone made is still there',
         JSON.stringify(landed) === JSON.stringify(CORRECTION),
         JSON.stringify(landed));
+    // MOVED AT v175, deliberately: `after.protocol === 1` became 2, here and in the check
+    // forty lines down. The number IS the change - this build says 2 because it keeps the
+    // pay book (PROTOCOL in js/sync/receive.js, payGuard in firestore.rules) - and nothing
+    // else about the bootstrap moved: the same five fields, at revision 1.
     check('the bootstrap wrote protocol fields and nothing else',
-        after.revision === 1 && after.protocol === 1
+        after.revision === 1 && after.protocol === 2
         && typeof after.lastOpId === 'string',
         JSON.stringify({ revision: after.revision, protocol: after.protocol }));
     check('every other legacy byte survived',
@@ -315,7 +319,7 @@ function updatedPhone(id) {
             === JSON.stringify(Object.keys(businessBefore).sort()),
         JSON.stringify(Object.keys(businessAfter).sort()));
     check('and the document is in the protocol',
-        after.protocol === 1 && Number.isInteger(after.revision) && after.revision >= 1,
+        after.protocol === 2 && Number.isInteger(after.revision) && after.revision >= 1,
         JSON.stringify({ protocol: after.protocol, revision: after.revision }));
 
     wired.releaseSubscription();

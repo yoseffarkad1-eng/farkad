@@ -148,6 +148,16 @@ const AHMAD = { id: 'w_a', name: 'אחמד', active: true, dailyRate: 300, hourl
         [left(paidBack, a1), OPEN.call('advanceAccount', paidBack, 'w_k', F2.from, F2.to).deducted,
             OPEN.call('advanceCarryInto', paidBack, 'w_k', F2.from)], [300, 300, 500]);
 
+    // THE CARRY PLAN STOPS WHERE THE RECORD DOES. Under the ruling a debt stands until
+    // somebody deducts it, and planAdvanceCarry - behind the gate every financial control
+    // asks - walked on through four thousand empty fortnights while one stood: measured at
+    // 1,415 ms a call on a record of two men, against 4 ms.
+    const started = Date.now();
+    const carryRows = OPEN.call('planAdvanceCarry', S);
+    same('the carry plan on a record with a standing debt names no account dated past the record, and the shut build\'s plan is what it was',
+        [carryRows.every(row => row.from <= F2.to), SHUT.call('planAdvanceCarry', S).every(row => row.from <= F2.to)], [true, true]);
+    check('and it answers at once', Date.now() - started < 400, `${Date.now() - started} ms`);
+
     // A man settled every Thursday: stepped in HIS weeks, the same rule.
     const W = record([clone(AHMAD)]);
     work(W, 'w_a', ['2026-08-09', '2026-08-16', '2026-08-23']);
