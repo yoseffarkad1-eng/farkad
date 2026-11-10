@@ -1442,10 +1442,21 @@ function openAdvanceBalance(schedule, workerId) {
     const folded = typeof advanceOutstanding === 'function'
         && typeof carryReportingEnabled === 'function'
         && carryReportingEnabled(schedule);
-    const total = advances.reduce((sum, id) => (folded
-        ? sum + advanceOutstanding(schedule, id).left
-        : sum + (Number((schedule.advances[id] || {}).amount) || 0)), 0);
-    return total > 0 ? { count: advances.length, total: agoraRound(total) } : null;
+    //
+    // AND LESS WHAT HE IS IN CREDIT, when the fold is read. An advance settled beyond
+    // what was handed over says so on its own row (`overpaid`); by the ruling over
+    // OVERPAYMENT_STAYS_CREDIT that money comes off his other advances, here exactly as
+    // it does in the account walk - so the sentence somebody reads before a man is put
+    // away and the sheet he is paid from say one figure. Never below zero: a credit is
+    // not a debt of the opposite sign.
+    const keeps = folded && typeof overpaymentStaysCredit === 'function'
+        && overpaymentStaysCredit();
+    const total = advances.reduce((sum, id) => {
+        if (!folded) return sum + (Number((schedule.advances[id] || {}).amount) || 0);
+        const state = advanceOutstanding(schedule, id);
+        return sum + state.left - (keeps ? state.overpaid : 0);
+    }, 0);
+    return agoraRound(total) > 0 ? { count: advances.length, total: agoraRound(total) } : null;
 }
 
 // ---------------------------------------------------------------- the wire form
@@ -1925,7 +1936,7 @@ function ledgerEntryProblems(id, value) {
     // Not `|| 0`. A number nobody can read is not zero: zero is a statement about
     // somebody's wage that no byte on the disk makes. The entry is unreadable, held
     // aside like any other, and the account falls back to the live figure and says so.
-    const snapshot = ['gross', 'carriedIn', 'given', 'repaid', 'reversed', 'net'];
+    const snapshot = ['gross', 'carriedIn', 'creditIn', 'given', 'repaid', 'reversed', 'net'];
     for (let at = 0; at < snapshot.length; at += 1) {
         const field = snapshot[at];
         if (value[field] === undefined || value[field] === null) continue;
@@ -2196,14 +2207,69 @@ function accountsBefore(schedule, workerId, fromDate) {
 // on or before its own last day, so an entry made in September cannot move a number on a
 // fortnight somebody was already paid from in August.
 function advanceCarryInto(schedule, workerId, fromDate) {
-    let balance = 0;
+    const position = advancePositionInto(schedule, workerId, fromDate);
+    return position > 0 ? position : 0;
+}
+
+// What he is IN CREDIT at the moment the account beginning `fromDate` opens: money he
+// handed back beyond what he owed, not yet used against an advance. Zero for almost
+// everybody, always. See the block over OVERPAYMENT_STAYS_CREDIT.
+function advanceCreditInto(schedule, workerId, fromDate) {
+    const position = advancePositionInto(schedule, workerId, fromDate);
+    return position < 0 ? agoraRound(-position) : 0;
+}
+
+// The two above as ONE signed figure - above zero he owes it, below zero it is his
+// credit - which is how one account hands the next where the man stands. It is never
+// printed and never recorded as it is: every reader takes one of the two halves, each of
+// them zero or more, so that no screen and no payslip can show a debt of less than
+// nothing.
+function advancePositionInto(schedule, workerId, fromDate) {
+    let position = 0;
     accountsBefore(schedule, workerId, fromDate).forEach(account => {
-        // carriedForward, not carriedOut: the payslip is frozen, the money is not. See
-        // the two-balance block in advanceWalk.
-        balance = advanceWalk(schedule, workerId, account.from, account.to, balance)
-            .carriedForward;
+        // What the period hands FORWARD, not what its payslip says: the payslip is
+        // frozen, the money is not. See the two-balance block in advanceWalk.
+        position = advanceWalk(schedule, workerId, account.from, account.to, position)
+            .position;
     });
-    return agoraRound(balance);
+    return agoraRound(position);
+}
+
+// ---------------------------------------------------------------- the owner's ruling
+//
+// MONEY A MAN GAVE BACK BEYOND WHAT HE OWED STAYS HIS CREDIT UNTIL IT IS USED.
+//
+// It comes off whatever advance he takes next, however many accounts later, and it is
+// never dropped at a boundary. (Recommended to the owner on 2026-11-10; v180 is a
+// candidate built to it and shown to him before anything is served - docs/releases.md.)
+//
+// What was here up to v179 was neither this nor its opposite. `balance` was floored at
+// zero and what a CLOSED period handed forward was not, so a repayment that arrived
+// dated into a fortnight already closed left the next account opening on less than
+// nothing - and that credit lived for exactly one boundary. 1,500 taken in the very
+// next account read as 1,000 owed; the same 1,500 taken an account later read as 1,500.
+// The same cash, a different debt depending on the week, and a close made in between
+// froze `carriedIn: -500` onto a payslip.
+//
+// THE CREDIT IS NEVER A NEGATIVE DEBT AND NEVER WAGES. It is its own figure, zero or
+// more (`creditIn`, `creditForward`), beside a debt that is zero or more. It is netted
+// against money handed over and against nothing else: no wage is ever raised by it, and
+// `net` is still the wage less what came off it. Paying it back to him in cash is still
+// a conversation and not something this app does.
+//
+// THIS LINE IS THE WHOLE SWITCH. With it false there is no credit at all: what a man
+// gave back beyond what he owed is dropped from the account at the end of the period it
+// arrived in (every period carries forward zero or more, and so does the sum of his
+// advances in openAdvanceBalance), and the period it arrived in is marked for review
+// (`excess`, and `review` on an open one). Nothing else in the app asks.
+const OVERPAYMENT_STAYS_CREDIT = true;
+
+// FARKAD_FLAG_OVERRIDES is the test seam and only that (see FARKAD_FLAGS): no shipped
+// file defines it, and this is how tests/overpayment.test.mjs runs the other ruling
+// without editing the line above.
+function overpaymentStaysCredit() {
+    return typeof FARKAD_FLAGS.overpaymentCredit === 'boolean'
+        ? FARKAD_FLAGS.overpaymentCredit : OVERPAYMENT_STAYS_CREDIT === true;
 }
 
 // The closure that froze EXACTLY this range, or undefined.
@@ -2274,7 +2340,31 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     // 3,050 -> 2,440 on a row whose deduction stayed 3,050, so it stopped adding up.
     // A closure written before this carries no gross, and then the live figure is the
     // only answer there is; nothing is invented for it.
-    const liveGross = row && row.amount !== null ? Number(row.amount) : null;
+    //
+    // AND THE WAGE OF AN ACCOUNT IS A SUM OF MONEY, ROUNDED TO THE AGORA ONCE, HERE.
+    //
+    // payrollReport adds days at the daily rate and hours at the hourly one and rounds
+    // nothing: half an hour at 41.25 is 20.625, so a day at 610 with half an extra hour
+    // is 630.625. Every surface that PRINTS that wage rounds it to the agora (`agora` in
+    // js/ui/reports.js, the same half-up as agoraRound) and shows 630.63 - that is the
+    // sum the man is paid, because nobody can be handed half an agora. The account read
+    // the unrounded figure, took `agoraRound(min(balance, 630.625))` = 630.63 off it,
+    // and wrote a closure of 630.63 against a recorded wage of 630.625: a deduction
+    // larger than the wage beside it, which closureProblems (js/model/ledger.js) rightly
+    // refuses - so the phone that pressed the button held its own closure aside at the
+    // next open and stopped writing. Up to v179.
+    //
+    // Rounded HERE and not at the deduction: flooring the deduction instead would leave
+    // the closure recording a wage no payslip prints, a net of half an agora, and one
+    // agora of debt carried for ever. Rounded here, the wage the account compares
+    // against, the wage the closure records (closureFacts takes it from this walk), the
+    // most a person may choose to deduct (advanceAccount) and the wage on the sheet are
+    // one figure, and a deduction can reach it and never pass it.
+    //
+    // A closure written before this keeps the wage it recorded, to the last digit: a
+    // frozen payslip is not restated. The judge reads that one the way the sheet has
+    // always printed it - see closureProblems.
+    const liveGross = row && row.amount !== null ? agoraRound(Number(row.amount)) : null;
     const gross = (closed !== undefined && closed.gross !== undefined
         && closed.gross !== null)
         ? Number(closed.gross)
@@ -2286,13 +2376,20 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     // happen and 400 again for saying so - while the ledger fold said the whole advance
     // was still owed. Two folds of one record, disagreeing by twice the money, on the
     // screens and the files somebody is paid from.
-    let balance = agoraRound((Number(carriedIn) || 0) + given
+    //
+    // `carriedIn` is where the man stood when this period opened, SIGNED: above zero he
+    // owed it, below zero he was in credit (advancePositionInto). `standing` is the same
+    // figure after everything dated inside the period except the wage.
+    const opening = agoraRound(Number(carriedIn) || 0);
+    const standing = agoraRound(opening + given
         - agoraRound(repaid - undoneRepaid) - undoneGiven + undoneDeducted);
-    // Never below zero: a man who hands back more than he owes has overpaid, and turning
-    // that into a negative balance would quietly ADD it to his next wage as though the
-    // firm owed him for it. It is his money and he should have it back, but that is a
+    // WHAT HE OWES is never below zero: a man who hands back more than he owes has
+    // overpaid, and a negative debt would quietly ADD itself to his next wage as though
+    // the firm owed him for it. What he overpaid is not lost either - it is kept beside
+    // the debt as his credit and comes off the next money he is handed (the block over
+    // OVERPAYMENT_STAYS_CREDIT). Handing it back to him in cash is still a
     // conversation, not an arithmetic result this app may reach on its own.
-    if (balance < 0) balance = 0;
+    const balance = standing > 0 ? standing : 0;
 
     // MORE SETTLED THAN WAS EVER GIVEN, on at least one of this man's advances.
     //
@@ -2335,7 +2432,20 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     // rewrites a payslip somebody was already paid from.
     //
     // So the payslip is frozen and the money still moves, into the period that is open.
-    const live = agoraRound(balance - deducted);
+    //
+    // AND WHAT MOVES IS SIGNED UNTIL IT IS READ. On an open period the deduction is
+    // never more than the balance, so nothing here can go below zero except by the man
+    // already being in credit. On a CLOSED one the deduction is a record and the
+    // balance goes on moving: a repayment from a phone that was offline, dated into the
+    // fortnight, can take it below what already came off the wage. Up to v179 that sum
+    // was handed to the next period as it stood - a debt of less than nothing - and
+    // dropped one period later. Now it is split where it is made: what he still owes,
+    // and what he is in credit, each zero or more.
+    const moved = agoraRound(standing - deducted);
+    const excess = moved < 0 ? agoraRound(-moved) : 0;
+    const keeps = overpaymentStaysCredit();
+    const live = moved > 0 ? moved : 0;
+    const creditForward = keeps ? excess : 0;
     const frozen = closed !== undefined && closed.balanceAfter !== undefined
         ? agoraRound(closed.balanceAfter)
         : live;
@@ -2344,13 +2454,31 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
     // they are what the record holds for this window today, and the sheet's late-movement
     // note is built from them. Freezing those would make a repayment that arrived after
     // the close vanish off the page, which is the money-losing half of this same fault.
-    const openedOn = (closed !== undefined && closed.carriedIn !== undefined)
-        ? agoraRound(Number(closed.carriedIn) || 0)
-        : agoraRound(Number(carriedIn) || 0);
+    //
+    // A CLOSURE WRITTEN UP TO v179 CAN HOLD `carriedIn: -500`. It is not rewritten (iron
+    // law 1) and it is not printed as a debt of minus five hundred either: it is read as
+    // what it was - an opening credit of 500 - through the same split as everything
+    // else here. A closure written from v180 on records the two halves apart
+    // (`carriedIn` zero or more, and `creditIn` only when there was one).
+    const openedSigned = (closed !== undefined && closed.carriedIn !== undefined)
+        ? agoraRound((Number(closed.carriedIn) || 0) - (Number(closed.creditIn) || 0))
+        : opening;
+    const openedOn = openedSigned > 0 ? openedSigned : 0;
+    const creditIn = openedSigned < 0 ? agoraRound(-openedSigned) : 0;
     return {
         from: fromDate,
         to: toDate,
         carriedIn: openedOn,
+        // His credit when the period opened, and when it hands over to the next. Zero
+        // for almost everybody; never both a debt and a credit on the same side.
+        creditIn,
+        creditForward,
+        // Where he stands going into the next period as ONE signed figure, for the walk
+        // and for nothing that prints: carriedForward less creditForward.
+        position: agoraRound(live - creditForward),
+        // What he handed back beyond what he owed by the end of this period, whichever
+        // ruling is in force - so that the other ruling has something to flag.
+        excess,
         given: agoraRound(given),
         repaid: agoraRound(repaid),
         reversed: agoraRound(reversed),
@@ -2363,13 +2491,19 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
         carriedForward: live,
         // Named so a screen can say "הגיעה תנועה אחרי סגירת התקופה" rather than leaving
         // two numbers on the page with nothing explaining why they differ.
-        lateSinceClose: agoraRound(live - frozen),
+        // Signed, and the WHOLE of what moved, under either ruling: a late repayment
+        // larger than what the close left moves this by its full amount, not only by the
+        // part that reached zero - the note is about a movement, and the movement
+        // happened whether or not the excess is then kept as a credit.
+        lateSinceClose: agoraRound(moved - frozen),
         // More has been settled against this man's advances than was ever handed to him.
         // Named so the screen can say so instead of printing a quiet zero.
         overpaid,
         // Whether this row's deduction was HELD rather than computed. Only ever true on
         // an open period: a closed one reports its record and is not revised.
-        review: overpaid > 0 && closed === undefined,
+        // Under the OTHER ruling - no credit - an excess that is about to be dropped is
+        // a reason to look too; under the one in force it is carried and says nothing.
+        review: (overpaid > 0 || (!keeps && excess > 0)) && closed === undefined,
         net: gross === null ? null : agoraRound(gross - deducted),
         // Whether this row is a record or a reckoning, said out loud - the screen shows
         // "החשבון נסגר ולא ישתנה" only where it is true.
@@ -2380,7 +2514,7 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
 // The account, start to finish, with what came before it already walked.
 function advanceAccount(schedule, workerId, fromDate, toDate, deduction) {
     const account = advanceWalk(schedule, workerId, fromDate, toDate,
-        advanceCarryInto(schedule, workerId, fromDate));
+        advancePositionInto(schedule, workerId, fromDate));
     // Draft amounts never mutate the ledger. Closing revalidates the choice and
     // journals the whole account. Historical closed accounts retain their figures.
     if (deduction === undefined || account.closed) return account;
@@ -2392,6 +2526,9 @@ function advanceAccount(schedule, workerId, fromDate, toDate, deduction) {
     return Object.assign({}, account, {
         deducted: off, carriedOut: agoraRound(balance - off),
         carriedForward: agoraRound(balance - off),
+        // A man in credit owes nothing, so nothing can be chosen and the credit passes
+        // through as it was.
+        position: agoraRound(balance - off - account.creditForward),
         net: account.gross === null ? null : agoraRound(account.gross - off),
         deductionChosen: true, invalidDeduction: invalid,
         review: account.review || invalid
@@ -2433,12 +2570,14 @@ function planAdvanceCarry(schedule) {
                     carriedOut: walked.carriedOut
                 });
             }
-            balance = walked.carriedForward;
+            balance = walked.position;
             at = advanceDayStep(at, 14);
             // Stop once nothing is left owed and no advance remains to be reached. A
             // balance that never clears - a man with no rate - is why the date is a
             // condition too.
-            if (balance === 0 && at > lastDated) break;
+            // (Or is in credit: past his last advance a credit has nothing left to come
+            // off, and a walk that waited for it to reach zero would never stop.)
+            if (balance <= 0 && at > lastDated) break;
         }
     });
 

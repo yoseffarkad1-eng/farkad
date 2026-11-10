@@ -42,7 +42,13 @@ const HELPERS = ['network-guard.mjs', 'emulator-host.mjs', 'exports-proof.lib.mj
 // is a gate nobody reads, so the red lives in a file of its own - and this list is what
 // stops that from being a way to hide a suite: a name here must exist, must be reached by
 // NO script, and must be named by the green suite that leaves its cases out.
-const FINDINGS = ['oracle.findings.mjs'];
+//
+// EMPTY SINCE v180, and that is the state to keep. The one file that was here,
+// oracle.findings.mjs, held two findings; both were repaired, its fixtures are green in
+// tests/overpayment.test.mjs, and the file is gone - so nothing in the corpus is outside
+// a gate except this suite itself. The mechanism stays for the next finding: the file,
+// its name here, and the exclusion by name in the suite that found it.
+const FINDINGS = [];
 
 // This file. The auditor who wrote it may not edit package.json, so it cannot yet be
 // named by a script; the exemption is ONE file and the check below pins that it is one,

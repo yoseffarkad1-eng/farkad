@@ -486,10 +486,28 @@ function closureProblems(schedule, entry) {
                 : null;
             return row && row.amount !== null ? Number(row.amount) : null;
         }());
-    if (gross !== null && off > gross + 1e-6) {
+    //
+    // AND AGAINST THE WAGE TO THE AGORA, which is the wage anybody was ever paid.
+    //
+    // Up to v179 a close recorded the wage as payrollReport summed it - unrounded - and
+    // took the ROUNDED wage off it: 630.63 against a recorded 630.625 (a day at 610 and
+    // half an hour at 41.25). This check compared the two raw, called that closure
+    // impossible, and the phone that wrote it held it aside and stopped writing. From
+    // v180 the account rounds the wage once (advanceWalk, js/model/schema.js) and no new
+    // closure looks like that. The ones already written do, on phones and in the cloud,
+    // and they are never rewritten (iron law 1) - so the judge reads their wage the way
+    // every sheet and statement has always printed it: to the agora, half up.
+    //
+    // What that accepts is exactly one thing: a deduction EQUAL to the wage as printed,
+    // which is at most half an agora above the unrounded figure. It accepts no real
+    // over-deduction. One agora more than the printed wage is refused as it always was
+    // (630.64 off 630.625), and a wage that was already whole agorot is untouched by the
+    // rounding (630.63 off 630.62 is still refused).
+    const paid = gross === null ? null : agoraRound(gross);
+    if (paid !== null && off > paid + 1e-6) {
         out.push('a closure deducting more than the wage it came off');
     }
-    if (gross !== null && agoraRound(gross - off) < 0) {
+    if (paid !== null && agoraRound(paid - off) < 0) {
         out.push('a closure leaving a wage below zero');
     }
 
@@ -503,6 +521,22 @@ function closureProblems(schedule, entry) {
         }
     }
     return out;
+}
+
+// THE ONE CLOSURE THIS APP WROTE AND THEN REFUSED: a deduction equal to the wage as
+// printed, recorded beside the same wage unrounded - 630.63 off 630.625. Written by any
+// build up to v179 whenever a wage came out finer than an agora and the man owed at
+// least that much. closureProblems accepts it now; this names it, so that the one place
+// that has to recognise a copy ALREADY held aside (normaliseSchedule, js/state.js) asks
+// about exactly this shape and nothing wider. A deduction above the printed wage is not
+// this, and neither is one against a wage that was whole agorot to begin with.
+function closureWithinRoundedWage(entry) {
+    if (!entry || String(entry.kind) !== 'deducted') return false;
+    if (entry.gross === undefined || entry.gross === null) return false;
+    const gross = Number(entry.gross);
+    const off = Number(entry.amount);
+    if (!Number.isFinite(gross) || !Number.isFinite(off)) return false;
+    return off > gross + 1e-6 && off <= agoraRound(gross) + 1e-6;
 }
 
 // Every closure on this device that cannot be true, by entry id.
@@ -859,6 +893,13 @@ function closureFacts(schedule, workerId, from, to, carriedIn, deduction) {
     return {
         gross: walk.gross,
         carriedIn: walk.carriedIn,
+        // What he was IN CREDIT when the period opened - money handed back beyond what
+        // he owed, used here against what he was given. Absent for everybody who was
+        // not, so an ordinary closure is byte for byte what v179 wrote; present, it is
+        // what makes the payslip add up: opening balance, less this, plus what was
+        // given, less what came off. Up to v179 the same fact was written as a negative
+        // `carriedIn`.
+        creditIn: walk.creditIn > 0 ? walk.creditIn : undefined,
         given: walk.given,
         repaid: walk.repaid,
         reversed: walk.reversed,
@@ -899,6 +940,7 @@ function recordPeriodClosed(schedule, advanceId, workerId, from, to, amount, at,
     return appendLedgerEntry(schedule, Object.assign({}, held && {
         gross: held.gross,
         carriedIn: held.carriedIn,
+        creditIn: held.creditIn,
         given: held.given,
         repaid: held.repaid,
         reversed: held.reversed,
@@ -969,6 +1011,7 @@ function recordPeriodArtifact(schedule, workerId, from, to, at, by, facts) {
     return appendLedgerEntry(schedule, Object.assign({}, held && {
         gross: held.gross,
         carriedIn: held.carriedIn,
+        creditIn: held.creditIn,
         given: held.given,
         repaid: held.repaid,
         reversed: held.reversed,
@@ -1148,7 +1191,7 @@ function closePeriodChanges(schedule, workerId, from, to, at, by, deduction) {
     // to every entry: the artifact and the deductions describe one fortnight and must not
     // describe it differently.
     const facts = closureFacts(schedule, workerId, from, to,
-        advanceCarryInto(schedule, workerId, from), deduction);
+        advancePositionInto(schedule, workerId, from), deduction);
     const artifact = recordPeriodArtifact(schedule, workerId, from, to, at, by, facts);
     return (artifact ? [artifact] : []).concat(plan.rows
         .filter(row => !row.alreadyClosed)
@@ -1222,6 +1265,9 @@ function closedPeriods(schedule, workerId) {
             }
             if (at.carriedIn === undefined && entry.carriedIn !== undefined) {
                 at.carriedIn = numberOf(entry.carriedIn);
+            }
+            if (at.creditIn === undefined && entry.creditIn !== undefined) {
+                at.creditIn = numberOf(entry.creditIn);
             }
             if (at.basis === undefined && isPlainObject(entry.basis)) at.basis = entry.basis;
             // The days the wage was made of, frozen with it. The list is half of what the

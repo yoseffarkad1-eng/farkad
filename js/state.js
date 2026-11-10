@@ -1584,6 +1584,67 @@ function normaliseSchedule(raw, hints) {
     // Recover the worker (including cycle history) before judging a late closure.
     // Otherwise a valid weekly closure is judged against a missing, fortnightly worker.
     reinstateReferenced(schedule, rememberedEntities(raw, hints));
+    // A CLOSURE THIS APP HELD ASIDE BY ITS OWN MISTAKE COMES BACK - that one, and no other.
+    //
+    // Up to v179 a close could take the wage ROUNDED to the agora off a wage it recorded
+    // unrounded (630.63 off 630.625), and the judge then called its own closure
+    // impossible: the deduction went under ledger.unreadable on the phone that wrote it,
+    // and the rule just below - whatever an earlier read held aside stays held - kept it
+    // there, re-reported at every open, for ever. v180 judges the wage to the agora
+    // (closureProblems, js/model/ledger.js), so a copy still sitting in `advances` is
+    // simply read. This is for the copy that is already under `unreadable` on the disk.
+    //
+    // Narrow on purpose. It takes back ONLY a deduction of that exact shape
+    // (closureWithinRoundedWage), only one this build can read whole, only when the
+    // record does not already hold different bytes under the same id, and only when
+    // taking it back condemns nothing: a phone that carried on without the deduction
+    // and closed a later fortnight wrote figures that do not include it, and bringing
+    // it back would make THAT closure the impossible one. Then nothing moves and the
+    // hold stands, exactly as before - a person has to look.
+    //
+    // The bytes are the ones that were held, unchanged; nothing is deleted (iron law 10):
+    // the entry is where it was written to be, and the quarantined copy Recovery made
+    // stays on the disk.
+    const readmitted = {};
+    if (typeof impossibleClosures === 'function'
+        && typeof closureWithinRoundedWage === 'function') {
+        const heldBefore = isPlainObject(ledger.unreadable) ? ledger.unreadable : {};
+        const same = (one, two) => (typeof sameLedgerBytes === 'function'
+            ? sameLedgerBytes(one, two)
+            : JSON.stringify(one) === JSON.stringify(two));
+        const has = id => Object.prototype.hasOwnProperty.call(schedule.ledger.advances, id);
+        const candidates = Object.keys(heldBefore).filter(id => {
+            const entry = heldBefore[id];
+            return isSafeId(String(id)) && isPlainObject(entry)
+                && ledgerEntryProblems(String(id), entry).length === 0
+                && closureWithinRoundedWage(entry)
+                && (!has(id) || same(schedule.ledger.advances[id], entry));
+        });
+        if (candidates.length > 0) {
+            // Asked of two COPIES of the map, never by taking anything out of the record
+            // being built: with the candidates, and without them. Nothing is admitted
+            // unless every closure the first reading condemns, the second condemned too.
+            const others = {};
+            Object.keys(schedule.ledger.advances).forEach(id => {
+                if (candidates.indexOf(id) === -1) others[id] = schedule.ledger.advances[id];
+            });
+            const taken = Object.assign({}, others);
+            candidates.forEach(id => {
+                taken[id] = Object.assign({}, heldBefore[id], { id: String(id) });
+            });
+            const reading = map => Object.assign({}, schedule,
+                { ledger: Object.assign({}, schedule.ledger, { advances: map }) });
+            const without = impossibleClosures(reading(others));
+            const harmless = impossibleClosures(reading(taken))
+                .every(id => without.indexOf(id) !== -1);
+            if (harmless) {
+                candidates.forEach(id => {
+                    schedule.ledger.advances[id] = taken[id];
+                    readmitted[id] = true;
+                });
+            }
+        }
+    }
     if (typeof impossibleClosures === 'function') {
         impossibleClosures(schedule).forEach(id => {
             keepUnder(schedule.ledger.unreadable, id, schedule.ledger.advances[id]);
@@ -1650,6 +1711,10 @@ function normaliseSchedule(raw, hints) {
     // copy was the only trace left, and the sweep did not know its name either.
     const held = isPlainObject(ledger.unreadable) ? ledger.unreadable : {};
     Object.keys(held).forEach(id => {
+        // Except the closure taken back above: it is in `advances` again, byte for byte,
+        // and holding a second copy aside would go on blocking the phone over a record
+        // it can now read.
+        if (Object.prototype.hasOwnProperty.call(readmitted, id)) return;
         if (!Object.prototype.hasOwnProperty.call(schedule.ledger.unreadable, id)) {
             keepUnder(schedule.ledger.unreadable, id, held[id]);
         }
