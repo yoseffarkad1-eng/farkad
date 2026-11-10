@@ -252,8 +252,7 @@ function pathWrite(db, fields, protocol) {
         const args = [];
         Object.keys(all).forEach(path => args.push(new FieldPath(...path.split('.')), all[path]));
         tx.update(doc(db, ...PATH), ...args);
-        tx.set(doc(db, ...PATH, 'receipts', opId), { opId, revision: all.revision, opFingerprint: all.opFingerprint,
-            at: all.updatedAt, by: all.updatedBy });
+        tx.set(doc(db, ...PATH, 'receipts', opId), { revision: all.revision, opFingerprint: all.opFingerprint, at: 'now', by: 'd_hand' });
     });
 }
 

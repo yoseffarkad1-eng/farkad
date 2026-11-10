@@ -299,7 +299,31 @@ instrument the «מקדמות» tab is the first-run card, not the accounts list
 record itself is measured, on the build as it ships, in `tests/activation.test.mjs` and
 `tests/activation.browser.mjs`.
 
-@GATE_OPEN_TABLE@
+**The run: 121 suites (84 node, 37 browser). 108 say with the gates open exactly what they
+say shut. 13 differ, and every one was read.** (A count belongs to a commit: these are from
+the run recorded in the report for this phase; `npm run test:gate-open` re-measures.)
+
+| suite | with the gates open | kind | what is different, and where the guarantee is held with the pay book on |
+|---|---|---|---|
+| `repayment` | 6 checks | **the ruling** | An account that inherits what the one before could not cover: 1,800 under the old walk, the whole 5,000 under the ruling, where the earlier account was never closed. Held: `tests/debt.ruling.test.mjs` (the carry into any account is the sum of what is left on each advance - 60 seeded records, 630 accounts); `tests/activation.test.mjs` V4, V10. |
+| `ledger-truth` | 1 check | **the ruling** | The same: the next account opens on everything given in the unclosed account before it, not on what its wage left over. Held: `tests/debt.ruling.test.mjs`. |
+| `paycycle-completion` | 1 check | **the ruling** | The same: October opens owing the whole 3,000, not 1,050. Held: `tests/debt.ruling.test.mjs`. |
+| `oracle` | 6 checks | **the ruling** | The second calculator is main's documented rule; with the ruling on the app parts from it on every man with an advance behind an unclosed period. **Not held by a second calculator** - see below. Held by: `tests/debt.ruling.test.mjs`, `tests/payroll.test.mjs`, `tests/overpayment.test.mjs` suite 4. |
+| `overpayment` | stops at a fixture | **the ruling** | «The middle account closed: 500 off, written against the oldest advance» - under the ruling that closure takes the whole debt, so the history the rest of the suite is built on does not exist. Held: its own suite 4, which builds that history with the gate open and runs in the ordinary gate. |
+| `poison` | stops at its own precondition | reading | «The shipped build does not write the pay book», asked of a device the instrument opened. Held: `tests/paybook.store.test.mjs` (poison names under `pay` and `payConflicted`, writer on). |
+| `transport` | 1 check | reading | A detector, not a leak: the suite looks for the word "off" (a vehicle turned off) in the rescue file, and with the cold store's reader active the file's `aboutColdStore.state` on a device that never ran `State.load` is that word. No transport key is in the file. Held: `tests/cold.test.mjs` K4. |
+| `simple-advances-browser` | stops at its third step | **replaced** | It taps a man's card on the «מקדמות» tab, which is the accounts home. Held: `tests/activation.browser.mjs` (one man's advances page from his row; a repayment and «תיקון טעות» through the real forms - added in this phase for exactly this), `tests/accounts.browser.mjs` (the review page that replaces the old closure dialog, decision 29). |
+| `polish-browser` | stops at the quiet zero | **replaced** | v181's quiet zero is measured on the advances list. Held: `tests/accounts.browser.mjs` (a quiet row; a debt figure only above zero). **Not measured with the gates open:** what that suite holds after that point - the empty screens, the week's letter, the backup's age. None is drawn by anything the pay book touches. |
+| `settings-order-browser` | 3 checks | reading | The pay book's row in ⋯ is drawn for a record that is not on, or on; under the seam the record is neither and no row is drawn. Held: `tests/activation.browser.mjs`, before and after. |
+| `nonassertions` | 1 check | **A DEFECT, fixed** | A literal `check(true)` in this phase's new emulator suite. It failed shut as well; it is a real comparison now and is not on the list. |
+| `build`, `gate-integrity` | 1 check each | (not the gate) | The stamp checks - red with the gates shut too on this branch of many commits. Both leave the list in the commit that moves the stamps. |
+
+**The 108 that say the same**, among them every suite the brief named: `daycheck`,
+`journey`, `workercard`, `yosefgeves`, `polish` (node), and in Chromium `daycheck-browser`,
+`journey-browser`, `workercard-browser`, `yosefgeves-browser`, `smoke`, `mobile`, `print`,
+`forms`, `reports-browser`, `navigation-browser`, `design-browser`, `transport-browser`,
+`seder-browser`, `rima-browser`, `week-browser`, `settings-browser`, the service-worker
+suites and the exports' proofs.
 
 **One real defect was found by this run** - in this phase's own work: a literal
 `check(..., true)` in the new emulator suite, caught by `tests/nonassertions.test.mjs`. It

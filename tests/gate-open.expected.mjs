@@ -123,8 +123,39 @@ export const EXPECTED = {
         why: 'the same stamp check, asked a second way',
         held: 'the squash commit moves the stamps',
         fails: ['no cached file has changed since the three stamps last moved']
-    }
+    },
 
     // ------------------------------------------------------------------ browser suites
-    //@BROWSER@
+
+    // THE «מקדמות» TAB IS THE ACCOUNTS HOME. Two suites tap things on the advances list
+    // that tab used to hold, and stop where the list is not.
+    'test:simple-advances-browser': {
+        kind: 'replaced',
+        why: 'it taps a man\'s card on the «מקדמות» tab; with the pay book on that tab is the accounts home and has no such card (measured first at Phase 5). What it holds: one man\'s advances page with a repayment and «תיקון טעות» through the real forms; the old closure dialog («קיזוז מהשכר», «סגירת חשבון התקופה»), which the review page replaces by decision 29; the layout of the old list',
+        held: 'tests/activation.browser.mjs («with the pay book on, one man\'s advances page is the existing one»: the same two forms, reached from his row, on the build as it ships); tests/accounts.browser.mjs (the review page, the closure, the list\'s geometry); tests/forms.browser.mjs, which says the same with the gates open',
+        died: 'locator.click: Timeout Nms exceeded.',
+        fails: []
+    },
+    'test:polish-browser': {
+        kind: 'replaced',
+        why: 'v181\'s «quiet zero» is measured on the advances list (`.advance-workers`), which is not on the tab. The suite stops there, so what it holds AFTER that point - the empty screens, the site\'s letter in the week, the backup\'s age - is NOT measured with the gates open; none of the three is drawn by anything the pay book touches',
+        held: 'tests/accounts.browser.mjs («a man with nothing to close is one quiet line»; a debt figure only when it is above zero)',
+        died: 'page.evaluate: TypeError: Failed to execute \'getComputedStyle\' on \'Window\': parameter 1 is not of type \'Element\'.',
+        fails: []
+    },
+
+    // THE SEAM IS NOT THE ACTIVATION. The settings sheet's one new row belongs to a record:
+    // «not turned on» with its button, or «on since» a day. A device opened through the
+    // seam has the flag and a record with no opening, which is neither - so the row is
+    // not drawn at all, and the three checks that count it part.
+    'test:settings-order-browser': {
+        kind: 'reading',
+        why: 'the pay book\'s row in the settings sheet is drawn for a RECORD (not on: a sentence and a button; on: the day), and under the seam the record is neither, so no row is drawn. On a record really turned on the row is there, in its second form',
+        held: 'tests/activation.browser.mjs (the row before and after the record is turned on, on the build as it ships)',
+        fails: [
+            'every control, with its id, its words and its inline handler - the v171 sheet, and the one row added since',
+            'every sentence, word for word - the same',
+            'what was added is one sentence and one button, both in the first section and neither behind a shut row'
+        ]
+    }
 };
