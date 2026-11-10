@@ -1,4 +1,4 @@
-# Worker accounts, closure and payment — the design as built (Phases 0 to 6)
+# Worker accounts, closure and payment — the design as built (Phases 0 to 7)
 
 Status: **the model, its storage and sync, the server-first closure, the rules for it, the
 screens, and closed accounts leaving the live document — shipped shut, on a development
@@ -11,7 +11,9 @@ gate may still not be opened**, and [What is still NOT built after Phase
 5](#what-is-still-not-built-after-phase-5) says exactly why. **Phase 6 comes before all of
 them**: closed months of days leaving the live document, behind a second flag
 (`months`, shipped `false`) - with what it measured about the phone's own storage, which
-is now the first wall and a blocker of the gate.
+is now the first wall and a blocker of the gate. **Phase 7 comes first of all**: the
+phone's cold store, which is the answer to that wall, behind a third flag (`cold`,
+shipped `false`), built on this branch merged with main at v180 (`d3103d6`).
 
 Phases 0 and 1 were built on `bd59a68` (v169); Phase 2 on `0acaceb` (v171); Phase 3 on
 Phase 2 merged with main at v172 (`8c943fa`); Phase 4 on Phase 3 merged with main at
@@ -25,6 +27,151 @@ wrong](#where-the-audit-and-the-design-were-wrong).
     node tests/paybook.sync.test.mjs        # two and three phones on the fake cloud (the old queue door, opened by name)
     node tests/paybook.oldbuilds.test.mjs   # v167, v169 and v171, out of Git, beside this build
     npm run -s test:paybook-emulator        # the PUBLISHED rules and the production adapter (needs Java)
+
+## Phase 7 — the phone's cold store (design, then as built)
+
+**Development branch. Not served, not merged, on no phone; no real record was read and no
+rules were published. `FARKAD_FLAGS.cold`, `months` and `paybook` are `false` in
+everything committed.** The owner approved BUILDING this on 2026-11-10 as a condition of
+ever opening the pay book's gate (decision 58). This section was written before the code;
+[Phase 7 as built](#phase-7-as-built) at its end says what exists and where the work
+stopped.
+
+### The problem
+
+Phase 6 measured it: with the pay book in use at 20 men closing fortnightly, a phone's
+localStorage (5 MiB, two bytes a character) stops fitting the record and one copy of it
+after about 0.7 years and the record alone after about 1.4, because Phases 5 and 6 shrink
+the SERVER's document and deliberately keep every archived day and every closure entry on
+the phone ("a phone's record never has a hole").
+
+### The decision, in one table
+
+The invariant is kept **in memory** and given up **on the localStorage record**:
+
+| | holds |
+|---|---|
+| `State.schedule` (memory) | every day and every entry, at the path it was written at - exactly as before. No fold, report, export or screen changes or reads anything new |
+| `scheduleData:v2` (localStorage) | what the server's live document holds, plus whatever has left the server and has NOT yet been proven to be in the cold store |
+| the cold store (IndexedDB `farkad-cold`, one object store `units`) | one record per thing that has left the live document: `m:<YYYY-MM>` - the days of an archived month; `c:<rowId>` - the entries of an archived closure, by field path |
+| `farkad:cold:u:<unit>` (localStorage, one small key per unit) | THE MARK: "the cold store was read back holding this unit with this digest". ~60 bytes. One key per unit so that two tabs never read-modify-write a shared list |
+
+What is cold is decided by the two indexes the live document already carries
+(`payIndex.rows`, `monthIndex.rows`) and by nothing else: a unit is exactly what an index
+row stands for (`paybookRowPaths`, the month's days). **Archived units never change** -
+both indexes only grow and both kinds of server document are create-once - which is what
+makes every step below idempotent.
+
+The digest of a month unit is the index row's own `h` (the server's digest, so a cold
+copy is checked against the live document, not only against itself). A closure row
+carries no digest of its entries, so the mark carries one (`monthHash` of the canonical
+entries), taken from memory at the moment of the move.
+
+### The move: copy, read back, compare, mark, and only then drop (law 3)
+
+`Cold.move()`, asynchronous, one unit at a time, never by a screen - it runs after boot
+and after a snapshot is adopted, when the flag is on.
+
+1. **COPY** - `put` the unit into IndexedDB; wait for the transaction's `complete`.
+2. **READ BACK** - in a NEW transaction, read the unit and digest what came back.
+3. **COMPARE** - with the digest of what memory holds (and, for a month, with the row's
+   `h`). Different: the cold copy is not believed, nothing is marked, nothing is dropped.
+4. **MARK** - `Store.setVerified('farkad:cold:u:<unit>', digest)`. Not landed: stop.
+5. **DROP** - the next write of the record leaves the unit out
+   (`State.persist` of `coldStrip(schedule)`), read back as every record write is.
+
+A kill at any point leaves one of: nothing changed (before 1); an unmarked cold copy and
+the record whole (after 1-3: the copy is simply made again); a mark and the record still
+whole (after 4: both hold it - the next boot verifies and then drops); the record without
+the unit and the cold store with it (after 5). **There is no order of events in which
+both are gone**, because 5 happens only after 2-4 in the same session.
+
+**What a write of the record may leave out - one rule, in `coldStripSet()`:** a unit this
+SESSION has read back from the cold store with the right digest (`Cold.verified`), or a
+unit the localStorage record did not hold when this session last read or wrote it. So a
+save never removes a unit on the strength of a mark alone (the cold store may have been
+evicted since the mark was written), and never ADDS a unit to localStorage that was not
+there (a phone that refetched three years of archive from the server must not try to fit
+them into five megabytes). With the reader inactive the set is empty and the record is
+written exactly as today.
+
+### Boot (IndexedDB is asynchronous; the app is not)
+
+`State.load()` stays synchronous and reads localStorage as today. Then, **only if the
+flag is on or a mark exists** (`farkad:cold:any`), `Cold.begin()`:
+
+- every index-named unit the record holds: nothing to wait for;
+- some are absent: `State.coldMissing()` is non-empty and the app is **partial** from the
+  first render. The day screen draws; everything computed over the archive says so and
+  refuses (next section). IndexedDB is opened with a deadline (4 s); each unit read is
+  digested; the ones that verify are laid into the raw record and the record is
+  re-normalised whole (`State.coldRebuild`, the same path `rollback` takes), then
+  rendered. Memory is then byte for byte what a phone without a cold store holds.
+- IndexedDB absent, blocked, slow past the deadline, throwing, or a unit missing or of
+  another digest: **not treated as empty** (law 10). The unit stays in `coldMissing()`,
+  the phone does not say synced, and Phase 5/6's gate does what it already does for a
+  phone that lacks detail: the next server document is made whole from the server's
+  `closed/` and `months/` documents (`closedGate`, `fetchClosed`), adopted, and
+  `Cold.move()` then writes the units to the cold store again. A slow open keeps trying
+  in the background.
+- **Private mode / no IndexedDB at all:** nothing is ever moved (step 1 fails), so
+  everything stays in localStorage as today, and ⋯ says so.
+
+`rollback()`, `adoptDiskBaseline()` and `loadRecord()` rebuild memory from the
+localStorage text; each now lays the units back before normalising - from what the cold
+store handed this session, or from the outgoing memory (units never change, so memory is
+always a correct source).
+
+### Missing data is said, and blocks what would be wrong without it (law 10)
+
+While `State.coldMissing()` is not empty:
+
+| | what happens | why |
+|---|---|---|
+| recording a day in a month that has not left | **works** | it needs nothing from the archive; this is the job on the site |
+| a day of a missing archived month | drawn with the sentence, never as an empty day; an edit is refused as any archived day's is | an empty day reads as "nobody worked" |
+| reports, the pay sheet, the invoice, a statement, xlsx/CSV/print/picture | **refused with the sentence** - all of them, not only ranges that touch a missing month | a missing closure makes every advance read as never deducted and every closed period as open, in ANY range; a pay sheet that silently omits is the worst failure here |
+| accounts, closing, paying, an advance, a repayment, a correction (`ledger.`, `advances.`, `pay.` paths) | **refused** before the journal | the planners would judge against folds with entries missing |
+| the backup file, a restore | **refused** | a backup that silently lacks the archive is a false backup |
+| the rescue file | **always made**; it says what is missing | it is the door of last resort |
+| «מסונכרן» | not said (the gate holds the document) | |
+
+### The files and the restore doors
+
+- **The backup file** is `State.schedule`, whole, as before - refused while partial.
+- **The rescue file** (`Recovery.rawRecords`) reads localStorage and now also carries
+  every cold unit this session read from IndexedDB, raw, under `cold:<unit>`, verified or
+  not, with `aboutColdStore` saying the state. `Cold.begin()` reads the cold store even
+  when the main record is quarantined (it then reads every unit there is, since the
+  index cannot be trusted), so the synchronous export has them.
+- **Restore points and `scheduleData:v2backup`** are written stripped, like the record.
+  A restore from one loses nothing: archived units never change, and Phases 5 and 6
+  already lay the phone's own archived months and closure entries over whatever a
+  restored document holds (`layMonthsKept`, `layPaybookUnion`).
+- **A restore** changes only what has not left, so the cold store is not rewritten by it;
+  memory and the record are written consistently by the existing doors.
+
+### Two tabs on one disk
+
+Marks are one key per unit (no shared list to lose). A `put` of a unit is idempotent (same
+key, same bytes). A tab that did not make the move strips nothing it has not itself read
+back; when it rebases onto the other tab's smaller record (`diskVerdict`), the units are
+carried over from its own memory. The worst case is the record flapping between "with the
+unit" and "without" until both tabs have verified - never a hole.
+
+### The reclaim ladder, and full ≠ blocked
+
+`Store.reclaim` deletes restore points and nothing else; the cold store is in another
+storage and the marks are not restore points - neither can be reclaimed. A full
+localStorage does not stop a move (the mark is ~60 bytes; if even that is refused the
+move stops before the drop). Nothing in the ladder waits on IndexedDB.
+
+### The flag
+
+`FARKAD_FLAGS.cold`, shipped `false`. With it shut and no mark on the disk **no IndexedDB
+database is opened**, nothing is stripped, and every byte written is today's. The READER
+is active whenever a mark exists, flag or not - a build that could not read what an
+earlier session moved would read holes.
 
 ## Phase 6 — closed months of days leave the live document (design, then as built)
 
