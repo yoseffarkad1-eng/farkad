@@ -44,7 +44,8 @@ const ROOT = sourceRoot();
 // how a suite stops testing. Anything this build loads that is not on this list must
 // still be in the older commit, and the three `given`s still stop the run if it is not.
 // v175 adds js/sync/transact.js (the pay book's server-first door) on the same terms.
-const NOT_IN_V165 = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js'];
+const NOT_IN_V165 = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
+    'js/model/months.js', 'js/sync/months.js'];
 const olderOrder = () => loadOrder().filter(file => NOT_IN_V165.indexOf(file) === -1);
 const REPORTS = readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8');
 const SETTINGS = readFileSync(new URL('../js/ui/settings.js', import.meta.url), 'utf8');

@@ -72,7 +72,7 @@ export function patchToUpdateArgs(patch) {
     return args;
 }
 
-export function firestoreOps(db, scheduleRef, receiptRef, closedRef) {
+export function firestoreOps(db, scheduleRef, receiptRef, closedRef, monthRef) {
     // One write, one receipt, one transaction. `apply` does the schedule half.
     //
     // A FAILURE BEFORE ANYTHING WAS WRITTEN SAYS SO (`unsent`, v166). The client keeps a note
@@ -411,6 +411,90 @@ export function firestoreOps(db, scheduleRef, receiptRef, closedRef) {
             return getDoc(closedRef(id)).then(snapshot =>
                 (snapshot.exists() ? JSON.parse(JSON.stringify(snapshot.data())) : null));
         },
+        // A CLOSED MONTH OF DAYS LEAVES THE LIVE DOCUMENT (Phase 6, js/sync/months.js).
+        //
+        // THE COPY: months/<id>, created once, in a commit that moves the schedule's
+        // revision and changes no business field. firestore.rules bind it to that commit
+        // exactly as they bind a closed document. One that is already there is answered
+        // as what it is, with nothing written.
+        copyMonth(patch, month) {
+            if (typeof monthRef !== 'function' || !month || typeof month.id !== 'string' || !month.data) {
+                const error = new Error('a month copy with no month document to create');
+                error.code = 'no-month-document';
+                error.unsent = true;
+                return Promise.reject(error);
+            }
+            return withReceipt(patch, transaction => {
+                transaction.update(scheduleRef, ...patchToUpdateArgs(patch));
+                transaction.set(monthRef(month.id), month.data);
+            }, (transaction, snapshot) => transaction.get(monthRef(month.id)).then(found => {
+                if (!found.exists()) return;
+                const error = new Error('this month already has a document of that name');
+                error.code = 'month-exists';
+                error.revision = snapshot.data().revision;
+                throw error;
+            }));
+        },
+        // THE DROP: the month's days leave the schedule, and its row and its calendar
+        // dates arrive in the index, in one commit. NEVER BEFORE THE SERVER HAS CONFIRMED
+        // THE COPY, and the confirmation is made here, inside the transaction, against
+        // what this very transaction read: the month document exists, is of this month,
+        // and holds EXACTLY the days the schedule holds for it - the same dates, each day
+        // equal. Anything less is `month-unconfirmed` and nothing is written. The rules
+        // repeat what they can: the document exists and is the one the row names, the
+        // days leaving are the days it holds by key, and the index only grows.
+        archiveMonth(patch, month, monthDocId) {
+            if (typeof monthRef !== 'function' || typeof month !== 'string' || typeof monthDocId !== 'string') {
+                const error = new Error('nothing may leave the schedule without a month document');
+                error.code = 'no-month-document';
+                error.unsent = true;
+                return Promise.reject(error);
+            }
+            const stable = value => {
+                if (value === null || value === undefined || typeof value !== 'object') {
+                    return JSON.stringify(value === undefined ? null : value);
+                }
+                if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+                return '{' + Object.keys(value).filter(key => value[key] !== undefined).sort()
+                    .map(key => JSON.stringify(key) + ':' + stable(value[key])).join(',') + '}';
+            };
+            const leaving = { dates: [], calendar: [] };
+            return withReceipt(patch, transaction => {
+                const args = patchToUpdateArgs(patch);
+                leaving.dates.forEach(date => args.push(new FieldPath('days', date), deleteField()));
+                args.push(new FieldPath('monthIndex', 'dates'), leaving.calendar);
+                transaction.update(scheduleRef, ...args);
+            }, (transaction, snapshot) => transaction.get(monthRef(monthDocId)).then(found => {
+                const live = snapshot.data();
+                const copy = found.exists() ? found.data() : null;
+                const days = (live && live.days && typeof live.days === 'object') ? live.days : {};
+                const mine = Object.keys(days).filter(date => date.slice(0, 7) === month && date.length === 10).sort();
+                const held = copy && copy.days && typeof copy.days === 'object' ? copy.days : {};
+                const theirs = Object.keys(held).sort();
+                const already = (live && live.monthIndex && Array.isArray(live.monthIndex.dates))
+                    ? live.monthIndex.dates.slice() : [];
+                const calendar = copy && Array.isArray(copy.dates) ? copy.dates : [];
+                if (copy && copy.month === month && mine.length > 0
+                    && stable(mine) === stable(theirs)
+                    && mine.every(date => stable(days[date]) === stable(held[date]))
+                    && calendar.length >= 28 && calendar.every(date => typeof date === 'string'
+                        && date.slice(0, 7) === month && already.indexOf(date) === -1)
+                    && mine.every(date => calendar.indexOf(date) !== -1)) {
+                    leaving.dates = mine;
+                    leaving.calendar = already.concat(calendar);
+                    return;
+                }
+                const error = new Error('the month document does not hold what would leave the schedule');
+                error.code = 'month-unconfirmed';
+                throw error;
+            }));
+        },
+        // One month document, as the server holds it, or null.
+        readMonth(id) {
+            if (typeof monthRef !== 'function') return Promise.resolve(null);
+            return getDoc(monthRef(id)).then(snapshot =>
+                (snapshot.exists() ? JSON.parse(JSON.stringify(snapshot.data())) : null));
+        },
         save(data) {
             return withReceipt(data, transaction => {
                 transaction.set(scheduleRef, data);
@@ -577,7 +661,11 @@ if (!isConfigured()) {
         const closedRef = id =>
             doc(db, ...SCHEDULE_DOC_PATH.split('/'), 'closed', String(id));
 
-        const ops = firestoreOps(db, scheduleRef, receiptRef, closedRef);
+        // And the months that have left: schedules/{docId}/months/{YYYY-MM}_{digest}.
+        const monthRef = id =>
+            doc(db, ...SCHEDULE_DOC_PATH.split('/'), 'months', String(id));
+
+        const ops = firestoreOps(db, scheduleRef, receiptRef, closedRef, monthRef);
 
         window.FarkadSync.connect({
             // Firestore merges dotted field paths server-side, so two people writing
@@ -626,6 +714,12 @@ if (!isConfigured()) {
             // A settled closure leaving the live document for its closed copy
             // (js/sync/closed.js): the drop, confirmed inside its own transaction.
             archiveClosed: ops.archiveClosed,
+            // A closed month of days leaving the live document for a document of its
+            // own (js/sync/months.js): the copy, the drop confirmed inside its own
+            // transaction, and the read a phone that lacks the month makes.
+            copyMonth: ops.copyMonth,
+            archiveMonth: ops.archiveMonth,
+            readMonth: ops.readMonth,
 
             // Sync is not a backup: a deletion syncs as faithfully as a correction, and
             // by the time it is noticed every phone agrees with it. These are the copies

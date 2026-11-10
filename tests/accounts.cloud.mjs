@@ -39,6 +39,9 @@ window.FarkadSync.connect({
     readClosed: id => call('readClosed', [id]),
     readReceipt: id => call('readReceipt', [id]),
     archiveClosed: (patch, removals, ids) => call('archiveClosed', [patch, removals, ids]),
+    copyMonth: (patch, month) => call('copyMonth', [patch, month]),
+    archiveMonth: (patch, month, id) => call('archiveMonth', [patch, month, id]),
+    readMonth: id => call('readMonth', [id]),
     archive: () => Promise.resolve(),
     archiveDates: () => Promise.resolve([]),
     archiveRead: () => Promise.resolve(null),
@@ -79,7 +82,7 @@ export function makeBrowserCloud(options = {}) {
             }
             if (!phone.online) {
                 const fields = { code: 'unavailable' };
-                if (['update', 'save', 'transact', 'archiveClosed'].includes(method)) fields.unsent = true;
+                if (['update', 'save', 'transact', 'archiveClosed', 'copyMonth', 'archiveMonth'].includes(method)) fields.unsent = true;
                 return { error: { message: 'client is offline', fields } };
             }
             try {

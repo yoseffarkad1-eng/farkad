@@ -490,6 +490,10 @@ Object.assign(FarkadSync, {
             // read as a path somebody else had corrected, and EVERY write came back
             // contested. Kept as one constant so a sixth ordering field cannot do it again.
             if (ENVELOPE_FIELDS.indexOf(path) !== -1) return false;
+            // A day of a month that has since left the live document (Phase 6): the
+            // document that refused this write says so itself, and the write is never
+            // sent again - see the pre-send pass in sendClaimed.
+            if (typeof monthArchivedPath === 'function' && monthArchivedPath(current, path)) return true;
             // Against the base this write FROZE, not against whatever the base has become
             // since. See stampProtocol. A path with no frozen base is one this client
             // cannot compare, and it is contested for that reason.
@@ -998,7 +1002,11 @@ Object.assign(FarkadSync, {
         if (remote.updatedAt === State.schedule.updatedAt
             && remote.updatedBy === syncDeviceId()
             && sameRimaLayers(remote, State.schedule, owes)
-            && (typeof paybookCovers !== 'function' || paybookCovers(State.schedule, remote))) {
+            && (typeof paybookCovers !== 'function' || paybookCovers(State.schedule, remote))
+            // AND NO MONTH THIS COPY DOES NOT KNOW HAS LEFT (Phase 6) - the same trap once
+            // more: a copy written by a build that never kept `monthIndex`, under the
+            // cloud's own stamps, must adopt the document that names the months.
+            && (typeof monthIndexCovers !== 'function' || monthIndexCovers(State.schedule, remote))) {
             this.noteCloudHeard();
             this.setStatus('synced');
             this.archiveDaily(State.schedule);

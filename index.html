@@ -709,6 +709,9 @@
      moment it loads, that read validates every queued path, and a queued pay.<id> is
      validated by payEntryProblems in this file. -->
 <script src="js/model/payroll.js"></script>
+<!-- Phase 6, closed months of days leaving the live document - shipped shut
+     (FARKAD_FLAGS.months). Pure; after payroll.js, whose planArchive it asks. -->
+<script src="js/model/months.js"></script>
 <script src="js/sync/sync.js"></script>
 <script src="js/sync/restore.js"></script>
 <script src="js/sync/receive.js"></script>
@@ -719,6 +722,8 @@
      queue. Above boot.js like every split of this group. -->
 <script src="js/sync/transact.js"></script>
 <script src="js/sync/closed.js"></script>
+<!-- Phase 6, the move of a closed month - shipped shut with it. Above boot.js. -->
+<script src="js/sync/months.js"></script>
 <!-- boot.js is last of the sync group and must stay last: its two lines RUN at load
      time. Any further split of this group goes ABOVE it. -->
 <script src="js/sync/boot.js"></script>

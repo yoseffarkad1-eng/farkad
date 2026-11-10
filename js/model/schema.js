@@ -96,7 +96,15 @@ const FARKAD_SHIPPED_FLAGS = {
     // rule of Phase 2 are about two phones holding DIFFERENT pay entries, and the only
     // way to produce that state in a suite is the door that used to produce it. The
     // Phase 2 suites open it through the test seam; nothing else does.
-    paybookQueue: false
+    paybookQueue: false,
+
+    // CLOSED MONTHS OF DAYS LEAVING THE LIVE DOCUMENT (Phase 6, js/model/months.js and
+    // js/sync/months.js). OFF. The owner approved building and testing it on 2026-11-10,
+    // not publishing it. With this off planMonths answers `gate` and archiveMonths
+    // refuses before it reads anything. It needs the pay book as well: a month is
+    // eligible only through closed and settled accounts. READING is deliberately not
+    // behind it - a phone must make whole a document another phone has archived from.
+    months: false
 };
 
 // FROZEN. `const` binds the name, not the object: anything holding a reference could set

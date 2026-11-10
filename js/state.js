@@ -899,6 +899,7 @@ const State = {
             if (typeof askTell === 'function') askTell(change.reason);
             return false;
         }
+        if (this.refuseArchivedMonth([change])) return false;
 
         // The journal first, and the schedule only if the journal took it.
         //
@@ -1012,6 +1013,27 @@ const State = {
         const journalled = Boolean(FarkadSync.queueBatch(entries));
         if (journalled && FarkadSync.adapter) FarkadSync.scheduleFlush();
         return journalled || !Store.available;
+    },
+
+    // A DAY OF A MONTH THAT HAS LEFT THE LIVE DOCUMENT IS NOT EDITED (Phase 6).
+    //
+    // The month was closed and settled for every man in it and its days are in a month
+    // document that is never rewritten; the server refuses any write to one of its dates.
+    // So the edit is refused HERE, before the journal: nothing is queued, nothing is owed,
+    // memory goes back to what the device holds (callers change memory before they
+    // commit), and the person is told why and what to do instead. Refused whole - a batch
+    // with one such path in it is not half-written. True when it refused.
+    refuseArchivedMonth(changes) {
+        if (typeof monthArchivedPath !== 'function') return false;
+        const hit = (changes || []).some(change => change && change.path
+            && monthArchivedPath(this.schedule, change.path));
+        if (!hit) return false;
+        this.rollback();
+        if (typeof render === 'function') render();
+        if (typeof askTell === 'function') {
+            askTell({ title: MONTH_TEXT.refusedTitle, message: MONTH_TEXT.refused });
+        }
+        return true;
     },
 
     // The shared ending for a commit with nowhere to live.
@@ -1157,6 +1179,7 @@ const State = {
             }
             return false;
         }
+        if (this.refuseArchivedMonth(accepted)) return false;
 
         // All or nothing, and ONE write. Journalling them one at a time was all-or-nothing
         // in what it reported and not in what it did: the first entry landed, the second
@@ -1841,6 +1864,30 @@ function normaliseSchedule(raw, hints) {
         }
     }
     if (Object.keys(payHeld).length > 0) schedule.payUnreadableContainer = payHeld;
+
+    // THE INDEX OF THE MONTHS THAT HAVE LEFT THE LIVE DOCUMENT (Phase 6), carried exactly
+    // as it lies - every row, readable or not, and the calendar dates beside them. It is
+    // the only thing in the record that says which days may no longer be edited and which
+    // a whole-document write must leave out; this function copies across only what it
+    // names, so without this block the first save would drop it. Not named in
+    // emptySchedule: a record with no month out is byte for byte the record it was.
+    // Never judged here - monthStoredIndex reads it, and a row it cannot read is held as
+    // broken at the gate, not repaired.
+    if (raw.monthIndex !== undefined && raw.monthIndex !== null) {
+        if (isPlainObject(raw.monthIndex)) {
+            const kept = {};
+            Object.keys(raw.monthIndex).forEach(key => {
+                if (POISON_SEGMENTS.indexOf(key) === -1) kept[key] = JSON.parse(JSON.stringify(raw.monthIndex[key]));
+            });
+            const rows = isPlainObject(kept.rows) ? Object.keys(kept.rows).length : 0;
+            const dates = Array.isArray(kept.dates) ? kept.dates.length : 0;
+            if (rows > 0 || dates > 0 || Object.keys(kept).some(key => ['v', 'rows', 'dates'].indexOf(key) === -1)) {
+                schedule.monthIndex = kept;
+            }
+        } else {
+            schedule.monthIndex = raw.monthIndex;
+        }
+    }
 
     // AND SOMEBODY IS TOLD, from here, because here is the only place every door meets.
     //

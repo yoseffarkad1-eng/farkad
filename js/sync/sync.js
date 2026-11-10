@@ -1106,7 +1106,9 @@ function replacementContent(source) {
         // And the index of what has left the live document (Phase 5): absent on every
         // record until a closure moves, so both sides read `undefined` and compare as
         // they did.
-        payIndex: schedule.payIndex
+        payIndex: schedule.payIndex,
+        // And the index of the months that have left it (Phase 6), on the same terms.
+        monthIndex: schedule.monthIndex
     });
 }
 
@@ -2738,6 +2740,13 @@ const FarkadSync = {
         const id = String(opId);
         const picked = choice === 'disk' || choice === 'cloud' ? String(choice) : 'mine';
         this.loadOutbox();
+        // «Mine» is not an answer for a day of a month that has left the live document
+        // (Phase 6): unbarring it would only have it held again at the next send. The
+        // hold stands, and the caller is told it was not taken.
+        if (picked === 'mine' && typeof monthArchivedPath === 'function' && this._baseDoc) {
+            const asked = this.physicalOperations().find(item => String(item.opId) === String(opId));
+            if (asked && monthArchivedPath(this._baseDoc, asked.path)) return false;
+        }
 
         const op = this.physicalOperations().find(item => String(item.opId) === id) || null;
         if (!op) return false;
@@ -3004,6 +3013,11 @@ const FarkadSync = {
                 answerable: !item.sent && (heard || Boolean(hold)),
                 heard
             };
+            // A DAY OF A MONTH THAT HAS LEFT THE LIVE DOCUMENT (Phase 6): this edit can
+            // never be sent - the server refuses any write to that date - so the panel
+            // must not offer to. `cloud` beside it is the archive's own value.
+            if (typeof monthArchivedPath === 'function' && this._baseDoc
+                && monthArchivedPath(this._baseDoc, path)) row.archived = true;
             // A COUNT (v166) carries the cloud's counts for its whole day: a move is two
             // paths and a hold names one, so the panel shows the day's other sites beside it.
             if (isRimaFieldPath(path)) {

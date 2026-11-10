@@ -65,7 +65,8 @@ const MAIN = '8c943fa';
 // The older builds, by the commit each was served or merged from - the same three
 // tests/paybook.oldbuilds.test.mjs measures on the fake cloud, with v172 (main) for v169.
 const OLDER = [['v167', 'a25566f'], ['v171', '0acaceb'], ['v172', MAIN]];
-const NEW_HERE = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js'];
+const NEW_HERE = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
+    'js/model/months.js', 'js/sync/months.js'];
 
 // The older builds, built out of Git: their own files, in this build's load order less
 // what they never had. Used by section O.

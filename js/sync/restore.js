@@ -181,6 +181,20 @@ Object.assign(FarkadSync, {
             layPaybookUnion(document, State.schedule, document);
         }
 
+        // AND NEITHER IS A MONTH THAT HAS LEFT THE LIVE DOCUMENT (Phase 6).
+        //
+        // Its days are in a month document that is never rewritten, and the server
+        // refuses any whole document that touches one of its dates or drops its row. So
+        // whatever this restore was handed - a file from before the month left, from
+        // after, or from a build that has never heard of it - the document gets the index
+        // as the server holds it and, for each month it names, the archive's own days in
+        // place of the file's: from the last server document this phone was shown, or
+        // from its own record, whichever has the row's digest. A restore that cannot do
+        // that does not run: half a month from a file over an archived one is exactly
+        // the quiet difference this app exists to refuse.
+        if (typeof layMonthsKept === 'function'
+            && !layMonthsKept(document, State.schedule, [this._baseDoc, State.schedule])) return false;
+
         // Checked before it is written down, not only when it is read back. A record
         // that would be quarantined on the next read is a record that should never have
         // been written: it would block every restore on the device and halt recording,
@@ -603,7 +617,16 @@ Object.assign(FarkadSync, {
         if (typeof layPaybookUnion === 'function') {
             layPaybookUnion(merged, base, merged);
         }
+        // AND A MONTH THAT LEFT IN THAT SAME WINDOW (Phase 6): the server's index, and
+        // for each month it names the archive's own days. If this phone holds nothing
+        // with the row's digest the document is left as it is - and the server refuses
+        // it, with the restore still owed, which is the safe direction.
+        if (typeof layMonthsKept === 'function' && typeof monthStoredIndex === 'function'
+            && monthStoredIndex(base).any) {
+            layMonthsKept(merged, base, [this._baseDoc, State.schedule, envelope.document]);
+        }
         const paySubstance = document => canonicalJson({
+            months: (document && document.monthIndex) || {},
             pay: (document && document.pay) || {},
             beside: (document && document.payConflicted) || {},
             // And the rows of what has left the live document (Phase 5). A cloud that

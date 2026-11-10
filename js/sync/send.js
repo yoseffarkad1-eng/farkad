@@ -538,6 +538,20 @@ Object.assign(FarkadSync, {
             // transaction with its own rules (G12-G14). Holding those here would have
             // stopped a worker added after a prepared restore from ever reaching the
             // cloud - a guarantee that already has a suite of its own. See replacesWhole.
+            // A DAY OF A MONTH THAT HAS LEFT THE LIVE DOCUMENT (Phase 6) IS NEVER SENT.
+            //
+            // This edit was made on a phone that had not yet heard the month was moved -
+            // offline, on a site - and it is now on top of a day that lives in a month
+            // document nobody may rewrite. The server would refuse it (daysGuard), and a
+            // refused write stops the queue behind it; dropping it would lose something a
+            // person typed with nothing said. So it is HELD, durably, with the contested
+            // writes, and listed in ⋯ with the archive's value beside it, where a person
+            // retires it. Asked of the last server document this phone was shown.
+            if (typeof monthArchivedPath === 'function' && this._baseDoc
+                && monthArchivedPath(this._baseDoc, path)) {
+                movedUnder.push(String(path));
+                return;
+            }
             if (!replacesWhole(path)) return;
             if (ask(item, path)) movedUnder.push(String(path));
         });

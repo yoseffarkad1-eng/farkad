@@ -404,8 +404,47 @@ function payArchiveFileNotice() {
 // not read, so that an import takes the record and leaves the note.
 function backupFileText(schedule) {
     const carried = payArchiveCarried(schedule);
-    if (!carried) return JSON.stringify(schedule, null, 1);
-    return JSON.stringify(Object.assign({}, schedule, { aboutClosedAccounts: carried }), null, 1);
+    const months = monthArchiveCarried(schedule);
+    if (!carried && !months) return JSON.stringify(schedule, null, 1);
+    const about = {};
+    if (carried) about.aboutClosedAccounts = carried;
+    if (months) about.aboutArchivedMonths = months;
+    return JSON.stringify(Object.assign({}, schedule, about), null, 1);
+}
+
+// THE MONTHS THAT HAVE LEFT THE SERVER'S LIVE DOCUMENT (Phase 6), said in the file - and
+// only on a phone whose record names one, so that with none the file is byte for byte
+// what it was. CARRIED: every day of every month, archived or not - this phone's record
+// keeps them all, and the file is this phone's record. Each archived month is counted
+// here and its digest asked, so a file that for any reason lacks a day says so itself.
+// Unlike a closure, an archived month needs no warning on the screen: restored into the
+// project it came from, the archived months are kept exactly as the server holds them;
+// restored into a new, empty project, they are simply days and go up with the rest.
+function monthArchiveCarried(schedule) {
+    if (typeof monthStoredIndex !== 'function') return null;
+    let index;
+    try { index = monthStoredIndex(schedule); } catch (error) { return null; }
+    if (!index.any) return null;
+    const whole = [];
+    const differing = [];
+    Object.keys(index.rows).forEach(month => {
+        const days = monthDaysOf(schedule, month);
+        if (Object.keys(days).length === index.rows[month].n && monthDigest(days) === index.rows[month].h) whole.push(month);
+        else differing.push(month);
+    });
+    return {
+        monthsArchivedOnServer: index.months.length,
+        monthsCarriedWholeInThisFile: whole.length,
+        monthsNotAsTheArchiveHoldsThem: differing,
+        indexRowsNotReadable: index.unreadable,
+        monthDocumentsCarried: false,
+        note: 'This file carries every day this phone holds, including the days of months that '
+            + 'have left the server\'s live document (monthIndex). It does not carry the server\'s '
+            + 'month documents themselves, and does not need to: a restore into the project it '
+            + 'came from keeps every archived month exactly as the server holds it, whatever this '
+            + 'file says about those days; a restore into a new, empty project sends them up as '
+            + 'ordinary days.'
+    };
 }
 
 // The state a restore replaced, kept so the restore itself can be undone.
@@ -888,6 +927,8 @@ function exportRecoveryData() {
     // the file itself (Phase 5) - present only when there is such a closure.
     const carried = payArchiveCarried(State.schedule);
     if (carried) payload.aboutClosedAccounts = carried;
+    const monthsCarried = monthArchiveCarried(State.schedule);
+    if (monthsCarried) payload.aboutArchivedMonths = monthsCarried;
 
     const name = `farkad-recovery-${todayStr()}.json`;
     const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
@@ -1302,6 +1343,11 @@ function recoveryFacts(schedule) {
     const indexRows = (schedule.payIndex && typeof schedule.payIndex === 'object'
         && schedule.payIndex.rows && typeof schedule.payIndex.rows === 'object') ? schedule.payIndex.rows : {};
     Object.keys(indexRows).forEach(id => put(`payIndex:${id}`, indexRows[id]));
+    // And each month that has left it (Phase 6), for the same reason: the row is the one
+    // thing that says a month's days may not be edited or sent whole.
+    const monthRows = (schedule.monthIndex && typeof schedule.monthIndex === 'object'
+        && schedule.monthIndex.rows && typeof schedule.monthIndex.rows === 'object') ? schedule.monthIndex.rows : {};
+    Object.keys(monthRows).forEach(month => put(`monthIndex:${month}`, monthRows[month]));
 
     ['pay', 'payConflicted'].forEach(family => {
         const held = schedule[family];

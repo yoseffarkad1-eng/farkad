@@ -33,6 +33,8 @@ const FILES = [
     // The pay book's model (v173): after the ledger it builds on, and before anything that
     // reads a queue - a queued `pay.<id>` is validated by payEntryProblems in this file.
     'js/model/payroll.js',
+    // Phase 6: closed months leaving the live document. Pure; asks planArchive.
+    'js/model/months.js',
     'js/state.js',
     'js/sync/sync.js',
     'js/sync/restore.js',
@@ -42,6 +44,7 @@ const FILES = [
     // The pay book's server-first door (v175). Above boot.js, like every split.
     'js/sync/transact.js',
     'js/sync/closed.js',
+    'js/sync/months.js',
     // Last of the sync group, and last for a reason - see the file's own header.
     'js/sync/boot.js',
     // For the backup, snapshot and undo-stack machinery. It builds DOM nodes and calls
@@ -675,7 +678,163 @@ export function makeCloud(options = {}) {
         return null;
     }
 
+    // WHAT firestore.rules SAY ABOUT THE MONTHS THAT HAVE LEFT (Phase 6), under the same
+    // opt-in: no write of any shape may add, change or remove a day whose date is in the
+    // index (daysGuard); nothing but the one archiving write may change the index
+    // (monthGuard); and once a month has left, only protocol 2 writes (monthsNeedPaybook).
+    // `whole` is a whole-document write; otherwise `data` is a field-path patch.
+    cloud.months = new Map();
+    function monthRulesProblem(data, whole) {
+        if (!cloud.payRules || !cloud.doc) return null;
+        const deny = why => { const error = new Error(why); error.code = 'permission-denied'; return error; };
+        const index = cloud.doc.monthIndex || {};
+        const rows = index.rows || {};
+        const dates = Array.isArray(index.dates) ? index.dates : [];
+        const stable = value => JSON.stringify(value === undefined ? null : value, (key, inner) =>
+            (inner && typeof inner === 'object' && !Array.isArray(inner)
+                ? Object.keys(inner).sort().reduce((out, name) => { out[name] = inner[name]; return out; }, {}) : inner));
+        if (Object.keys(rows).length > 0 && !(data.protocol >= 2)) {
+            return deny('a build that does not keep the pay book may not write once a month has left');
+        }
+        if (whole) {
+            if (stable(data.monthIndex || {}) !== stable(cloud.doc.monthIndex || {})
+                && !(Object.keys(rows).length === 0 && dates.length === 0
+                    && Object.keys((data.monthIndex || {}).rows || {}).length === 0
+                    && ((data.monthIndex || {}).dates || []).length === 0)) {
+                return deny('a whole document may not change the month index');
+            }
+            const before = cloud.doc.days || {};
+            const after = data.days || {};
+            const touched = Object.keys(Object.assign({}, before, after))
+                .filter(date => stable(before[date]) !== stable(after[date]));
+            if (touched.some(date => dates.indexOf(date) !== -1)) return deny('a day of a month that has left');
+            return null;
+        }
+        if (Object.keys(data).some(path => path === 'monthIndex' || path.indexOf('monthIndex.') === 0)) {
+            return deny('only the archiving write may change the month index');
+        }
+        if (Object.keys(data).some(path => path.indexOf('days.') === 0 && dates.indexOf(path.split('.')[1]) !== -1)) {
+            return deny('a day of a month that has left');
+        }
+        return null;
+    }
+
     cloud.adapter = {
+        // THE COPY OF A MONTH (Phase 6), modelled on the production adapter's copyMonth and
+        // on the rules for months/{id}: created once, in a commit that moves the revision,
+        // naming that operation and revision, under the name its month and digest give it.
+        copyMonth(patch, month) {
+            if (!month || typeof month.id !== 'string' || !month.data) {
+                return Promise.reject(refuse('no-month-document', 'a month copy with no month document'));
+            }
+            const problem = guard('copyMonth', patch);
+            if (problem) {
+                if (problem.code === 'unavailable') problem.unsent = true;
+                return Promise.reject(problem);
+            }
+            return landing('copyMonth', patch, () => {
+                if (!cloud.doc) throw refuse('not-found', 'No document to update');
+                if (cloud.protocol && receiptFor(patch.lastOpId)) {
+                    cloud.writes.push({ kind: 'copyMonth', patch, replayed: true });
+                    return { replayed: true, revision: receiptFor(patch.lastOpId).revision };
+                }
+                const said = protocolProblem(patch, false);
+                if (said) throw said;
+                if (cloud.months.has(month.id)) {
+                    const exists = refuse('month-exists', 'this month already has a document of that name');
+                    exists.revision = (cloud.doc && cloud.doc.revision) || 0;
+                    throw exists;
+                }
+                const data = month.data;
+                const denied = monthRulesProblem(patch, false);
+                if (denied) throw denied;
+                if (patch.protocol < 2 || data.opId !== patch.lastOpId || data.revision !== patch.revision
+                    || month.id !== `${data.month}_${data.digest}` || !Array.isArray(data.dates)
+                    || !data.days || Object.keys(data.days).some(date => data.dates.indexOf(date) === -1)) {
+                    const unpaired = new Error('the rules refuse this month document');
+                    unpaired.code = 'permission-denied';
+                    throw unpaired;
+                }
+                Object.keys(patch).forEach(path => setByPath(cloud.doc, path, patch[path]));
+                cloud.months.set(month.id, JSON.parse(JSON.stringify(data)));
+                landReceipt(patch);
+                cloud.writes.push({ kind: 'copyMonth', patch, month: month.id });
+                publish();
+                if (cloud.loseAnswer && cloud.loseAnswer('copyMonth', patch)) {
+                    const lost = new Error('the connection dropped before the answer');
+                    lost.code = 'unavailable';
+                    throw lost;
+                }
+            });
+        },
+        // THE DROP OF A MONTH (Phase 6), modelled on the production adapter's archiveMonth
+        // (the confirmation inside the transaction) and on archivesMonth in the rules.
+        archiveMonth(patch, month, monthDocId) {
+            if (typeof month !== 'string' || typeof monthDocId !== 'string') {
+                return Promise.reject(refuse('no-month-document', 'nothing may leave without a month document'));
+            }
+            const problem = guard('archiveMonth', patch);
+            if (problem) {
+                if (problem.code === 'unavailable') problem.unsent = true;
+                return Promise.reject(problem);
+            }
+            return landing('archiveMonth', patch, () => {
+                if (!cloud.doc) throw refuse('not-found', 'No document to update');
+                if (cloud.protocol && receiptFor(patch.lastOpId)) {
+                    cloud.writes.push({ kind: 'archiveMonth', patch, replayed: true });
+                    return { replayed: true, revision: receiptFor(patch.lastOpId).revision };
+                }
+                const said = protocolProblem(patch, false);
+                if (said) throw said;
+                const stable = value => {
+                    if (value === null || value === undefined || typeof value !== 'object') {
+                        return JSON.stringify(value === undefined ? null : value);
+                    }
+                    if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+                    return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + stable(value[key])).join(',') + '}';
+                };
+                const copy = cloud.months.has(monthDocId) ? cloud.months.get(monthDocId) : null;
+                const days = cloud.doc.days || {};
+                const mine = Object.keys(days).filter(date => date.slice(0, 7) === month && date.length === 10).sort();
+                const held = copy ? (copy.days || {}) : {};
+                const index = cloud.doc.monthIndex || {};
+                const already = Array.isArray(index.dates) ? index.dates : [];
+                const calendar = copy && Array.isArray(copy.dates) ? copy.dates : [];
+                if (!copy || copy.month !== month || mine.length === 0
+                    || stable(mine) !== stable(Object.keys(held).sort())
+                    || !mine.every(date => stable(days[date]) === stable(held[date]))
+                    || calendar.some(date => already.indexOf(date) !== -1)) {
+                    throw refuse('month-unconfirmed', 'the month document does not hold what would leave');
+                }
+                // The rules' half.
+                const rowKeys = Object.keys(patch).filter(key => key.indexOf('monthIndex.rows.') === 0);
+                const row = patch['monthIndex.rows.' + month];
+                if (patch.protocol < 2 || patch.archivedMonth !== month || patch.monthDoc !== monthDocId
+                    || rowKeys.length !== 1 || !row || row.d !== monthDocId || row.h !== copy.digest
+                    || Object.prototype.hasOwnProperty.call(index.rows || {}, month)
+                    || Object.keys(patch).some(key => key.indexOf('days.') === 0 || key.indexOf('pay.') === 0)) {
+                    const denied = new Error('the rules refuse this month archive write');
+                    denied.code = 'permission-denied';
+                    throw denied;
+                }
+                Object.keys(patch).forEach(path => setByPath(cloud.doc, path, patch[path]));
+                mine.forEach(date => { delete cloud.doc.days[date]; });
+                cloud.doc.monthIndex.dates = already.concat(calendar);
+                landReceipt(patch);
+                cloud.writes.push({ kind: 'archiveMonth', patch, month, removed: mine.slice() });
+                publish();
+                if (cloud.loseAnswer && cloud.loseAnswer('archiveMonth', patch)) {
+                    const lost = new Error('the connection dropped before the answer');
+                    lost.code = 'unavailable';
+                    throw lost;
+                }
+            });
+        },
+        readMonth(id) {
+            if (!cloud.online) return Promise.reject(offlineError('read'));
+            return Promise.resolve(cloud.months.has(String(id))
+                ? JSON.parse(JSON.stringify(cloud.months.get(String(id)))) : null);
+        },
         // The envelope travels IN the patch, exactly as it does on the wire: the client
         // sets protocol, revision and lastOpId as ordinary fields of the same write.
         update(patch) {
@@ -700,6 +859,8 @@ export function makeCloud(options = {}) {
                 }
                 const said = protocolProblem(patch, false);
                 if (said) throw said;
+                const refused = monthRulesProblem(patch, false);
+                if (refused) throw refused;
                 Object.keys(patch).forEach(path => setByPath(cloud.doc, path, patch[path]));
                 landReceipt(patch);
                 cloud.writes.push({ kind: 'update', patch });
@@ -869,7 +1030,7 @@ export function makeCloud(options = {}) {
                 }
                 const said = protocolProblem(data, !cloud.doc);
                 if (said) throw said;
-                const denied = payRulesProblem(data);
+                const denied = payRulesProblem(data) || monthRulesProblem(data, true);
                 if (denied) throw denied;
                 cloud.doc = JSON.parse(JSON.stringify(data));
                 landReceipt(data);
@@ -924,7 +1085,8 @@ export function makeCloud(options = {}) {
                 // payGuardOnCreate / indexGuardOnCreate: a project may not begin with a
                 // pay book (no closed document can be created beside it here) or an index.
                 if (cloud.payRules && (Object.keys(data.pay || {}).length > 0
-                    || Object.keys(((data.payIndex || {}).rows) || {}).length > 0)) {
+                    || Object.keys(((data.payIndex || {}).rows) || {}).length > 0
+                    || Object.keys(((data.monthIndex || {}).rows) || {}).length > 0)) {
                     const denied = new Error('a project may not begin with a pay book or an index');
                     denied.code = 'permission-denied';
                     throw denied;

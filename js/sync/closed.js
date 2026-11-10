@@ -44,6 +44,8 @@ Object.assign(FarkadSync, {
     // Closed documents fetched in this session, by id. Never written to the disk: once a
     // document made whole has been adopted, the entries are in the record itself.
     _closedDocs: {},
+    // Month documents fetched in this session, by id (Phase 6). The same rule.
+    _monthDocs: {},
     // The newest server document that could not be made whole yet, or null.
     _closedHeld: null,
     // { missing: [closed ids], broken: [row ids], since, tries } while one is held.
@@ -72,7 +74,24 @@ Object.assign(FarkadSync, {
             // an exception. A phone that stops updating is noticed; a hole is not.
             whole = { document: remote, missing: [], broken: ['payIndex'], laid: 0 };
         }
-        if (whole.missing.length === 0 && whole.broken.length === 0) {
+        // AND THE MONTHS THAT HAVE LEFT (Phase 6, js/model/months.js), by the same rule:
+        // every day of a month the index names is laid back - from this phone's own
+        // record or the last document it adopted when their days have the row's digest,
+        // from the month document otherwise - or the document is not adopted.
+        whole.months = [];
+        if (typeof monthsWhole === 'function') {
+            let months;
+            try {
+                months = monthsWhole(whole.document, [typeof State !== 'undefined' ? State.schedule : null,
+                    this._baseDoc], this._monthDocs);
+            } catch (error) {
+                months = { document: whole.document, missing: [], broken: ['monthIndex'], laid: 0 };
+            }
+            whole.document = months.document;
+            whole.months = months.missing;
+            whole.broken = whole.broken.concat(months.broken);
+        }
+        if (whole.missing.length === 0 && whole.months.length === 0 && whole.broken.length === 0) {
             if (this._closedWaiting) this.closedSettled();
             return whole.document;
         }
@@ -80,7 +99,8 @@ Object.assign(FarkadSync, {
             || !Number.isInteger(remote.revision) || remote.revision >= this._closedHeld.revision;
         if (newer) this._closedHeld = remote;
         const tries = this._closedWaiting ? this._closedWaiting.tries : 0;
-        this._closedWaiting = { missing: whole.missing.slice(), broken: whole.broken.slice(),
+        this._closedWaiting = { missing: whole.missing.slice(), months: whole.months.slice(),
+            broken: whole.broken.slice(),
             since: this._closedWaiting ? this._closedWaiting.since : new Date().toISOString(), tries };
         // «מסונכרן» over a document this phone has not adopted would be the lie the whole
         // status line exists to prevent.
@@ -97,6 +117,7 @@ Object.assign(FarkadSync, {
     // What a screen may say: null, or what this phone is still waiting for.
     closedWaiting() {
         return this._closedWaiting ? { missing: this._closedWaiting.missing.slice(),
+            months: (this._closedWaiting.months || []).slice(),
             broken: this._closedWaiting.broken.slice(), since: this._closedWaiting.since } : null;
     },
 
@@ -116,6 +137,8 @@ Object.assign(FarkadSync, {
         if (this._closedFetching || !this._closedWaiting) return this._closedFetching;
         const reader = this.adapter && typeof this.adapter.readClosed === 'function' ? this.adapter : null;
         const ids = this._closedWaiting.missing.slice();
+        const months = (this._closedWaiting.months || []).slice();
+        const monthReader = this.adapter && typeof this.adapter.readMonth === 'function' ? this.adapter : null;
         const again = () => {
             this._closedFetching = null;
             const held = this._closedHeld;
@@ -133,15 +156,19 @@ Object.assign(FarkadSync, {
                 this._closedTimer = setTimeout(() => { this._closedTimer = null; this.fetchClosed(); }, wait);
             }
         };
-        if (!reader || ids.length === 0) {
+        const fetches = (reader ? ids : []).map(id =>
+            Promise.resolve().then(() => reader.readClosed(id)).then(doc => {
+                if (doc && paybookClosedProblems(id, doc).length === 0) this._closedDocs[id] = doc;
+            }, () => undefined)).concat((monthReader ? months : []).map(id =>
+            Promise.resolve().then(() => monthReader.readMonth(id)).then(doc => {
+                if (doc && monthDocumentProblems(id, doc).length === 0) this._monthDocs[id] = doc;
+            }, () => undefined)));
+        if (fetches.length === 0) {
             // Nothing to fetch (a broken row), or nothing to fetch with: wait and look again.
             this._closedFetching = Promise.resolve().then(again);
             return this._closedFetching;
         }
-        this._closedFetching = Promise.all(ids.map(id =>
-            Promise.resolve().then(() => reader.readClosed(id)).then(doc => {
-                if (doc && paybookClosedProblems(id, doc).length === 0) this._closedDocs[id] = doc;
-            }, () => undefined))).then(again, again);
+        this._closedFetching = Promise.all(fetches).then(again, again);
         return this._closedFetching;
     },
 
@@ -153,8 +180,15 @@ Object.assign(FarkadSync, {
     closedAware(adapter) {
         if (!adapter || typeof adapter !== 'object' || typeof paybookStripCovered !== 'function') return adapter;
         const aware = Object.create(adapter);
+        // And no day of a month that has left (Phase 6): the rules refuse a write that
+        // touches one, and the month document already holds it.
         const strip = data => {
-            try { return paybookStripCovered(data); } catch (error) { return data; }
+            let out = data;
+            try { out = paybookStripCovered(out); } catch (error) { out = data; }
+            if (typeof monthsStripCovered === 'function') {
+                try { out = monthsStripCovered(out); } catch (error) { /* sent as it is; the rules decide */ }
+            }
+            return out;
         };
         if (typeof adapter.save === 'function') aware.save = data => adapter.save(strip(data));
         if (typeof adapter.create === 'function') aware.create = data => adapter.create(strip(data));
