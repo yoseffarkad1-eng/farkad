@@ -319,6 +319,22 @@ function hashOf(text) {
 //   const shared = sharedStore();
 //   const tabA = makeDevice({ sharedStorage: shared });
 //   const tabB = makeDevice({ sharedStorage: shared });
+// THE GATE-OPEN INSTRUMENT (tests/gate-open.preload.mjs, tests/gate-open.matrix.mjs).
+//
+// Run by no gate. When that preload is loaded it leaves the three flags to open in
+// globalThis.FARKAD_GATE_OPEN, and a device whose suite named NONE of the pay book's gates
+// is made with them open - which is every device of every suite written before the pay
+// book. A device whose flags name a gate is one its suite built on purpose and is left
+// exactly as named. Without the preload this returns what it was handed, untouched: a
+// device given no flags gets exactly what a person installs.
+const GATE_FLAGS = ['paybook', 'months', 'cold', 'paybookQueue', 'paybookActivation'];
+function gateOpenFlags(named) {
+    const open = globalThis.FARKAD_GATE_OPEN;
+    if (!open || typeof open !== 'object') return named || null;
+    if (named && GATE_FLAGS.some(flag => Object.prototype.hasOwnProperty.call(named, flag))) return named;
+    return Object.assign({}, named || {}, open);
+}
+
 export function makeDevice(options = {}) {
     deviceCount += 1;
 
@@ -344,7 +360,9 @@ export function makeDevice(options = {}) {
         // The test seam for the shipped feature gates. Defined BEFORE the app's scripts
         // run, which is the only moment it can be read - schema.js freezes the flags at
         // definition time. A device given no flags gets exactly what a person installs.
-        FARKAD_FLAG_OVERRIDES: options.flags || null,
+        // (Under tests/gate-open.preload.mjs - the instrument, never a gate - a device
+        // whose suite said nothing about the pay book's gates is opened: see gateOpenFlags.)
+        FARKAD_FLAG_OVERRIDES: gateOpenFlags(options.flags),
         document: makeDocument(downloads),
         Blob: makeBlob(),
         URL: makeUrl(),

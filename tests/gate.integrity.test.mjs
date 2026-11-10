@@ -45,7 +45,14 @@ const HELPERS = ['network-guard.mjs', 'cold.world.mjs', 'emulator-host.mjs', 'ex
     // it is handed to node with --import to run an EXISTING browser suite with the pay
     // book's gate open on every page (tests/README.md). No gate runs it, on purpose: what
     // fails under it is the list of expectations the gate's opening moves.
-    'gate-open.preload.mjs'];
+    'gate-open.preload.mjs',
+    // Phase 8: the same instrument run over EVERY suite (`npm run test:gate-open`), and
+    // the hand-kept list it compares with. In no gate, on purpose, for the same reason:
+    // it runs the suites as a build with the three flags on would, which no gate ships.
+    // It fails on a difference nobody has read - that is its whole job - but it is not a
+    // suite of this build's behaviour, and a release must not wait on a build nobody
+    // installs.
+    'gate-open.matrix.mjs', 'gate-open.expected.mjs'];
 
 // Suites that are RED ON PURPOSE and therefore in no gate: each one proves, on fixtures,
 // a case where the app parts from a documented rule, found by tests/oracle.test.mjs and
