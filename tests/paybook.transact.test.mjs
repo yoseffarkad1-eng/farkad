@@ -15,6 +15,7 @@
 //   T4   a stale account - the other phone closed it first: one closed document, one
 //        statement, no double deduction, the loser told and brought up to date
 //   T5   the document moved for an unrelated reason: the same operation, re-aimed
+//   T5b  "permission denied": a lost race is read and re-aimed, a refusal is said once
 //   T6   a double tap is one operation
 //   T7   the answer is lost and the write landed: settled by the receipt, never sent twice
 //   T8   the answer is lost and the server cannot be asked: «unknown», everything else
@@ -277,6 +278,38 @@ const deafen = cloud => cloud.subscribers.splice(0, 1);
     const refused = await c.Sync.transactPaybook(stale);
     same('a day recorded inside the account is a stale review: nothing is written, the fresh wage is handed back',
         [refused.state, refused.reasons[0], landed(cloud2).length, refused.fresh && refused.fresh.review.gross], ['stale', 'stale', 0, 3500]);
+}
+
+// ================================================================ T5b
+{
+    suite('T5b: "permission denied" is two answers - a race that was lost, or a refusal - and only looking tells them apart');
+
+    // What the real server says to the loser of a revision race (measured on the emulator,
+    // tests/paybook.split.emulator.test.mjs): the rules judge its commit against a document
+    // that has already moved, and refuse it in the words of "you are not on the list".
+    const denied = () => Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
+    const cloud = cloudWith();
+    const a = phone('d_a5b', cloud);
+    const b = phone('d_b5b', cloud);
+    await settled([a, b]);
+    const drawn = khaled(a);
+    deafen(cloud);
+    day(b, 'w_nasser', '2026-10-18');
+    await settled([b]);
+    let refusals = 0;
+    cloud.reject = kind => (kind === 'transact' && (refusals += 1) === 1 ? denied() : null);
+    const raced = await a.Sync.transactPaybook(drawn);
+    same('refused that way while the document had moved: it was the race - the document is read, the plan judged again, and the closure lands',
+        [raced.state, refusals, landed(cloud).length, payIds(cloud.doc)], ['closed', 2, 1, KHALED_PAY]);
+
+    const still = cloudWith();
+    const c = phone('d_c5b', still);
+    await settled([c]);
+    still.reject = kind => (kind === 'transact' ? denied() : null);
+    const refused = await c.Sync.transactPaybook(khaled(c));
+    same('refused that way while the document stood still: it is a refusal - said once, nothing kept, nothing sent again',
+        [refused.state, refused.reasons, refused.code, tried(still).length, intentOf(c), payIds(still.doc)],
+        ['refused', ['server'], 'permission-denied', 1, null, ['po_open']]);
 }
 
 // ================================================================ T6
