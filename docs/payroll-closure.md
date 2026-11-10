@@ -1,17 +1,18 @@
-# Worker accounts, closure and payment — the design as built (Phases 0 to 4)
+# Worker accounts, closure and payment — the design as built (Phases 0 to 5)
 
-Status: **the model, its storage and sync, the server-first closure, the rules for it and
-the screens — shipped shut, on a development branch.** `FARKAD_FLAGS.paybook` is `false`:
-every planner refuses with `gate`, nothing in the app creates a pay entry, the one-debt
-ruling the owner approved is behind the same gate, and the screens of Phase 4 are reached
-by nothing. **v176 is not served and not merged; nothing here has touched a real record,
-no rules were published, and the gate has never been open outside a test.** Phase 4 as
-built comes first below, then Phase 3; **the gate may still not be opened**, and
-[What is NOT built](#what-is-not-built-and-why-the-gate-stays-shut) says exactly why.
+Status: **the model, its storage and sync, the server-first closure, the rules for it, the
+screens, and closed accounts leaving the live document — shipped shut, on a development
+branch.** `FARKAD_FLAGS.paybook` is `false`: every planner refuses with `gate`, nothing in
+the app creates a pay entry, the one-debt ruling the owner approved is behind the same
+gate, and the screens are reached by nothing. **v176 is not served and not merged; nothing
+here has touched a real record, no rules were published, and the gate has never been open
+outside a test.** Phase 5 as built comes first below, then Phase 4, then Phase 3; **the
+gate may still not be opened**, and [What is still NOT built after Phase
+5](#what-is-still-not-built-after-phase-5) says exactly why.
 
 Phases 0 and 1 were built on `bd59a68` (v169); Phase 2 on `0acaceb` (v171); Phase 3 on
 Phase 2 merged with main at v172 (`8c943fa`); Phase 4 on Phase 3 merged with main at
-v174 (`893def8`). The specification was the audit and design
+v174 (`893def8`); Phase 5 on Phase 4 (`1981c5e`). The specification was the audit and design
 written against `b640c5a`; where the code disagreed with either, the code won, and every
 such place is in [Where the audit and the design were
 wrong](#where-the-audit-and-the-design-were-wrong).
@@ -21,6 +22,297 @@ wrong](#where-the-audit-and-the-design-were-wrong).
     node tests/paybook.sync.test.mjs        # two and three phones on the fake cloud (the old queue door, opened by name)
     node tests/paybook.oldbuilds.test.mjs   # v167, v169 and v171, out of Git, beside this build
     npm run -s test:paybook-emulator        # the PUBLISHED rules and the production adapter (needs Java)
+
+## Phase 5 — what leaves the live document, and the screens Phase 4 left (v176)
+
+**Development branch. Not served, not merged, on no phone; no real record was read and no
+rules were published. The gate (`paybook`) is still `false` in everything committed.**
+Everything below is reachable only with the gate open, which has never happened outside a
+test. After this phase the gate still may not be opened; [what is still not
+built](#what-is-still-not-built-after-phase-5) says why.
+
+    node tests/paybook.archive.test.mjs             # the move on the fake cloud; restores; the files
+    npm run -s test:paybook-archive-emulator        # the rules, the production adapter, three older builds (needs Java)
+    npm run -s test:archive-browser                 # the archive, the draft, «לבדיקה», «נסגר» - in Chromium
+    node --import ./tests/gate-open.preload.mjs tests/<suite>   # an EXISTING browser suite with the gate open
+
+### The one decision of this phase: a phone's record never has a hole
+
+Phase 3 wrote that dropping the live copy "needs the folds to read the index" and that
+teaching every reader of the ledger to do so "is a phase of its own". This phase did NOT
+teach them. It made the drop safe without it:
+
+| | holds |
+|---|---|
+| the server's live document | the open accounts, the days, and `payIndex.rows` - one row per closure whose entries have left it |
+| the server's closed documents | those entries, verbatim, create-once (Phase 3) |
+| **a phone's own record** | **both, laid together: every entry at the field path it was written at, exactly as before anything left** |
+
+So **no fold in the app reads the index for money** - `closedPeriods`,
+`advanceOutstanding`, the judge, `payrollReport`, `accountFor`, `closureHistory` read the
+entries they always read, because on a phone the entries are still there. The index is a
+manifest used at the boundary, in two functions:
+
+- **on the way in** - `closedGate`, the first lines of `receive()`, the one door every
+  server document comes through. For each row the entries it stands for are laid back at
+  their paths (`paybookWhole`): from this phone's own record where it holds them, from the
+  closed documents where it does not. **A document that cannot be made whole is not
+  adopted.** The phone keeps the record it has, leaves «מסונכרן», says so on the accounts
+  page, refuses to close or pay (`waiting`), fetches, and tries again on a ladder (1.5 s
+  to 60 s) with nobody tapping anything.
+- **on the way out** - `closedAware` wraps the three whole-document writes (`save`,
+  `create`, the daily cloud copy `archive`) so that they leave out what a row stands for
+  (`paybookStripCovered`). A field-path edit is untouched.
+
+**What this buys and what it does not.** It buys: the server's document shrinks, and every
+figure on every screen of every phone is the figure it was - asserted as one string over
+`accountsList`, `closureHistory`, every `advanceOutstanding`, every `closedPeriods`, every
+`advanceCarryInto`, `payrollReport`, and the two maps byte for byte, on the phone that
+moved the closure, a phone that watched, a phone with the writer off, a phone that was away
+for both the closure and the move, and a phone installed afterwards. It does **not** buy a
+smaller copy on the PHONE: a phone's record is as large as it always was. That is decision
+43, and it is the largest thing this phase leaves.
+
+### What leaves, and when
+
+`planArchive(schedule, today, { olderThanDays })` - the dry run, and the list the move
+works from. It writes nothing. One row per closed period per man:
+
+| state | means |
+|---|---|
+| `ready` | settled, and may leave now |
+| `waiting` | settled, and younger than the horizon asked for |
+| `archived` | already out of the live document (its row is in the index) |
+| `held` | it stays - `why`: `unanswered` (an older closure nobody answered for), `owed` (not paid in full), `overpaid`, `disputed`, `corrected` (a ledger «תיקון טעות» points at one of its deductions), `irregular` (an entry is not where this build would have written it) |
+
+**Nothing unsettled moves, ever.** A bundle is the frozen payslip, each `deducted` entry,
+the statement, its extra deductions, its payments, voids and adjustments - or, for a
+closure from before statements, the payslip, its deductions, the owner's answer and any
+payment against it.
+
+**The row** is Phase 3's index row (`paybookIndexFrom`) with three differences, all forced:
+
+- `a` is a MAP, `{ advanceId: [amount, balanceAfter] }`, not a list of triples.
+  **Firestore refuses a list inside a list** - measured on the emulator
+  (`invalid-argument`; the first drop that carried one never landed). The fake cloud now
+  refuses one too, so the node suite would catch it.
+- `e` - the pay entries that left with it, other than the one the row is named after;
+- `d` - the closed documents that hold the bundle, other than the one the row is named
+  after (a later payment's, the ledger half of an older closure).
+
+Every field path a row stands for is derived from the row alone (`paybookRowPaths`), and
+`planArchive` refuses (`irregular`) any bundle whose paths are not exactly those. A row is
+**create-once**: a correction made to a closure after it left - a void, an adjustment, a
+later payment - is a new entry in the live document and stays there (decision 52).
+
+A stored row is the derived row plus `e`: 31 bytes more for a closure paid at the closing
+(210 against 179 on a nine-day fortnight with no advance; 258 against 226 with two
+advances). **The capacity table of Phase 3 was drawn with the derived row and was not
+redrawn**: for 20 men closed fortnightly that is about 16 KB a year more than it says,
+and 32 KB closed weekly - which moves no conclusion in it.
+
+### The move: copy, read back, compare, and only then drop
+
+`FarkadSync.archiveClosed({ today, olderThanDays, limit, only })` in `js/sync/closed.js`,
+one bundle at a time. **Nothing about a move in progress is written on the phone**: each
+step begins by reading the server's document and the closed documents, and does the next
+thing they call for. That is what makes it idempotent and resumable - a reload, a lost
+answer and a second phone doing the same move all end in the same place.
+
+1. Read the live document. The row is there and the entries are gone: done.
+2. Every path of the bundle must be in the live document **with this phone's bytes**
+   (`differs` otherwise - somebody knows something this phone does not).
+3. Read the closed documents the bundle can be in. One that holds another figure for an
+   entry: `copy-differs`, and the closure stays for good - a closed document is
+   create-once and the live copy is then the only true one.
+4. **THE COPY**, only if some entry is in no closed document (every closure from before
+   the server-first door): one create-once document, in a commit that moves the revision
+   and changes no business field. Then back to step 1.
+5. **THE DROP**: the entries leave and the row arrives, in one commit
+   (`adapter.archiveClosed`). Then back to step 1, which is how a success is confirmed -
+   by reading, at a revision at least that new.
+
+**Never before server confirmation - checked in three places.** The client compares what
+it read (step 3). The adapter compares again INSIDE the drop's own transaction, against
+the closed documents and the schedule that transaction read (`closed-unconfirmed`, nothing
+written) - measured on the emulator by asking the production adapter to drop on the
+strength of a document that does not hold the entries, of one that does not exist, and of
+none. And the rules refuse a drop that names no existing closed document.
+
+Refused, with nothing attempted: `gate`, `busy`, `waiting`, `unsupported`, and everything
+`payTransactRefusal` refuses a closure for (`offline`, `unsent-work`, `pending`,
+`restoring`).
+
+**By itself:** after any closure, payment or correction goes through, the closures settled
+at least `PAYBOOK_ARCHIVE_AFTER_DAYS` (14) days ago are moved, three at a time, refused
+quietly if anything is in the way (`archiveDue`). Fourteen days so that a phone seldom
+meets a closure it never held. By hand, any settled closure, from «ארכיון סגירות».
+
+Two things the emulator found that the fake cloud could not, both fixed and both now
+modelled in the fake: the nested list above; and **a read can be a moment behind the
+commit it follows** (the lesson of Phase 3 again) - the read straight after a drop that
+had committed handed back the revision before it, the move concluded it had not landed and
+reported «busy» about a closure that was already out. A look that follows a write this
+phone knows of now waits for a document at least that new.
+
+### The rules, as they now stand on this branch
+
+Added to `firestore.rules`; **nothing was published**. `docs/firestore.rules.before-paybook`
+is still the rollback artifact.
+
+- **The index only grows.** No row removed, none changed, by anybody (`indexGuard`).
+- **A row arrives one at a time**, in a write that names it (`archivedId`), speaks
+  protocol 2, and whose closed document of that name **already exists** (`archivesOne`).
+- **A pay entry may leave** in such a write and in no other; that write adds none and
+  changes none (`payOnlyLeaves`).
+- **A project may not begin with an index** (`indexGuardOnCreate`).
+- **Once there is an index, a writer that does not speak protocol 2 may not write at
+  all** (`indexedNeedsPaybook`) - new, and it changes a cell of Phase 3's rollout table:
+  decision 46.
+
+Not server-enforced, said plainly: that the entries leaving are the ones the closed
+documents hold. The rules cannot loop. That is the adapter's, inside the transaction.
+
+Measured in `tests/paybook.archive.emulator.test.mjs`, by hand-written transactions:
+refused - a drop naming no row; naming a closed document that does not exist; from
+protocol 1; two rows at once; pay entries leaving with no row; a drop that also adds or
+changes a pay entry; a stranger; removing a row; changing a row; another entry leaving
+under a row that is already there; a whole document with no index; one that puts the
+entries back; a protocol-1 day once an index exists; a project created with an index.
+Accepted - the drop; a protocol-2 day after it; a whole document carrying the index and
+the pay book as they are (a restore from this build); the next closure.
+
+**The rollout order gains nothing new** - the rules to publish at its step 2 are these.
+If Phase 3's rules were what had been published, a drop would be refused whole (a pay
+entry removed) and nothing would be lost; they were never published.
+
+### Older builds, once anything has moved
+
+v167, v171 and v172, out of Git, on the emulator under these rules:
+
+| | measured |
+|---|---|
+| installed after the move (a copy that never held the closure) | **reads that account as never closed** - which is why the next line exists |
+| it records a day | **refused**: the day does not reach the server, the revision does not move, the phone does not say synced; the day stays on that phone |
+| its whole-document restore | **refused**: the rows, the pay book and the revision exactly where they were; the closed document untouched |
+| this build beside it | goes on recording |
+
+A build that had been syncing all along still holds the ledger half of the closure (the
+ledger is merged by union) and computes as before - but the rules cannot tell the two
+apart. THE ROLLOUT RULE already says every phone updates before the first pay entry.
+
+### A restore never erases a closure
+
+Proven in `tests/paybook.archive.test.mjs` (R9) on a fake cloud that refuses what the
+rules refuse of a whole-document write, and against the real rules on the emulator:
+
+| the restore | what happens |
+|---|---|
+| a file from before any closure | accepted; the index, the live pay book and every closed document exactly as they were; both phones still hold every closure and pay from the same figures; the work record IS replaced, as asked |
+| a file from before the move | the same |
+| a file from after the move | the same |
+| from a phone installed after the move, of a file that never held a closure | the same (also on the emulator) |
+| the document it sends | carries the rows and none of the entries they stand for |
+| a whole document from a build that does not know `pay` | **refused** (fake cloud; and v167, v171, v172 on the emulator) |
+| a whole document that takes a row away | **refused** |
+
+How: `layPaybookUnion` - the one function `receive()`, `prepareReplace` and
+`absorbCloudLedger` already call - now unions the index too (rows only arrive); the
+restore's "did the cloud gain anything" comparison and `localDurableHolds` include the
+index; and the write is stripped by `closedAware`.
+
+### The files
+
+A phone's record is whole, and the backup file is the phone's record - so **the backup
+and the rescue file carry every entry of every closure, archived or not**, by
+construction. What they do not carry is said **in the file** and **on the screen**, and
+only on a phone that has an archived closure (with none, the backup file is byte for byte
+`JSON.stringify(schedule)` as before - asserted):
+
+- in the file: `aboutClosedAccounts` - how many closures are archived on the server, how
+  many of their entries the file carries (and how many it lacks: 0), `closedDocumentsCarried:
+  false`, and a note in plain words. `normaliseSchedule` does not read that name: a file
+  read back is the record, without the note.
+- on the screen, added to the confirmation of both exports (proposed wording):
+  «הקובץ כולל את כל סגירות החשבון והתשלומים שבמכשיר הזה, גם אלה שכבר הועברו לארכיון בשרת. מסמכי הארכיון עצמם נשארים בשרת ואינם בקובץ: שחזור לאותו חשבון לא מוחק דבר, אבל שחזור לחשבון חדש וריק לא יחזיר את סגירות החשבון לשרת.»
+- the daily cloud copy (`history/{day}`) is the live document's shape - the rows, not the
+  entries - so it is no larger than the document it copies.
+- the rescue's comparison of two captures knows each row as a fact (`payIndex:<id>`).
+
+**NOT built, and stated in both places: a restore into a NEW, EMPTY project does not put
+the pay book on that server.** The rules refuse a pay entry that arrives without its
+closed document and a project that begins with an index. Measured: nothing is created
+there, the phone does not say synced, and it still holds everything. Building it means
+replaying every closure as its own transaction (decision 47).
+
+### The screens
+
+All in `js/ui/accounts.js`, drawn inside the «מקדמות» tab's page as the others are; styles
+at the end of `css/design.css`, inside `@media screen`. One more guarded line in
+`js/ui/reports.js` (its fifth hook).
+
+| screen | what it is |
+|---|---|
+| «ארכיון סגירות» | A link on the accounts list, shown once a closure may move or has moved, with how many are ready. The page IS the dry run: one paragraph saying what moving is and that nothing is deleted; the size of the server's record now, out of 1,024 KB, and after; the closures ready, by name and period; the ones that stay, each with its reason; the ones already archived. One filled button, «העבר לארכיון», which can be pressed again after any interruption. Reading the page writes nothing (measured). |
+| a phone that lacks the detail | One sentence at the top of every accounts screen while the phone is waiting, and it goes by itself when the phone has adopted. A closure or payment from that phone is refused in the same sentence. |
+| «לבדיקה» → «מה לבדוק?» | A man who reads «לבדיקה» has a button on his row. The page shows both bodies of a disagreement - the one that is counted («נספר - מה שהשרת מחזיק») and the one kept beside it - with kind, amount, date and device; each entry the fold holds out; what was paid beyond what was owed. **It settles nothing and says so**; its only button is the way back. |
+| a draft | What is typed into a review is kept in one Store key (`farkadPayDraft`) after the first key or tap - opening a page still writes nothing. After a reload the list offers «המשך סגירה שהתחלת: <name>», and the review opens with what was typed and says it was put back. It is put back only for the same man, the same period, on the same day, into an account that still reads exactly as it did (a mark of the wage, the open advances and what is left on each, and what he is already owed); otherwise it is removed without a word. A closure that goes through takes its draft with it. Never the record, the cloud, a backup or the rescue file. |
+| «נסגר» on «לפי עובד» | In the «פירוט שבועי» fold of that report, a week of a weekly man that is whole and closed carries the mark «נסגר» - the owner's word, the model's label - beside its dates. The figures are untouched. The report's main rows are per range and are not marked (decision 51). |
+
+Two pinned expectations moved, in the commits that moved them, each with its reason
+beside the check: «nothing is kept in storage» became «ONE thing is kept in storage - the
+draft - under one key of its own» (`tests/accounts.test.mjs`); «all of that typing wrote
+nothing» became «…nothing of the record and nothing to the cloud» plus «it wrote the
+draft» (`tests/accounts.browser.mjs`). And `js/ui/reports.js` "without its four hooks is
+main's file" is now five hooks.
+
+### The existing suites with the gate open
+
+Run through `tests/gate-open.preload.mjs`, which gives every page any suite opens the test
+seam with `paybook: true` before the app's scripts load, without changing the suite or a
+shipped byte.
+
+(measured table pending)
+
+### What is still NOT built after Phase 5
+
+1. **A phone's copy does not shrink.** Folds that read the index instead of the entries
+   are not built (decision 43). The limit that remains on a phone is its own storage -
+   one copy of the record plus up to seven more in restore points and the way back,
+   the same limit Phase 2 measured.
+2. **The server's document is still not bounded.** What Phase 3 measured stands: with
+   closures leaving, the days are the larger half and fill it in about a year and a half
+   for 20 men; the index is one row per closure and is not folded into a checkpoint. The
+   capacity table was not redrawn.
+3. **An unpaid closure never leaves.** Only what is settled moves, so a man who is owed
+   for months keeps his closures in the live document for months.
+4. **Settling a disagreement.** «לבדיקה» shows one; choosing between two bodies is a new
+   linked record kind and a change to the model (decision 49).
+5. **A restore into a new, empty project** does not carry the pay book (decision 47).
+6. **A phone installed afresh re-reads every closed document its index names** - one read
+   per document - and holds them only in memory until it has adopted; a reload in the
+   middle starts again.
+7. **The partial void** (skipped on instruction), and Phase 4's items 3, 4, 6 and 9: the
+   wording of «late since close», a date for the payment made at the closing, reversing
+   an advance deduction from the statement, the stale «שולח» line.
+8. **The commit that opens the gate**, with the expectations it moves - the eight in
+   `repayment`, `ledger.truth` and `paycycle.completion`, and the browser expectations in
+   the table above. Nothing here opens it.
+9. **A real phone, and the owner's real record.** `planArchive`, `planDebtRuling`,
+   `planPayMigration` and `planHistoryMove` have been read on synthetic records only.
+
+### Hebrew in Phase 5
+
+All **proposed**. Forty strings in `ACC_TEXT` (the four groups at the end of the table in
+[Hebrew in Phase 4](#hebrew-in-phase-4): the draft, «לבדיקה», the archive, a phone that
+lacks the detail), pinned word for word in `tests/accounts.test.mjs`; and one in
+`js/ui/backup.js`, pinned in `tests/paybook.archive.test.mjs`:
+
+| string | where |
+|---|---|
+| הקובץ כולל את כל סגירות החשבון והתשלומים שבמכשיר הזה, גם אלה שכבר הועברו לארכיון בשרת. מסמכי הארכיון עצמם נשארים בשרת ואינם בקובץ: שחזור לאותו חשבון לא מוחק דבר, אבל שחזור לחשבון חדש וריק לא יחזיר את סגירות החשבון לשרת. | the confirmation of the backup and of the rescue file, on a phone with an archived closure |
+
+«נסגר» on the weekly breakdown is not a new string: it is `PAYBOOK_STATUS_LABELS.closed`.
 
 ## Phase 4 — the screens (v176)
 
@@ -113,10 +405,10 @@ subtract. Pinned in `tests/accounts.test.mjs`. No other file under `js/model/` o
 ### What is NOT built in Phase 4
 
 1. **«נסגר» on the «לפי עובד» report** for closed weeks (the owner's answer of
-   2026-11-10). The reports are unchanged.
+   2026-11-10). *Built at Phase 5, on the weekly breakdown - see above.*
 2. **A screen to settle a pay-book disagreement** (`payConflicted`). Such a man reads
    «לבדיקה», his planners refuse with `conflict` and its sentence, and nothing lets a
-   person choose.
+   person choose. *Phase 5 built the page that SHOWS it; settling is still not built.*
 3. **The wording of «late since close»** on a closed row under the ruling (decision 26).
 4. **A date for the payment made AT the closing.** It is dated today; a different day is a
    later payment.
@@ -126,9 +418,13 @@ subtract. Pinned in `tests/accounts.test.mjs`. No other file under `js/model/` o
    existing «תיקון טעות», on the man's advances page.
 7. **Drafts.** What is typed into a review is in memory only; a reload loses it, on
    purpose — a draft of a closure offered a week later would be against another account.
+   *Built at Phase 5, with that objection answered: a draft is put back only against the
+   account it was typed against, on the day it was typed.*
 8. **The absent detail is not fetched into a backup**, and the «detail not on this phone»
    sentence can only be produced in a test today, because nothing has left the live
-   document (Phase 3, item 1).
+   document (Phase 3, item 1). *At Phase 5 closures do leave it - and a phone's own record
+   keeps every entry, so a backup is whole and that sentence still cannot arise outside a
+   test: a phone that lacks the detail does not adopt the document at all.*
 9. **The stale «שולח» status line** after a batch settled against the server's copy
    (pre-existing, `js/sync/send.js`).
 
@@ -696,7 +992,10 @@ with their proof.
 
 ### What is NOT built, and why the gate stays shut
 
-1. **Nothing leaves the live document yet.** A closure written through the new door is in
+1. **Nothing leaves the live document yet.** *(Phase 5: a settled closure now does - by
+   another road than the one written here. The folds were NOT taught to read the index;
+   a phone's record keeps every entry and the index is used only at the boundary. See
+   Phase 5.)* A closure written through the new door is in
    the closed collection AND still in the schedule. Dropping the live copy needs the folds
    to read the index — and every reader of the ledger (`closedPeriods`,
    `advanceOutstanding`, `advanceHistory`, the judge, the reports) reads the entry map
@@ -704,14 +1003,17 @@ with their proof.
    a phase of its own; a version of it squeezed into this one would have been the weaker
    version. **So the capacity clock is not stopped**, and opening the gate today would
    fill the document in about seven months (below).
-2. **The index is not stored.** It is derivable from the entries for as long as they are
+2. **The index is not stored.** *(Phase 5: it is, one row per archived closure, written
+   by the transaction that drops the entries.)* It is derivable from the entries for as long as they are
    in the schedule, which is always, today. It must be written by the same transaction
    that drops an entry, never before.
 3. **The index as designed is itself not bounded** — measured, below. Rows of settled
    closures older than some horizon have to fold into one per-man checkpoint.
 4. **The days are still in the document, and they are the larger half.** See Capacity.
 5. **Backups and the rescue file do not carry closed documents, and a restore does not
-   re-create them.** While nothing has left the schedule a backup is complete without
+   re-create them.** *(Phase 5: they carry every ENTRY, say in the file and on the screen
+   what they do not carry, and a restore never erases a closure - proven. A restore into
+   an empty project is still not built.)* While nothing has left the schedule a backup is complete without
    them, by construction. Decided, not built: the backup file gains `closed: { id: doc }`
    for every closed document the phone can fetch (and says how many it could not); a
    restore never deletes or rewrites a closed document (the rules make that impossible)
@@ -719,7 +1021,8 @@ with their proof.
    **Under the new rules a whole-document write that would ADD pay entries is refused
    unless it creates a closed document in the same commit** — so until that is built, a
    pay book cannot be restored into a new project. With the gate shut there is none.
-6. **Moving existing history** — Phase 5, after every phone reads the index.
+6. **Moving existing history** — Phase 5, after every phone reads the index. *(Built:
+   `archiveClosed`, with `planArchive` as its dry run.)*
 7. **No screen.** Phase 4.
 
 ### The rules, as a file
@@ -1524,6 +1827,45 @@ Every other string is **proposed** and needs his word before it is pinned (iron 
 defaults 1 to 8, and items 9, 10 (the debt stays; built behind the gate), 11 (the carry:
 never silently locked - `carry-approval-needed`), 17, 20, 21. What follows is the list as
 it stood, kept for the items that are still open: 12 to 16, 18, 19 and 22 to 25.
+
+**New, from Phase 5** - each answerable in one line; what is built is said:
+
+43. A phone keeps every entry of an archived closure (built): the SERVER's document gets
+    smaller, the phone's own copy does not. The other way - phones holding only the index
+    and fetching the detail when somebody opens it - means teaching every fold of money to
+    read the index. Recommended: accept for now, and build the other when a phone's own
+    storage is what is running out.
+44. A phone that cannot fetch the closed copy of an archived closure does not take the
+    server's newer record at all until it can (built): it goes on with the record it has,
+    says so, and is not «מסונכרן». The other way is to take it with the sums from the
+    index and no detail. Recommended: keep - no screen can then show a closed account as
+    open.
+45. A closure that is paid in full leaves the live record by itself fourteen days after
+    it was closed, three at a time, right after a closure or payment goes through (built),
+    and sooner by hand from «ארכיון סגירות». Recommended: fourteen days.
+46. Once any closure has been archived, a phone on a build from before the pay book may
+    not write at all - not even a day (built in the rules of this branch; measured on
+    v167, v171, v172). Before, such a phone could go on recording days. Recommended: keep
+    - installed afresh, such a build reads an archived account as never closed.
+47. A backup restored into a NEW, EMPTY Firebase project does not put the pay book on
+    that server (as built; said in the file and on the screen). Recommended: accept;
+    building it means replaying every closure as a transaction of its own.
+48. A closure with a «תיקון טעות» against one of its deductions, an overpaid one and a
+    disputed one never move (built). Recommended: keep.
+49. «לבדיקה» now SHOWS a disagreement - both figures, which one is counted - and cannot
+    settle it (built). Settling needs a new linked record. Build it before the gate opens?
+    Recommended: yes if restores from files are expected; otherwise after.
+50. What is typed into a closure is kept on the phone until the closure goes through, the
+    day ends or the account changes (built). Recommended: keep.
+51. «נסגר» is marked on the lines of the weekly breakdown («פירוט שבועי») of «לפי עובד»
+    (built); the report's main rows are per chosen range, not per week, and are not marked.
+    Is that the marking he meant? Recommended: show him the page.
+52. A correction made to a closure after it was archived - a void, an adjustment, a later
+    payment - stays in the live record for good (built). They are small. Recommended:
+    accept.
+53. Every proposed string of Phase 5: the four groups at the end of the table in
+    [Hebrew in Phase 4](#hebrew-in-phase-4), and the one sentence in
+    [Hebrew in Phase 5](#hebrew-in-phase-5).
 
 **New, from Phase 4** - each answerable in one line; what is built is said:
 

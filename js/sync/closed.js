@@ -66,9 +66,11 @@ Object.assign(FarkadSync, {
         try {
             whole = paybookWhole(remote, typeof State !== 'undefined' ? State.schedule : null, this._closedDocs);
         } catch (error) {
-            // A row this build cannot even walk is not a reason to stop hearing the cloud:
-            // paybookStoredIndex skips what it cannot read. This is belt and braces.
-            return remote;
+            // It should not be able to throw: paybookStoredIndex skips a row it cannot
+            // read. If it does, the one thing known is that this document was NOT shown
+            // to be whole - so it is held, loudly, and never adopted on the strength of
+            // an exception. A phone that stops updating is noticed; a hole is not.
+            whole = { document: remote, missing: [], broken: ['payIndex'], laid: 0 };
         }
         if (whole.missing.length === 0 && whole.broken.length === 0) {
             if (this._closedWaiting) this.closedSettled();

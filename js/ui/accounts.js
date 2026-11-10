@@ -2130,14 +2130,24 @@ function accDrawOpening(node) {
         accSend(plan, form, () => accGo('list', { flash: ACC_TEXT.openingDone, opening: null }));
     });
     node.appendChild(go);
-    const advances = button(ACC_TEXT.advances, 'btn-secondary', () => {
-        // The advances themselves stay reachable before anybody has activated anything:
-        // the first man on the roster's page, from which every other is one tap back.
-        const first = (State.schedule.workers || [])[0];
-        if (first) showWorkerAdvances(first.id);
-        else { form.message = ACC_TEXT.notFound; paint(); }
+    // THE ADVANCES STAY REACHABLE BEFORE ANYBODY HAS ACTIVATED ANYTHING - every man's, not
+    // the first man's. This button used to open the first man on the roster "from which
+    // every other is one tap back"; but back from his page is THIS page, so until the
+    // tracking day was chosen an advance could be recorded for one man only (found by
+    // running tests/simple-advances.browser.mjs with the gate open, Phase 5). It now
+    // opens the roster, a name a button, each to that man's own advances page.
+    const people = el('div', 'acc-row-actions acc-opening-people');
+    people.hidden = true;
+    const advances = button(ACC_TEXT.advances, 'btn-secondary acc-opening-advances', () => {
+        const crew = (State.schedule.workers || []).filter(worker => worker && worker.id !== undefined);
+        if (crew.length === 0) { form.message = ACC_TEXT.notFound; paint(); return; }
+        clear(people);
+        crew.forEach(worker => people.appendChild(button(isolate(worker.name), 'btn-secondary acc-opening-person',
+            () => showWorkerAdvances(worker.id))));
+        people.hidden = !people.hidden;
     });
     node.appendChild(advances);
+    node.appendChild(people);
 
     function paint() {
         if (paybookFold(State.schedule).opening) { accGo('list', { opening: null }); return; }

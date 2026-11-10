@@ -13,6 +13,7 @@
 //   R3  never before the server confirms the copy
 //   R4  a phone that lacks the detail: it fetches, or it does not adopt - and says so
 //   R5  resumable: a lost answer, a refused step, a second phone doing the same move
+//   R6  existing history: a closure made the old way with a deduction - dry run, answer, pay, move
 //   R7  what is refused: no signal, unsent work, the gate shut
 //   R8  life after the move: a correction to an archived closure, and the next closure
 //   R9  a restore never erases a closure: every door, before and after the move
@@ -455,6 +456,25 @@ const KHALED_PATHS = ['ledger.advances.le_period_w_khaled_20261002',
         cloud4.adapter.readClosed = real;
     }
 
+    // the gate itself failing: never adopt on the strength of an exception
+    {
+        const cloud5 = cloudWith();
+        const one = phone('d_g4a', cloud5);
+        const two = phone('d_g4b', cloud5);
+        await settled([one, two]);
+        const real = one.ctx.paybookWhole;
+        one.ctx.paybookWhole = () => { throw new Error('the reader of the index broke'); };
+        given('another phone records a day', two.State.commit(two.call('assignPlace', two.State.schedule, '2026-10-16', 'w_salim', 'actual', 'p_a', undefined, 0)) === true);
+        await settled([two]);
+        await settle(60);
+        same('IF THE GATE ITSELF THROWS the document is held, not adopted: the day is not on this phone, it does not say synced, and it says it is waiting',
+            [Boolean((one.State.schedule.days['2026-10-16'] || {}).actual), one.Sync.status === 'synced', (one.Sync.closedWaiting() || {}).broken],
+            [false, false, ['payIndex']]);
+        one.ctx.paybookWhole = real;
+        await settleUntil(() => quiet(one), 20000, 20);
+        same('and when it can be judged again it is adopted', [Boolean(one.State.schedule.days['2026-10-16'].actual.w_salim), one.Sync.closedWaiting()], [true, null]);
+    }
+
     // a broken copy on the server
     {
         const cloud3 = cloudWith();
@@ -535,6 +555,67 @@ const KHALED_PATHS = ['ledger.advances.le_period_w_khaled_20261002',
 
 // ------------------------------------------------------------------------------------
 {
+    suite('R6: existing history - a closure made the OLD way, with a deduction, answered and then moved');
+
+    const cloud = cloudWith();
+    const a = phone('d_a6', cloud);
+    const b = phone('d_b6', cloud);
+    await settled([a, b]);
+    // The dialog every phone has today: one total, oldest first, through the queue.
+    const old = b.call('closePeriodChanges', b.State.schedule, 'w_khaled', FORTNIGHT.from, FORTNIGHT.to,
+        `${TODAY}T08:00:00.000Z`, b.id, 700);
+    given('the old dialog closes Khaled\'s fortnight with 700 deducted', Array.isArray(old) && b.State.commitMany(old) === true,
+        JSON.stringify(old).slice(0, 200));
+    await settled([a, b]);
+    const said = a.call('planArchive', a.State.schedule, TODAY).bundles[0];
+    same('THE DRY RUN, before anybody answered: it stays, and says why - nobody has said whether he was paid',
+        [said.workerId, said.state, said.why, said.source], ['w_khaled', 'held', 'unanswered', 'artifact']);
+    same('and a move run now moves nothing', (await a.Sync.archiveClosed({ today: TODAY })).moved, []);
+    const answer = plan(a, 'planLegacy', 'w_khaled', FORTNIGHT.from, { state: 'due', due: 1000 }, stamp(TODAY, a.id, '11'));
+    given('the owner answers: 1,000 still owed', answer.ok === true && (await a.Sync.transactPaybook(answer)).state === 'closed', JSON.stringify(answer.reasons));
+    await settled([a, b]);
+    same('answered «נשאר חוב»: it still stays - it is owed',
+        (bundle => [bundle.state, bundle.why])(a.call('planArchive', a.State.schedule, TODAY).bundles[0]), ['held', 'owed']);
+    const paid = plan(a, 'planPayment', 'pl_le_period_w_khaled_20261002', 1000, { paymentId: 'pp_old00000001', date: TODAY, method: 'cash' }, stamp(TODAY, a.id, '12'));
+    given('and is then paid', paid.ok === true && (await a.Sync.transactPaybook(paid)).state === 'closed', JSON.stringify(paid.reasons));
+    await settled([a, b]);
+    const ready = a.call('planArchive', a.State.schedule, TODAY).bundles[0];
+    same('paid in full: ready, under the answer\'s id, standing for the payslip, BOTH deductions, the answer and the payment',
+        [ready.state, ready.rowId, ready.paths.slice().sort()],
+        ['ready', 'pl_le_period_w_khaled_20261002', ['ledger.advances.le_period_w_khaled_20261002',
+            `ledger.advances.le_close_${K1}_20261002`, `ledger.advances.le_close_${K2}_20261002`,
+            'pay.pl_le_period_w_khaled_20261002', 'pay.pp_old00000001'].sort()]);
+    const before = { a: money(a), b: money(b), closed: [...cloud.closed.keys()].sort() };
+    const from = cloud.writes.length;
+    const result = await b.Sync.archiveClosed({ today: TODAY });
+    await settled([a, b]);
+    same('THE MOVE, run from the other phone: the copy of the ledger half first, then the drop',
+        [result.ok, result.moved, kinds({ writes: cloud.writes.slice(from) })], [true, ['pl_le_period_w_khaled_20261002'], ['transact', 'archiveClosed']]);
+    const copy = cloud.closed.get('le_period_w_khaled_20261002');
+    same('the copy holds the payslip and both deductions, byte for byte what the schedule held - and nothing that already had a closed document',
+        [Object.keys(copy.entries).sort(), canonical(copy.entries) === canonical(Object.fromEntries(Object.keys(copy.entries)
+            .map(path => [path, at(a.State.schedule, path)]))), copy.kind],
+        [['ledger.advances.le_period_w_khaled_20261002', `ledger.advances.le_close_${K1}_20261002`,
+            `ledger.advances.le_close_${K2}_20261002`].sort(), true, 'history']);
+    same('the row names the three documents the closure now lives in',
+        [cloud.doc.payIndex.rows.pl_le_period_w_khaled_20261002.d, Object.keys(cloud.doc.payIndex.rows.pl_le_period_w_khaled_20261002.a).sort(),
+            cloud.doc.payIndex.rows.pl_le_period_w_khaled_20261002.e],
+        [['le_period_w_khaled_20261002', 'pp_old00000001'], [K1, K2].sort(), ['pp_old00000001']]);
+    same('nothing of it is left in the live document: the advances are there, their deductions are not',
+        [ledgerIds(cloud.doc).filter(id => /^le_(period|close)_/.test(id)), payIds(cloud.doc)], [[], ['po_open']]);
+    same('and both phones pay from the same figures as before - each advance reduced exactly once',
+        [money(a) === before.a, money(b) === before.b, [K1, K2].map(id => a.call('advanceOutstanding', a.State.schedule, id).left)], [true, true, [0, 200]]);
+    const fresh = phone('d_new6', cloud, { storage: {} });
+    await settled([fresh]);
+    same('a phone installed afterwards reads all three closed documents and agrees', [money(fresh) === before.a,
+        [K1, K2].map(id => fresh.call('advanceOutstanding', fresh.State.schedule, id).left)], [true, [0, 200]]);
+    same('and none of the three can close that fortnight again',
+        [a, b, fresh].map(device => (said => [said.ok, said.reasons.indexOf('closed') !== -1])(plan(device, 'planClosure', 'w_khaled', FORTNIGHT,
+            { allocations: { [K2]: 0 }, paid: 0 }, stamp(TODAY, device.id, '15')))), [[false, true], [false, true], [false, true]]);
+}
+
+// ------------------------------------------------------------------------------------
+{
     suite('R7: what is refused, and that a refusal writes nothing');
 
     const { cloud, a, b } = await closedWorld({ tag: '7' });
@@ -610,8 +691,11 @@ const KHALED_PATHS = ['ledger.advances.le_period_w_khaled_20261002',
     const stay = () => [rowsOf(cloud.doc), payIds(cloud.doc), [...cloud.closed.keys()].sort().length];
     const stood = stay();
 
+    // And the shape the daily cloud copy has: the rows, and none of the entries they stand for.
+    const cloudCopy = a.call('paybookStripCovered', clone(fileAfter));
+    given('the daily copy\'s shape lacks the archived entries', at(cloudCopy, 'pay.' + KHALED) === undefined && rowsOf(cloudCopy).length === 3);
     for (const [name, file] of [['a file from before any closure', ancient], ['a file from before the move', fileBefore],
-        ['a file from after the move', fileAfter]]) {
+        ['a file from after the move', fileAfter], ['a daily cloud copy from after the move (rows, no entries)', cloudCopy]]) {
         const saves = cloud.writes.filter(write => write.kind === 'save').length;
         const result = await b.Sync.replaceEverything(b.call('normaliseSchedule', clone(file)));
         await settled([a, b]);

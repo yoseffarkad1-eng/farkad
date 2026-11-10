@@ -5,6 +5,27 @@ no rules were published.** Built on Phase 3 (`239ff66`, v175) merged with main a
 (`893def8`). No gate result is written here: validation is recorded against the exact clean
 commit, and no count is carried over.
 
+**Phase 5 is in the same build number** (the stamps did not move again; this branch is
+squashed before anything is served). What it adds, all of it behind the same shut gate and
+all of it in `docs/payroll-closure.md` («Phase 5»): a settled closure LEAVES the server's
+live document for its closed copy and one row of `payIndex` stays in its place
+(`js/sync/closed.js`, `archiveClosed` in the adapter, new rules for it); a phone's own
+record keeps every entry, so no fold of money changed; a phone that cannot fetch what the
+index names does not adopt the server's document and says so; a restore never erases a
+closure, and a whole document from a build that does not know the pay book is refused; the
+backup and the rescue file say, in the file and on the screen, what they carry; and four
+screens - «ארכיון סגירות», «מה לבדוק?», a draft kept across a reload, and «נסגר» on the
+weekly breakdown of «לפי עובד».
+
+**KNOWN, and not covered by this build:** a phone's own copy of the record does not get
+smaller; the server's document is still not bounded (the days are the larger half); a
+closure that is not paid in full never leaves; a disagreement can be seen and not settled;
+a restore into a new, empty project does not carry the pay book; **once anything is
+archived, a phone on a build from before the pay book can no longer write at all - not
+even a day** (the rules of this branch; measured on v167, v171 and v172); nothing here has
+been on a real phone or read a real record; and none of the forty-one new Hebrew strings
+has been seen by the owner.
+
 **What it is.** Phase 4 of the worker-accounts work (`docs/payroll-closure.md` has all of
 it: the screens, the taps, every string). **The gate is still shut** -
 `FARKAD_FLAGS.paybook` is `false` - and with it shut this build looks and behaves as v174

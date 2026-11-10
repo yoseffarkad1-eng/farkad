@@ -40,7 +40,12 @@ const HELPERS = ['network-guard.mjs', 'emulator-host.mjs', 'exports-proof.lib.mj
     'paybook.world.mjs',
     // v176: the crew and the played cloud of tests/accounts.browser.mjs. Neither asserts
     // anything; the suite that imports both IS in the gate (test:all).
-    'accounts.world.mjs', 'accounts.cloud.mjs'];
+    'accounts.world.mjs', 'accounts.cloud.mjs',
+    // Phase 5: an instrument, not a suite. It asserts nothing and is imported by nothing;
+    // it is handed to node with --import to run an EXISTING browser suite with the pay
+    // book's gate open on every page (tests/README.md). No gate runs it, on purpose: what
+    // fails under it is the list of expectations the gate's opening moves.
+    'gate-open.preload.mjs'];
 
 // This file. The auditor who wrote it may not edit package.json, so it cannot yet be
 // named by a script; the exemption is ONE file and the check below pins that it is one,

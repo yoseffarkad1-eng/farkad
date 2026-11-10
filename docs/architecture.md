@@ -242,6 +242,7 @@ carry it:
 | `js/sync/send.js` | getting this device's work out: the flush, the send claim, the pre-send hold, the create race, the retry ladder. |
 | `js/sync/status.js` | being connected and saying so truthfully; the sentence in the ⋯ panel and the banner above the board. |
 | `js/sync/transact.js` | the pay book's server-first door (v175, shipped shut): one closure, payment or void as one transaction with its create-once closed document; the durable intent; settling a lost answer by reading the receipt, never by sending again. |
+| `js/sync/closed.js` | what has left the live document (Phase 5, shipped shut): the gate at the top of `receive()` that makes a server document whole again - or does not adopt it; the wrapper that keeps archived entries out of a whole-document write; and the move itself, which keeps no state of its own. |
 | `js/sync/boot.js` | two lines that RUN at load time. Loaded last, and every later split of the group goes above it — that is the file's whole job. |
 
 The later five extend the object with `Object.assign(FarkadSync, { … })`, because a

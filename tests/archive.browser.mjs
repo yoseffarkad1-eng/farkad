@@ -119,6 +119,31 @@ await seed(a.page, {});
 const b = await openPhone(browser, server.url, { cloud: net, flags: OPEN });
 await settled(b.page);
 given('the crew is on the cloud', net.cloud.doc.workers.length === 5);
+
+// =====================================================================================
+{
+    suite('before the tracking day is chosen, EVERY man\'s advances page is reachable - not the first man\'s only');
+
+    // Found by running tests/simple-advances.browser.mjs with the gate open: the «מקדמות»
+    // tab is the accounts home, the home before activation is one screen, and its
+    // «מקדמות» button opened the first man on the roster - whose way back is that same
+    // screen. An advance could be recorded for one man only until the day was chosen.
+    await showAccounts(a.page);
+    given('the activation screen is up', await a.page.evaluate(() => !paybookFold(State.schedule).opening && ACC.screen === 'list'));
+    same('nobody is listed until it is asked for', await a.page.locator(`${V} .acc-opening-people`).isVisible(), false);
+    await tap(a.page, `${V} .acc-opening-advances`);
+    same('«מקדמות» opens the roster, a name a button', await all(a.page, `${V} .acc-opening-person`), ['אחמד', 'חאלד', 'נאסר', 'סלים', 'זיאד']);
+    await geometry(a.page, 'activation with the roster open', 1);
+    await a.page.locator(`${V} .acc-opening-person`, { hasText: 'סלים' }).click();
+    await a.page.waitForTimeout(150);
+    same('a man who is not first: HIS advances page, the existing one, not an accounts screen',
+        await a.page.evaluate(() => [ADVANCE_WORKER, document.querySelectorAll('#advancesView .acc-screen').length,
+            Boolean(document.querySelector('#advancesView .advance-balance'))]), ['w_salim', 0, true]);
+    await a.page.locator(`${V} button`, { hasText: 'חזרה לכל העובדים' }).click();
+    await a.page.waitForTimeout(150);
+    same('and the way back from it is the activation screen, with the roster one tap away again',
+        [await a.page.evaluate(() => ADVANCE_WORKER), await shown(a.page, `${V} .acc-opening-advances`)], [null, true]);
+}
 given('the book is opened', (await transact(a.page, 'planOpening', ['2026-10-02'])).ok);
 given('Nasser\'s fortnight closes, paid in full', (await transact(a.page, 'planClosure',
     ['w_nasser', FORTNIGHT, { allocations: {}, paid: 3000, method: 'cash' }])).ok);

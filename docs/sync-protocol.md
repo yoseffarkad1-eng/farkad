@@ -227,6 +227,22 @@ derived by measurement in `tests/paybook.split.emulator.test.mjs` and written as
 steps in `docs/payroll-closure.md` («The rollout order, measured»), with
 `docs/firestore.rules.before-paybook` as the rollback artifact.
 
+### What leaves the document (Phase 5 — the same development branch)
+
+A settled closure's entries leave `schedules/{doc}` for their closed documents, and one
+row of `payIndex.rows` stays. Four rules, all in `firestore.rules` on that branch: the
+index only grows; a row arrives one at a time, in a protocol-2 write that names it
+(`archivedId`) and whose closed document of that name already exists; a pay entry may
+leave in such a write and in no other; and once a document has an index, a writer that
+does not speak protocol 2 may not write to it at all. The client's half is
+`js/sync/closed.js`: every server document passes one gate at the top of `receive()`,
+which lays the archived entries back from this phone's own record or from the closed
+documents - or does not adopt the document; and a whole-document write (`save`, `create`,
+the daily copy) leaves those entries out. So the ordering protocol itself did not change:
+a drop is an ordinary next revision with its receipt, and what a phone calls "the
+server's document" is the live document made whole. Measured in
+`tests/paybook.archive.test.mjs` and `tests/paybook.archive.emulator.test.mjs`.
+
 **Nothing here has been published to the real project.** The rules in this repository are
 the tested artifact, not the live ones; publishing them is a human operation performed
 deliberately, and this file describes what will happen when someone does. No rules were

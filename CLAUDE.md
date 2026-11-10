@@ -64,7 +64,12 @@ different from what was done.
    shut: `paybook: false` in `js/model/schema.js` opens on the owner's word, after the
    rules of this branch are published and every phone is on v175 or later
    (docs/payroll-closure.md, «The rollout order, measured») and after closed history
-   has actually LEFT the one document - which v175 does not yet do.
+   has actually LEFT the one document. Since Phase 5 a SETTLED closure does: its entries
+   leave the server's document for their closed copy and one row of `payIndex` stays
+   (js/sync/closed.js) - never before the copy is confirmed by the server, inside the
+   transaction that drops them. A PHONE'S RECORD KEEPS EVERY ENTRY: no fold reads the
+   index, a server document that cannot be made whole is not adopted, and a
+   whole-document write leaves out what a row stands for.
    **And the one-debt ruling moves with that gate (v175).** An advance from a period
    nobody closed stays a full debt until a person deducts it (the owner, 2026-11-10):
    `advanceDebtStays()` in `js/model/schema.js` is `FARKAD_FLAGS.paybook`, read in one
@@ -191,6 +196,11 @@ written down so it cannot happen twice.
                                server transaction with its create-once closed document - never the queue;
                                the durable intent (farkad:payIntent); a lost answer settled by reading the
                                receipt, never by sending again
+    js/sync/closed.js          Phase 5, SHIPPED SHUT with the pay book: what has left the live document. The
+                               gate at the top of receive() that lays an archived closure's entries back
+                               (from this phone's record or its closed documents) or does NOT adopt; the
+                               wrapper that strips them from a whole-document write; archiveClosed - copy,
+                               read back, compare, drop - which keeps no state and continues from the server's
     js/sync/boot.js            two lines that RUN at load; loaded last, and every later split goes above it
     js/sync/firebase-adapter.js  the only file that knows Firebase exists; the one ES module
     js/sync/firebase-config.js   project config; empty means local-only
@@ -358,6 +368,16 @@ written down so it cannot happen twice.
                                the shekel on the glass, a blank field refused on its row, offline writing
                                nothing, two taps one closure, a second phone's conflict, the walk and the
                                batch, history five ways, corrections, the first run, 44px/16px/200% text
+    tests/paybook.archive.test.mjs Phase 5 on the fake cloud (which refuses what the rules refuse of a whole
+                               document): the move, and the same money on five kinds of phone; never before
+                               the copy is confirmed; a phone that cannot fetch adopts nothing; resumable;
+                               a restore never erases a closure; what the backup and the rescue file say
+    tests/paybook.archive.emulator.test.mjs the rules for what leaves, the production adapter's drop, and
+                               v167/v171/v172 once an index exists (they may not write; their restore is refused)
+    tests/archive.browser.mjs  Phase 5 in Chromium: «ארכיון סגירות» read and run, a phone that lacks the
+                               detail, «מה לבדוק?», a draft across a reload, «נסגר» on the weekly breakdown
+    tests/gate-open.preload.mjs an instrument, run by no gate: any existing browser suite with the pay book
+                               open on every page (node --import ./tests/gate-open.preload.mjs tests/<suite>)
     tests/paybook.split.test.mjs v175, the split as a model: the closed document, lossless, the index folds
                                equal to the full folds on random records, planHistoryMove, and capacity for
                                20 men over 5 years with and without it
