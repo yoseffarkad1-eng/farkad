@@ -694,5 +694,50 @@ input, select, textarea { border-radius: 12px; }
     .week-cell .cell-double::after { position: static; inset: auto; margin: 0; flex: none; }
     .week-cell .cell-extra::after { position: static; inset: auto; display: block; flex: none; }
 }
+/* «בדיקת היום» (js/ui/daycheck.js): what may have been forgotten on the day on screen.
+   ITS WAY IN is one tonal button the width of the list, at the list's foot - under the two
+   trays, above the dock; nothing on the header or the dock moved for it. THE DIALOG is one
+   of the app's own: a calm green line when nothing was found, else the findings under two
+   small headings - «כדאי לבדוק» with a warm edge, «לידיעה» with a quiet one - each a
+   sentence and under it the names, which are buttons (a finger wide and tall both ways,
+   16px words) and wrap rather than push the dialog sideways at doubled text. A site that
+   can be shown carries a small drawn square before its name - never the site's own colour,
+   which no button borrows; a site that cannot (the by-worker view) is a name and nothing
+   to press. The close button sticks to the dialog's bottom edge, the way the seder's foot
+   does, so a long list still ends under the thumb. */
+.daycheck-row { display: flex; margin: 14px 0 4px; }
+.daycheck-entry { flex: 1 1 auto; min-height: 48px; font-size: 16px; font-weight: 600; }
+#dayCheckModal .modal-content { padding-bottom: 0; }
+#dayCheckModal .modal-content > h3 { line-height: 1.3; margin: 0 0 4px; overflow-wrap: anywhere; }
+.daycheck-list { display: flex; flex-direction: column; gap: 16px; }
+.daycheck-clean { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--ok-bg); color: var(--ok); font-size: 16px; font-weight: 650; line-height: 1.4; }
+.daycheck-group { display: flex; flex-direction: column; gap: 12px; }
+.daycheck-head { margin: 0; font-size: 14px; font-weight: 700; color: var(--ink-2); }
+.daycheck-check .daycheck-head { color: var(--warn); }
+.daycheck-finding { padding-inline-start: 10px; border-inline-start: 3px solid var(--line); }
+.daycheck-check .daycheck-finding { border-inline-start-color: var(--warn); }
+.daycheck-say { margin: 0 0 8px; color: var(--ink); font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+.daycheck-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.daycheck-go { min-height: 44px; min-width: 44px; max-width: 100%; padding: 8px 14px; font-size: 16px; font-weight: 600; text-align: start; overflow-wrap: anywhere; }
+.daycheck-site { display: inline-flex; align-items: center; gap: 8px; }
+.daycheck-site::before { content: ''; flex: none; inline-size: 8px; block-size: 8px; border-radius: 2px; background: currentColor; }
+.daycheck-plain { min-height: 44px; padding: 8px 4px; color: var(--ink); font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.daycheck-lead { margin: 16px 0 0; color: var(--ink-2); font-size: 14px; line-height: 1.45; }
+.daycheck-foot { position: sticky; bottom: 0; z-index: 1; display: flex; margin-top: 10px; padding: 12px 0 18px; border-top: 1px solid var(--line); background: var(--surface); }
+.daycheck-foot button { flex: 1 1 auto; min-height: 48px; font-size: 16px; }
+/* THE REPORT OF A PERIOD: the summary's dialog over again - the same tier, for the same
+   reason, the same field and the same buttons - with the four ranges above the field,
+   two to a row so that each is a finger tall and wide on the 375px phone. The chosen one
+   is the tray's chosen man: the soft accent and a ring, never a filled button. */
+#transportReportModal { z-index: 60; }
+#transportReportModal .modal-content > h3 { line-height: 1.3; margin: 0 0 12px; overflow-wrap: anywhere; }
+.transport-report-ranges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 12px; }
+.transport-report-ranges button { min-height: 44px; min-width: 44px; font-size: 16px; font-weight: 700; touch-action: manipulation; overflow-wrap: anywhere; }
+.transport-report-ranges button[aria-pressed="true"] { background: var(--accent-soft) !important; box-shadow: inset 0 0 0 3px var(--accent); }
+#transportReportText { min-height: 140px; height: clamp(140px, 34dvh, 420px); line-height: 1.65; padding: 12px; background: var(--surface-2); font-family: inherit; font-size: 16px; white-space: pre-wrap; }
+#transportReportModal .modal-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; border-top: 1px solid var(--line); padding-top: 12px; }
+#transportReportModal .modal-actions button { min-height: 44px; min-width: 44px; font-size: 16px; }
+#transportReportSend, #transportReportClose, #transportReportStatus { grid-column: 1 / -1; }
+#transportReportStatus:empty { display: none; }
 
 }

@@ -1,6 +1,64 @@
-## v181 — polish: a quiet zero, emptier empty screens, a letter in the week, the backup's age (candidate, not served)
+## v182 — «בדיקת היום», and the vehicles' report of a period (candidate, not served)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `90ac0e8` (v181). Two readings; neither writes a key anywhere. Nothing in `js/sync`,
+`js/model`, `js/state.js`, `js/store.js`, `js/recovery.js` or the rules. The owner asked
+(2026-11-10) to be surprised with things that ease the evening, and for the seder to become one
+journey "with nothing left to chance"; the check is a station of that journey, built first.
+
+### «בדיקת היום» — the day's check (`js/ui/daycheck.js`)
+
+One button at the foot of the day's list opens the app's own dialog with what the day on screen
+may be missing, compared with the previous working day THE RECORD holds (the latest earlier date
+on which a man has a site; none if that is more than 14 days back). Under «כדאי לבדוק»: men who
+had a site that day and have no record now; a site left empty because of them; a Rima count that
+was there and is not (never for a date after today); «שעות נוספות» with no hours; a day with no
+daily rate; extra hours with no hourly rate - the last two read as the pay report reads them.
+Under «לידיעה»: active men with no site for 5-12 working days, and days that are not regular. A
+repeat of last week's same-weekday pattern is not reported. A name opens the assign sheet it
+already opens; a site is scrolled to (by-site view only). When nothing is found:
+«✓ לא נמצא דבר שנראה שנשכח.»
+
+**It writes nothing** - no commit, no Store key, no mark that a day was checked. Two globals for
+other screens: `dayCheckFindings(date)`, `renderDayCheckInto(container, date)`.
+
+**Measured on a seeded model, not on the owner's record** (`DAYCHECK_NOISE=1 node
+tests/daycheck.test.mjs` prints it): a forgotten man is caught on about 96% of evenings; for an
+owner who never marks «נעדר», the not-recorded line asks about roughly one man on more than half
+the evenings - a man off today and a man forgotten today are the same bytes; «לא יום רגיל» shows
+on most evenings, under «לידיעה». The rules were tightened against that noise and the suite holds
+ceilings and floors on it.
+
+### הסעות — the report of a period (`js/ui/transport.js`)
+
+One worded button under the last car, «דוח הסעות לתקופה», opens a dialog: four ranges - «השבוע»,
+«שבוע קודם» (Friday to Thursday), «החודש», «חודש שעבר» - and per vehicle the days it went out,
+who drove it and on how many days, days with nobody at the wheel, seats filled in total and on
+average; then the vehicles that carried nobody; then each driver with his days and vehicles. It
+counts what THIS phone kept and says what it did not: a day with no stored plan is counted and
+said, never shown as a vehicle that stayed home. **The store keeps 35 days** and prunes when the
+screen is opened, so «חודש שעבר» is whole only in the first days of a month; after that the
+report names the date before which nothing is kept. The horizon was not changed. It leaves by
+the summary's three doors (`shareTextOut`, `copyTextOut`, `sharePrintout('transport')`). The app
+sends nothing, marks nothing, and nothing says «נשלח».
+
+### Hebrew - PROPOSED, not read by the owner
+
+The check's strings are one block, `DAY_CHECK_TEXT`, pinned word for word in
+`tests/daycheck.test.mjs`; the report's twenty-five are in transport's own block, pinned in
+`tests/transport.test.mjs` (the four range words are the pay report's). No existing string changed.
+
+### Known not covered
+
+Not tried on a real phone. The check cannot see a man recorded at the wrong site or a regular day
+that should have been double; a forgotten Rima count is not seen on the first day of a stint. In
+the report: a vehicle taken off the list drops out with its past days; days are read against the
+vehicle list and the day record as they are now; future days count as days with no plan; how the
+text reads inside WhatsApp was not seen; the picture's pixels are compared with nothing.
+
+## v181 — polish: a quiet zero, emptier empty screens, a letter in the week, the backup's age (served 2026-11-10)
+
+**Served.** Merged as `90ac0e8` (PR #63) on 2026-11-10 after both gates exited 0 on `98648d9`.
 Built on `d3103d6` (v180). No number and no data path moved; nothing in `js/sync`, `js/model`,
 `js/state.js`, `js/store.js`, `js/recovery.js` or the rules. The owner asked (2026-11-10) for
 more features, faster, and to be surprised; this is the first of them.

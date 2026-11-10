@@ -25,6 +25,10 @@ const MODAL_CLOSERS = {
     sederModal: () => closeSederList(),
     // The summary of the day's rides (v179, js/ui/transport.js).
     transportSummaryModal: () => closeTransportSummary(),
+    // The day's check (js/ui/daycheck.js). Nothing to clear behind it: it holds no state.
+    dayCheckModal: () => closeDayCheck(),
+    // The report of a period's rides (js/ui/transport.js).
+    transportReportModal: () => closeTransportReport(),
     migrationModal: () => closeMigrationModal(),
     // The one .modal that had no entry here, so Escape fell through to the bare
     // `display = 'none'` below and never reached closeSignInModal - which exists, and

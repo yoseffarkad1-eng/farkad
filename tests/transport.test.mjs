@@ -688,6 +688,230 @@ await block('the summary of the day: every car, its driver, its men, who waits a
         && !/navigator\.share|wa\.me|clipboard|execCommand|window\.open/.test(code));
 });
 
+// The report of a period. The owner asked for "a report for the cars"; v179 gave him one
+// day. This is the week and the month - counted from the plans THIS phone kept, with every
+// day it has no plan for said as such. The dialog, the range buttons, the ways out and the
+// picture are tests/transport.browser.mjs.
+await block('the report of a period: each vehicle, each driver, and every day this phone has no plan for', async () => {
+    const device = crewPhone('d_report');
+    const text = (key, today = DAY) => device.call('transportReportText', key, today);
+    const lines = (key, today = DAY) => text(key, today).split('\n');
+    const range = (key, today = DAY) => { const r = device.call('transportReportRange', key, today); return r ? `${r.from}..${r.to}` : null; };
+    const dayKey = date => `farkadTransport:day:${date}`;
+
+    // --- the four ranges. DAY is Tuesday 2026-11-10; the week is the app's own, Friday
+    // through Thursday.
+    same('this week is the Friday before through the Thursday after', range('thisWeek'), '2026-11-06..2026-11-12');
+    same('last week is the seven days before it', range('lastWeek'), '2026-10-30..2026-11-05');
+    same('this month is the calendar month', range('thisMonth'), '2026-11-01..2026-11-30');
+    same('last month is the one before', range('lastMonth'), '2026-10-01..2026-10-31');
+    same('on a Friday the week starts that day, and on a Thursday it ends that day',
+        [range('thisWeek', '2026-11-06'), range('thisWeek', '2026-11-12'), range('thisWeek', '2026-11-13')],
+        ['2026-11-06..2026-11-12', '2026-11-06..2026-11-12', '2026-11-13..2026-11-19']);
+    same('in January last month is December of the year before; in March it is the whole of February',
+        [range('lastMonth', '2027-01-03'), range('lastMonth', '2027-03-31'), range('thisMonth', '2028-02-10')],
+        ['2026-12-01..2026-12-31', '2027-02-01..2027-02-28', '2028-02-01..2028-02-29']);
+    same('a range nobody offers, or a day that is not one, is no range', [range('year'), range('thisWeek', '2026-13-40'),
+        text('year'), text('thisWeek', 'tomorrow')], [null, null, '', '']);
+
+    // --- nothing kept yet
+    same('with no plan on the phone it says so for every day, and names no vehicle at all', lines('thisWeek'),
+        ['דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:', '',
+            'ימים עם שיבוץ שמור במכשיר הזה: 0 מתוך 7', 'ב-7 ימים אין שיבוץ שמור במכשיר הזה.']);
+
+    // --- a week of plans. The crew works on four more days; then:
+    //   Fri 06  a vehicle kept home and nobody seated          -> NOT a plan
+    //   Sat 07  nothing                                         -> no plan
+    //   Sun 08  קורולה 2013: אחמד drives מוחמד; BYD: סמיר alone
+    //   Mon 09  קורולה 2013: סמיר drives אחמד and יוסי         (a driver in a second vehicle)
+    //   Tue 10  קורולה 2013: אחמד alone; פולקסווגן: Ali Hassan and nobody at the wheel; BYD kept home
+    //   Wed 11  the bytes v171 wrote                           (אחמד drives two; BYD kept home)
+    //   Thu 12  bytes that will not read
+    ['2026-11-06', '2026-11-08', '2026-11-09', '2026-11-11'].forEach(date => {
+        ['w_01', 'w_02', 'w_03', 'w_04', 'w_06'].forEach(id => device.State.commit(device.call('assignPlace',
+            device.State.schedule, date, id, 'actual', 'p_01')));
+    });
+    device.call('transportSetAvailable', '2026-11-06', 'tv_02', false);
+    device.call('transportPlace', '2026-11-08', 'w_01', 'tv_01', 1);
+    device.call('transportPlace', '2026-11-08', 'w_02', 'tv_01', 2);
+    device.call('transportPlace', '2026-11-08', 'w_04', 'tv_03', 1);
+    device.call('transportPlace', '2026-11-09', 'w_04', 'tv_01', 1);
+    device.call('transportPlace', '2026-11-09', 'w_01', 'tv_01', 4);
+    device.call('transportPlace', '2026-11-09', 'w_03', 'tv_01', 2);
+    device.call('transportPlace', DAY, 'w_01', 'tv_01', 1);
+    device.call('transportPlace', DAY, 'w_06', 'tv_05', 2);
+    device.call('transportSetAvailable', DAY, 'tv_03', false);
+    const BROKEN = '{"version":1,"trips":{"tv_01":{"driver":"w_0';
+    device.putRaw(dayKey('2026-11-11'), V171_DAY);
+    device.putRaw(dayKey('2026-11-12'), BROKEN);
+    // A month ago, inside the five weeks the store keeps: one car, one driver.
+    device.putRaw(dayKey('2026-10-20'), JSON.stringify({ version: 1, trips: { tv_05: { driver: 'w_02', passengers: ['w_03'], seats: { w_03: 9 } } } }));
+    given('the days are on the disk as staged', device.raw(dayKey('2026-11-06')) !== null && device.raw(dayKey('2026-11-07')) === null
+        && device.raw(dayKey('2026-11-09')) !== null && device.raw(dayKey('2026-11-11')) === V171_DAY);
+
+    const again = reopen(device);
+    const disk = JSON.stringify(again.dump());
+    const fence = again.Store.fenceState();
+    const queued = JSON.stringify(again.Sync.pendingPaths());
+    const schedule = JSON.stringify(again.State.schedule);
+    const held = Object.keys(again.global('transportDays')).sort().join();
+    const week = again.call('transportReportText', 'thisWeek', DAY).split('\n');
+    same('THE WEEK, line for line: the days counted, each vehicle that went out - its days, its drivers and how often each, its seats - the ones that did not, then each driver and his vehicles',
+        week, ['דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:', '',
+            'ימים עם שיבוץ שמור במכשיר הזה: 4 מתוך 7',
+            'ב-2 ימים אין שיבוץ שמור במכשיר הזה.',
+            'שיבוץ של יום אחד שמור במכשיר ולא נקרא, ולא נספר.', '',
+            `רכב: ${car('טויוטה קורולה 2013')} – יצא ב-4 ימים`,
+            `נהג: ${named('אחמד')} – 3 ימים`,
+            `נהג: ${named('סמיר')} – יום אחד`,
+            'מושבים תפוסים: 9 בסך הכול, 2.3 בממוצע ליום', '',
+            `רכב: ${car('BYD סיל U 2025')} – יצא ביום אחד`,
+            `נהג: ${named('סמיר')} – יום אחד`,
+            'מושבים תפוסים: 1 בסך הכול, 1 בממוצע ליום', '',
+            `רכב: ${car('פולקסווגן 2018')} – יצא ביום אחד`,
+            'בלי נהג – יום אחד',
+            'מושבים תפוסים: 1 בסך הכול, 1 בממוצע ליום', '',
+            `רכבים בלי עובדים בימים עם שיבוץ: ${car('טויוטה קורולה 2016')}, ${car('BYD אטו 3 2025')}, ${car('סוואנה 2010')}, ${car('ליפמוטור C10 2026')}`, '',
+            'נהגים בתקופה:',
+            `- ${named('אחמד')} – 3 ימים: ${car('טויוטה קורולה 2013')} (3)`,
+            `- ${named('סמיר')} – 2 ימים: ${car('טויוטה קורולה 2013')} (1), ${car('BYD סיל U 2025')} (1)`]);
+    check('a vehicle is always named after a Hebrew word and held right-to-left: no line begins with its name',
+        week.every(line => !line.startsWith(RLI) && !/^[A-Za-z]/.test(line))
+        && week.join('\n').includes(`${RLI}BYD`) && !week.join('\n').includes(`${FSI}BYD`));
+
+    // The counting itself, with no word in it.
+    const days = again.call('transportReportDays', '2026-11-06', '2026-11-12');
+    same('each day of the range is one of three things: a plan, no plan, or bytes that will not read',
+        plain(days).map(one => `${one.date.slice(8)}:${one.state}`),
+        ['06:none', '07:none', '08:plan', '09:plan', '10:plan', '11:plan', '12:unreadable']);
+    const count = plain(again.call('transportReportCount', days));
+    same('the days add up to the range', [count.total, count.planned, count.missing, count.unreadable], [7, 4, 2, 1]);
+    same('per vehicle: days out, seats filled, days with nobody at the wheel - a vehicle that never went out has zeros, in the order of the list',
+        count.vehicles.map(v => `${v.id}:${v.days}:${v.seats}:${v.noDriver}`),
+        ['tv_01:4:9:0', 'tv_02:0:0:0', 'tv_03:1:1:0', 'tv_04:0:0:0', 'tv_05:1:1:1', 'tv_06:0:0:0', 'tv_07:0:0:0']);
+    same('who drove each, most days first', count.vehicles.filter(v => v.days > 0).map(v => v.drivers.map(d => `${d.id}x${d.days}`).join('+')),
+        ['w_01x3+w_04x1', 'w_04x1', '']);
+    same('per driver: his days, and each vehicle with its days - a driver across two vehicles is one driver',
+        count.drivers.map(d => `${d.id}:${d.days}:${d.vehicles.map(v => `${v.id}x${v.days}`).join('+')}`),
+        ['w_01:3:tv_01x3', 'w_04:2:tv_01x1+tv_03x1']);
+    check('a vehicle kept home that day is not counted as out, even with a man its old plan left in it (v171, the 11th)',
+        count.vehicles[2].days === 1);
+    check('a seat count is the men DRAWN in the car: v171\'s day is its driver and two men',
+        plain(Core.layout(plain(days[5].ctx), plain(days[5].day))).cars.tv_01.filter(Boolean).length === 3);
+
+    // A DAY WITH NO PLAN IS NEVER "THE VEHICLE STAYED HOME".
+    check('the Friday on which a vehicle was kept home and nobody seated is a day with no plan, not a day nothing went out',
+        days[0].state === 'none' && again.raw(dayKey('2026-11-06')) !== null);
+    check('nothing in the report calls a vehicle unavailable, at home or not going out',
+        !/לא זמין|נשאר|בבית|לא יצא/.test(week.join('\n')));
+    check('and the vehicles named as carrying nobody are named only for «ימים עם שיבוץ»',
+        week.filter(line => line.includes('סוואנה')).every(line => line.startsWith('רכבים בלי עובדים בימים עם שיבוץ: ')));
+
+    // --- the month, and the month before it against the store's horizon.
+    same('this month: the same four days out of thirty, twenty-five with no plan, and nothing said about deletion - it is all inside the five weeks',
+        again.call('transportReportText', 'thisMonth', DAY).split('\n').slice(0, 5),
+        ['דוח הסעות – החודש, 01/11/2026 עד 30/11/2026:', '',
+            'ימים עם שיבוץ שמור במכשיר הזה: 4 מתוך 30', 'ב-25 ימים אין שיבוץ שמור במכשיר הזה.',
+            'שיבוץ של יום אחד שמור במכשיר ולא נקרא, ולא נספר.']);
+    same('LAST MONTH ON THE 10TH CANNOT BE WHOLE, AND SAYS WHY: the store keeps 35 days, so the first five days of October are gone - counted, dated, explained',
+        again.call('transportReportText', 'lastMonth', DAY).split('\n'),
+        ['דוח הסעות – חודש שעבר, 01/10/2026 עד 31/10/2026:', '',
+            'ימים עם שיבוץ שמור במכשיר הזה: 1 מתוך 31',
+            'ב-30 ימים אין שיבוץ שמור במכשיר הזה.',
+            'מתוכם 5 ימים לפני 06/10/2026: שיבוצים ישנים מ-35 ימים נמחקים מהמכשיר הזה.', '',
+            `רכב: ${car('פולקסווגן 2018')} – יצא ביום אחד`,
+            `נהג: ${named('מוחמד')} – יום אחד`,
+            'מושבים תפוסים: 2 בסך הכול, 2 בממוצע ליום', '',
+            `רכבים בלי עובדים בימים עם שיבוץ: ${car('טויוטה קורולה 2013')}, ${car('טויוטה קורולה 2016')}, ${car('BYD סיל U 2025')}, ${car('BYD אטו 3 2025')}, ${car('סוואנה 2010')}, ${car('ליפמוטור C10 2026')}`, '',
+            'נהגים בתקופה:',
+            `- ${named('מוחמד')} – יום אחד: ${car('פולקסווגן 2018')} (1)`]);
+    const pruned = today => again.call('transportReportText', 'lastMonth', today).split('\n').filter(line => line.startsWith('מתוכם'));
+    same('the date in that line is the horizon the store itself prunes at', again.call('addDays', DAY, -again.global('TRANSPORT_KEEP_DAYS')), '2026-10-06');
+    same('on the 5th the whole of October is still inside the five weeks and nothing is said; on the 6th one day is gone; at the end of the month, every day before the 26th that is not on the disk (the 20th still is - it is read, not presumed gone)',
+        [pruned('2026-11-05'), pruned('2026-11-06'), pruned('2026-11-30')],
+        [[], ['מתוכם יום אחד לפני 02/10/2026: שיבוצים ישנים מ-35 ימים נמחקים מהמכשיר הזה.'],
+            ['מתוכם 24 ימים לפני 26/10/2026: שיבוצים ישנים מ-35 ימים נמחקים מהמכשיר הזה.']]);
+    check('this week, last week and this month are never past the horizon, on any day of a year',
+        (() => {
+            for (let date = '2026-11-01'; date < '2027-11-01'; date = again.call('addDays', date, 1)) {
+                if (['thisWeek', 'lastWeek', 'thisMonth'].some(key => again.call('transportReportRange', key, date).from
+                    < again.call('addDays', date, -35))) return false;
+            }
+            return true;
+        })());
+
+    // --- IT IS A READING. Four ranges, twice, the counting and the days: nothing moved.
+    ['thisWeek', 'lastWeek', 'thisMonth', 'lastMonth', 'thisWeek', 'lastMonth'].forEach(key => again.call('transportReportText', key, DAY));
+    same('composing it wrote nothing: every key on the disk is byte for byte what it was', JSON.stringify(again.dump()), disk);
+    check('the day that would not read is where it was, and NO copy of it was put aside - a copy is a write',
+        again.raw(dayKey('2026-11-12')) === BROKEN && again.raw(`${dayKey('2026-11-12')}:unreadable`) === null);
+    same('the day v171 wrote is byte for byte what v171 wrote', again.raw(dayKey('2026-11-11')), V171_DAY);
+    same('the write counter did not move', again.Store.fenceState(), fence);
+    same('nothing was queued for the cloud', JSON.stringify(again.Sync.pendingPaths()), queued);
+    same('the schedule in memory is what it was', JSON.stringify(again.State.schedule), schedule);
+    same('and no day was loaded into the session by being counted', Object.keys(again.global('transportDays')).sort().join(), held);
+    check('reading it did not tell the screen that something is unreadable either', again.call('transportSawUnreadable') === false);
+    check('nothing in it says «נשלח»', !/נשלח|sent/i.test(week.join('\n')));
+
+    // PURE: the same input, the same blocks; and the input is not changed.
+    const spec = plain({ label: 'השבוע', from: '2026-11-06', to: '2026-11-12', days, cutoff: '2026-10-06', keep: 35 });
+    const before = JSON.stringify(spec);
+    const once = JSON.stringify(again.call('transportReportBlocks', spec));
+    same('the builder is pure: two readings are the same bytes', JSON.stringify(again.call('transportReportBlocks', spec)), once);
+    check('and it does not change what it was handed', JSON.stringify(spec) === before);
+    same('the text is the blocks, a blank line between them', JSON.parse(once).map(block => block.join('\n')).join('\n\n'), week.join('\n'));
+
+    // A change the disk refused is in the session and on the screen - and so in the report.
+    again.setQuota(key => /^farkadTransport:/.test(key));
+    again.call('transportPlace', DAY, 'w_04', 'tv_02', 1);
+    given('the disk refused that change', again.call('transportWasKept') === false);
+    check('a change this session holds and the disk refused is counted as the screen shows it',
+        again.call('transportReportText', 'thisWeek', DAY).includes(`רכב: ${car('טויוטה קורולה 2016')} – יצא ביום אחד`));
+
+    // --- a day with a plan on which no vehicle carries anybody: the only man seated sits
+    // in a vehicle that is kept home.
+    const idle = crewPhone('d_report_idle');
+    idle.putRaw(DAY_KEY, JSON.stringify({ version: 1, unavailable: { tv_01: true }, trips: { tv_01: { driver: 'w_01', passengers: [], seats: {} } } }));
+    same('a plan in which nobody is drawn in any vehicle says so, once, and lists no vehicle', reopen(idle).call('transportReportText', 'thisWeek', DAY).split('\n'),
+        ['דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:', '',
+            'ימים עם שיבוץ שמור במכשיר הזה: 1 מתוך 7', 'ב-6 ימים אין שיבוץ שמור במכשיר הזה.', '',
+            'בימים עם שיבוץ אף רכב לא יצא עם עובדים.']);
+
+    // --- a driver who has left the roster is still a driver, under the name the screen gives him.
+    const gone = crewPhone('d_report_gone');
+    gone.putRaw(DAY_KEY, JSON.stringify({ version: 1, trips: { tv_01: { driver: 'w_99', passengers: ['w_01'], seats: { w_01: 2 } } } }));
+    check('a driver no longer on the roster is counted, as «עובד שנמחק»',
+        reopen(gone).call('transportReportText', 'thisWeek', DAY).split('\n').includes(`נהג: ${named('עובד שנמחק')} – יום אחד`));
+
+    // --- with the switch off there is no report, and nothing is read to find that out.
+    const reads = [];
+    const off = bare('d_report_off');
+    const get = off.Store.get.bind(off.Store);
+    off.Store.get = key => { reads.push(String(key)); return get(key); };
+    load(off);
+    same('with the switch off there is no report, no days and no dialog',
+        [off.call('transportReportText', 'thisWeek', DAY), plain(off.call('transportReportDays', '2026-11-06', '2026-11-12')), off.call('openTransportReport')],
+        ['', [], false]);
+    same('and the only transport key read is the switch', [...new Set(reads.filter(key => /transport/i.test(key)))], [ENABLED]);
+
+    // --- the code that counts, composes, shows, sends and copies it calls nothing that
+    // writes, loads or prunes; the one function that touches the store only reads it.
+    const section = (from, to) => SCREEN.slice(SCREEN.indexOf(from), SCREEN.indexOf(to))
+        .split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
+    const code = section('== the report of a period', '== the summary\'s dialog');
+    given('the report\'s section was found in the screen\'s file', /function transportReportCount/.test(code)
+        && /function transportReportBlocks/.test(code) && /function openTransportReport/.test(code) && /function transportReportPick/.test(code));
+    same('nothing in it writes, marks, loads, prunes, commits or touches the store',
+        code.match(/transportKeep|transportSaveDay|transportSaveSettings|transportWrite|transportMarkOpened|transportRedrawn|transportDayOf|transportLoad|transportPrune|transportPlace|transportUnseat|transportSet\w+|Store\.|localStorage|State\.(commit|commitMany|save|persist)|FarkadSync|window\.print/g) || [], []);
+    check('the text goes out by the day message\'s own two doors, and the picture by the printout\'s',
+        /shareTextOut\(/.test(code) && /copyTextOut\(/.test(code) && /sharePrintout\('transport'\)/.test(code)
+        && !/navigator\.share|wa\.me|clipboard|execCommand|window\.open/.test(code));
+    const peek = section('function transportPeekDay', 'function transportSaveDay');
+    given('the function that looks at a day was found', /Store\.get\(TRANSPORT_DAY_PREFIX \+ date\)/.test(peek));
+    same('the one function that looks at a day asks the store to READ and nothing else',
+        peek.match(/Store\.\w+|transportLoad|transportWrite|transportDays\[date\]\s*=|transportUnreadableSeen\s*=|transportHeld\[/g) || [], ['Store.get']);
+});
+
 await block('a number becomes a wa.me number only by the seder\'s rule', async () => {
     const device = crewPhone('d_numbers');
     const number = phone => {
@@ -1085,7 +1309,34 @@ await block('the words, every one of them, and no other', async () => {
         sNoneSeated: 'אף עובד לא שובץ לרכב.',
         sWaiting: [[2], 'ממתינים לשיבוץ (2):'],
         sEmpty: [['סוואנה, קורולה'], 'רכבים ריקים: סוואנה, קורולה'],
-        sHome: [['סוואנה, קורולה'], 'רכבים שלא זמינים היום: סוואנה, קורולה']
+        sHome: [['סוואנה, קורולה'], 'רכבים שלא זמינים היום: סוואנה, קורולה'],
+        // The report of a period: the button, the dialog and its four ranges (the pay
+        // report's own words), the picture's file, and the lines of the report.
+        reportButton: 'דוח הסעות לתקופה',
+        reportTitle: 'דוח הסעות',
+        reportRanges: 'בחירת תקופה',
+        reportThisWeek: 'השבוע',
+        reportLastWeek: 'שבוע קודם',
+        reportThisMonth: 'החודש',
+        reportLastMonth: 'חודש שעבר',
+        reportLabel: 'תצוגה מקדימה של הדוח',
+        reportFile: [['2026-11-06', '2026-11-12'], 'farkad-דוח-הסעות-2026-11-06_2026-11-12.png'],
+        rCount: [[3], '3 ימים'],
+        rIn: [[3], 'ב-3 ימים'],
+        rHeading: [['השבוע', '06/11/2026', '12/11/2026'], 'דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:'],
+        rDays: [[3, 7], 'ימים עם שיבוץ שמור במכשיר הזה: 3 מתוך 7'],
+        rMissing: [[4], 'ב-4 ימים אין שיבוץ שמור במכשיר הזה.'],
+        rPruned: [['5 ימים', '06/10/2026', 35], 'מתוכם 5 ימים לפני 06/10/2026: שיבוצים ישנים מ-35 ימים נמחקים מהמכשיר הזה.'],
+        rUnreadable: [[2], 'שיבוצים של 2 ימים שמורים במכשיר ולא נקראו, ולא נספרו.'],
+        rVehicle: [['סוואנה', 'ב-3 ימים'], 'רכב: סוואנה – יצא ב-3 ימים'],
+        rDriverDays: [['אחמד', '2 ימים'], 'נהג: אחמד – 2 ימים'],
+        rNoDriverDays: [['יום אחד'], 'בלי נהג – יום אחד'],
+        rSeats: [[11, '3.7'], 'מושבים תפוסים: 11 בסך הכול, 3.7 בממוצע ליום'],
+        rNoneOut: 'בימים עם שיבוץ אף רכב לא יצא עם עובדים.',
+        rIdle: [['סוואנה, קורולה'], 'רכבים בלי עובדים בימים עם שיבוץ: סוואנה, קורולה'],
+        rDriversTitle: 'נהגים בתקופה:',
+        rDriver: [['אחמד', '3 ימים', 'סוואנה (2), קורולה (1)'], '- אחמד – 3 ימים: סוואנה (2), קורולה (1)'],
+        rDriverVehicle: [['סוואנה', 2], 'סוואנה (2)']
     };
     same('the block holds exactly these words', Object.keys(T).sort(), Object.keys(W).sort());
     Object.keys(W).forEach(key => {
@@ -1093,6 +1344,12 @@ await block('the words, every one of them, and no other', async () => {
         if (Array.isArray(want)) same(`${key}(${want[0].join(', ')})`, typeof T[key] === 'function' ? T[key](...want[0]) : T[key], want[1]);
         else same(key, T[key], want);
     });
+    // One day is a word of its own in Hebrew, not «1 ימים».
+    same('one day is said as one day, in each of the four places a number of days is said',
+        [T.rCount(1), T.rIn(1), T.rMissing(1), T.rUnreadable(1)],
+        ['יום אחד', 'ביום אחד', 'ביום אחד אין שיבוץ שמור במכשיר הזה.', 'שיבוץ של יום אחד שמור במכשיר ולא נקרא, ולא נספר.']);
+    check('and no word of the report says «נשלח»', !Object.keys(T).some(key =>
+        String(typeof T[key] === 'function' ? T[key]('x', 'y', 'z') : T[key]).includes('נשלח')));
     check('«ממתין» is nowhere in the words', !Object.keys(T).some(key =>
         String(typeof T[key] === 'function' ? T[key]('x', 'y', 'z') : T[key]).includes('ממתין')));
     // What the owner was shown on v171 and sent back must not come back by a side door.

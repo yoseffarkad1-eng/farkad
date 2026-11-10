@@ -32,9 +32,16 @@
 // ways out (the share sheet and wa.me are replaced by recorders - nothing is shared and
 // nothing is opened), the picture, and that none of it moves a key on the disk.
 //
-// TRANSPORT_SHOTS=<directory> also writes six JPEGs (main-440-dark, summary-440-dark,
-// dragging-440-dark, small-375-dark, main-440-light, nine-375-dark) and the summary's own
-// picture (summary-picture.png). Synthetic names only - it is this file's own fixture.
+// THE REPORT OF A PERIOD is measured here as well: its one button, the four ranges, the
+// words in the field against THE PLANS AS THEY ARE STORED (read off localStorage and
+// counted by this file's own hand), the same three ways out through the same recorders,
+// the picture, the rectangles at both sizes and at 200% text, and that none of it moves a
+// key on the disk.
+//
+// TRANSPORT_SHOTS=<directory> also writes JPEGs (main-440-dark, summary-440-dark,
+// report-440-dark, report-month-440-dark, dragging-440-dark, small-375-dark, main-440-light,
+// nine-375-dark, report-375-light) and the two pictures (summary-picture.png,
+// report-picture.png). Synthetic names only - it is this file's own fixture.
 
 import { chromium } from 'playwright';
 import { join } from 'node:path';
@@ -74,6 +81,7 @@ const OUT_OF_CAR = 'הוצאה מהרכב';
 const CANCEL = 'ביטול';
 const ALL_SEATED = 'כל העובדים משובצים';
 const SUMMARY = 'סיכום הסעות ליום';
+const REPORT = 'דוח הסעות לתקופה';
 const VEHICLES = ['טויוטה קורולה 2013', 'טויוטה קורולה 2016', 'BYD סיל U 2025', 'BYD אטו 3 2025', 'פולקסווגן 2018',
     'סוואנה 2010', 'ליפמוטור C10 2026'];
 
@@ -519,6 +527,325 @@ async function summary(page, where) {
     await page.locator('#transportSummaryClose').tap();
 }
 
+// ------------------------------------------------------------------ the report of a period
+
+// Two more days of plans for the week of DAY, as the screen would have kept them. Put on
+// the disk by this file and taken off again by it: the evening's own account of what the
+// feature wrote (three names) is taken after.
+const STAGED = {
+    '2026-11-08': { version: 1, unavailable: {}, status: {}, marks: {},
+        trips: { tv_01: { driver: 'w_01', passengers: ['w_02'], seats: { w_02: 2 } }, tv_03: { driver: 'w_04', passengers: [], seats: {} } } },
+    '2026-11-09': { version: 1, unavailable: { tv_03: true }, status: {}, marks: {},
+        trips: { tv_01: { driver: 'w_04', passengers: ['w_01', 'w_03'], seats: { w_01: 4, w_03: 2 } }, tv_05: { driver: null, passengers: ['w_06'], seats: { w_06: 2 } } } }
+};
+
+// What the report must say, WORKED OUT FROM THE DISK by this file's own hand: every day
+// key of the range parsed, a vehicle out when its stored trip has a man in it and the day
+// does not keep it home, the vehicles' names and order off the stored list, the men's
+// names off this file's own roster. The pinned words of tests/transport.test.mjs.
+const reportFromDisk = (page, label, from, to, pruned) => page.evaluate(([label, from, to, workers, pruned]) => {
+    const full = date => `${date.slice(8)}/${date.slice(5, 7)}/${date.slice(0, 4)}`;
+    const count = n => (n === 1 ? 'יום אחד' : `${n} ימים`);
+    const within = n => (n === 1 ? 'ביום אחד' : `ב-${n} ימים`);
+    const vehicles = JSON.parse(localStorage.getItem('farkadTransport:settings')).vehicles.filter(v => v.active !== false);
+    const rank = id => workers.findIndex(w => w.id === id);
+    const nameOf = id => workers[rank(id)].name;
+    const cars = vehicles.map(v => ({ id: v.id, name: v.name, days: 0, seats: 0, noDriver: 0, drivers: {} }));
+    const men = {};
+    let total = 0;
+    let planned = 0;
+    const start = new Date(Number(from.slice(0, 4)), Number(from.slice(5, 7)) - 1, Number(from.slice(8)), 12);
+    const end = new Date(Number(to.slice(0, 4)), Number(to.slice(5, 7)) - 1, Number(to.slice(8)), 12);
+    for (const at = new Date(start); at <= end; at.setDate(at.getDate() + 1)) {
+        total += 1;
+        const date = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+        const raw = localStorage.getItem(`farkadTransport:day:${date}`);
+        const day = raw ? JSON.parse(raw) : null;
+        const sitting = trip => (trip.driver ? 1 : 0) + trip.passengers.length;
+        if (!day || !Object.values(day.trips || {}).some(trip => sitting(trip) > 0)) continue;
+        planned += 1;
+        cars.forEach(car => {
+            const trip = day.trips[car.id];
+            if (!trip || (day.unavailable || {})[car.id] || sitting(trip) === 0) return;
+            car.days += 1;
+            car.seats += sitting(trip);
+            if (!trip.driver) { car.noDriver += 1; return; }
+            car.drivers[trip.driver] = (car.drivers[trip.driver] || 0) + 1;
+            men[trip.driver] = men[trip.driver] || {};
+            men[trip.driver][car.id] = (men[trip.driver][car.id] || 0) + 1;
+        });
+    }
+    const said = [`ימים עם שיבוץ שמור במכשיר הזה: ${planned} מתוך ${total}`];
+    if (total - planned > 0) said.push(total - planned === 1 ? 'ביום אחד אין שיבוץ שמור במכשיר הזה.' : `ב-${total - planned} ימים אין שיבוץ שמור במכשיר הזה.`);
+    if (pruned) said.push(pruned);
+    const blocks = [[`דוח הסעות – ${label}, ${full(from)} עד ${full(to)}:`], said];
+    if (planned === 0) return blocks.map(block => block.join('\n')).join('\n\n');
+    const most = (a, b) => b[1] - a[1] || rank(a[0]) - rank(b[0]);
+    const out = cars.filter(car => car.days > 0);
+    if (out.length === 0) blocks.push(['בימים עם שיבוץ אף רכב לא יצא עם עובדים.']);
+    out.forEach(car => {
+        const lines = [`רכב: ${car.name} – יצא ${within(car.days)}`];
+        Object.entries(car.drivers).sort(most).forEach(([id, n]) => lines.push(`נהג: ${nameOf(id)} – ${count(n)}`));
+        if (car.noDriver) lines.push(`בלי נהג – ${count(car.noDriver)}`);
+        lines.push(`מושבים תפוסים: ${car.seats} בסך הכול, ${Math.round(car.seats / car.days * 10) / 10} בממוצע ליום`);
+        blocks.push(lines);
+    });
+    const idle = cars.filter(car => car.days === 0);
+    if (out.length && idle.length) blocks.push([`רכבים בלי עובדים בימים עם שיבוץ: ${idle.map(car => car.name).join(', ')}`]);
+    const drivers = Object.keys(men).map(id => [id, Object.values(men[id]).reduce((a, b) => a + b, 0)]).sort(most);
+    if (drivers.length) {
+        blocks.push(['נהגים בתקופה:'].concat(drivers.map(([id, n]) =>
+            `- ${nameOf(id)} – ${count(n)}: ${cars.filter(car => men[id][car.id]).map(car => `${car.name} (${men[id][car.id]})`).join(', ')}`)));
+    }
+    return blocks.map(block => block.join('\n')).join('\n\n');
+}, [label, from, to, WORKERS, pruned || '']);
+const reportField = page => page.evaluate(() => document.getElementById('transportReportText').value);
+const reportOpen = page => visible(page, '#transportReportModal');
+const pressed = page => page.evaluate(() => [...document.querySelectorAll('#transportReportRanges button')]
+    .filter(node => node.getAttribute('aria-pressed') === 'true').map(node => node.dataset.range).join());
+
+async function periodReport(page, where, small) {
+    suite(`${where}: the report of a period - one button, four ranges, the stored plans counted, three ways out, nothing written`);
+    await page.evaluate(staged => {
+        Object.keys(staged).forEach(date => localStorage.setItem(`farkadTransport:day:${date}`, JSON.stringify(staged[date])));
+    }, STAGED);
+    const record = await recordBytes(page);
+    const disk = await diskOf(page);
+    given('three days of plans are on the disk for the week', (await page.evaluate(() =>
+        Object.keys(localStorage).filter(key => key.startsWith('farkadTransport:day:')).sort().join())) ===
+        'farkadTransport:day:2026-11-08,farkadTransport:day:2026-11-09,farkadTransport:day:2026-11-10');
+
+    same('one button on the screen, by its words', await page.locator('#transportPanel button', { hasText: REPORT }).evaluateAll(nodes => nodes.map(node => node.id)),
+        ['transportReportOpen']);
+    check('it is under the last car and above the folded list of vehicles - not on the first screen, which is the cars\'', await page.evaluate(() => {
+        const node = document.getElementById('transportReportOpen');
+        const cars = [...document.querySelectorAll('#transportBody [data-car]')];
+        const after = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+        return after(cars[cars.length - 1], node) && after(node, document.getElementById('transportFleet'))
+            && document.getElementById('transportSummaryOpen').nextElementSibling !== node;
+    }));
+    same('and nowhere else in the app is there a way to it', await page.evaluate(word =>
+        [...document.querySelectorAll('button, a, summary')].filter(node => node.textContent.includes(word) || /transportReport|openTransportReport/.test(node.getAttribute('onclick') || ''))
+            .filter(node => !node.closest('#transportPanel') && !node.closest('#transportReportModal')).length, 'דוח הסעות'), 0);
+    await page.locator('#transportReportOpen').scrollIntoViewIfNeeded();
+    const size = await page.locator('#transportReportOpen').boundingBox();
+    check('44px at least, both ways, and the width of the list', size.height >= 43.5 && size.width >= 200, JSON.stringify(size));
+    check('scrolled to, it is on the glass and under nothing', await page.evaluate(() => {
+        const node = document.getElementById('transportReportOpen');
+        const box = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return hit === node || node.contains(hit);
+    }));
+    await floors(page, 'with the report\'s button on the panel', small ? 56 : 44);
+
+    await page.locator('#transportReportOpen').tap();
+    await page.locator('#transportReportModal').waitFor({ state: 'visible' });
+    await page.waitForTimeout(300);
+    same('it opens the app\'s own dialog: its title, the four ranges by the pay report\'s words, the label, and the summary\'s four buttons',
+        [await text(page, '#transportReportTitle'), (await page.locator('#transportReportRanges button').allTextContents()).map(bare),
+            await page.locator('#transportReportRanges').getAttribute('aria-label'), await text(page, '#transportReportLabel'),
+            (await page.locator('#transportReportModal .modal-actions button').allTextContents()).map(bare)],
+        ['דוח הסעות', ['השבוע', 'שבוע קודם', 'החודש', 'חודש שעבר'], 'בחירת תקופה', 'תצוגה מקדימה של הדוח',
+            ['שליחה בוואטסאפ', 'העתקה', 'שיתוף כתמונה', 'סגירה']]);
+    same('it opens on this week', await pressed(page), 'thisWeek');
+    const shape = await page.evaluate(() => {
+        const modal = document.getElementById('transportReportModal');
+        const field = document.getElementById('transportReportText');
+        const box = field.getBoundingClientRect();
+        const content = modal.querySelector('.modal-content').getBoundingClientRect();
+        const buttons = [...modal.querySelectorAll('button')];
+        const boxes = buttons.map(node => node.getBoundingClientRect());
+        const on = modal.querySelector('#transportReportRanges button[aria-pressed="true"]');
+        const offButton = modal.querySelector('#transportReportRanges button[aria-pressed="false"]');
+        const probe = document.createElement('span');
+        probe.style.cssText = 'position:absolute;background:var(--accent)';
+        modal.appendChild(probe);
+        const accent = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return { onTop: document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) === field,
+            panelOpen: document.getElementById('transportPanel').classList.contains('open'),
+            readOnly: field.readOnly, font: parseFloat(getComputedStyle(field).fontSize),
+            small: boxes.filter(one => one.width < 43.5 || one.height < 43.5).length,
+            smallFont: buttons.filter(node => parseFloat(getComputedStyle(node).fontSize) < 16).length,
+            reachable: buttons.every(node => { const b = node.getBoundingClientRect(); const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return hit === node || node.contains(hit); }),
+            apart: boxes.every((a, i) => boxes.every((b, j) => i >= j || a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5)),
+            inside: content.left >= -0.5 && content.right <= window.innerWidth + 0.5 && content.top >= -0.5 && content.bottom <= window.innerHeight + 0.5,
+            pageFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+            chosenDiffers: getComputedStyle(on).backgroundColor !== getComputedStyle(offButton).backgroundColor,
+            chosenFilled: getComputedStyle(on).backgroundColor === accent };
+    });
+    check('the dialog is OVER the panel, which stays open behind it', shape.onTop && shape.panelOpen, JSON.stringify(shape));
+    check('the text is in a field nobody types in, at 16px or more', shape.readOnly && shape.font >= 16, JSON.stringify(shape));
+    same('no button of it - a range or a way out - is under 44px either way, or under 16px', [shape.small, shape.smallFont], [0, 0]);
+    check('every button is on the glass, under no other, and no two overlap', shape.reachable && shape.apart, JSON.stringify(shape));
+    check('it is whole on the glass and the page does not scroll sideways', shape.inside && shape.pageFits, JSON.stringify(shape));
+    check('the chosen range is told from the others without a filled button', shape.chosenDiffers && !shape.chosenFilled, JSON.stringify(shape));
+
+    const field = await reportField(page);
+    const want = await reportFromDisk(page, 'השבוע', '2026-11-06', '2026-11-12');
+    same('THE WORDS ARE THE PLANS ON THE DISK: three days of seven, each vehicle\'s days, drivers and seats, each driver\'s vehicles - counted again by this file',
+        bare(field).split('\n'), want.split('\n'));
+    check('and that is a report with something in it: a vehicle out on two days with two drivers, a driver in two vehicles, a day with nobody at the wheel, four days said to have no plan',
+        want.includes('יצא ב-2 ימים') && want.includes('ב-4 ימים אין שיבוץ שמור במכשיר הזה.') && want.includes('נהגים בתקופה:')
+        && /- סמיר – 2 ימים: [^\n]+ \(1\), [^\n]+ \(1\)/.test(want)
+        && want.includes('בלי נהג – יום אחד'), want);
+    check('a vehicle\'s name is held right-to-left in it, a man\'s is isolated, and no line begins with a vehicle', field.includes(`${RLI}`) && field.includes(`${FSI}`)
+        && field.split('\n').every(line => !line.startsWith(RLI) && !/^[A-Za-z]/.test(line)));
+    check('a day with no plan is never called a vehicle that stayed home', !/לא זמין|נשאר|בבית|לא יצא/.test(field));
+
+    // --- the ranges
+    await page.locator('#transportReportRanges button[data-range="thisMonth"]').tap();
+    same('«החודש» is the pressed one, and the only one', await pressed(page), 'thisMonth');
+    const month = await reportField(page);
+    same('and the field is the month, counted off the same disk', bare(month).split('\n'),
+        (await reportFromDisk(page, 'החודש', '2026-11-01', '2026-11-30')).split('\n'));
+    await page.locator('#transportReportRanges button[data-range="lastWeek"]').tap();
+    same('«שבוע קודם»: nothing was kept for it, and it says so for all seven days and names no vehicle',
+        [await pressed(page), bare(await reportField(page)).split('\n')],
+        ['lastWeek', ['דוח הסעות – שבוע קודם, 30/10/2026 עד 05/11/2026:', '', 'ימים עם שיבוץ שמור במכשיר הזה: 0 מתוך 7', 'ב-7 ימים אין שיבוץ שמור במכשיר הזה.']]);
+    await page.locator('#transportReportRanges button[data-range="lastMonth"]').tap();
+    same('«חודש שעבר» on the 10th says that its first five days are older than the store keeps',
+        [await pressed(page), bare(await reportField(page)).split('\n')],
+        ['lastMonth', (await reportFromDisk(page, 'חודש שעבר', '2026-10-01', '2026-10-31',
+            'מתוכם 5 ימים לפני 06/10/2026: שיבוצים ישנים מ-35 ימים נמחקים מהמכשיר הזה.')).split('\n')]);
+    await page.locator('#transportReportRanges button[data-range="thisWeek"]').tap();
+    same('back on «השבוע» it says what it said', await reportField(page), field);
+
+    // --- WhatsApp, by the day message's own door, through recorders.
+    await page.evaluate(() => {
+        window.__shared = null;
+        window.__opened = null;
+        window.__realOpen = window.open;
+        window.open = url => { window.__opened = url; return null; };
+        navigator.share = data => { window.__shared = data; return Promise.reject(Object.assign(new Error('x'), { name: 'AbortError' })); };
+    });
+    await page.locator('#transportReportSend').tap();
+    await page.waitForTimeout(150);
+    same('«שליחה בוואטסאפ» hands the share sheet the text and nothing else', await page.evaluate(() => window.__shared), { text: field });
+    check('a share sheet backed out of is not a failure: the dialog stays, says nothing, and opens nothing',
+        (await reportOpen(page)) && (await text(page, '#transportReportStatus')) === '' && (await page.evaluate(() => window.__opened)) === null);
+    await page.evaluate(() => { navigator.share = () => Promise.reject(new Error('boom')); });
+    await page.locator('#transportReportSend').tap();
+    await page.waitForTimeout(150);
+    check('a share sheet that fails keeps the report on the glass and says to copy it',
+        (await reportOpen(page)) && (await text(page, '#transportReportStatus')).includes('העתק'), await text(page, '#transportReportStatus'));
+    await page.locator('#transportReportRanges button[data-range="thisMonth"]').tap();
+    same('choosing another range clears what was said about the last one', await text(page, '#transportReportStatus'), '');
+    await page.locator('#transportReportRanges button[data-range="thisWeek"]').tap();
+    await page.evaluate(() => { delete navigator.share; });
+    await page.locator('#transportReportSend').tap();
+    await page.waitForTimeout(150);
+    same('with no share sheet it is wa.me with the text and NO NUMBER - the person picks the chat',
+        await page.evaluate(() => window.__opened), `https://wa.me/?text=${encodeURIComponent(field)}`);
+    check('and the dialog steps aside, the screen still there', !(await reportOpen(page)) && (await visible(page, '#transportPanel')));
+
+    // --- copy
+    await page.locator('#transportReportOpen').tap();
+    await page.locator('#transportReportModal').waitFor({ state: 'visible' });
+    same('opened again it is on this week, with nothing said', [await pressed(page), await text(page, '#transportReportStatus')], ['thisWeek', '']);
+    await page.evaluate(() => { window.__copied = null; navigator.clipboard.writeText = value => { window.__copied = value; return Promise.resolve(); }; });
+    await page.locator('#transportReportCopy').tap();
+    await page.waitForTimeout(150);
+    same('«העתקה» puts the same text on the clipboard, and says it did', [await page.evaluate(() => window.__copied), await text(page, '#transportReportStatus')],
+        [field, '✔️ הועתק']);
+
+    // --- the picture: read off this dialog, drawn by the printout's own machinery.
+    const picture = await page.evaluate(() => {
+        const seen = [];
+        const proto = CanvasRenderingContext2D.prototype;
+        const real = proto.fillText;
+        proto.fillText = function (value, ...rest) { seen.push(String(value)); return real.call(this, value, ...rest); };
+        let out = null;
+        try { out = printoutImage('transport'); } finally { proto.fillText = real; }
+        if (!out) return null;
+        return { name: out.name, type: out.blob.type, size: out.blob.size, rows: out.layout.rows.length, title: Boolean(out.layout.title), seen };
+    });
+    given('the picture was drawn', Boolean(picture));
+    if (picture) {
+        same('the picture is a PNG named for the range', [picture.name, picture.type, picture.size > 2000],
+            ['farkad-דוח-הסעות-2026-11-06_2026-11-12.png', 'image/png', true]);
+        same('it has a title and one box for every block under it', [picture.title, picture.rows], [true, field.split('\n\n').length - 1]);
+        same('and every word drawn in it is a word of the dialog, in the dialog\'s order - nothing added, nothing left out',
+            bare(picture.seen.join(' ')), bare(field.split('\n').filter(Boolean).join(' ')));
+    }
+    await page.evaluate(() => {
+        window.__file = null;
+        navigator.canShare = () => true;
+        navigator.share = data => { const file = data.files && data.files[0]; window.__file = file ? { name: file.name, type: file.type, size: file.size, text: data.text || null } : 'no file'; return Promise.resolve(); };
+    });
+    await page.locator('#transportReportRanges button[data-range="thisMonth"]').tap();
+    await page.locator('#transportReportPicture').tap();
+    await page.waitForTimeout(150);
+    const file = await page.evaluate(() => window.__file);
+    check('«שיתוף כתמונה» hands the share sheet that file, inside the tap, named for the range that is CHOSEN',
+        Boolean(file) && file.name === 'farkad-דוח-הסעות-2026-11-01_2026-11-30.png' && file.type === 'image/png' && file.size > 2000 && file.text === null, JSON.stringify(file));
+    check('and the dialog stays for the next thing', await reportOpen(page));
+    await page.evaluate(() => { delete navigator.share; delete navigator.canShare; window.open = window.__realOpen; });
+    await page.locator('#transportReportRanges button[data-range="thisWeek"]').tap();
+
+    // --- a plan that changes while the dialog is open: the words follow the disk.
+    const moved = await page.evaluate(day => {
+        const tile = [...document.querySelectorAll('#transportBody .transport-seat[data-worker]')].filter(one => one.dataset.seat !== '1').pop();
+        const was = { id: tile.dataset.worker, vehicle: tile.dataset.vehicle, n: Number(tile.dataset.seat) };
+        transportUnseat(day, was.id);
+        renderTransportIfOpen();
+        return was;
+    }, DAY);
+    const after = await reportField(page);
+    check('the open dialog was brought up to date: one seat fewer', after !== field, after);
+    same('and is again exactly what the disk holds', bare(after).split('\n'), (await reportFromDisk(page, 'השבוע', '2026-11-06', '2026-11-12')).split('\n'));
+    await page.evaluate(([day, was]) => { transportPlace(day, was.id, was.vehicle, was.n); renderTransportIfOpen(); }, [DAY, moved]);
+    same('put back, it says what it said', await reportField(page), field);
+
+    // --- 200% text: the words double and the boxes make room; nothing is cut or lost.
+    const big = await page.evaluate(() => {
+        const modal = document.getElementById('transportReportModal');
+        const content = modal.querySelector('.modal-content');
+        const touched = [...modal.querySelectorAll('*')].map(node => [node, parseFloat(getComputedStyle(node).fontSize)]);
+        touched.forEach(([node, size]) => node.style.setProperty('font-size', `${size * 2}px`, 'important'));
+        const buttons = [...modal.querySelectorAll('button')];
+        const result = {
+            clipped: buttons.filter(node => node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1).map(node => node.textContent),
+            small: buttons.filter(node => node.getBoundingClientRect().width < 43.5 || node.getBoundingClientRect().height < 43.5).length,
+            sideways: content.scrollWidth > content.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+            inside: content.getBoundingClientRect().left >= -0.5 && content.getBoundingClientRect().right <= window.innerWidth + 0.5,
+            scrolls: content.scrollHeight <= content.clientHeight + 1 || /auto|scroll/.test(getComputedStyle(content).overflowY)
+        };
+        const close = document.getElementById('transportReportClose');
+        close.scrollIntoView({ block: 'nearest' });
+        const box = close.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        result.closeReached = (hit === close || close.contains(hit)) && box.top >= -0.5 && box.bottom <= window.innerHeight + 0.5;
+        touched.forEach(([node]) => node.style.removeProperty('font-size'));
+        content.scrollTop = 0;
+        return result;
+    });
+    same('at 200% text no button\'s words are cut', big.clipped, []);
+    check('nothing runs off the side, every button is still 44px, and «סגירה» can be scrolled to and touched',
+        big.small === 0 && !big.sideways && big.inside && big.scrolls && big.closeReached, JSON.stringify(big));
+
+    // --- the way out, and what it all cost: nothing.
+    await page.keyboard.press('Escape');
+    check('Escape closes the dialog and NOT the screen behind it', !(await reportOpen(page)) && (await visible(page, '#transportPanel')));
+    same('with the dialog shut there is no picture to draw', await page.evaluate(() => printoutImage('transport')), null);
+    await page.locator('#transportReportOpen').tap();
+    await page.locator('#transportReportModal').waitFor({ state: 'visible' });
+    await page.locator('#transportReportClose').tap();
+    check('«סגירה» closes it too, and the keyboard is back on the button that opened it', !(await reportOpen(page))
+        && (await page.evaluate(() => document.activeElement && document.activeElement.id)) === 'transportReportOpen');
+    same('NOTHING WAS WRITTEN: the same keys on the disk, and every transport key byte for byte', await diskOf(page), disk);
+    same('the record and the queue are byte for byte what they were', await recordBytes(page), record);
+    check('nothing in it says «נשלח»', !/נשלח/.test(field + month + await page.locator('#transportReportModal').textContent()));
+
+    // The summary of the day still draws ITS picture: the reader takes whichever is open.
+    await page.locator('#transportSummaryOpen').tap();
+    await page.locator('#transportSummaryModal').waitFor({ state: 'visible' });
+    same('with the summary open, the picture is the summary\'s again', await page.evaluate(() => printoutImage('transport').name), 'farkad-הסעות-2026-11-10.png');
+    await page.locator('#transportSummaryClose').tap();
+
+    await page.evaluate(staged => { Object.keys(staged).forEach(date => localStorage.removeItem(`farkadTransport:day:${date}`)); }, STAGED);
+}
+
 async function shot(page, name) {
     if (!SHOTS) return;
     await page.screenshot({ path: join(SHOTS, `${name}.jpg`), type: 'jpeg', quality: 80 });
@@ -543,6 +870,9 @@ async function evening(width, height, scheme) {
         await page.locator('#dayView [id^="transport"], #dayView [class*="transport"]').count(), 0);
     same('nor is there a summary button, or a summary, anywhere', [await page.locator('#transportSummaryOpen').count(),
         await page.evaluate(() => openTransportSummary()), await visible(page, '#transportSummaryModal')], [0, false, false]);
+    same('nor a report button, or a report', [await page.locator('#transportReportOpen').count(),
+        await page.evaluate(() => openTransportReport()), await visible(page, '#transportReportModal'),
+        await page.evaluate(() => transportReportText('thisWeek', '2026-11-10'))], [0, false, false, '']);
 
     // ------------------------------------------------------------ the switch, in ⋯
     suite(`${where}: the switch in ⋯`);
@@ -1146,6 +1476,9 @@ async function evening(width, height, scheme) {
     // ------------------------------------------------------------ the summary of the day
     await summary(page, where);
 
+    // ------------------------------------------------------------ the report of a period
+    await periodReport(page, where, small);
+
     // ------------------------------------------------------------ the record, and the way out
     suite(`${where}: the record is untouched, and the way out`);
     same('the day record and everything queued for the cloud are byte for byte what they were',
@@ -1180,6 +1513,8 @@ async function evening(width, height, scheme) {
     same('turned off in ⋯, the entry is gone from the WhatsApp dialog', await page.locator('#transportEntry').count(), 0);
     same('and the summary cannot be opened by any road', [await page.evaluate(() => openTransportSummary()),
         await page.evaluate(() => transportSummaryText('2026-11-10')), await visible(page, '#transportSummaryModal')], [false, '', false]);
+    same('nor the report', [await page.evaluate(() => openTransportReport()),
+        await page.evaluate(() => transportReportText('thisWeek', '2026-11-10')), await visible(page, '#transportReportModal')], [false, '', false]);
     check('and the plans stay on the disk for when it is turned on again', await page.evaluate(() =>
         localStorage.getItem('farkadTransport:enabled') === null && localStorage.getItem('farkadTransport:day:2026-11-10') !== null));
     same('the record is still what it was', await recordBytes(page), before);
@@ -1220,6 +1555,33 @@ async function pictures() {
                 return new Promise(done => { const reader = new FileReader(); reader.onload = () => done(reader.result.split(',')[1]); reader.readAsDataURL(out.blob); });
             });
             writeFileSync(join(SHOTS, 'summary-picture.png'), Buffer.from(png, 'base64'));
+            await page.locator('#transportSummaryClose').tap();
+        }
+        // The report of a period, over a week this file stages: on the big dark phone, and
+        // once on the small light one.
+        if (name === 'main-440-dark' || name === 'main-440-light') {
+            const dark = name === 'main-440-dark';
+            await page.evaluate(staged => {
+                Object.keys(staged).forEach(date => localStorage.setItem(`farkadTransport:day:${date}`, JSON.stringify(staged[date])));
+            }, STAGED);
+            await page.locator('#transportReportOpen').tap();
+            await page.locator('#transportReportModal').waitFor({ state: 'visible' });
+            await page.waitForTimeout(400);
+            if (dark) {
+                await shot(page, 'report-440-dark');
+                const png = await page.evaluate(async () => {
+                    const out = printoutImage('transport');
+                    return new Promise(done => { const reader = new FileReader(); reader.onload = () => done(reader.result.split(',')[1]); reader.readAsDataURL(out.blob); });
+                });
+                writeFileSync(join(SHOTS, 'report-picture.png'), Buffer.from(png, 'base64'));
+                await page.locator('#transportReportRanges button[data-range="lastMonth"]').tap();
+                await page.waitForTimeout(100);
+                await shot(page, 'report-month-440-dark');
+            } else {
+                await page.setViewportSize({ width: 375, height: 667 });
+                await page.waitForTimeout(200);
+                await shot(page, 'report-375-light');
+            }
         }
         await context.close();
     }
