@@ -354,7 +354,8 @@ const ACC = {
     closed: {},
     watch: null,
     look: null,
-    archive: null
+    archive: null,
+    archiveSeen: null
 };
 
 // ---------------------------------------------------------------- a draft, across a reload
@@ -869,7 +870,7 @@ function accDrawList(node) {
         legacy.hidden = accLegacyRows().length === 0;
         // The archive is offered once there is anything it could say: a closure that
         // may leave, or one that already has.
-        const moving = planArchive(State.schedule, todayStr()).totals;
+        const moving = accArchiveTotals();
         archive.textContent = `${ACC_TEXT.archiveEntry} (${moving.ready})`;
         archive.hidden = moving.ready === 0 && moving.archived === 0;
         const draft = accDraftRead();
@@ -2336,6 +2337,22 @@ function accArchiveWord(reasons) {
     return Object.prototype.hasOwnProperty.call(words, code) ? words[code] : accServerText(reasons);
 }
 
+// What the list says about the archive: how many closures may move, how many have. The
+// dry run weighs the whole record to say so, and the list is painted on every key typed
+// into its search - so it is asked once for each state of the record, and that state is
+// named by what any change to it changes: the day, the record's own stamp, and how many
+// entries each of the three maps holds.
+function accArchiveTotals() {
+    const S = State.schedule;
+    const count = map => (map && typeof map === 'object' ? Object.keys(map).length : 0);
+    const key = [todayStr(), S.updatedAt, count(S.pay), count(S.ledger && S.ledger.advances),
+        count(S.payIndex && S.payIndex.rows), count(S.payConflicted)].join('|');
+    if (!ACC.archiveSeen || ACC.archiveSeen.key !== key || ACC.archiveSeen.of !== S) {
+        ACC.archiveSeen = { key, of: S, totals: planArchive(S, todayStr()).totals };
+    }
+    return ACC.archiveSeen.totals;
+}
+
 function accDrawArchive(node) {
     const form = ACC.archive || (ACC.archive = { busy: false, message: '', moved: null });
     accHead(node, ACC_TEXT.archiveEntry, null, () => accGo('list', { archive: null }));
@@ -2362,7 +2379,13 @@ function accDrawArchive(node) {
         const done = answer => {
             form.busy = false;
             form.moved = answer && Array.isArray(answer.moved) ? answer.moved.length : 0;
-            if (!answer || answer.state === 'refused') form.message = accArchiveWord(answer ? answer.reasons : ['server']);
+            // Refused before anything was tried: the server-first door's own sentence
+            // (another operation in flight, unsent work, a restore outstanding...).
+            if (!answer || answer.state === 'refused') {
+                const said = answer ? answer.reasons : ['server'];
+                form.message = said[0] === 'gate' ? ACC_REFUSALS.gate
+                    : (said[0] === 'offline' ? ACC_TEXT.archiveOffline : accServerText(said));
+            }
             else if (answer.failed.length > 0) {
                 form.message = `${accArchiveWord([answer.failed[0].reason])} ${ACC_TEXT.archiveStopped}`;
             }

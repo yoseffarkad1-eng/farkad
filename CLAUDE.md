@@ -206,6 +206,11 @@ written down so it cannot happen twice.
                                (from this phone's record or its closed documents) or does NOT adopt; the
                                wrapper that strips them from a whole-document write; archiveClosed - copy,
                                read back, compare, drop - which keeps no state and continues from the server's
+    js/sync/closed.js          Phase 5, SHIPPED SHUT with the pay book: what has left the live document. The
+                               gate at the top of receive() that lays an archived closure's entries back
+                               (from this phone's record or its closed documents) or does NOT adopt; the
+                               wrapper that strips them from a whole-document write; archiveClosed - copy,
+                               read back, compare, drop - which keeps no state and continues from the server's
     js/sync/boot.js            two lines that RUN at load; loaded last, and every later split goes above it
     js/sync/firebase-adapter.js  the only file that knows Firebase exists; the one ES module
     js/sync/firebase-config.js   project config; empty means local-only
@@ -373,6 +378,16 @@ written down so it cannot happen twice.
                                the shekel on the glass, a blank field refused on its row, offline writing
                                nothing, two taps one closure, a second phone's conflict, the walk and the
                                batch, history five ways, corrections, the first run, 44px/16px/200% text
+    tests/paybook.archive.test.mjs Phase 5 on the fake cloud (which refuses what the rules refuse of a whole
+                               document): the move, and the same money on five kinds of phone; never before
+                               the copy is confirmed; a phone that cannot fetch adopts nothing; resumable;
+                               a restore never erases a closure; what the backup and the rescue file say
+    tests/paybook.archive.emulator.test.mjs the rules for what leaves, the production adapter's drop, and
+                               v167/v171/v172 once an index exists (they may not write; their restore is refused)
+    tests/archive.browser.mjs  Phase 5 in Chromium: «ארכיון סגירות» read and run, a phone that lacks the
+                               detail, «מה לבדוק?», a draft across a reload, «נסגר» on the weekly breakdown
+    tests/gate-open.preload.mjs an instrument, run by no gate: any existing browser suite with the pay book
+                               open on every page (node --import ./tests/gate-open.preload.mjs tests/<suite>)
     tests/paybook.archive.test.mjs Phase 5 on the fake cloud (which refuses what the rules refuse of a whole
                                document): the move, and the same money on five kinds of phone; never before
                                the copy is confirmed; a phone that cannot fetch adopts nothing; resumable;
