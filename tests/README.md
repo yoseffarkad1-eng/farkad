@@ -1,10 +1,12 @@
 # The suites
 
-Sixty-three suites, forty-five of which need no browser at all. (Counted off
-package.json, which is the only place a suite count is true: `npm test` names the node
-suites, `test:all` adds the eleven browser suites, `test:release` adds sendclaim and the
-six emulator suites. The count in this paragraph is re-counted whenever a suite is added
-and is true of nothing but the commit it was written on.) From a clean clone:
+One hundred and twenty suite files, seventy-nine of which need neither a browser nor the
+emulator. (Counted off package.json, which is the only place a suite count is true:
+`npm test` runs those seventy-nine, `test:all` adds thirty-two more - the browser suites -
+and `test:release` adds sendclaim and the eight emulator suites. The count in this
+paragraph is re-counted whenever a suite is added and is true of nothing but the commit
+it was written on - the one that added `oracle.test.mjs`. The command summaries below it
+were not re-counted then, and name fewer suites than the scripts run.) From a clean clone:
 
     npm ci
     npm test                # the DEVELOPMENT gate: node suites, no browser, run before every commit
@@ -398,11 +400,111 @@ several waves of tests and is stale.)
 | transport-browser | `transport.browser.mjs` | The picture in a real Chromium **with a touch screen** (`hasTouch`, `isMobile`), four times (440x956 and 375x667, dark and light). Every drag is a real touch sequence sent through `Input.dispatchTouchEvent` - Chromium's own gesture detection, `touch-action`, scrolling and touch-type pointer events - and a counter proves no mouse and no native drag was involved. No entry until the switch in ⋯ is on; then one row in the WhatsApp dialog; the panel entered at its heading, still the `settings-panel` layer, and opening it writing nothing. The picture: no tabs; the tray's count and chips in roster order with each site's own colour; seven cards with their rows (2-3, and 2-2-2-3); «הוספת עובד» on every seat and «נהג» on the driver's; **the driver in the LEFT half of the car in a right-to-left page**, under the windscreen, with the drawn steering wheel; no image; the nine-seater's nine tiles inside its outline on the screen; the outline and seat borders 3:1, a name 7:1. Carrying: a man stopped in the air (the floating copy is not a fixed layer, the seat under the finger lit, nothing selected, nothing changed), dropped on an empty seat, on the driver's seat (the WhatsApp link appears with its exact `href`, `target` and `rel`), on a taken seat from the tray (the other back in the tray), a held man from one car to the next, a swap, back to the tray, released outside (nothing), `touchCancel` in mid-air (nothing, and nothing left on the page). A swipe from a card's background AND a quick swipe that starts on a seated man both scroll and move nobody; a level swipe on the chips slides the tray. A man held at the bottom edge scrolls the list to the sixth car and is dropped there, and back under the tray to the first. A mouse carrying a man with no hold, and its release not opening the seat it landed on. Tap-then-tap; Escape; the chooser over the panel with its exact rows; the driver's-seat title; «הוצאה מהרכב»; the link tapped (navigation prevented here) marking «נפתח בוואטסאפ» and a changed message un-believing it; a vehicle kept home folding and returning its men; three men marked not riding three ways (touched, chosen, dropped on the control) and one brought back; the nine-seater full with every name inside its seat; an empty seat with nobody waiting SAYING so; the vehicles list (add, a seven-seater drawn 2-3-2, rename, retire). On every state 44px both ways, **56px seats at 375**, 16px fields, no sideways page scroll, no filled button; `scheduleData:v2` and the queue byte for byte at the end; no request off loopback; a reload; the switch off again. `TRANSPORT_SHOTS=<dir>` also writes five JPEGs. **Chromium with emulated touch only - nothing here is an iPhone or a Galaxy.** **v179, the summary:** its one button and no other way to it, the dialog over the open panel, its words equal to the cars as they are DRAWN (worked out from the tiles and chips on the glass), the share sheet, wa.me with no number and the clipboard through recorders, the picture (file name, type, one box per block, the words drawn equal to the words shown), Escape closing the dialog and not the panel, an open dialog following a plan that changes, and no key written. |
 | settings-order-browser | `settings-order.browser.mjs` | The ⋯ sheet in strict order (v172), in a real Chromium. The three sections and their nine cards by their own titles, in order; the sync card a plain `<section>` with nothing in it inside anything that shuts, the advances review directly under it; every other card a `<details>` whose `<summary>` is the card head. On opening: גיבוי open, the rest shut, the filled button on the glass at 440x956; after Escape and after «חזרה» focus is back on `#settingsBtn` and the next opening is the default again, with nothing about the rows in storage. A person's open and shut rows survive `render()`, a settings redraw, a snapshot adopted through `FarkadSync.receive`, the connection changing and a reminder check. Each self-opening reason through the state that causes it: a record that will not read (truncated `scheduleData:v2`, reloaded - and the banner's own export button), a problem arriving under the open sheet, a restore outstanding, a pending restore that cannot be read, a restore's answer, an empty crew beside a restore point, and beside a cloud copy that arrives after the sheet is drawn (and a full crew beside a restore point NOT opening it), a subscribed phone the server does not know and one that blocks notifications (and a registered one, and an arrival from a reminder, NOT opening it), a waiting build, one arriving, a check asked with the sheet shut, a storage warning; with every reason standing הסעות and מידע טכני still shut; a row shut by a person staying shut through a redraw while its reason stands. The inventory: every control (tag, id, words, inline handler) and every sentence of the v171 sheet, captured from `b640c5a`, found with every row open; the three script-built controls pressed; one filled button. Enter on a row, Tab from the last row wrapping to the first control and never into a shut row. Rows 56px and every target 44px both ways, fields 16px, no sideways scroll, the drawn corner and no browser triangle, at 440x956, 375x667 and 320x568 in both schemes, as opened and with every row open; the jump buttons moving focus to headings that clear the fixed navigation; doubled text clipping no title. Folding writes nothing: the schedule and every `localStorage` key byte for byte. Chromium only - nothing here is an iPhone. |
 | bootstrap-rules | `bootstrap.rules.test.mjs` | The SERVER's answer to a bootstrap that carries business data. Nineteen smuggling attempts — days, advances, ledger entries, workers, places, roster, `schemaVersion`, unknown fields, each alone and in combination — against the local emulator, plus the acceptance list of what a bootstrap may legitimately touch. Every row reports: the helper returns a verdict rather than throwing, so one refusal does not hide the eighteen behind it. |
+| oracle | `oracle.test.mjs` | TWO CALCULATORS, ONE RECORD. `oracle.mjs` is a second calculator, written from the documented rules, handed the raw record and importing nothing from `js/`: dates are day numbers worked out by integer arithmetic (no `Date`, so no zone and no DST hour), money is whole agorot. The suite generates 240 records from a seeded generator (no `Math.random`, no clock, every `at` counted) and puts the shipped app's answer beside the second calculator's on every one: a pay sheet row over every fortnight, week, month, odd window and single day (dates on site, pay units, double days, hours, site visits, absences, the wage at the rate STAMPED on each day, advances, net, the two flags); one man day by day and the summary of it; the client's invoice with Rima's men, and the three tables that must add up (the invoice, `בלי עובדי רימא`, the Rima table); what is left on every advance and what each man still owes; every man's account period by period in his own cycle (in, given, back, corrected, the wage, covered, carried out, carried forward, late movement, over-settled, review, net, closed), with closed periods reporting their record; what a close WRITES, through `closePeriodChanges` (the payslip, the deductions oldest advance first, the reasons a close is refused); and the days and stamps the app's own writers leave, against a writer that only knows iron law 2. The calendar on its own - week, account, each man's period, the period after it - in Asia/Jerusalem, UTC, America/Los_Angeles and Pacific/Auckland. Figures worked out by hand, to which BOTH calculators are held. Eleven mutants: the app loaded again with one line of `js/model/money.js` (or of the account walk in `js/model/schema.js`, or of the fold in `js/model/ledger.js`) changed in memory, each of which must turn the comparison red. A census of what the generator actually produced. Where the two are KNOWN to part the case is left out by name, counted, and proved red in `oracle.findings.mjs`. |
+
+`oracle.mjs` is not a suite: it is the second calculator, and it asserts nothing.
+`oracle.findings.mjs` IS one, red on purpose and in no gate - see «The second
+calculator» below.
 
 `shot.mjs` is not a suite: it takes one screenshot and asserts nothing, for the
 question the suites cannot answer — whether the screen is worth looking at.
 `embedded.html` hosts the app in a sandboxed iframe; `serve.py` is a threaded server
 whose `?slow=N` holds a response N seconds, for testing stuck-network behavior.
+
+## The second calculator (`oracle.mjs`, `oracle.test.mjs`, `oracle.findings.mjs`)
+
+    npm run test:oracle             # the comparison; in `npm test`
+    node tests/oracle.findings.mjs  # the known disagreements; in NO gate, exits 1
+
+**Why it exists.** Every other money suite holds the app to literals somebody typed for
+one crew. That proves those cases; it cannot find the one nobody thought to type, and a
+silent arithmetic disagreement is by definition one nobody thought of.
+
+**What makes it independent.** `oracle.mjs` imports nothing from `js/`, is handed the raw
+record and nothing else, and was written from the rules where they are written down:
+iron laws 1 and 2 in `CLAUDE.md`, `docs/architecture.md` («The shape of the record»,
+«Money»), `docs/weekly-cycle.md`, `docs/releases.md` (v166) and the comment blocks that
+state a rule in words. It does its sums differently on purpose - integer day numbers
+instead of local `Date`s, integer agorot instead of floats - so a shared habit cannot
+make two answers agree.
+
+**Where it is NOT independent** - rules written down nowhere, where it does what the code
+does and says «FOLLOWS THE CODE» at the line. Agreement on these proves nothing:
+
+- `hoursUnpriced` is raised only on a day that HAS a daily rate; a day with neither rate
+  does not raise it.
+- `mixedRates` counts a day with no daily rate as a day «at a rate» of nothing.
+- An `extra` day is a normal day with hours; hours count on whatever band they sit on.
+- A man put back because the record still names him comes back with no rate and no pay
+  cycle when nobody remembers him (`reinstateReferenced` with nothing remembered).
+- The over-settled state stops the automatic deduction on EVERY open period of the man,
+  past ones included, as soon as it exists; it is read as of today, not as of the period.
+- An account's `given` is read from the old `advances` field, while whose repayment it is
+  comes from the fold (they differ only after a `corrected` entry, which nothing writes).
+- A close may write a deduction against an advance dated AFTER the period it closes, once
+  the older ones are used up; what an advance has left is read as of the period's last
+  day (`outstandingWithout`).
+- The most a person may choose to deduct is the smaller of what is owed and the wage.
+- The shape of a closure's entries, their ids, and the approval record `cm_carry`.
+- The legacy pair `payCycle`/`payCycleFrom` is read only when `payCycles` is empty.
+
+**What it does not cover.**
+
+- Anything in `js/ui/`: the sheet's own columns (`moneyOf`, `moneyCells`, `payrollRows`,
+  which rows stay on the sheet), the worker's statement, the exported files and every
+  Hebrew word. The comparison stops at the model functions those surfaces read.
+- A wage finer than an agora (an hourly rate with an odd number of agorot times a half
+  hour). The second calculator refuses to price one in an account, because how half an
+  agora is rounded is written down nowhere - and the edge it refuses at is where
+  finding 2 was found.
+- `corrected` and `cancelled` ledger entries. No screen of this build writes either; the
+  generator makes none. A probe by hand says the account walk ignores both (it reads the
+  old field), so a `corrected` amount gives one figure on the pay sheet and another on
+  the advance, and a `cancelled` advance goes on being deducted - latent, reported, and
+  not asserted anywhere.
+- Vehicles (the flag is off; the suite only checks that nothing is paid for one), the
+  retired `plan` layer, negative legacy advances, an advance that exists only in the
+  ledger, a closure written before closures carried `periodTo`/`gross`/`basis`, a clock
+  that is behind (`clock`), a chosen deduction that is not allowed, and anything a
+  second phone, the wire or a restore does to a record. Other suites own those.
+- `openAdvanceBalance` on a record where somebody still owes at the end. NOT for the
+  arithmetic: behind it `carryReportingEnabled` re-plans the carry migration on every
+  call (`planAdvanceCarry`), in fixed fortnights, and while any man's balance has not
+  cleared - no rate, archived, over-settled, or simply not yet earned back - that plan
+  walks four thousand fortnights looking for the one where it does. Measured in Node on
+  a 26-man record: about 0.4 s per call, on a function the pay sheet asks on every draw.
+  It is a cost, not a wrong number, and it is why this suite asks that one question only
+  on records where everybody's account has run down to nothing.
+
+**What it found** - both left red in `oracle.findings.mjs`, neither repaired, nothing in
+`js/` touched:
+
+1. A closed period can carry forward LESS THAN NOTHING (`advanceWalk`,
+   `js/model/schema.js`: `balance` is floored at zero, `live = balance - deducted` is
+   not). A repayment or a correction dated into a period after it shut, larger than what
+   the close left, makes it negative; the next period opens on that credit; it is netted
+   against a new advance if one falls in the very next period, dropped if it falls a
+   period later, and a close made after it freezes the negative opening balance onto a
+   payslip. `oracle.test.mjs` leaves every account and close downstream of such a period
+   out of its comparison by name and counts them.
+2. A wage finer than an agora, closed against a debt at least as large, has the wage
+   ROUNDED UP taken off it - half an agora more than the man earned - and the app's own
+   `closureProblems` then calls its own closure impossible; at the next open the
+   deduction is held aside as unreadable and writing is blocked.
+
+**The mutants, and doing one by hand.** The suite loads the app again eleven times with one
+line changed in memory and requires red each time. To see it on a real file: copy the
+tree somewhere outside the repository, change one thing in the copy's
+`js/model/money.js` - `(doubled ? 2 : 1)` to `(doubled ? 3 : 1)` in `payrollReport` - and
+run `node tests/oracle.test.mjs` in the copy. Never in the checkout: a cached file
+changed without the three stamps is a different failure.
+
+**Reading a failure.** Every line names the seed, the man, the range, the field, what the
+app said and what the rule gives. The record is `makeRecord(seed, APP)` in the suite. A
+disagreement is settled by the documented rule, not by making either side match: if the
+rule supports the app, the second calculator is wrong and is fixed; if it supports the
+second calculator, the case goes to `oracle.findings.mjs` with a fixture a person can
+check on paper, and a predicate in `KNOWN`; if no rule says, it is listed above.
 
 ## The harness idiom (`harness.mjs`)
 
