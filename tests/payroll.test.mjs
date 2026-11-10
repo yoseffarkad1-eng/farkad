@@ -196,21 +196,42 @@ const without = (record, fields) => {
         kinds.every(kind => ['given', 'closed', 'deducted', 'repaid', 'reversed', 'corrected', 'cancelled'].includes(kind))
         && JSON.stringify(S.pay) === '{}', JSON.stringify([[...new Set(kinds)], S.pay]));
 
-    // AN ADVANCE WHOSE OWN PERIOD WAS NEVER CLOSED: two folds, two answers. Found while
-    // building the planner, on unchanged code. advanceOutstanding says 500 is still owed -
-    // nothing was ever recorded against it. The account walk has already counted it as
-    // taken from the wage of the fortnight it was given in, so nothing carries, and the
-    // existing dialog refuses to deduct any of it later.
+    // AN ADVANCE WHOSE OWN PERIOD WAS NEVER CLOSED: two folds, two answers - HISTORY now,
+    // and the pin stays so that the change is visible. Found while building the planner,
+    // on unchanged code: advanceOutstanding says 500 is still owed - nothing was ever
+    // recorded against it - while the account walk had already counted it as taken from
+    // the wage of the fortnight it was given in, so nothing carried, and the existing
+    // dialog refused to deduct any of it later.
+    //
+    // MOVED AT v175, deliberately - THE OWNER'S RULING, 2026-11-10: an advance from a
+    // period that was never closed stays a full debt until the person deducts it. The rule
+    // is behind the pay book's gate (advanceDebtStays, js/model/schema.js), so the old
+    // answer is still what a build with the gate shut computes - which is every build a
+    // person has installed - and it is asserted here on exactly such a device. The devices
+    // of this suite have the gate open, and on them there is one answer.
     const old = world({ today: '2026-10-16', days: [['w_khaled', '2026-09-20'], ['w_khaled', '2026-09-21']],
         advances: [['w_khaled', '2026-09-20', 500]] });
     const oldId = advancesOf(old.State.schedule, 'w_khaled')[0];
+    const shut = makeDevice({ deviceId: 'd_shut_gate' });
+    const before = shut.call('planPeriodClosure', clone(old.State.schedule), 'w_khaled', FORTNIGHT.from, FORTNIGHT.to,
+        '2026-10-16T08:00:00.000Z', 300);
+    same('HISTORY (the gate shut, as installed): 500 from a fortnight nobody closed is "500 left" to one fold and "nothing carried" to the other',
+        [shut.call('advanceOutstanding', clone(old.State.schedule), oldId).left,
+            shut.call('advanceCarryInto', clone(old.State.schedule), 'w_khaled', FORTNIGHT.from)],
+        [500, 0]);
+    check('HISTORY (the gate shut): and the existing closure refuses to deduct it from a later wage',
+        before.canClose === false && before.reasons.includes('deduction'), JSON.stringify(before.reasons));
+    same('the old rule is still computable by name on any build, for the report that compares the two',
+        [old.call('advanceCarryIntoUnder', old.State.schedule, 'w_khaled', FORTNIGHT.from, false),
+            old.call('advanceCarryIntoUnder', old.State.schedule, 'w_khaled', FORTNIGHT.from, true)], [0, 500]);
     const later = old.call('planPeriodClosure', old.State.schedule, 'w_khaled', FORTNIGHT.from, FORTNIGHT.to,
         '2026-10-16T08:00:00.000Z', 300);
-    same('TODAY: 500 from a fortnight nobody closed is "500 left" to one fold and "nothing carried" to the other',
+    same('THE RULING (the gate open): the same 500 is 500 left on the advance and 500 carried into the account - one answer',
         [leftOf(old.State.schedule, oldId), old.call('advanceCarryInto', old.State.schedule, 'w_khaled', FORTNIGHT.from)],
-        [500, 0]);
-    check('TODAY: and the existing closure refuses to deduct it from a later wage',
-        later.canClose === false && later.reasons.includes('deduction'), JSON.stringify(later.reasons));
+        [500, 500]);
+    same('THE RULING: and the existing closure deducts 300 of it from a later wage, leaving 200 on the advance',
+        [later.canClose, later.reasons, later.rows.map(row => [row.advanceId === oldId, row.amount, row.balanceAfter])],
+        [true, [], [[true, 300, 200]]]);
 
     // A PARTIAL DEDUCTION SHUTS THE FINANCIAL GATE ON A RECORD NOBODY APPROVED THE CARRY ON.
     // Also found on unchanged code. planAdvanceCarry lists every fortnight whose deduction
@@ -633,17 +654,29 @@ const without = (record, fields) => {
     check('and there is no field anywhere in his account holding the difference of the two',
         !/\b2200\b/.test(JSON.stringify(after)), JSON.stringify(after).slice(0, 200));
 
-    // An advance whose own period was never closed (Phase 0's two folds): refused, with both figures.
+    // An advance whose own period was never closed (Phase 0's two folds).
+    //
+    // MOVED AT v175, deliberately - the owner's ruling of 2026-11-10 (see Phase 0). These
+    // two checks read `[false, ['deduction'], 500, 0]` and one disagreement of 500 against
+    // 0: the planner refused, with both figures on the review. Under the ruling the walk
+    // carries the 500, so the person's 300 is allowed, the two figures on the review are
+    // one, and the migration report has no disagreement left to name.
     const old = world({ days: [['w_khaled', '2026-09-20'], ['w_khaled', '2026-09-21']],
         advances: [['w_khaled', '2026-09-20', 500]] });
     const O0 = opened(old);
     const oldId = advancesOf(O0, 'w_khaled')[0];
-    const stuck = F('planClosure', O0, 'w_khaled', FORTNIGHT, { allocations: { [oldId]: 300 } }, stamp('2026-10-16'));
-    same('an advance from a fortnight nobody closed: 500 left on it, nothing the account walk will let come off',
-        [stuck.ok, stuck.reasons, stuck.review.advances[0].left, stuck.review.walkRoom], [false, ['deduction'], 500, 0]);
-    same('the migration report names the disagreement instead of settling it',
-        F('planPayMigration', O0, '2026-10-16').debtDisagreements,
-        [{ workerId: 'w_khaled', name: 'חאלד', byAdvance: 500, byAccountWalk: 0 }]);
+    const unstuck = F('planClosure', O0, 'w_khaled', FORTNIGHT, { allocations: { [oldId]: 300 } }, stamp('2026-10-16'));
+    same('an advance from a fortnight nobody closed: 500 left on it, and the account walk lets the same 500 come off',
+        [unstuck.ok, unstuck.reasons, unstuck.review.advances[0].left, unstuck.review.walkRoom], [true, [], 500, 500]);
+    const O1 = applied(O0, unstuck, 'the later closure of an old advance');
+    same('300 chosen off it at the later closure: 200 left on the advance, 200 carried into the next account, net 4,100',
+        [leftOf(O1, oldId), F('advanceCarryInto', O1, 'w_khaled', '2026-10-16'),
+            F('paybookFold', O1).statements.ps_w_khaled_20261002.statement.netDue], [200, 200, 4100]);
+    same('the migration report has no disagreement between the two folds left to name',
+        F('planPayMigration', O0, '2026-10-16').debtDisagreements, []);
+    same('and the frozen payslip states the opening balance the ruling gives: 500 in, a net of 4,100, 200 out',
+        (slip => [slip.carriedIn, slip.net, slip.balanceAfter])(O1.ledger.advances.le_period_w_khaled_20261002),
+        [500, 4100, 200]);
 }
 
 // ---------------------------------------------------------------- extra deductions
@@ -1162,17 +1195,27 @@ const without = (record, fields) => {
     expect('an unsettled disagreement on his account', C(disputed, 'w_khaled', { from: '2026-10-16', to: '2026-10-29' },
         { allocations: { [k1]: 0 } }, stamp('2026-10-29')), 'conflict');
 
-    // deduction: see the advances section; produced again here so the list below is complete.
-    // One day at 350 in a fortnight nobody closed, and 500 handed over in it: the walk
-    // counts 350 as taken there and carries 150, so 150 may come off now and 150.01 may not.
+    // deduction: the account walk allowing less than the person chose.
+    //
+    // MOVED AT v175, deliberately - the owner's ruling of 2026-11-10. One day at 350 in a
+    // fortnight nobody closed, and 500 handed over in it: the old walk counted 350 as taken
+    // there and carried 150, so 150 could come off now and 150.01 could not. Under the
+    // ruling nothing was taken there, the walk carries the whole 500 and 150.01 is an
+    // ordinary answer. The code is still in the planner - it is what stands between a
+    // chosen figure and a walk that disagrees with it, whatever the cause - and with the
+    // gate open no input here reaches it; it joins `rejected` in the list below. The old
+    // refusal is asserted where it still happens: on a build with the gate shut.
     const oldWorld = world({ days: [['w_khaled', '2026-09-20']], advances: [['w_khaled', '2026-09-20', 500]] });
     const O0 = opened(oldWorld);
     const oldAdvance = advancesOf(O0, 'w_khaled')[0];
-    expect('the account walk allowing less than was chosen',
-        C(O0, 'w_khaled', FORTNIGHT, { allocations: { [oldAdvance]: 150.01 } }), 'deduction');
-    same('and exactly what the walk carries is allowed',
-        (answer => [answer.ok, answer.review.walkRoom, answer.review.advances[0].left])(
-            C(O0, 'w_khaled', FORTNIGHT, { allocations: { [oldAdvance]: 150 } })), [true, 150, 500]);
+    const shutBuild = makeDevice({ deviceId: 'd_shut_vocab' });
+    const refusedThen = shutBuild.call('planClosure', clone(O0), 'w_khaled', FORTNIGHT, { allocations: { [oldAdvance]: 150.01 } }, st);
+    check('HISTORY (the gate shut): the account walk allows 150 of the 500 and refuses 150.01 with «deduction»',
+        refusedThen.ok === false && refusedThen.reasons.includes('deduction') && refusedThen.review.walkRoom === 150,
+        JSON.stringify([refusedThen.reasons, refusedThen.review && refusedThen.review.walkRoom]));
+    same('THE RULING: 150.01 off the same advance is allowed, and the walk carries all of what is left on it',
+        (answer => [answer.ok, answer.reasons, answer.review.walkRoom, answer.review.advances[0].left])(
+            C(O0, 'w_khaled', FORTNIGHT, { allocations: { [oldAdvance]: 150.01 } })), [true, [], 500, 500]);
 
     // the other planners
     const P = (...args) => F('planPayment', ...args);
@@ -1213,9 +1256,12 @@ const without = (record, fields) => {
     // shipped defaults cannot produce: the first two are behind rules (8) and (3) and are
     // produced below with each rule flipped; the third fires only if this file and
     // js/model/ledger.js disagree about an entry, and no input here can make them.
+    // `deduction` left this list at v175 (the owner's ruling, above): with the gate open
+    // the walk and the per-advance fold are one answer, so it is `rejected`'s sibling - a
+    // refusal for the day the two disagree again, produced by no input in this suite.
     const vocabulary = ['worker', 'stamp', 'gate', 'inactive', 'before-tracking', 'period', 'closed', 'overlap',
         'statement', 'conflict', 'early', 'unpriced', 'overpaid', 'allocation', 'allocation-missing', 'over-advance',
-        'over-wage', 'deduction', 'clock', 'extra', 'paid', 'overpay', 'note', 'unsafe-id',
+        'over-wage', 'clock', 'extra', 'paid', 'overpay', 'note', 'unsafe-id',
         'target', 'payment-id', 'amount', 'date', 'method', 'reason', 'over-target', 'voided', 'delta', 'below-zero',
         'opened', 'state', 'due', 'answered', 'stale'];
     same('every refusal code in the vocabulary was produced above, by name', vocabulary.filter(code => !seen.has(code)), []);

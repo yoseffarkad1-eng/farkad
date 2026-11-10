@@ -1077,9 +1077,23 @@ function planPeriodClosure(schedule, workerId, from, to, at, deduction) {
     // The cut-off itself is not the bug and is not touched: it is what stops a repayment
     // that lands AFTER a closure condemning it, which is a bug this file already fixed
     // once (see outstandingWithout). The writer is the half that was wrong.
+    // AND, UNDER THE ONE-DEBT RULING, NEVER MORE THAN IS LEFT ON IT TODAY. With a debt
+    // that travels until it is deducted, an account can be closed AFTER a later one took
+    // money off the same advance - the later `deducted` entry is dated past this period's
+    // end, so the judged figure does not see it, and the whole advance would be offered a
+    // second time (advanceLiveRoom in js/model/schema.js has the measured case). The
+    // judge accepts the lesser figure: it only ever asks for "no more than was left".
+    //
+    // TWO FIGURES PER ADVANCE, then, and each has its own job. `state.left` is what the
+    // judge will compute and is what the entry's balanceAfter is taken from - a closure
+    // whose carried balance is not `judged - amount` is held aside by every phone. `cap`
+    // is the most this closure may take.
+    const stays = typeof advanceDebtStays === 'function' && advanceDebtStays();
     const leftOf = id => (at
         ? outstandingWithout(schedule, id, null, to, at)
         : advanceOutstanding(schedule, id));
+    const capOf = (id, judged) => (stays
+        ? Math.min(judged.left, advanceOutstanding(schedule, id).left) : judged.left);
     const ids = Object.keys(advances).concat(Object.keys(folded))
         .filter((id, at, all) => all.indexOf(id) === at)
         .filter(id => {
@@ -1088,14 +1102,19 @@ function planPeriodClosure(schedule, workerId, from, to, at, deduction) {
         })
         .map(id => ({ id, state: leftOf(id),
             date: String((folded[id] || advances[id]).date || '') }))
-        .filter(row => row.state.left > 0)
+        .map(row => Object.assign(row, { cap: capOf(row.id, row.state) }))
+        .filter(row => row.state.left > 0 && row.cap > 0)
+        // Under the ruling an advance dated after the period is not this closure's to
+        // touch (the owner, 2026-11-10: not offered). The old walk never reached one -
+        // its balance was spent oldest first before the list got that far.
+        .filter(row => !stays || row.date <= String(to))
         .sort((a, b) => (a.date < b.date ? -1 : (a.date > b.date ? 1 : (a.id < b.id ? -1 : 1))));
 
     let room = walk.deducted;
     const rows = [];
     ids.forEach(row => {
         if (room <= 0) return;
-        const off = agoraRound(Math.min(room, row.state.left));
+        const off = agoraRound(Math.min(room, row.cap));
         if (off <= 0) return;
         room = agoraRound(room - off);
         rows.push({
@@ -1105,6 +1124,12 @@ function planPeriodClosure(schedule, workerId, from, to, at, deduction) {
             alreadyClosed: Boolean(periodClosureFor(schedule, row.id, from))
         });
     });
+
+    // A DEDUCTION THE ADVANCES CANNOT ABSORB IS REFUSED, not written short. Under the
+    // ruling the walk's figure and the per-advance figures are computed to be one; if
+    // they ever are not, a closure whose payslip says 500 came off while its entries
+    // take 300 is two answers frozen for ever.
+    if (stays && room > 0 && reasons.indexOf('deduction') === -1) reasons.push('deduction');
 
     // A CLOCK THAT IS BEHIND SAYS SO, rather than moving money quietly.
     //
