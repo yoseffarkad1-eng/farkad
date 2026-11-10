@@ -34,7 +34,15 @@ const corpus = readdirSync(HERE).filter(name => name.endsWith('.mjs')).sort();
 // "not a suite" from the filename - would let a real suite named without .test. slip out
 // of the gate unnoticed, which is exactly the failure this file exists for.
 const HELPERS = ['network-guard.mjs', 'emulator-host.mjs', 'exports-proof.lib.mjs', 'harness.mjs', 'moneydom.mjs', 'nodes.mjs',
-    'pdf.mjs', 'runner.mjs', 'serve.mjs', 'shell.mjs', 'shot.mjs', 'treecheck.mjs'];
+    'oracle.mjs', 'pdf.mjs', 'runner.mjs', 'serve.mjs', 'shell.mjs', 'shot.mjs', 'treecheck.mjs'];
+
+// Suites that are RED ON PURPOSE and therefore in no gate: each one proves, on fixtures,
+// a case where the app parts from a documented rule, found by tests/oracle.test.mjs and
+// kept out of that suite's comparison by name. A red line everybody expects in `npm test`
+// is a gate nobody reads, so the red lives in a file of its own - and this list is what
+// stops that from being a way to hide a suite: a name here must exist, must be reached by
+// NO script, and must be named by the green suite that leaves its cases out.
+const FINDINGS = ['oracle.findings.mjs'];
 
 // This file. The auditor who wrote it may not edit package.json, so it cannot yet be
 // named by a script; the exemption is ONE file and the check below pins that it is one,
@@ -83,10 +91,23 @@ function suitesOf(name) {
 
     const orphans = corpus
         .filter(name => HELPERS.indexOf(name) === -1 && name !== UNWIRED)
+        .filter(name => FINDINGS.indexOf(name) === -1)
         .filter(name => !release.has(name))
         .sort();
     check('no suite is left out of npm run test:release',
         orphans.length === 0, orphans.join(', '));
+
+    // The findings files: there, in no gate, and owned by a suite that IS in one.
+    const every = new Set();
+    Object.keys(pkg.scripts).forEach(name => suitesOf(name).forEach(file => every.add(file)));
+    const wired = FINDINGS.filter(name => every.has(name));
+    check('a findings file is red on purpose, so no script runs it', wired.length === 0,
+        wired.join(', '));
+    const unowned = FINDINGS.filter(name => corpus.indexOf(name) === -1
+        || !release.has(name.replace('.findings.', '.test.'))
+        || read(name.replace('.findings.', '.test.')).indexOf(`tests/${name}`) === -1);
+    check('and each one exists beside the gated suite that names it', unowned.length === 0,
+        unowned.join(', '));
 
     // The exemption is one file and stays one file.
     same('exactly one suite is exempt, and it is this one',

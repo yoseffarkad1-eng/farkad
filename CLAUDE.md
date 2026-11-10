@@ -301,6 +301,12 @@ written down so it cannot happen twice.
                                the rows alone, every self-opening reason, the v171 sheet's controls and
                                sentences found again one by one, the Tab trap, 56px rows on three phones,
                                doubled text
+    tests/oracle.test.mjs      the money worked out twice: tests/oracle.mjs, a second calculator written from
+                               the documented rules and importing nothing from js/, against the app on 240
+                               seeded records - pay at the stamped rate, both pay cycles, the invoice with
+                               Rima, advances, carry, corrections, closed periods - plus hand-computed
+                               fixtures and eleven in-memory mutants that must each go red; what the two are
+                               KNOWN to disagree on is red in tests/oracle.findings.mjs, which is in no gate
     tests/serve.mjs, serve.py  static servers for the suites (?slow=N on the python one)
     tests/shot.mjs             a screenshot; asserts nothing
     tests/embedded.html        the app inside a sandboxed iframe
