@@ -62,6 +62,9 @@ const ACC_TEXT = Object.freeze({
     notFound: 'לא נמצא עובד.',
     advances: 'מקדמות',
     debt: 'חוב מקדמות',
+    // v180's own word for it (ADVANCE_CREDIT_LABEL, js/ui/reports.js): the figure the debt
+    // beside it is already net of. Decision 67.
+    credit: 'יתרת זכות',
     statusReview: 'לבדיקה',
     statusNone: 'אין חשבון פתוח',
     statusUnknown: 'לא ידוע אם שולם',
@@ -919,7 +922,12 @@ function accRow(row) {
     // TWO BALANCES, IN TWO PLACES, NEVER ADDED. What he is owed and what he owes are two
     // facts about two different envelopes; a net of them is a decision only the person
     // closing the account may make, one advance at a time.
-    if (row.wageDue > 0 || row.debt > 0) {
+    //
+    // AND A THIRD, FOR ALMOST NOBODY (decision 67): his credit on advances. The debt
+    // beside it is already net of it (v180's ruling), so without this line a man who
+    // handed back 500 too much and then took 1,500 reads «חוב מקדמות 1,000» against an
+    // advance of 1,500, with nothing on the page saying where 500 went.
+    if (row.wageDue > 0 || row.debt > 0 || row.credit > 0) {
         const sums = el('div', 'acc-row-sums');
         if (row.wageDue > 0) {
             const due = el('span', 'acc-sum acc-sum-due');
@@ -932,6 +940,12 @@ function accRow(row) {
             debt.appendChild(el('span', null, ACC_TEXT.debt));
             debt.appendChild(el('strong', 'acc-num', accMoney(row.debt)));
             sums.appendChild(debt);
+        }
+        if (row.credit > 0) {
+            const credit = el('span', 'acc-sum acc-sum-credit');
+            credit.appendChild(el('span', null, ACC_TEXT.credit));
+            credit.appendChild(el('strong', 'acc-num', accMoney(row.credit)));
+            sums.appendChild(credit);
         }
         card.appendChild(sums);
     }
@@ -1118,6 +1132,9 @@ function accDrawReview(node) {
     after.appendChild(paidLine);
     after.appendChild(balance);
     after.appendChild(debtLine);
+    // His credit, named (decision 67). A closure does not spend it, so it is one figure.
+    const creditLine = accLine(ACC_TEXT.credit, '', '', 'credit');
+    after.appendChild(creditLine);
     node.appendChild(after);
 
     const carry = el('div', 'acc-carry-slot');
@@ -1331,6 +1348,8 @@ function accDrawReview(node) {
         balance.lastChild.textContent = accMoney(review.balanceAfter);
         debtLine.lastChild.textContent = accMoney(review.debtAfter);
         debtLine.hidden = !(review.debtBefore > 0);
+        creditLine.lastChild.textContent = accMoney(review.creditBefore || 0);
+        creditLine.hidden = !(review.creditBefore > 0);
         return plan;
     }
     ACC.live = paint;

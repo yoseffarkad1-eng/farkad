@@ -882,6 +882,15 @@ const closeIt = phone => phone.State.commitMany(phone.call('closePeriodChanges',
         plan.ok === false && plan.reasons.indexOf('overpaid') !== -1, JSON.stringify(plan.reasons));
     same('and the review it draws shows the debt net of his credit: 1,000 before, 1,000 after nothing came off',
         [plan.review.debtBefore, plan.review.debtAfter], [1000, 1000]);
+    // DECISION 67 (Phase 8): the credit is NAMED on the review, so the page can say where
+    // the difference between «1,500 left on the advance» and «owes 1,000» went.
+    same('and names his credit beside it: none left here - the 500 was used against the 1,500',
+        plan.review.creditBefore, 0);
+    const idle = clone(one);
+    work(idle, FIVE(P2[0]));
+    const idlePlan = OPEN.planClosure(idle, 'w_d', { from: P2[0], to: P2[1] }, {}, stamp);
+    same('the man of 1a with nothing taken since: the review says debt 0 and credit 500 - the figure the accounts row prints as «יתרת זכות»',
+        [idlePlan.review.debtBefore, idlePlan.review.creditBefore, OPEN.accountFor(idle, 'w_d', '2026-09-04').credit], [0, 500, 500]);
     same('the walk proposes nothing while a person has to look, and hands on 1,000',
         (a => [a.deducted, a.review, a.carriedForward, a.creditIn])(OPEN.advanceAccount(soon, 'w_d', ...P2)),
         [0, true, 1000, 500]);

@@ -1318,6 +1318,7 @@ Existing words reused as they are: «מקדמות», «חיפוש עובד», «
 | `notFound` | לא נמצא עובד. | the list |
 | `advances` | מקדמות | the list |
 | `debt` | חוב מקדמות | the list |
+| `credit` | יתרת זכות | the list and the review page (Phase 8, decision 67: v180's own word) |
 | `statusReview` | לבדיקה | the list |
 | `statusNone` | אין חשבון פתוח | the list |
 | `statusUnknown` | לא ידוע אם שולם | the list |

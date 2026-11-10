@@ -1704,7 +1704,13 @@ function planClosure(schedule, worker, period, choices, stamp) {
         wageDueAfter: agoraRound(wageDueBefore + netDue - paid),
         // And, apart, what he still owes: every open advance of his, the later ones too.
         debtBefore,
-        debtAfter: agoraRound(debtBefore - advanceDeducted)
+        debtAfter: agoraRound(debtBefore - advanceDeducted),
+        // HIS CREDIT ON ADVANCES (v180's ruling; decision 67): what he handed back beyond
+        // everything he owes. `debtBefore` above is already net of it, so a page that
+        // showed the debt alone would show a smaller debt with nothing naming why. A
+        // closure never spends it - it comes off the next advance he takes - so there is
+        // one figure, not a before and an after. Zero for almost everybody.
+        creditBefore: account.credit
     };
     const expects = paybookClosureFingerprint(schedule, man, { from, to }, fold, wage);
     const ids = { statementId, artifactId, deductionIds: [], extraIds: [], paymentId: null };

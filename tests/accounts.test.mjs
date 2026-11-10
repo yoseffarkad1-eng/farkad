@@ -49,6 +49,7 @@ const WANT_TEXT = {
     notFound: 'לא נמצא עובד.',
     advances: 'מקדמות',
     debt: 'חוב מקדמות',
+    credit: 'יתרת זכות',
     statusReview: 'לבדיקה',
     statusNone: 'אין חשבון פתוח',
     statusUnknown: 'לא ידוע אם שולם',

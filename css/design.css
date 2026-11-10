@@ -1030,6 +1030,7 @@ button.acc-row { border: 0 !important; text-align: start; align-items: stretch; 
 .acc-sum { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 4px 10px; border-radius: 10px; font-size: 15px; font-weight: 700; }
 .acc-sum-due { background: var(--ok-bg); color: var(--ok); }
 .acc-sum-debt { background: var(--warn-bg); color: var(--warn); }
+.acc-sum-credit { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); }
 .acc-line.acc-sum-due { background: transparent; }
 .acc-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; width: 100%; padding: 6px 10px; background: var(--surface-2) !important; color: var(--ink) !important; border-color: transparent !important; text-align: start; font-weight: 600 !important; }
 .acc-pending > .acc-num { margin-inline-start: auto; font-weight: 800; }

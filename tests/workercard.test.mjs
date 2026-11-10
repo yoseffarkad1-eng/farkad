@@ -706,6 +706,100 @@ const cellOf = (facts, label) => ((facts.pay || []).filter(one => one.label === 
         facts.notes.some(note => note === '500 ₪ יתרת זכות מחשבון קודם'), facts.notes.join(' | '));
 }
 
+// ---------------------------------------------------------------- 2c. beside the pay book
+{
+    suite('with the pay book open, the card and the accounts page say one debt (the test seam)');
+
+    // The card reads openAdvanceBalance and the walk; the accounts page (js/ui/accounts.js)
+    // draws accountFor's `debt` and `credit` - the pay book's own fold. They are two
+    // functions in two files, and the pay book's gate moves the walk under one of them
+    // (the one-debt ruling). Asked here over the same twelve records, with the pay book
+    // open through the seam, so that a man is never 1,000 on his card and 1,500 on the
+    // accounts page.
+    const BOOK = Object.assign({}, OPEN, { paybook: true });
+    const rows = [];
+    const unapproved = [];
+    SEEDS.forEach(seed => {
+        const device = seededPhone(seed, BOOK);
+        const schedule = device.State.schedule;
+        given(`record ${seed}: the pay book and the one-debt ruling are on`,
+            device.call('paybookWritesEnabled', schedule) === true && device.call('advanceDebtStays', schedule) === true);
+        const approvedNow = device.call('carryReportingEnabled', schedule) === true;
+        const read = () => schedule.workers.map(worker => {
+            const facts = device.facts(worker.id);
+            const account = device.call('accountFor', device.State.schedule, worker, TODAY);
+            return { id: `${seed}/${worker.id}`, label: facts.owed.label, owed: num(facts.owed.amount),
+                debt: account.debt, credit: account.credit,
+                cardCredit: facts.credit.map(line => [line.label, num(line.amount)]) };
+        });
+        if (!approvedNow) {
+            // KNOWN, and closed by the activation step (docs/payroll-closure.md, Phase 8):
+            // until the carry is approved on a record the card says what was HANDED OVER,
+            // under «מקדמות רשומות», while the accounts page reads the fold.
+            read().forEach(row => unapproved.push(row));
+            const stampAt = '2026-11-10T09:00:00.000Z';
+            const written = device.call('recordCarryApproval', device.State.schedule,
+                device.call('planCarryMigration', device.State.schedule), stampAt, 'd_owner');
+            given(`record ${seed}: the carry approval is committed`, device.State.commitMany([{ path: written.path, value: written.value }]) === true);
+            given(`record ${seed}: and the record now reads the new way`, device.call('carryReportingEnabled', device.State.schedule) === true);
+        }
+        read().forEach(row => rows.push(row));
+    });
+    given('the corpus has men who owe, men who do not, and a record nobody had approved',
+        rows.some(row => row.debt > 0) && rows.some(row => row.debt === 0) && unapproved.length > 0,
+        `${rows.filter(row => row.debt > 0).length} owing of ${rows.length}; ${unapproved.length} read before approval`);
+    same('ONCE THE CARRY IS APPROVED, every man\'s «נשאר להחזיר» on his card is the accounts page\'s «חוב מקדמות», to the agora',
+        rows.filter(row => row.label !== 'נשאר להחזיר' || row.owed !== row.debt), []);
+    same('and a man the accounts page shows in credit owes nothing on his card',
+        rows.filter(row => row.credit > 0 && row.owed !== 0), []);
+    // Before the approval: a statement of what a person would see, not a guarantee.
+    check('BEFORE the carry is approved the card does not claim «נשאר להחזיר» at all - it says «מקדמות רשומות», what was handed over',
+        unapproved.every(row => row.label === 'מקדמות רשומות'), JSON.stringify(unapproved.slice(0, 3)));
+    console.log(`  (measured: of ${unapproved.length} men read before the approval, ${unapproved.filter(row => row.owed !== row.debt).length} read a different figure on the card than on the accounts page)`);
+
+    // The credit, on the fixture v180 was argued on, with the pay book open.
+    const record = {
+        schemaVersion: 2,
+        workers: [{ id: 'w_d', name: 'דוד', dailyRate: RATE, hourlyRate: 0, active: true }],
+        places: [{ id: 'p_x', name: 'חיפה', active: true }],
+        days: {}, vehicles: [],
+        advances: { a_1: { id: 'a_1', workerId: 'w_d', date: '2026-08-10', amount: 1000, note: '' } },
+        ledger: { advances: {
+            le_mig_a_1: { id: 'le_mig_a_1', advanceId: 'a_1', kind: 'given', workerId: 'w_d',
+                date: '2026-08-10', amount: 1000, note: '', at: '2026-08-10T08:00:00.000Z', by: 'd' },
+            le_back: { id: 'le_back', advanceId: 'a_1', kind: 'repaid', date: '2026-08-12',
+                amount: 1500, note: '', at: '2026-08-12T08:00:00.000Z', by: 'd2' }
+        }, unreadable: {},
+        migrations: { cm_carry: { id: 'cm_carry', kind: 'carry', rows: 0, at: '', by: 'd' } } }
+    };
+    ['2026-08-10', '2026-08-11', '2026-08-24'].forEach(date => {
+        record.days[date] = { plan: {}, actual: { w_d: { entries: [{ placeId: 'p_x' }],
+            rates: { daily: RATE, hourly: 0 } } } };
+    });
+    const credit = withCard(makeDevice({ deviceId: 'd_credit_book', flags: BOOK,
+        storage: { 'scheduleData:v2': JSON.stringify(record) } }));
+    credit.State.load();
+    credit.setToday('2026-08-25');
+    const facts = credit.facts('w_d');
+    const account = credit.call('accountFor', credit.State.schedule, credit.State.schedule.workers[0], '2026-08-25');
+    same('500 handed back beyond the debt: the card says 0 owed and 500 «יתרת זכות»; the accounts page says debt 0, credit 500',
+        [facts.owed, facts.credit.map(line => line.amount), account.debt, account.credit],
+        [{ label: 'נשאר להחזיר', amount: '0 ₪' }, ['500 ₪', '500 ₪'], 0, 500]);
+    // He takes 1,500 in the open fortnight: both say 1,000.
+    const later = JSON.parse(JSON.stringify(record));
+    later.advances.a_2 = { id: 'a_2', workerId: 'w_d', date: '2026-08-24', amount: 1500, note: '' };
+    later.ledger.advances.le_mig_a_2 = { id: 'le_mig_a_2', advanceId: 'a_2', kind: 'given', workerId: 'w_d',
+        date: '2026-08-24', amount: 1500, note: '', at: '2026-08-24T08:00:00.000Z', by: 'd' };
+    const took = withCard(makeDevice({ deviceId: 'd_credit_book2', flags: BOOK,
+        storage: { 'scheduleData:v2': JSON.stringify(later) } }));
+    took.State.load();
+    took.setToday('2026-08-25');
+    const after = took.facts('w_d');
+    const then = took.call('accountFor', took.State.schedule, took.State.schedule.workers[0], '2026-08-25');
+    same('he then takes 1,500: his card says 1,000 left to return and the accounts page says «חוב מקדמות» 1,000 - not 1,500 on either',
+        [after.owed, then.debt, then.credit], [{ label: 'נשאר להחזיר', amount: '1000 ₪' }, 1000, 0]);
+}
+
 // ---------------------------------------------------------------- 3. it writes nothing
 {
     suite('opening the card for every man leaves every byte on the disk where it was');
