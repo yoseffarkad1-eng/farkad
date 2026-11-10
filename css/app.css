@@ -1439,17 +1439,29 @@ a[href]:focus-visible,
    deliberately not an .assign-row: nothing that counts the crew's rows may count it.
    44px tall and 16px in the box, both floors (CLAUDE.md, law 9), written here and not
    left to the phone block. */
-.rima-field {
+/* TWO COUNTS ON THAT LINE (v183): «רימא» and beside it «יוסף גבס», each a label and a
+   box of its own. The LINE is .site-counts now - it carries the rule above it and the
+   padding - and each count is a .rima-field / .yosefgeves-field inside it, so the second
+   count costs a card no height. It wraps only where the two will not fit. */
+.site-counts {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    column-gap: 14px;
     min-height: 44px;
     padding: 0 6px;
     border-top: 1px solid var(--line-soft);
 }
-.site-card-empty .rima-field { border-top: none; }
+.site-card-empty .site-counts { border-top: none; }
+.rima-field, .yosefgeves-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+}
+.yosefgeves-label { font-size: 15px; font-weight: 600; color: var(--ink-2); }
 .rima-label { font-size: 15px; font-weight: 600; color: var(--ink-2); }
-.rima-input {
+.rima-input, .yosefgeves-input {
     width: 64px;
     min-height: 44px;
     font-family: inherit;
@@ -1462,7 +1474,7 @@ a[href]:focus-visible,
     background: var(--surface-2);
     color: var(--ink);
 }
-@media print { .rima-field { display: none !important; } }
+@media print { .rima-field, .yosefgeves-field, .site-counts { display: none !important; } }
 
 .badge {
     font-size: 11px;
@@ -2446,12 +2458,29 @@ a[href]:focus-visible,
    the paper the client is handed (and readReportPrintout leaves it out of the picture). */
 .report-norima { margin-top: 18px; }
 @media print { .report-norima { display: none !important; } }
+/* עובדי יוסף גבס (v183): the list that is in no account, last on the page and apart from
+   everything above it. An ordinary .report-table inside .report-invoice, so it takes the
+   same phone cards and the invoice's paper rules. ON PAPER TOO - the owner, 2026-11-10: "I
+   want it in print too, but as a separate list that does not enter any other list's
+   account" - so it is printed as the Rima table is: its own heading, its own table, its
+   own note, last. The note is NOT .hint, because .hint never reaches paper. */
+.report-yosefgeves { margin-top: 18px; }
+.report-yosefgeves-note {
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    margin: 6px 0 0;
+}
 @media print {
     .report-rima { margin-top: 6mm; }
     .report-rima-title { font-size: 12pt; margin: 0 0 2mm; color: #000; }
     .report-rima-note { font-size: 10pt; color: #000; }
     /* The heading never strands at the foot of a page with its table on the next. */
     .report-rima-title { page-break-after: avoid; break-after: avoid; }
+    .report-yosefgeves { margin-top: 6mm; }
+    .report-yosefgeves-title { font-size: 12pt; margin: 0 0 2mm; color: #000; }
+    .report-yosefgeves-note { font-size: 10pt; color: #000; }
+    .report-yosefgeves-title { page-break-after: avoid; break-after: avoid; }
 }
 
 /* A name in the pay sheet is a way in, so it looks like one - but it stays a table cell

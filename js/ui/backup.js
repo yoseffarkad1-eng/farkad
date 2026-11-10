@@ -1248,6 +1248,14 @@ function recoveryFacts(schedule) {
         } else if (rima !== undefined) {
             put(`rimaUnreadable:${date}`, rima);
         }
+        // And the «עובדי יוסף גבס» counts (v183), for the same reason: a capture that lost
+        // them must not pass for one that holds everything.
+        const geves = (days[date] || {}).yosefGeves;
+        if (geves && typeof geves === 'object' && !Array.isArray(geves)) {
+            Object.keys(geves).forEach(placeId => put(`yosefGeves:${date}:${placeId}`, geves[placeId]));
+        } else if (geves !== undefined) {
+            put(`yosefGevesUnreadable:${date}`, geves);
+        }
     });
 
     (schedule.workers || []).forEach(worker => put(`worker:${worker.id}`, worker));

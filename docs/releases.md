@@ -1,3 +1,261 @@
+## v183 — עובדי יוסף גבס: a second count per site, in no account at all (approved by the owner 2026-11-10 - not yet served)
+
+**Not served yet: the merge and the Pages deployment are recorded here by whoever
+publishes it.** A change to what the record holds ships alone: one commit of shipped files
+on `4ad33cb` (v182), nothing else in it. No gate result is written here: validation is recorded
+against the exact clean commit, and no count is carried over from another commit. It was
+written on v180, then carried onto v181 and onto v182 as each was merged; the gate belongs
+to the commit it was last run on.
+
+**The owner's words** (2026-11-10, Arabic, translated): "Add for me, next to the Rima
+workers, workers who are OUTSIDE ANY ACCOUNT. I want a list of their own that has nothing
+to do with any account, but I want them recorded with me. The list's name is «עובדי יוסף
+גבס», at every project like the Rima workers - but these workers have nothing to do with
+the accounts or with anything anywhere; they have a list of their own without touching any
+other list. I just write their NUMBER and that's it."
+
+**And his two answers, the same day**, to what the first candidate asked him:
+
+- Shown that the list was on the screen and in the workbook but not printed, he said:
+  "I want it in print too, but as a separate list that does not enter any other list's
+  account." So it is on the paper and in the picture now - see below - and still in
+  nobody's arithmetic.
+- He approved publishing, having been told THE ROLLOUT RULE: every phone updated to v183
+  before the first count is typed.
+
+**What it is.** Each site card on the day screen gains a second small number field, on
+the same line as `רימא` and after it, labelled `יוסף גבס`: how many of that list's men
+were on that site that day. A number only, 1-99; 0 or empty clears it. A day may carry
+this count and nothing else. On the reports page, at the END of «לפי אתר» - after the
+invoice, after «בלי עובדי רימא», after «רישום לרימא» - a table titled «עובדי יוסף גבס»:
+its own dates (only the days that had a count), its own columns (only the sites that had
+one), its own total line, and one line under it saying what it is not in. The same table
+is printed on the paper and drawn in the shared picture of that page - LAST, under its own
+heading, with its note, the way Rima's own table is printed - and only when the range in
+scope has a count: with none there is no heading, on the screen, on paper or in the
+picture. In the workbook of the full export, a last sheet named `עובדי יוסף גבס`.
+
+**The path.** `days.<date>.yosefGeves.<placeId>`, one field path per edit (law 4), and a
+clear is a field deletion - `rima`'s shape exactly, on a layer of its own. The key is
+`yosefGeves` because it is ASCII letters only (one Firestore field-path segment, no
+quoting, passes `isSafeSegment`), camelCase like the day's other extra keys (`vehiclesOff`,
+`vehicleRuns`), the LIST'S OWN NAME rather than a description of what the list means (the
+meaning is the owner's to change; the name is his), and shares no substring with `rima`,
+so no search for one layer finds the other.
+
+**What it is in.** The record (journal first, then the schedule, both verified - law 3);
+the queue, the cloud, the daily cloud copy, a backup file, a restore point and the rescue
+file's comparison of captures, because all of those carry the whole day; the day screen's
+field; ⋯ when a count is held (a row titled `<day> · יוסף גבס · <site>`, both sides, both
+buttons, the day's other counts OF THIS LIST under it); the arrows (a Saturday holding only
+this count is landed on); its own table on the reports page; its own last sheet in the
+full workbook, and its own file `farkad-yosef-geves_<from>_<to>.csv` in the CSV fallback.
+
+**What it is NOT in.** This is the whole point of it, and it is measured, not asserted
+(`tests/yosefgeves.test.mjs`, «IN NO ARITHMETIC AT ALL»; `tests/oracle.test.mjs`, 3b):
+
+- **Not in pay.** No pay sheet row, worker-day, rate, hour, advance, repayment, deduction,
+  correction, closure, payslip, carried balance or credit reads it. `js/model/money.js`
+  and `js/model/ledger.js` do not name the layer or any function that reads it - a check
+  reads the two files and fails if either ever does.
+- **Not on the client's invoice** - the difference from Rima. `invoiceReport` adds
+  `rima` to a site's day by name and adds nothing else. A day with only this list's men
+  is NOT a billed day; a site with only this list's men is NOT on the invoice or in its
+  site picker; the grid, the bars, the totals, the `חיוב` sheet and the client's file are
+  cell for cell what they are without the counts.
+- **Not in «בלי עובדי רימא»** and **not in «רישום לרימא»**, on the screen, in the picture,
+  on paper or in their sheets. Neither list reads, writes, clears or holds the other: two
+  counts on one site are two fields, and a held count of one list does not hold the other
+  list's count of that day (the day's-counts-held-together rule is per list).
+- **Not in the names or numbers of sites.** A site the roster has not got is numbered on
+  the invoice («אתר שאינו ברשימה N») by the days and Rima counts that name it;
+  this list is deliberately not read there, so a count cannot renumber anybody's invoice.
+  In its own table such a site is «אתר שאינו ברשימה», unnumbered.
+- **Not in the day's WhatsApp message**, any template, the whole day or one site; **not in
+  the seder to each worker**, the list or any man's message; **not in הסעות** or its
+  summary (which read the day through the seder's own list); **not in the week grid**; **not in «לפי עובד»**; **not copied by copy-a-day**
+  (which has never copied a Rima count either).
+- **Not in any other table on the paper or in the picture.** It is printed - his word -
+  and as a table of its own: the invoice grid, its totals, the Rima table and every note
+  above it are, on a real PDF and in the picture, word for word what they are without the
+  counts (`tests/yosefgeves.browser.mjs` prints the page with the list's section hidden and
+  compares it with the paper of a record that never had a count; and takes the list's group
+  and note out of the picture and compares that).
+- **Not in the one-client workbook** or a chosen-workers export. With one site chosen the
+  FILE is the client's and does not carry the list's sheet; the screen and the paper of
+  that page do carry the list, narrowed to that site. That the file stays so was confirmed
+  with the paper decision.
+- **Not in «בדיקת היום»** (v182): its Rima rule reads `rima` by name, and there is no
+  rule for a missing count of this list. A day holding only this count is not a worked day
+  to it, as a day holding only a Rima count is not.
+
+How it was measured: a fortnight with every kind of day in it - a double at two sites,
+extra hours, an absence, a weekly man and a fortnightly one, an advance, a closed week,
+and Rima counts - is read off every surface (the pay sheet and its rows, each man's days
+and account, the advances and the ledger, the invoice whole and per site, «בלי עובדי
+רימא», the Rima table, every sheet of `reportSheets()` in five scopes, the REAL workbook
+written by the shipped SheetJS in each of those scopes with every cell as the library holds
+it, every WhatsApp message in every template for every site, every man's seder); eight
+counts are typed over it, 140 men in all; everything is read again and compared byte for
+byte. With the count billed like Rima's by a one-line change, eighteen of those checks
+fail. And the second calculator (`tests/oracle.mjs`), which has never heard of the layer,
+is run on 240 generated records that now carry these counts - laid on from a random stream
+of their own, so every record is otherwise the record it was - and agrees with the app on
+every figure; then the counts are stripped off a copy of each record and both calculators
+are asked again over every range: not one figure differs.
+
+**Rules.** `firestore.rules` does not restrict nested field paths, so an ordinary protocol
+write admits the new path, as it admitted `rima`. NO rules change and no rules-first step;
+`tests/cas.emulator.test.mjs` writes the path, beside a Rima count and a worker-day,
+through the production adapter against the real rules, clears it, and reads the field gone.
+
+**THE ROLLOUT RULE: every phone on v183 before the first «עובדי יוסף גבס» count is
+typed.** The phones update separately. Until every one of them shows v183 (⋯ names the
+version), nobody types a count, and:
+
+- no rescue file, backup file, restore point or cloud copy is restored across builds -
+  not an older phone opening what a v183 phone wrote, not a v183 phone opening what an
+  older one wrote;
+- no window of an older build stays open beside a v183 window on the same phone.
+
+v166's third line - invoices only from an updated phone - is NOT needed for this count:
+nothing an older phone prints is wrong for lacking it, because it is in nothing an older
+phone prints. Every item under WHAT THE RULE IS FOR needs a phone or a window on an older
+build while counts exist, so the rule closes all of them.
+
+WHAT THE RULE IS FOR - the phones that have not updated. "Older" here is EVERY build before
+v183, the ones that know Rima included: v180 and v179 on their real bytes out of Git, and
+v165 from before Rima, each run beside this build on one cloud in
+`tests/yosefgeves.test.mjs`. All three do the same things:
+
+- **It adopts a document carrying the layer and says synced.** It is not held and not
+  blocked. It rebuilds each day from the layers it knows (`normaliseSchedule`), so it does
+  NOT keep `yosefGeves` in its own copy and does not show it. (`normaliseSchedule` in
+  v179 and v180 names `plan`, `actual`, `vehicleRuns`, `vehiclesOff` and `rima`, and keeps
+  nothing else: an unknown day layer is DROPPED, not preserved. Measured on both.)
+- **Its ordinary edits do not take the counts off the cloud** - work recorded on a day
+  that holds a count, on a day that holds only a count, and the deletion of an unused
+  worker with his empty placeholder on such a day: one field path each, and the cloud
+  still holds every count afterwards. A v183 phone adopting those writes still has them.
+- **Handed a v183 record to restore, it refuses it out loud**: «ליום … יש שכבה שאינה
+  מוכרת: yosefGeves.» - not restored with the counts silently stripped.
+- **A whole-document RESTORE run on it erases every count for every phone.** Its own
+  restore point is its own copy, which has none; restored, the cloud lost both counts and
+  so did the v183 phone that never restored anything, and the older phone said only
+  «שוחזר.». The worker-days all survived: only the layer it never kept is gone.
+- **The same erasure from a v183 phone**: a restore point (or daily cloud copy, undo entry
+  or backup file) WRITTEN by an older phone carries no counts, and v183 restores it without
+  a word - a missing layer is not a problem to its restore gate - so every count on every
+  date is gone from the cloud, and the person is told only «שוחזר.». The way back is the
+  restoring phone's own state from before the restore, which is on its undo stack with the
+  counts in it (measured).
+- **A window of an older build opened on a phone where v183 has typed a count is held out
+  loud**: «הרישום השמור במכשיר לא נקרא: ליום … יש שכבה שאינה מוכרת: yosefGeves.», and a
+  count still queued is «קבוצת עריכות בתור השליחה לא נקראה». It writes nothing; the record
+  and every queued edit on the disk are byte for byte what v183 wrote; opened again on
+  v183 the phone has everything and is not held.
+- **A phone that wrote last on an older build and then updates** shows the cloud's counts
+  at its first snapshot, before anybody writes again, and its daily cloud copy carries
+  them: the own-echo rule compares this layer's counts too.
+
+Not measured for this layer, and assumed to be as v166 documents them for `rima` because
+the code is the same code: the RESCUE-file exception (a phone that still carries the v1
+`scheduleData` bytes offers the v1 reading, and confirming it replaces the record on every
+phone); and an older window that adopts a snapshot AFTER a count was collected, writing the
+shared disk without it until the v183 window's next snapshot.
+
+**The Hebrew.** The list's name is the OWNER'S, verbatim. Every other string is PROPOSED:
+its Rima neighbour's wording with the name changed, sitting beside it in the source, and
+pinned word for word in `tests/yosefgeves.test.mjs` (and the screen's in
+`tests/yosefgeves.browser.mjs`). No existing string changed.
+
+| Where | The string | Its Rima neighbour |
+| --- | --- | --- |
+| the table's title; the sheet's name | `עובדי יוסף גבס` (the owner's) | `רישום לרימא`; `רימא` |
+| the box on a site card; the word in a held row's title | `יוסף גבס` | `רימא` |
+| the box's name for a screen reader | `יוסף גבס ב<site>` | `רימא ב<site>` |
+| the total line | `סה״כ עובדי יוסף גבס` | `סה״כ עובדי רימא` |
+| the line under the table, and under the sheet | `עובדי יוסף גבס בלבד. אינם נכללים בשכר ואינם נכללים בחיוב.` | `עובדי רימא בלבד. אינם נכללים בשכר. בחיוב שלמעלה כל אחד מהם נספר כיום עובד־אתר אחד.` |
+| a count refused | `אפשר לרשום ליוסף גבס רק מספר שלם בין 0 ל-99.` | `אפשר לרשום לרימא רק מספר שלם בין 0 ל-99.` |
+| a stored record that will not read (four) | `ליום <date> יש רישום יוסף גבס שאינו תקין.` · `ביום <date> יש רישום יוסף גבס תחת מזהה שאינו תקין.` · `ביום <date> יש מספר עובדי יוסף גבס שאינו תקין באתר <id>.` · `ביום <date> יש רישום יוסף גבס באתר <id> שאינו ברשימה.` | the same four with `רימא` |
+| the refusal on the wire (never shown) | `רישום יוסף גבס אינו תקין.` | `רישום רימא אינו תקין.` |
+
+**Pinned expectations moved, deliberately** (three in other suites, each with its reason
+beside it; and, when the owner asked for the list in print, five of this build's own first
+candidate, listed after them):
+
+- `tests/rima.test.mjs` - the field-deletion rule's layers, read off the adapter, the sync
+  layer and the fake cloud, were `actual, plan, rima` and are `actual, plan, rima,
+  yosefGeves`: a cleared count of the second list is a deleted field too.
+- `tests/declutter.browser.mjs` - «every site card keeps its רימא box, as v166 drew it»
+  asked that the card's LAST child be `.rima-field`. The last child is now the line of
+  counts (`.site-counts`) and the רימא box is the first thing on it. Still one box of hers
+  on every card, at its foot; the line is as tall as hers alone was (44px, 45 with the
+  rule above it), so no card grew and no name left any screen.
+- `tests/harness.mjs` - the fake cloud deletes a cleared `yosefGeves` field, as the
+  production adapter does (the check above holds the three copies of that rule together).
+
+Nothing else moved: `tests/rima.browser.mjs`, `tests/scroll.browser.mjs`,
+`tests/design.browser.mjs`, `tests/print.test.mjs` and `tests/mobile.test.mjs` pass as they
+were.
+
+And in `tests/yosefgeves.browser.mjs`, what the first candidate pinned as "never on paper,
+never in the picture", moved on his word:
+
+- the picture's groups were `['', רישום לרימא]` and are `['', רישום לרימא, עובדי יוסף גבס]`,
+  the list's group carrying its own header, rows and total line and nothing of the others';
+- "no title, total or note of the list is in the picture" is now "its note is the last line
+  of the picture";
+- the print stylesheet's `display` for the list was `none` and is now shown, with its note
+  («בלי עובדי רימא» is still `none`);
+- "a real printout carries not one word of the list, nor the sites only the list was on" is
+  now "a real printout carries its heading, its total line with its numbers, its note and
+  those sites - after the Rima total line and the Rima note, in that order";
+- a range holding only the list's counts: the picture was no group and the sentence «אין
+  רישומים בטווח הזה.», and is now the list's one group with its note (the picture draws that
+  sentence only when it has no table; the screen and the paper still say it above the list).
+
+`js/ui/printout.js` no longer leaves the list out by name, and `css/app.css` no longer hides
+it in print: it takes the Rima table's paper rules (12pt heading kept with its table, 10pt
+note).
+
+**What it does NOT cover.**
+
+- **The paper was read as a PDF out of Chromium**, never off a phone's print sheet, and the
+  picture as the object the drawing code is handed, not as pixels.
+- **Never on a real phone.** Chromium with touch emulation at 320, 375, 390 and 440 wide,
+  both schemes, and 320 with the text doubled (where the line of counts wraps to two rather
+  than run off the side - a card is then one box taller). Not an iPhone, not its keyboard.
+- **Everything v166 lists under WHAT STAYS OPEN is open for this count too**, by the same
+  code: half-typed digits dropped by a redraw; the same men recorded at two sites by two
+  phones both kept; a count held against an empty cloud when nobody cleared it; an
+  unrelated count of the same list typed the same day held with a held one; a row decided
+  before the other phone's snapshot arrived; ↶ after a count decided in ⋯.
+- **A malformed count in the cloud** (only a hand edit or a future build could write one)
+  is refused at the door Rima's is, and the person is shown the EXISTING sentence, which
+  calls the record financial («…בגלל רישום כספי שאינו תקין…»). This one is not. A sentence
+  of its own is the owner's to word and is not in this build.
+- **A range holding only this list's counts** shows the invoice's «אין רישומים בטווח הזה.»
+  and then the list under it, on the screen and on paper. True of the invoice; it reads
+  oddly above a table of records. The picture of that page is the list alone.
+- **Two sites off the roster with a count each** are two columns both headed «אתר שאינו
+  ברשימה». Numbering them would have to share the invoice's numbering or contradict it.
+- `firestore.rules` does not type-check `days.*.yosefGeves.*`, as it does not `rima`.
+- The restore gate still restores a copy that lacks the layer without a word (inherited
+  from v166; the rollout rule is what stands in front of it).
+- No reminder, and no rule in «בדיקת היום», for a count nobody typed.
+
+**What is still the owner's to say.**
+
+1. **On paper and in the picture: ANSWERED** (2026-11-10) - printed, as a separate list.
+   It is printed on the same page as the invoice, after everything else on it. A page of
+   its own, if he wants the client's paper without it, is one page-break rule.
+2. **The one-client file** stays without the list's sheet.
+3. **The words.** The label on the box («יוסף גבס»), the total line, the note and the
+   refusal are proposed. The note is the one that says the thing he asked for.
+4. **The rollout.** Every phone on v183 before the first count. v182, a candidate, is
+   ahead of this one in the queue. Which builds are published, in what order, is his.
+
 ## v182 — «בדיקת היום», and the vehicles' report of a period (candidate, not served)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
