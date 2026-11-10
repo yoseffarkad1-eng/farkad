@@ -716,7 +716,7 @@ button.acc-row { border: 0 !important; text-align: start; align-items: stretch; 
 .acc-pending > .acc-num { margin-inline-start: auto; font-weight: 800; }
 .acc-pending-label { color: var(--warn); font-weight: 800; }
 .acc-row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.acc-row-actions > button { flex: 1 1 auto; padding: 6px 12px; }
+.acc-row-actions > button { flex: 1 1 auto; padding: 6px 12px; display: inline-flex; align-items: center; justify-content: center; }
 .acc-row-actions > .acc-close { flex: 2 1 160px; }
 
 /* The review page. */

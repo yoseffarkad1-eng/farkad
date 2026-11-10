@@ -757,7 +757,9 @@ function accRow(row) {
     head.appendChild(accChip(row.status));
     card.appendChild(head);
 
-    if (!quiet) {
+    // THE ONE BIG NUMBER is his open period's wage, and only while there is one: a period
+    // that is closed, or has no work in it yet, is not printed as a large zero.
+    if (!quiet && (row.running === null || (row.current.hasWork && !row.current.closed))) {
         const main = el('div', 'acc-row-main');
         main.appendChild(el('strong', 'acc-num acc-row-wage',
             row.running === null ? ACC_TEXT.unpriced : accMoney(row.running)));

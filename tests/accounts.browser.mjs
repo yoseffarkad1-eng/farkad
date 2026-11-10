@@ -346,8 +346,8 @@ await a.page.waitForTimeout(200);
     check('a calm line says so', /החשבון נסגר ונרשם\./.test(await txt(a.page, `${V} .acc-banner`)));
     same('his row: «שולם חלקית», «יתרת שכר לתשלום» 1,000 and the advance debt 500 - two figures, never one',
         [await txt(a.page, `${row('w_khaled')} .acc-chip`), await all(a.page, `${row('w_khaled')} .acc-sum-due`),
-            await all(a.page, `${row('w_khaled')} .acc-sum-debt`), await txt(a.page, `${row('w_khaled')} .acc-row-wage`)],
-        [T.partial, [`${T.wageDue}1000 ₪`], [`${T.debt}500 ₪`], '0 ₪']);
+            await all(a.page, `${row('w_khaled')} .acc-sum-debt`), await a.page.locator(`${row('w_khaled')} .acc-row-wage`).count()],
+        [T.partial, [`${T.wageDue}1000 ₪`], [`${T.debt}500 ₪`], 0]);
     check('no figure anywhere on his row is their difference', !/(^|\D)500 ₪.*1000 ₪.*(^|\D)(-500|1500) ₪/.test(await txt(a.page, row('w_khaled')))
         && (await all(a.page, `${row('w_khaled')} .acc-num`)).every(text => !['1500 ₪', '-500 ₪'].includes(text)));
     same('each advance is reduced once on this phone\'s record', await a.page.evaluate(ids =>
@@ -772,6 +772,57 @@ await b.context.close();
     await doubled(e.page, 'payment 375 dark');
     same('the small phone: no page error, nothing off this machine', [e.errors, e.away], [[], []]);
     await e.context.close();
+}
+
+// =====================================================================================
+// THE FLOORS, on the other three screens of the matrix: 440 light, 375 dark, 375 light
+// =====================================================================================
+{
+    const net4 = makeBrowserCloud();
+    const first = await openPhone(browser, server.url, { cloud: net4, flags: OPEN, scheme: 'light' });
+    await seed(first.page);
+    given('tracking is opened', (await transact(first.page, 'planOpening', ['2026-10-02'], '2026-10-09')).ok);
+    given('one account is closed and owed', (await transact(first.page, 'planClosure', ['w_nasser', FORTNIGHT, { allocations: {} }])).ok);
+    const phones = [[first, '440 light']];
+    for (const [width, height, scheme] of [[375, 667, 'dark'], [375, 667, 'light']]) {
+        const next = await openPhone(browser, server.url, { cloud: net4, flags: OPEN, width, height, scheme });
+        await next.page.waitForFunction(() => Boolean((State.schedule.pay || {}).ps_w_nasser_20261002), null, { timeout: 15000 });
+        phones.push([next, `${width} ${scheme}`]);
+    }
+    for (const [phone, label] of phones) {
+        suite(`the floors at ${label}: every screen`);
+        const page = phone.page;
+        await showAccounts(page);
+        await geometry(page, `${label} list`, 1);
+        await tap(page, `${row('w_khaled')} .acc-close`);
+        await tapText(page, '+ ניכוי נוסף');
+        await tap(page, `${V} .acc-seg-btn[data-value="partial"]`);
+        await geometry(page, `${label} review, everything open`, 1);
+        await doubled(page, `${label} review`);
+        await tapText(page, 'חזרה');
+        await tap(page, `${row('w_nasser')} .acc-pay`);
+        await geometry(page, `${label} payment`, 1);
+        await tapText(page, 'חזרה');
+        await tapText(page, T.groupAll);
+        await geometry(page, `${label} group`, 1);
+        await doubled(page, `${label} group`);
+        await page.locator(`${V} .acc-group-row[data-worker="w_khaled"] .acc-check`).click();
+        await page.locator(`${V} .acc-group-row[data-worker="w_salim"] .acc-check`).click();
+        await tapText(page, 'הכן סגירה לנבחרים');
+        await geometry(page, `${label} summary`, 1);
+        await doubled(page, `${label} summary`);
+        await page.evaluate(() => accGo('history', { group: null }));
+        await geometry(page, `${label} history`, 0);
+        await doubled(page, `${label} history`);
+        await tap(page, `${V} .acc-history-row`);
+        await geometry(page, `${label} statement`, 1);
+        await doubled(page, `${label} statement`);
+        await tap(page, `${V} .acc-adjust`);
+        await geometry(page, `${label} correction`, 1);
+        same(`${label}: no page error, nothing off this machine`, [phone.errors, phone.away], [[], []]);
+    }
+    same('all of that looking wrote nothing more', writes(net4, 'transact').length, 2);
+    for (const [phone] of phones) await phone.context.close();
 }
 
 // =====================================================================================
