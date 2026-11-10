@@ -348,6 +348,66 @@ function payKeptOnRestoreNotice() {
         : '';
 }
 
+// WHAT A FILE CARRIES OF THE CLOSURES THAT HAVE LEFT THE SERVER'S DOCUMENT (Phase 5),
+// said in the file and on the screen - and only on a phone whose record has such a
+// closure, so that with none every file and every sentence is exactly what it was.
+//
+// The honest answer has two halves and the file says both. CARRIED: every entry of every
+// closure, archived or not - this phone's record keeps them all (js/sync/closed.js), and
+// the file is this phone's record. NOT CARRIED: the server's closed documents themselves.
+// A restore neither creates nor changes nor deletes one, so a file restored into the
+// project it came from loses nothing, and a file restored into a NEW, EMPTY project
+// cannot put the pay book on that server at all - the rules refuse a pay entry that
+// arrives without its closed document. That second half is the one somebody would
+// otherwise learn on the worst day there is to learn it.
+function payArchiveCarried(schedule) {
+    if (typeof paybookStoredIndex !== 'function' || typeof paybookRowPaths !== 'function') return null;
+    let index;
+    try { index = paybookStoredIndex(schedule); } catch (error) { return null; }
+    const ids = Object.keys(index.rows);
+    if (ids.length === 0 && index.unreadable.length === 0) return null;
+    let entries = 0;
+    let absent = 0;
+    ids.forEach(id => paybookRowPaths(id, index.rows[id]).forEach(path => {
+        if (paybookReadAt(schedule, path) === undefined) absent += 1;
+        else entries += 1;
+    }));
+    return {
+        closuresArchivedOnServer: ids.length,
+        entriesOfThoseCarriedInThisFile: entries,
+        entriesOfThoseMissingFromThisFile: absent,
+        indexRowsNotReadable: index.unreadable.length,
+        closedDocumentsCarried: false,
+        note: 'This file carries every entry of every closure this phone holds, including the '
+            + 'closures whose entries have left the server\'s live document (payIndex). It does NOT '
+            + 'carry the server\'s closed documents themselves: a restore never creates, changes or '
+            + 'deletes one. Restored into the project it came from, nothing is lost. Restored into a '
+            + 'NEW, EMPTY project, the days and the roster go to the server and the pay book does '
+            + 'not - the server refuses a pay entry without its closed document - so it would '
+            + 'remain on the restoring phone only.'
+    };
+}
+
+// PROPOSED WORDING (iron law 6): the sentence added to the backup's and the rescue file's
+// confirmation on such a phone.
+const PAY_ARCHIVE_FILE_NOTICE = ' הקובץ כולל את כל סגירות החשבון והתשלומים שבמכשיר הזה, גם אלה '
+    + 'שכבר הועברו לארכיון בשרת. מסמכי הארכיון עצמם נשארים בשרת ואינם בקובץ: שחזור לאותו '
+    + 'חשבון לא מוחק דבר, אבל שחזור לחשבון חדש וריק לא יחזיר את סגירות החשבון לשרת.';
+
+function payArchiveFileNotice() {
+    const carried = (typeof State !== 'undefined' && State.schedule) ? payArchiveCarried(State.schedule) : null;
+    return carried ? PAY_ARCHIVE_FILE_NOTICE : '';
+}
+
+// The backup file: this phone's record, as it always was - and, on a phone with an
+// archived closure, the statement above beside it under a name normaliseSchedule does
+// not read, so that an import takes the record and leaves the note.
+function backupFileText(schedule) {
+    const carried = payArchiveCarried(schedule);
+    if (!carried) return JSON.stringify(schedule, null, 1);
+    return JSON.stringify(Object.assign({}, schedule, { aboutClosedAccounts: carried }), null, 1);
+}
+
 // The state a restore replaced, kept so the restore itself can be undone.
 //
 // There used to be one slot, which meant the second restore overwrote the way back from
@@ -824,6 +884,10 @@ function exportRecoveryData() {
         held: heldRecordsForExport(),
         records
     };
+    // What this file carries of the closures that have left the server's document, in
+    // the file itself (Phase 5) - present only when there is such a closure.
+    const carried = payArchiveCarried(State.schedule);
+    if (carried) payload.aboutClosedAccounts = carried;
 
     const name = `farkad-recovery-${todayStr()}.json`;
     const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
@@ -872,14 +936,17 @@ function exportRecoveryData() {
             title: !payload.stable
                 ? 'הקובץ נמסר, אבל נלקח בזמן שמשהו השתנה'
                 : (recorded ? 'הקובץ נמסר לדפדפן' : 'הקובץ נמסר, אבל לא נרשם במכשיר'),
-            message: recorded
+            message: (recorded
                 ? '\u2066' + name + '\u2069 - בדוק בהורדות או ב"קבצים" שהקובץ באמת נשמר, והעתק אותו למקום נוסף. ' +
                     'האפליקציה לא יכולה לדעת אם השמירה הצליחה. ' +
                     'הקובץ כולל את הרשומות הפגומות ואת המצב החי — שום דבר לא נמחק מהמכשיר.'
                 : '\u2066' + name + '\u2069 - בדוק בהורדות או ב"קבצים" שהקובץ באמת נשמר. ' +
                     'לא הצלחנו לרשום במכשיר שהקובץ יצא ממנו, ולכן מחיקה לצמיתות תישאר חסומה ' +
                     'עד שיהיה מקום פנוי - הארכיון עובד כרגיל. ' +
-                    'הקובץ כולל את הרשומות הפגומות ואת המצב החי — שום דבר לא נמחק מהמכשיר.'
+                    'הקובץ כולל את הרשומות הפגומות ואת המצב החי — שום דבר לא נמחק מהמכשיר.')
+                // And, only on a phone with a closure archived on the server, what the
+                // file does and does not carry of those (payArchiveCarried).
+                + payArchiveFileNotice()
         });
     }
 }
@@ -908,7 +975,7 @@ function exportBackup() {
     }
 
     const name = `farkad-${todayStr()}.json`;
-    const blob = new Blob([JSON.stringify(State.schedule, null, 1)], { type: 'application/json' });
+    const blob = new Blob([backupFileText(State.schedule)], { type: 'application/json' });
 
     // The same door, and its answer read for the same reason (handOverBlob,
     // js/ui/share.js). The stamp below is why this one mattered most: a refused press
@@ -976,7 +1043,7 @@ function tellBackupHandedOver(name) {
         message: 'שם הקובץ: \u2066' + name + '\u2069. ' +
             'הדפדפן קיבל את הקובץ — זה עדיין לא אומר שהוא ביישום "קבצים". ' +
             'פתח את "קבצים" וודא שהוא מופיע. ' +
-            'הייצוא עובד גם בלי חיבור — הקובץ נוצר במכשיר.',
+            'הייצוא עובד גם בלי חיבור — הקובץ נוצר במכשיר.' + payArchiveFileNotice(),
         ok: 'הבנתי',
         cancel: 'שמירה חוזרת'
     }).then(() => {
@@ -1229,6 +1296,13 @@ function recoveryFacts(schedule) {
     // everything" the others held, and the rescue could choose the capture in which
     // nobody had been paid. A container that is not a record is one fact of its own,
     // as an unreadable Rima layer is.
+    // And each row of the index of what has left the server's document (Phase 5): a
+    // capture that had lost a row would otherwise "contain everything" the others held,
+    // and the row is the one thing that says those entries have a closed copy.
+    const indexRows = (schedule.payIndex && typeof schedule.payIndex === 'object'
+        && schedule.payIndex.rows && typeof schedule.payIndex.rows === 'object') ? schedule.payIndex.rows : {};
+    Object.keys(indexRows).forEach(id => put(`payIndex:${id}`, indexRows[id]));
+
     ['pay', 'payConflicted'].forEach(family => {
         const held = schedule[family];
         if (held && typeof held === 'object' && !Array.isArray(held)) {

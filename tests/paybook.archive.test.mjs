@@ -600,11 +600,64 @@ const KHALED_PATHS = ['ledger.advances.le_period_w_khaled_20261002',
 
 // ------------------------------------------------------------------------------------
 {
-    suite('R10: the daily cloud copy carries the rows and not the entries');
+    suite('R10: the files - the backup, the rescue file, the daily cloud copy - say what they carry, and carry it');
 
     const { cloud, a, b } = await closedWorld({ tag: '10' });
+    // Before anything has moved: every file and every sentence is what it always was.
+    a.call('exportBackup');
+    same('with nothing archived the backup file is this phone\'s record and nothing else, byte for byte',
+        a.downloads[a.downloads.length - 1].text === JSON.stringify(a.State.schedule, null, 1), true);
+    same('and no sentence about an archive is said', [a.call('payArchiveFileNotice'), a.call('payArchiveCarried', a.State.schedule)], ['', null]);
     given('moved', (await a.Sync.archiveClosed({ today: TODAY })).ok === true);
     await settled([a, b]);
+
+    const NOTICE = ' הקובץ כולל את כל סגירות החשבון והתשלומים שבמכשיר הזה, גם אלה שכבר הועברו לארכיון בשרת. '
+        + 'מסמכי הארכיון עצמם נשארים בשרת ואינם בקובץ: שחזור לאותו חשבון לא מוחק דבר, '
+        + 'אבל שחזור לחשבון חדש וריק לא יחזיר את סגירות החשבון לשרת.';
+    a.said.length = 0;
+    a.call('exportBackup');
+    const file = JSON.parse(a.downloads[a.downloads.length - 1].text);
+    const pathsOut = rowsOf(a.State.schedule).reduce((sum, id) => sum + a.call('paybookRowPaths', id, a.State.schedule.payIndex.rows[id]).length, 0);
+    same('THE BACKUP FILE carries every entry of every closure - the archived ones included - and the rows',
+        [canonical(file.pay) === canonical(a.State.schedule.pay), canonical(file.ledger) === canonical(a.State.schedule.ledger),
+            rowsOf(file), KHALED_PATHS.every(path => at(file, path) !== undefined)], [true, true, [AHMAD, KHALED, SALIM].sort(), true]);
+    same('and SAYS, in the file, what it carries and what it does not',
+        [file.aboutClosedAccounts.closuresArchivedOnServer, file.aboutClosedAccounts.entriesOfThoseCarriedInThisFile,
+            file.aboutClosedAccounts.entriesOfThoseMissingFromThisFile, file.aboutClosedAccounts.closedDocumentsCarried,
+            /does NOT\s+carry the server's closed documents/.test(file.aboutClosedAccounts.note.replace(/\s+/g, ' ')),
+            /NEW, EMPTY project/.test(file.aboutClosedAccounts.note)], [3, pathsOut, 0, false, true, true]);
+    same('the same is said on the screen, in these words', [a.call('payArchiveFileNotice'), a.said.some(line => line.indexOf(NOTICE.trim()) !== -1)], [NOTICE, true]);
+    const read = a.call('readBackupFile', clone(file));
+    same('read back, the file is the record - the note is not taken for data',
+        [canonical(read.schedule.pay) === canonical(a.State.schedule.pay), canonical(read.schedule.payIndex) === canonical(a.State.schedule.payIndex),
+            'aboutClosedAccounts' in read.schedule], [true, true, false]);
+    a.said.length = 0;
+    a.call('exportRecoveryData');
+    const rescue = JSON.parse(a.downloads[a.downloads.length - 1].text);
+    same('THE RESCUE FILE says the same in the file, and on the screen',
+        [rescue.aboutClosedAccounts.closuresArchivedOnServer, rescue.aboutClosedAccounts.closedDocumentsCarried,
+            a.said.some(line => line.indexOf(NOTICE.trim()) !== -1)], [3, false, true]);
+    same('its copy of the record holds every entry and every row',
+        (raw => [canonical(raw.pay) === canonical(a.State.schedule.pay), rowsOf(raw)])(JSON.parse(rescue.records[SCHEDULE])), [true, [AHMAD, KHALED, SALIM].sort()]);
+    same('and its comparison of two captures knows each row as a fact of its own',
+        Object.keys(a.call('recoveryFacts', a.State.schedule)).filter(key => key.indexOf('payIndex:') === 0).sort(),
+        [AHMAD, KHALED, SALIM].sort().map(id => 'payIndex:' + id));
+
+    // What the note warns of, measured: the same record offered to a project that does not exist yet.
+    {
+        const empty = makeCloud({ payRules: true });
+        const lone = payDevice({ storage: a.dump(), deviceId: 'd_lone10', flags: { paybookQueue: false } });
+        lone.Sync.pushDelayMs = 5;
+        lone.State.load();
+        lone.Sync.connect(empty.adapter);
+        await settle(40);
+        given('a day is recorded on it', lone.State.commit(lone.call('assignPlace', lone.State.schedule, '2026-10-17', 'w_salim', 'actual', 'p_a', undefined, 0)) === true);
+        await settle(400);
+        same('A NEW, EMPTY PROJECT does not take the pay book: nothing is created there, and the phone does not say synced',
+            [empty.doc, lone.Sync.status === 'synced'], [null, false]);
+        same('and the phone still holds everything', [canonical(lone.State.schedule.pay) === canonical(a.State.schedule.pay), rowsOf(lone.State.schedule).length], [true, 3]);
+    }
+
     cloud.history.clear();
     a.Sync._archivedOn = null;                 // the day's copy is written once; ask for it again
     a.Sync.archiveDaily(a.State.schedule);

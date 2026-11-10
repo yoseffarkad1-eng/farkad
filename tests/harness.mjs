@@ -921,6 +921,14 @@ export function makeCloud(options = {}) {
                 }
                 const said = protocolProblem(data, true);
                 if (said) throw said;
+                // payGuardOnCreate / indexGuardOnCreate: a project may not begin with a
+                // pay book (no closed document can be created beside it here) or an index.
+                if (cloud.payRules && (Object.keys(data.pay || {}).length > 0
+                    || Object.keys(((data.payIndex || {}).rows) || {}).length > 0)) {
+                    const denied = new Error('a project may not begin with a pay book or an index');
+                    denied.code = 'permission-denied';
+                    throw denied;
+                }
                 cloud.doc = JSON.parse(JSON.stringify(data));
                 landReceipt(data);
                 cloud.writes.push({ kind: 'create', data });
