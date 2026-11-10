@@ -402,8 +402,8 @@ const plain = value => JSON.parse(JSON.stringify(value));
     check('the shipped flag is false', /\n\s*paybook: false,/.test(shipped) && !/paybook: true/.test(shipped));
 
     // THE FIVE HOOKS (four at Phase 4, one more at Phase 5), and nothing else, are what js/ui/reports.js gained. Taken out, the
-    // file is byte for byte main's at v180 (d3103d6, the merge base since Phase 7; it was
-    // 893def8, v174, until main was merged in) - so with the hooks answering false, the
+    // file is byte for byte main's at v184 (990f5b4, the merge base since Phase 8; it was
+    // d3103d6, v180, since Phase 7 and 893def8, v174, before that) - so with the hooks answering false, the
     // «מקדמות» tab, «קיזוז מהשכר» and the old closure dialog are built by the same code.
     const HOOKS = [
         `    // v176, SHUT: with the pay book's gate open this tab is the accounts home
@@ -432,8 +432,8 @@ const plain = value => JSON.parse(JSON.stringify(value));
         given('a hook is in js/ui/reports.js exactly once', without.split(hook).length === 2, hook.slice(0, 60));
         without = without.replace(hook, '');
     });
-    same('js/ui/reports.js without its five hooks is main\'s file at d3103d6 (v180), byte for byte',
-        without === git(['show', 'd3103d6:js/ui/reports.js']), true);
+    same('js/ui/reports.js without its five hooks is main\'s file at 990f5b4 (v184), byte for byte',
+        without === git(['show', '990f5b4:js/ui/reports.js']), true);
     check('every hook asks the gate before it does anything', HOOKS.every(hook =>
         /accountsTakesTab\(\)|accountsRoutesClosure\(|accountsOpen\(\)/.test(hook) && /typeof \w+ === 'function'/.test(hook)));
 
@@ -463,7 +463,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
     same('no other shipped script calls into the screens', others.filter(file =>
         /\b(renderAccounts|accountsTakesTab|accountsRoutesClosure|accountsClosureDoor|accGo|accOpen\w+)\b/
             .test(readFileSync(join(ROOT, file), 'utf8'))), []);
-    const before = git(['show', 'd3103d6:index.html']);
+    const before = git(['show', '990f5b4:index.html']);
     const tabs = text => text.slice(text.indexOf('<nav class="tabs"'), text.indexOf('</nav>', text.indexOf('<nav class="tabs"')));
     same('the tab bar is main\'s, byte for byte: five tabs, the same label', tabs(PAGE) === tabs(before), true);
     const added = PAGE.split('\n').filter(lineText => !before.split('\n').includes(lineText));

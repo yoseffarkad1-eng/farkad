@@ -629,168 +629,6 @@ input, select, textarea { border-radius: 12px; }
 #shareModal .modal-actions .transport-entry { grid-column: 1 / -1; }
 .transport-switch .btn-secondary { align-self: flex-start; }
 
-/* ---- WORKER ACCOUNTS, js/ui/accounts.js (v176, SHIPPED SHUT) --------------------------
-   Every class here starts with `acc-` and is created only by js/ui/accounts.js, which runs
-   only with the pay book's gate open - so with the gate shut not one of these rules
-   matches a node, and no existing screen moves by a pixel.
-
-   What the look has to do, in the owner's words: one clear list, read in the sun with one
-   hand. So: a man is a card on the surface, his open wage is the one big number on it,
-   and what he is owed and what he owes are two small figures in two colours that never
-   share a line of arithmetic. One filled button on a screen (.acc-primary) - a choice is
-   tonal and says which is chosen with aria-pressed and an inset ring, never with the
-   accent fill, or the screen has two "the button"s.
-
-   NUMBERS ARE NEVER CLIPPED. Nothing here has a fixed height, an ellipsis or
-   overflow:hidden on a line that holds money; a row wraps and grows. At 200% text a
-   number that does not fit beside its label goes under it. A clipped amount is a money
-   bug, not a layout one. Every target is 44px in both dimensions and every field 16px. */
-.acc-screen { display: flex; flex-direction: column; gap: 12px; max-width: 620px; margin: 0 auto; font-size: 17px; line-height: 1.4; color: var(--ink); min-width: 0; }
-.acc-screen h2, .acc-screen h3, .acc-screen p { margin: 0; padding: 0; }
-.acc-screen [hidden] { display: none !important; }
-.acc-screen button, .acc-screen summary { min-height: 44px; min-width: 44px; font-size: 16px; font-weight: 700; touch-action: manipulation; }
-.acc-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.acc-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
-.acc-titles { flex: 1 1 auto; min-width: 0; }
-.acc-title { font-size: 24px; line-height: 1.2; font-weight: 800; overflow-wrap: anywhere; }
-.acc-back { flex: none; }
-.acc-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px !important; color: var(--ink-2); font-size: 16px; }
-.acc-h3 { font-size: 18px; font-weight: 800; margin-top: 6px !important; }
-.acc-hint { color: var(--ink-2); font-size: 15px; }
-.acc-primary {
-    background: var(--accent) !important;
-    color: var(--on-accent) !important;
-    border-color: transparent !important;
-    min-height: 52px !important;
-    padding: 10px 16px;
-    font-size: 18px !important;
-    font-weight: 800 !important;
-    width: 100%;
-}
-.acc-primary[disabled] { opacity: .6; }
-.acc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.acc-actions > button { flex: 1 1 150px; }
-.acc-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }
-.acc-link { background: transparent !important; border-color: transparent !important; color: var(--accent) !important; padding: 0 4px; text-align: start; }
-.acc-seg { display: flex; flex-wrap: wrap; gap: 6px; }
-.acc-seg-btn { flex: 1 1 auto; background: var(--surface-2) !important; color: var(--ink) !important; border-color: transparent !important; padding: 6px 12px; }
-.acc-seg-btn.acc-seg-on { background: var(--accent-soft) !important; color: var(--accent) !important; box-shadow: inset 0 0 0 2px var(--accent); }
-.acc-input {
-    font: inherit;
-    font-size: 17px;
-    width: 100%;
-    min-width: 0;
-    min-height: 48px;
-    padding: 8px 12px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: var(--surface);
-    color: var(--ink);
-    font-variant-numeric: tabular-nums;
-}
-.acc-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.acc-field { display: flex; flex-direction: column; gap: 4px; flex: none; min-width: 0; }
-.acc-adv-line > .acc-field { flex: 1 1 120px; }
-.acc-field-label { color: var(--ink-2); font-size: 15px; font-weight: 600; }
-.acc-error { color: var(--danger); font-size: 16px; font-weight: 700; }
-.acc-error:empty { display: none; }
-.acc-error:not(:empty) { padding: 8px 12px; border-radius: 10px; background: var(--danger-bg); }
-.acc-screen .acc-note { padding: 10px 12px; border-radius: 12px; background: var(--surface); color: var(--ink); font-size: 16px; }
-.acc-note > button { margin-top: 8px; }
-.acc-note-warn { background: var(--warn-bg); color: var(--warn); font-weight: 700; }
-.acc-note-ok { background: var(--ok-bg); color: var(--ok); font-weight: 700; }
-.acc-banner { display: flex; flex-direction: column; gap: 8px; }
-.acc-banner:empty, .acc-page-reasons:empty, .acc-carry-slot:empty, .acc-fresh:empty, .acc-before:empty, .acc-later:empty, .acc-pick:empty { display: none; }
-.acc-page-reasons { display: flex; flex-direction: column; gap: 8px; }
-
-/* The list. */
-.acc-list { display: flex; flex-direction: column; gap: 10px; }
-.acc-row { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface); min-width: 0; }
-button.acc-row { border: 0 !important; text-align: start; align-items: stretch; color: var(--ink) !important; font-weight: 400; }
-.acc-row-quiet { background: transparent; padding-block: 4px; }
-.acc-row-quiet .acc-name { color: var(--ink-2); font-weight: 600; }
-.acc-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
-.acc-name { font-size: 19px; font-weight: 800; overflow-wrap: anywhere; }
-.acc-cycle { color: var(--ink-2); font-size: 14px; font-weight: 600; white-space: nowrap; }
-.acc-chip { display: inline-flex; align-items: center; margin-inline-start: auto; padding: 3px 10px; border-radius: 9px; background: var(--surface-2); color: var(--ink-2); font-size: 14px; font-weight: 800; }
-.acc-chip-waiting, .acc-chip-partial { background: var(--warn-bg); color: var(--warn); }
-.acc-chip-paid, .acc-chip-legacy-paid { background: var(--ok-bg); color: var(--ok); }
-.acc-chip-open, .acc-chip-legacy-due { background: var(--accent-soft); color: var(--accent); }
-.acc-chip-review, .acc-chip-unknown { background: var(--danger-bg); color: var(--danger); }
-.acc-row-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
-.acc-row-wage { font-size: 30px; line-height: 1.15; font-weight: 800; }
-.acc-row-period { color: var(--ink-2); font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.acc-row-sums { display: flex; flex-wrap: wrap; gap: 6px 8px; }
-.acc-sum { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 4px 10px; border-radius: 10px; font-size: 15px; font-weight: 700; }
-.acc-sum-due { background: var(--ok-bg); color: var(--ok); }
-.acc-sum-debt { background: var(--warn-bg); color: var(--warn); }
-.acc-line.acc-sum-due { background: transparent; }
-.acc-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; width: 100%; padding: 6px 10px; background: var(--surface-2) !important; color: var(--ink) !important; border-color: transparent !important; text-align: start; font-weight: 600 !important; }
-.acc-pending > .acc-num { margin-inline-start: auto; font-weight: 800; }
-.acc-pending-label { color: var(--warn); font-weight: 800; }
-.acc-row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.acc-row-actions > button { flex: 1 1 auto; padding: 6px 12px; display: inline-flex; align-items: center; justify-content: center; }
-.acc-row-actions > .acc-close { flex: 2 1 160px; }
-
-/* The review page. */
-.acc-facts { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface); }
-.acc-counts { display: flex; flex-wrap: wrap; gap: 4px 16px; }
-.acc-count { display: inline-flex; gap: 6px; align-items: baseline; color: var(--ink-2); font-size: 16px; }
-.acc-count > strong { color: var(--ink); font-size: 18px; }
-.acc-sites { display: flex; flex-wrap: wrap; gap: 6px; }
-.acc-site { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 9px; font-size: 15px; font-weight: 700; }
-.acc-days > summary { display: flex; align-items: center; cursor: pointer; color: var(--accent); }
-.acc-days { display: flex; flex-direction: column; gap: 6px; }
-.acc-days > .acc-field { margin-bottom: 8px; }
-.acc-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; min-width: 0; }
-.acc-line-label { color: var(--ink-2); min-width: 0; overflow-wrap: anywhere; }
-.acc-line > .acc-num { margin-inline-start: auto; }
-.acc-line-strong > .acc-num { font-size: 22px; font-weight: 800; }
-.acc-line-strong > .acc-line-label { color: var(--ink); font-weight: 700; }
-.acc-line-net { padding-top: 6px; border-top: 1px solid var(--line-soft); }
-.acc-line-net > .acc-line-label { color: var(--ink); font-weight: 800; font-size: 18px; }
-.acc-line-net > .acc-num { font-size: 30px; line-height: 1.15; font-weight: 800; }
-.acc-day { font-size: 15px; }
-.acc-advances, .acc-extras, .acc-statement, .acc-form, .acc-table { display: flex; flex-direction: column; gap: 10px; }
-.acc-adv, .acc-extra { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface); }
-.acc-adv-info { font-weight: 700; font-variant-numeric: tabular-nums; }
-.acc-adv-line { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
-.acc-adv-line > button { flex: none; min-height: 48px; padding: 6px 14px; }
-.acc-adv-zero { min-width: 52px !important; }
-.acc-adv-after > .acc-num { font-size: 19px; font-weight: 800; }
-.acc-voided > .acc-line > .acc-num { text-decoration: line-through; color: var(--ink-2); }
-.acc-result { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: var(--surface); }
-.acc-walk { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.acc-progress { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
-
-/* The group walk and its summary. */
-.acc-check { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin-inline-start: -8px; }
-.acc-check > input { width: 26px; height: 26px; accent-color: var(--accent); }
-.acc-table-card { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: var(--surface); }
-.acc-table-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; align-items: baseline; }
-.acc-table-row > * { min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: 16px; }
-.acc-table-head { padding: 0 12px; color: var(--ink-2); font-size: 14px; font-weight: 700; }
-.acc-table-total { background: var(--surface-2); }
-.acc-table-total .acc-num { font-weight: 800; }
-@media (max-width: 400px) {
-    .acc-row-wage, .acc-line-net > .acc-num { font-size: 26px; }
-}
-
-/* Phase 5: what «לבדיקה» is about, and the archive. Rows of text and one filled button;
-   nothing here is a bar and nothing is fixed. */
-.acc-look-body, .acc-archive-list { display: flex; flex-direction: column; gap: 10px; }
-.acc-look, .acc-archive-group { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface); }
-.acc-look-side { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
-.acc-look-counted { border-inline-start: 4px solid var(--ok); }
-.acc-look-beside { border-inline-start: 4px solid var(--warn); }
-.acc-look-kind { font-size: 17px; }
-.acc-look-id { direction: ltr; text-align: end; overflow-wrap: anywhere; font-size: 13px; }
-.acc-archive-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 0; border-top: 1px solid var(--line-soft); }
-.acc-archive-row > .acc-name { overflow-wrap: anywhere; }
-.acc-archive-why { flex-basis: 100%; }
-.acc-draft-restored { background: var(--surface-2); }
-.report-weekly-mark { margin-inline-start: 8px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 13px; font-weight: 700; white-space: nowrap; }
-
 /* THE SUMMARY OF THE DAY (v179): one of the app's dialogs, opened from the panel above.
    The panel is on the settings sheet's tier (60) and an ordinary .modal is on 50, which
    would open this one BEHIND the screen it was asked from - a button that does nothing
@@ -1096,5 +934,167 @@ body.journey-on #sederModal { z-index: 60; }
 #workerCardModal .modal-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 #workerCardModal .modal-actions button { min-height: 44px; min-width: 44px; font-size: 16px; overflow-wrap: anywhere; }
 #workerCardModal .modal-actions button:last-child { grid-column: 1 / -1; }
+
+/* ---- WORKER ACCOUNTS, js/ui/accounts.js (v176, SHIPPED SHUT) --------------------------
+   Every class here starts with `acc-` and is created only by js/ui/accounts.js, which runs
+   only with the pay book's gate open - so with the gate shut not one of these rules
+   matches a node, and no existing screen moves by a pixel.
+
+   What the look has to do, in the owner's words: one clear list, read in the sun with one
+   hand. So: a man is a card on the surface, his open wage is the one big number on it,
+   and what he is owed and what he owes are two small figures in two colours that never
+   share a line of arithmetic. One filled button on a screen (.acc-primary) - a choice is
+   tonal and says which is chosen with aria-pressed and an inset ring, never with the
+   accent fill, or the screen has two "the button"s.
+
+   NUMBERS ARE NEVER CLIPPED. Nothing here has a fixed height, an ellipsis or
+   overflow:hidden on a line that holds money; a row wraps and grows. At 200% text a
+   number that does not fit beside its label goes under it. A clipped amount is a money
+   bug, not a layout one. Every target is 44px in both dimensions and every field 16px. */
+.acc-screen { display: flex; flex-direction: column; gap: 12px; max-width: 620px; margin: 0 auto; font-size: 17px; line-height: 1.4; color: var(--ink); min-width: 0; }
+.acc-screen h2, .acc-screen h3, .acc-screen p { margin: 0; padding: 0; }
+.acc-screen [hidden] { display: none !important; }
+.acc-screen button, .acc-screen summary { min-height: 44px; min-width: 44px; font-size: 16px; font-weight: 700; touch-action: manipulation; }
+.acc-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.acc-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.acc-titles { flex: 1 1 auto; min-width: 0; }
+.acc-title { font-size: 24px; line-height: 1.2; font-weight: 800; overflow-wrap: anywhere; }
+.acc-back { flex: none; }
+.acc-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px !important; color: var(--ink-2); font-size: 16px; }
+.acc-h3 { font-size: 18px; font-weight: 800; margin-top: 6px !important; }
+.acc-hint { color: var(--ink-2); font-size: 15px; }
+.acc-primary {
+    background: var(--accent) !important;
+    color: var(--on-accent) !important;
+    border-color: transparent !important;
+    min-height: 52px !important;
+    padding: 10px 16px;
+    font-size: 18px !important;
+    font-weight: 800 !important;
+    width: 100%;
+}
+.acc-primary[disabled] { opacity: .6; }
+.acc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.acc-actions > button { flex: 1 1 150px; }
+.acc-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.acc-link { background: transparent !important; border-color: transparent !important; color: var(--accent) !important; padding: 0 4px; text-align: start; }
+.acc-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.acc-seg-btn { flex: 1 1 auto; background: var(--surface-2) !important; color: var(--ink) !important; border-color: transparent !important; padding: 6px 12px; }
+.acc-seg-btn.acc-seg-on { background: var(--accent-soft) !important; color: var(--accent) !important; box-shadow: inset 0 0 0 2px var(--accent); }
+.acc-input {
+    font: inherit;
+    font-size: 17px;
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+}
+.acc-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.acc-field { display: flex; flex-direction: column; gap: 4px; flex: none; min-width: 0; }
+.acc-adv-line > .acc-field { flex: 1 1 120px; }
+.acc-field-label { color: var(--ink-2); font-size: 15px; font-weight: 600; }
+.acc-error { color: var(--danger); font-size: 16px; font-weight: 700; }
+.acc-error:empty { display: none; }
+.acc-error:not(:empty) { padding: 8px 12px; border-radius: 10px; background: var(--danger-bg); }
+.acc-screen .acc-note { padding: 10px 12px; border-radius: 12px; background: var(--surface); color: var(--ink); font-size: 16px; }
+.acc-note > button { margin-top: 8px; }
+.acc-note-warn { background: var(--warn-bg); color: var(--warn); font-weight: 700; }
+.acc-note-ok { background: var(--ok-bg); color: var(--ok); font-weight: 700; }
+.acc-banner { display: flex; flex-direction: column; gap: 8px; }
+.acc-banner:empty, .acc-page-reasons:empty, .acc-carry-slot:empty, .acc-fresh:empty, .acc-before:empty, .acc-later:empty, .acc-pick:empty { display: none; }
+.acc-page-reasons { display: flex; flex-direction: column; gap: 8px; }
+
+/* The list. */
+.acc-list { display: flex; flex-direction: column; gap: 10px; }
+.acc-row { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface); min-width: 0; }
+button.acc-row { border: 0 !important; text-align: start; align-items: stretch; color: var(--ink) !important; font-weight: 400; }
+.acc-row-quiet { background: transparent; padding-block: 4px; }
+.acc-row-quiet .acc-name { color: var(--ink-2); font-weight: 600; }
+.acc-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.acc-name { font-size: 19px; font-weight: 800; overflow-wrap: anywhere; }
+.acc-cycle { color: var(--ink-2); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.acc-chip { display: inline-flex; align-items: center; margin-inline-start: auto; padding: 3px 10px; border-radius: 9px; background: var(--surface-2); color: var(--ink-2); font-size: 14px; font-weight: 800; }
+.acc-chip-waiting, .acc-chip-partial { background: var(--warn-bg); color: var(--warn); }
+.acc-chip-paid, .acc-chip-legacy-paid { background: var(--ok-bg); color: var(--ok); }
+.acc-chip-open, .acc-chip-legacy-due { background: var(--accent-soft); color: var(--accent); }
+.acc-chip-review, .acc-chip-unknown { background: var(--danger-bg); color: var(--danger); }
+.acc-row-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+.acc-row-wage { font-size: 30px; line-height: 1.15; font-weight: 800; }
+.acc-row-period { color: var(--ink-2); font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.acc-row-sums { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.acc-sum { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 4px 10px; border-radius: 10px; font-size: 15px; font-weight: 700; }
+.acc-sum-due { background: var(--ok-bg); color: var(--ok); }
+.acc-sum-debt { background: var(--warn-bg); color: var(--warn); }
+.acc-line.acc-sum-due { background: transparent; }
+.acc-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; width: 100%; padding: 6px 10px; background: var(--surface-2) !important; color: var(--ink) !important; border-color: transparent !important; text-align: start; font-weight: 600 !important; }
+.acc-pending > .acc-num { margin-inline-start: auto; font-weight: 800; }
+.acc-pending-label { color: var(--warn); font-weight: 800; }
+.acc-row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.acc-row-actions > button { flex: 1 1 auto; padding: 6px 12px; display: inline-flex; align-items: center; justify-content: center; }
+.acc-row-actions > .acc-close { flex: 2 1 160px; }
+
+/* The review page. */
+.acc-facts { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface); }
+.acc-counts { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.acc-count { display: inline-flex; gap: 6px; align-items: baseline; color: var(--ink-2); font-size: 16px; }
+.acc-count > strong { color: var(--ink); font-size: 18px; }
+.acc-sites { display: flex; flex-wrap: wrap; gap: 6px; }
+.acc-site { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 9px; font-size: 15px; font-weight: 700; }
+.acc-days > summary { display: flex; align-items: center; cursor: pointer; color: var(--accent); }
+.acc-days { display: flex; flex-direction: column; gap: 6px; }
+.acc-days > .acc-field { margin-bottom: 8px; }
+.acc-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; min-width: 0; }
+.acc-line-label { color: var(--ink-2); min-width: 0; overflow-wrap: anywhere; }
+.acc-line > .acc-num { margin-inline-start: auto; }
+.acc-line-strong > .acc-num { font-size: 22px; font-weight: 800; }
+.acc-line-strong > .acc-line-label { color: var(--ink); font-weight: 700; }
+.acc-line-net { padding-top: 6px; border-top: 1px solid var(--line-soft); }
+.acc-line-net > .acc-line-label { color: var(--ink); font-weight: 800; font-size: 18px; }
+.acc-line-net > .acc-num { font-size: 30px; line-height: 1.15; font-weight: 800; }
+.acc-day { font-size: 15px; }
+.acc-advances, .acc-extras, .acc-statement, .acc-form, .acc-table { display: flex; flex-direction: column; gap: 10px; }
+.acc-adv, .acc-extra { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface); }
+.acc-adv-info { font-weight: 700; font-variant-numeric: tabular-nums; }
+.acc-adv-line { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.acc-adv-line > button { flex: none; min-height: 48px; padding: 6px 14px; }
+.acc-adv-zero { min-width: 52px !important; }
+.acc-adv-after > .acc-num { font-size: 19px; font-weight: 800; }
+.acc-voided > .acc-line > .acc-num { text-decoration: line-through; color: var(--ink-2); }
+.acc-result { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: var(--surface); }
+.acc-walk { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.acc-progress { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* The group walk and its summary. */
+.acc-check { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin-inline-start: -8px; }
+.acc-check > input { width: 26px; height: 26px; accent-color: var(--accent); }
+.acc-table-card { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: var(--surface); }
+.acc-table-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; align-items: baseline; }
+.acc-table-row > * { min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: 16px; }
+.acc-table-head { padding: 0 12px; color: var(--ink-2); font-size: 14px; font-weight: 700; }
+.acc-table-total { background: var(--surface-2); }
+.acc-table-total .acc-num { font-weight: 800; }
+@media (max-width: 400px) {
+    .acc-row-wage, .acc-line-net > .acc-num { font-size: 26px; }
+}
+
+/* Phase 5: what «לבדיקה» is about, and the archive. Rows of text and one filled button;
+   nothing here is a bar and nothing is fixed. */
+.acc-look-body, .acc-archive-list { display: flex; flex-direction: column; gap: 10px; }
+.acc-look, .acc-archive-group { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface); }
+.acc-look-side { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.acc-look-counted { border-inline-start: 4px solid var(--ok); }
+.acc-look-beside { border-inline-start: 4px solid var(--warn); }
+.acc-look-kind { font-size: 17px; }
+.acc-look-id { direction: ltr; text-align: end; overflow-wrap: anywhere; font-size: 13px; }
+.acc-archive-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 0; border-top: 1px solid var(--line-soft); }
+.acc-archive-row > .acc-name { overflow-wrap: anywhere; }
+.acc-archive-why { flex-basis: 100%; }
+.acc-draft-restored { background: var(--surface-2); }
+.report-weekly-mark { margin-inline-start: 8px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 13px; font-weight: 700; white-space: nowrap; }
 
 }
