@@ -151,7 +151,45 @@ const TRANSPORT_TEXT = Object.freeze({
     // a passenger with no site in today's record: named, and no site invented for him
     mPassengerOnly: name => `- ${name}`,
     mAlone: 'בלי נוסעים.',
-    mDestinations: sites => `יעדים: ${sites}`
+    mDestinations: sites => `יעדים: ${sites}`,
+
+    // --- the summary of the day (v179): the button on the screen, and its dialog
+    summaryButton: 'סיכום הסעות ליום',
+    summaryTitle: 'סיכום הסעות',
+    summaryLabel: 'תצוגה מקדימה של הסיכום',
+    summarySend: 'שליחה בוואטסאפ',
+    summaryCopy: 'העתקה',
+    summaryPicture: 'שיתוף כתמונה',
+    summaryClose: 'סגירה',
+    // the name of the picture's file; the date as the record writes it
+    summaryFile: date => `farkad-הסעות-${date}.png`,
+
+    // --- the summary itself. It borrows `driver`, `driverNone`, `mPassenger`,
+    // `mPassengerOnly`, `mAlone` and `nobody` from above, so a man reads the same in it
+    // as in the message his driver gets.
+    //   סיכום הסעות ליום שלישי 10/11/2026:
+    //
+    //   רכב: טויוטה קורולה 2016 – 3 מתוך 5
+    //   נהג: סאמר – חיפה
+    //   - ראמי – חדרה
+    //   - דוד – חיפה
+    //
+    //   ממתינים לשיבוץ (1):
+    //   - יוסי – חיפה
+    //
+    //   רכבים ריקים: סוואנה 2010
+    //
+    //   רכבים שלא זמינים היום: פולקסווגן 2018
+    // A vehicle's name never STARTS a line: a line takes its direction from its first
+    // strong letter, and «BYD…» would turn the whole line left-to-right. So a vehicle is
+    // always named after a Hebrew word, inside transportRli's isolate.
+    sHeading: (day, date) => `סיכום הסעות ל${day} ${date}:`,
+    sVehicle: (v, a, b) => `רכב: ${v} – ${a} מתוך ${b}`,
+    sDriver: (name, site) => `נהג: ${name} – ${site}`,
+    sNoneSeated: 'אף עובד לא שובץ לרכב.',
+    sWaiting: n => `ממתינים לשיבוץ (${n}):`,
+    sEmpty: list => `רכבים ריקים: ${list}`,
+    sHome: list => `רכבים שלא זמינים היום: ${list}`
 });
 
 // ================================================================== the store
@@ -636,6 +674,80 @@ function transportMarkOpened(date, vehicleId) {
     return true;
 }
 
+// ================================================================== the summary of the day
+//
+// v179. The owner, 2026-11-10: "is there a report for the cars?" There was none - only a
+// message to each driver, one car at a time. This is the whole day on one page: every
+// vehicle that goes out with somebody in it (its driver, then the men in the order of
+// their seats), then the men still waiting, then the vehicles that go out empty and the
+// ones kept home.
+//
+// IT IS A READING AND NOTHING ELSE. It asks the engine for the same picture the screen
+// draws (TransportEngine.layout), so a man is in the summary's car exactly when he is
+// drawn in it; it calls nothing that writes - no transportKeep, no transportSaveDay, no
+// mark: composing it, showing it, sending it and copying it leave every key on the disk
+// as it was (tests/transport.test.mjs). The app cannot see whether it was sent, so
+// nothing says it was.
+//
+// NOT IN IT, on purpose: the men marked «לא בהסעה שלנו» - they are in no car and wait for
+// none - and a man who has no site that day and no seat. A man who is SEATED and has no
+// site in today's record is named in his seat with no site, as his driver's message does.
+//
+// PURE: the same context and day give the same blocks, and neither is changed. Blocks of
+// lines; a block is a paragraph of the text, and the picture (below) draws the first
+// line of a longer block as its heading.
+function transportSummaryBlocks(ctx, day, date) {
+    const T = TRANSPORT_TEXT;
+    const parsed = parseLocalDate(date);
+    const blocks = [[T.sHeading(hebrewDayName(parsed), formatFullDate(parsed))]];
+    const picture = TransportEngine.layout(ctx, day);
+    if (Object.keys(ctx.attendance).length === 0 && Object.keys(picture.where).length === 0) {
+        blocks.push([T.nobody]);
+        return blocks;
+    }
+    const site = id => transportSiteName(ctx, ctx.attendance[id]);
+    const man = id => {
+        const name = isolate(transportWorkerName(ctx, id));
+        return site(id) ? T.mPassenger(name, isolate(site(id))) : T.mPassengerOnly(name);
+    };
+    const empty = [];
+    const home = [];
+    let cars = 0;
+    ctx.vehicles.forEach(vehicle => {
+        const seats = picture.cars[vehicle.id];
+        if (!seats) { home.push(transportRli(vehicle.name)); return; }
+        const riding = seats.filter(Boolean);
+        if (riding.length === 0) { empty.push(transportRli(vehicle.name)); return; }
+        cars += 1;
+        const lines = [T.sVehicle(transportRli(vehicle.name), riding.length, vehicle.seats)];
+        if (!seats[1]) lines.push(T.driverNone);
+        else {
+            const name = isolate(transportWorkerName(ctx, seats[1]));
+            lines.push(site(seats[1]) ? T.sDriver(name, isolate(site(seats[1]))) : T.driver(name));
+        }
+        const passengers = seats.slice(2).filter(Boolean);
+        if (passengers.length === 0) lines.push(T.mAlone);
+        else passengers.forEach(id => lines.push(man(id)));
+        blocks.push(lines);
+    });
+    if (cars === 0) blocks.push([T.sNoneSeated]);
+    const waiting = TransportEngine.riders(ctx, day).filter(id => !picture.where[id]);
+    if (waiting.length > 0) blocks.push([T.sWaiting(waiting.length)].concat(waiting.map(man)));
+    // With nobody seated every vehicle that goes out is empty, and the line above has
+    // already said so: seven names would add nothing to it.
+    if (cars > 0 && empty.length > 0) blocks.push([T.sEmpty(empty.join(', '))]);
+    if (home.length > 0) blocks.push([T.sHome(home.join(', '))]);
+    return blocks;
+}
+
+// The summary as the text that is shown, sent and copied: the blocks, a blank line
+// between them. From the stored plan of that day, read the way the screen reads it.
+function transportSummaryText(date) {
+    if (!transportEnabled() || !isRealDate(date)) return '';
+    return transportSummaryBlocks(transportContext(date), transportDayOf(date), date)
+        .map(block => block.join('\n')).join('\n\n');
+}
+
 // ================================================================== the list of vehicles, changed
 
 function transportNameProblem(name, list, selfId, taken) {
@@ -769,6 +881,7 @@ function closeTransport() {
     const parts = transportParts();
     if (!parts.panel || !transportIsOpen()) return;
     transportDragEnd(false);
+    closeTransportSummary();
     parts.panel.classList.remove('open');
     parts.panel.setAttribute('aria-hidden', 'true');
     document.removeEventListener('keydown', transportKeydown);
@@ -912,6 +1025,11 @@ function renderTransport() {
     if (typeof sayOnce === 'function') sayOnce(parts.live, transportSaid);
     else if (parts.live.textContent !== transportSaid) parts.live.textContent = transportSaid;
 
+    // A summary that is open over this panel says what the panel says: a plan that
+    // changed under it (a snapshot from another phone moved a man's site) changes its
+    // words too.
+    transportSummaryRefresh();
+
     parts.body.scrollTop = scrolled;
     const chipsAfter = document.getElementById('transportChips');
     if (chipsAfter) chipsAfter.scrollLeft = slid;
@@ -933,6 +1051,12 @@ function transportView(ctx, day, date, picture, waiting) {
         hint.id = 'transportHint';
         root.appendChild(hint);
     }
+    // The summary of the whole day (v179): one worded button, above the cars, where it is
+    // on the glass when the screen opens. Tonal, like every control here.
+    const summary = transportButton(T.summaryButton, 'summary', () => openTransportSummary());
+    summary.id = 'transportSummaryOpen';
+    summary.classList.add('transport-wide');
+    root.appendChild(summary);
     // What is wrong is asked of the plan as the picture reads it, so a line on a card is
     // about a man who is drawn on that card.
     const issues = TransportEngine.validate(ctx, { unavailable: day.unavailable, status: day.status,
@@ -1345,6 +1469,155 @@ function transportDoor(date, vehicleId, number, text) {
         setTimeout(renderTransportIfOpen, 1500);
     });
     return door;
+}
+
+// ================================================================== the summary's dialog
+//
+// One of the app's own dialogs (index.html, #transportSummaryModal - a `.modal`, so
+// Escape, the Tab trap and the focus return are js/ui/modal.js's). The text in a field
+// nobody can type in, and three ways out, none of them new:
+//   - WhatsApp: shareTextOut (js/ui/share.js) - the share sheet, or wa.me with the text
+//     and NO number, exactly as the day's message goes. The person picks the chat and
+//     presses send; the app sends nothing and marks nothing.
+//   - copy: copyTextOut, the same file - and it says whether the copy happened.
+//   - a picture: sharePrintout('transport') (js/ui/printout.js), the door the week and
+//     the reports use. The picture is read off THIS dialog's field (below), so it shows
+//     the words that are on the glass and cannot disagree with them.
+function transportSummaryParts() {
+    const get = id => document.getElementById(id);
+    return { modal: get('transportSummaryModal'), title: get('transportSummaryTitle'),
+        context: get('transportSummaryContext'), label: get('transportSummaryLabel'),
+        text: get('transportSummaryText'), send: get('transportSummarySend'), copy: get('transportSummaryCopy'),
+        picture: get('transportSummaryPicture'), close: get('transportSummaryClose'),
+        status: get('transportSummaryStatus') };
+}
+
+function transportSummaryIsOpen() {
+    const modal = typeof document !== 'undefined' && document.getElementById
+        ? document.getElementById('transportSummaryModal') : null;
+    return Boolean(modal && modal.style && modal.style.display === 'flex');
+}
+
+// Only from the open screen, so only on a phone that turned הסעות on, and always about
+// the day that screen is about.
+function openTransportSummary() {
+    if (!transportEnabled() || !transportIsOpen() || !transportDate) return false;
+    const parts = transportSummaryParts();
+    if (!parts.modal || !parts.text) return false;
+    const T = TRANSPORT_TEXT;
+    const parsed = parseLocalDate(transportDate);
+    parts.title.textContent = T.summaryTitle;
+    parts.context.textContent = `${hebrewDayName(parsed)} ${formatFullDate(parsed)}`;
+    parts.label.textContent = T.summaryLabel;
+    parts.send.textContent = T.summarySend;
+    parts.copy.textContent = T.summaryCopy;
+    parts.picture.textContent = T.summaryPicture;
+    parts.close.textContent = T.summaryClose;
+    parts.status.textContent = '';
+    parts.text.value = transportSummaryText(transportDate);
+    parts.modal.style.display = 'flex';
+    parts.text.scrollTop = 0;
+    return true;
+}
+
+function closeTransportSummary() {
+    if (typeof document === 'undefined' || !document.getElementById) return;
+    const modal = document.getElementById('transportSummaryModal');
+    if (modal && modal.style) modal.style.display = 'none';
+}
+
+function transportSummaryRefresh() {
+    if (!transportSummaryIsOpen() || !transportDate) return;
+    const field = transportSummaryParts().text;
+    const now = transportSummaryText(transportDate);
+    if (field && field.value !== now) field.value = now;
+}
+
+function transportSummarySend() {
+    if (!transportSummaryIsOpen()) return;
+    const parts = transportSummaryParts();
+    shareTextOut(parts.text.value, parts.status, closeTransportSummary);
+}
+
+function transportSummaryCopy() {
+    if (!transportSummaryIsOpen()) return;
+    const parts = transportSummaryParts();
+    copyTextOut(parts.text, parts.status);
+}
+
+// Inside the tap, with nothing awaited before it: the share sheet needs the gesture
+// (js/ui/printout.js, the top of the file).
+function transportSummaryPicture() {
+    if (!transportSummaryIsOpen()) return;
+    sharePrintout('transport');
+}
+
+// ------------------------------------------------------------------ the summary as a picture
+//
+// What js/ui/printout.js asks of a kind: something that READS THE SCREEN and something
+// that plans a drawing. The screen here is the open dialog's field - the very words the
+// person is looking at - so the picture is not a second composition of the plan: with the
+// dialog shut there is nothing to draw, and it says so.
+//
+// A person's name loses its FSI…PDI (printoutText's rule: canvas lays text out by the
+// same algorithm and the marks add nothing there); a vehicle's RLI…PDI stays, as a date
+// range's isolate stays in the week's picture, because that one changes what is read.
+function readTransportPrintout() {
+    if (!transportSummaryIsOpen() || !transportDate) return null;
+    const field = transportSummaryParts().text;
+    const clean = line => line.replace(/\u2068([^\u2066-\u2069]*)\u2069/g, '$1').replace(/\s+/g, ' ').trim();
+    const blocks = String((field && field.value) || '').split(/\n{2,}/)
+        .map(block => block.split('\n').map(clean).filter(Boolean)).filter(block => block.length > 0);
+    if (blocks.length === 0) return null;
+    return { title: blocks[0].join(' '), name: TRANSPORT_TEXT.summaryFile(transportDate), blocks: blocks.slice(1) };
+}
+
+// Sizes in CSS pixels, everything from the RIGHT edge. A fixed width a phone's chat
+// shows whole; a line too long for it wraps and is never cut - a cut line here would be
+// a man missing from his car. `layout.rows` is one box per block.
+function planTransportPrintout(spec, probe, family) {
+    const PAD = 24;
+    const INNER = 520;
+    const TITLE = { weight: 800, size: 22, line: 32 };
+    const HEAD = { weight: 700, size: 18, line: 28 };
+    const LINE = { weight: 500, size: 17, line: 26 };
+    const GAP = 14;
+    const wrap = (text, style) => {
+        probe.font = printoutFont(style.weight, style.size, family);
+        return printoutWrap(probe, text, INNER).map(piece => ({ text: piece, style }));
+    };
+    const title = wrap(spec.title, TITLE);
+    const blocks = spec.blocks.map(block => [].concat(...block.map((line, i) =>
+        wrap(line, i === 0 && block.length > 1 ? HEAD : LINE))));
+    const tall = lines => lines.reduce((sum, line) => sum + line.style.line, 0);
+    const width = PAD * 2 + INNER;
+    const height = PAD + tall(title) + blocks.reduce((sum, block) => sum + GAP * 2 + tall(block), 0) + PAD;
+
+    const draw = ctx => {
+        const paper = PRINTOUT_PAPER;
+        const right = width - PAD;
+        const layout = { title: null, header: null, rows: [], chips: [] };
+        ctx.textAlign = 'right';
+        let y = PAD;
+        const write = (lines, colour) => lines.forEach(line => {
+            ctx.fillStyle = colour(line);
+            ctx.font = printoutFont(line.style.weight, line.style.size, family);
+            ctx.fillText(line.text, right, y + line.style.line / 2);
+            y += line.style.line;
+        });
+        write(title, () => paper.ink);
+        layout.title = { x: PAD, y: PAD, w: INNER, h: y - PAD };
+        blocks.forEach((block, i) => {
+            y += GAP;
+            printoutLine(ctx, PAD, y - 0.5, right, y - 0.5, i === 0 ? paper.ink : paper.line, i === 0 ? 1.5 : 1);
+            y += GAP;
+            const top = y;
+            write(block, line => (line.style === HEAD ? paper.ink : paper.ink2));
+            layout.rows.push({ x: PAD, y: top, w: INNER, h: y - top });
+        });
+        return layout;
+    };
+    return { width, height, draw };
 }
 
 // ================================================================== carrying a man

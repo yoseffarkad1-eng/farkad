@@ -67,6 +67,16 @@ a mark's `sentAt`. `farkadTransport:settings` keeps the vehicles; v171's `areas`
 **The driver's message** is composed from the picture as it is (no accepted version): hello,
 the day, the vehicle, the passengers in seat order with their sites, the destinations.
 
+**The summary of the day (v179).** The owner asked whether there is a report for the cars.
+One button under the tray, «סיכום הסעות ליום», opens a dialog (`#transportSummaryModal`) with
+the day on one page: each vehicle that goes out with somebody in it - name, occupancy, driver,
+the men in seat order with their sites - then the men waiting, the empty vehicles, the ones
+kept home. `transportSummaryBlocks(ctx, day, date)` is pure and reads `TransportEngine.layout`,
+the screen's own reading; nothing is written, marked or sent by it. The text leaves through
+`shareTextOut` / `copyTextOut` (`js/ui/share.js`), the picture through
+`sharePrintout('transport')` (`js/ui/printout.js`), read off the dialog's field. The men marked
+«לא בהסעה שלנו» are not in it. `docs/releases.md`, v179.
+
 **Tests**: `tests/transport.test.mjs` (the engine's geometry and seat rules, a v171 day and
 list opening cleanly, the message, the words, the store's isolation) and
 `tests/transport.browser.mjs` (real touch sequences through Chromium's input pipeline at

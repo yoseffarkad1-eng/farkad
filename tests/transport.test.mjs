@@ -18,6 +18,9 @@
 //     somebody changes them;
 //   the screen's words are one block, pinned here word for word, and the driver's message
 //     is composed exactly;
+//   the summary of the day (v179) is every car that goes out with its driver and its men
+//     in the order of their seats, then the men waiting, the empty vehicles and the ones
+//     kept home - composed exactly, and a READING: no key on the disk moves for it;
 //   a number is a wa.me number by the seder's own rule;
 //   what it keeps is under its own keys, through Store - never the schedule, the outbox,
 //     the write fence, a backup, a restore point, the rescue file or the cloud - a record
@@ -551,6 +554,140 @@ await block('the driver\'s message, composed exactly, and the mark', async () =>
         ['נוסעים (1):', `- ${named('יוסי')}`, `יעדים: ${named('פרדסיה')}`]);
 });
 
+// v179. The owner, 2026-11-10: "is there a report for the cars?" - the whole day on one
+// page. Composed line for line here; the dialog it is shown in, its three ways out and the
+// picture are tests/transport.browser.mjs.
+await block('the summary of the day: every car, its driver, its men, who waits and what stays home', async () => {
+    const device = crewPhone('d_summary');
+    const lines = (date = DAY) => device.call('transportSummaryText', date).split('\n');
+    const HEAD = 'סיכום הסעות ליום שלישי 10/11/2026:';
+    const man = (name, site) => `- ${named(name)} – ${named(site)}`;
+
+    same('nobody seated yet: it says so, lists the men waiting in roster order, and does not list seven empty vehicles',
+        lines(), [HEAD, '', 'אף עובד לא שובץ לרכב.', '',
+            'ממתינים לשיבוץ (5):', man('אחמד', 'הרצליה'), man('מוחמד', 'הרצליה'), man('יוסי', 'חיפה'), man('סמיר', 'חיפה'),
+            man('Ali Hassan', 'פרדסיה')]);
+    check('a man on two sites is named with the first his day holds, as on the screen',
+        lines().includes(man('מוחמד', 'הרצליה')) && !lines().some(line => line.includes('מוחמד') && line.includes('חיפה')));
+    check('and the man marked נעדר is nowhere in it', !lines().join('\n').includes('עלי'));
+
+    // The third vehicle of the list gets a driver and two men put in back to front; the
+    // first gets a passenger and nobody at the wheel; two are kept home.
+    device.call('transportPlace', DAY, 'w_01', 'tv_03', 3);
+    device.call('transportPlace', DAY, 'w_02', 'tv_03', 2);
+    device.call('transportPlace', DAY, 'w_04', 'tv_03', 1);
+    device.call('transportPlace', DAY, 'w_06', 'tv_01', 4);
+    device.call('transportSetAvailable', DAY, 'tv_05', false);
+    device.call('transportSetAvailable', DAY, 'tv_07', false);
+    const disk = JSON.stringify(device.dump());
+    const fence = device.Store.fenceState();
+    const queued = JSON.stringify(device.Sync.pendingPaths());
+    const schedule = JSON.stringify(device.State.schedule);
+    const full = lines();
+    same('the whole day, line for line: the vehicles in the order of the list, the driver first, the men in the order of their SEATS',
+        full, [HEAD, '',
+            `רכב: ${car('טויוטה קורולה 2013')} – 1 מתוך 5`, 'בלי נהג', man('Ali Hassan', 'פרדסיה'), '',
+            `רכב: ${car('BYD סיל U 2025')} – 3 מתוך 5`, `נהג: ${named('סמיר')} – ${named('חיפה')}`,
+            man('מוחמד', 'הרצליה'), man('אחמד', 'הרצליה'), '',
+            'ממתינים לשיבוץ (1):', man('יוסי', 'חיפה'), '',
+            `רכבים ריקים: ${car('טויוטה קורולה 2016')}, ${car('BYD אטו 3 2025')}, ${car('סוואנה 2010')}`, '',
+            `רכבים שלא זמינים היום: ${car('פולקסווגן 2018')}, ${car('ליפמוטור C10 2026')}`]);
+    check('a vehicle is always named after a Hebrew word and held right-to-left: no line begins with its name',
+        full.every(line => !line.startsWith(RLI) && !/^[A-Za-z]/.test(line))
+        && full.join('\n').includes(`${RLI}BYD`) && !full.join('\n').includes(`${FSI}BYD`));
+    same('every car in it is what the screen draws: the same picture, asked of the same engine',
+        ['tv_01', 'tv_03'].map(id => car5(device, id)), ['- - - w_06 -', 'w_04 w_02 w_01 - -']);
+
+    // IT IS A READING. Composing it - twice - moved nothing: not a transport key, not the
+    // record, not the queue, not the write counter, not a mark.
+    lines();
+    device.call('transportSummaryBlocks', device.call('transportContext', DAY), device.call('transportDayOf', DAY), DAY);
+    same('composing it wrote nothing: every key on the disk is byte for byte what it was', JSON.stringify(device.dump()), disk);
+    same('the write counter did not move', device.Store.fenceState(), fence);
+    same('nothing was queued for the cloud', JSON.stringify(device.Sync.pendingPaths()), queued);
+    same('the schedule in memory is what it was', JSON.stringify(device.State.schedule), schedule);
+    same('and no car was marked as opened by it', device.call('transportMarkState', DAY, 'tv_03'), 'none');
+    check('nothing in it says «נשלח», of the summary or of anything else', !/נשלח|sent/i.test(full.join('\n')));
+
+    // PURE: the same input, the same blocks; and the input is not changed.
+    const ctx = plain(device.call('transportContext', DAY));
+    const day = plain(device.call('transportDayOf', DAY));
+    const before = JSON.stringify([ctx, day]);
+    const once = JSON.stringify(device.call('transportSummaryBlocks', ctx, day, DAY));
+    same('the builder is pure: two readings are the same bytes', JSON.stringify(device.call('transportSummaryBlocks', ctx, day, DAY)), once);
+    check('and it does not change what it was handed', JSON.stringify([ctx, day]) === before);
+    same('the text is the blocks, a blank line between them',
+        JSON.parse(once).map(block => block.join('\n')).join('\n\n'), full.join('\n'));
+
+    // A driver alone, and everybody seated: no «ממתינים» block at all.
+    device.call('transportPlace', DAY, 'w_03', 'tv_02', 1);
+    const seated = lines();
+    same('a driver alone has his own block, with his site and «בלי נוסעים.»',
+        seated.slice(seated.indexOf(`רכב: ${car('טויוטה קורולה 2016')} – 1 מתוך 5`)).slice(0, 3),
+        [`רכב: ${car('טויוטה קורולה 2016')} – 1 מתוך 5`, `נהג: ${named('יוסי')} – ${named('חיפה')}`, 'בלי נוסעים.']);
+    check('with everybody seated there is no waiting block', !seated.some(line => line.startsWith('ממתינים')));
+    same('and that vehicle has left the empty ones',
+        seated.filter(line => line.startsWith('רכבים ריקים')), [`רכבים ריקים: ${car('BYD אטו 3 2025')}, ${car('סוואנה 2010')}`]);
+
+    // The day changed under the plan: a seated man, and a driver, with no site today.
+    device.State.commit(device.call('markAbsent', device.State.schedule, DAY, 'w_01', 'actual'));
+    device.State.commit(device.call('markAbsent', device.State.schedule, DAY, 'w_04', 'actual'));
+    const changed = lines();
+    same('a seated man with no site today is named in his seat with no site made up - passenger and driver alike',
+        changed.slice(changed.indexOf(`רכב: ${car('BYD סיל U 2025')} – 3 מתוך 5`)).slice(0, 4),
+        [`רכב: ${car('BYD סיל U 2025')} – 3 מתוך 5`, `נהג: ${named('סמיר')}`, man('מוחמד', 'הרצליה'), `- ${named('אחמד')}`]);
+
+    // A man who gets there another way is in no car and waits for none.
+    device.call('transportUnseat', DAY, 'w_06');
+    same('taken out of his car a man is waiting again, and a car left with nobody in it is an empty one',
+        [lines().includes('ממתינים לשיבוץ (1):'), lines().some(line => line.startsWith('רכבים ריקים') && line.includes('2013'))], [true, true]);
+    device.call('transportSetStatus', DAY, 'w_06', 'private');
+    check('marked «לא בהסעה שלנו» he is not in the summary at all', !lines().join('\n').includes('Ali Hassan'));
+
+    // A day nobody works on, and a day that is not one.
+    same('a day with nobody on a site says so and nothing more', lines('2026-11-12'),
+        ['סיכום הסעות ליום חמישי 12/11/2026:', '', 'אין ביום הזה עובדים עם אתר עבודה.']);
+    same('a date that is not a date has no summary', device.call('transportSummaryText', '2026-13-40'), '');
+    check('asking about another day wrote nothing either', device.raw('farkadTransport:day:2026-11-12') === null);
+
+    // A DAY WRITTEN BY v171: read as the screen reads it, and not rewritten by being read.
+    const old = crewPhone('d_summary_v171');
+    old.putRaw(DAY_KEY, V171_DAY);
+    old.putRaw(SETTINGS, V171_SETTINGS);
+    const elder = reopen(old);
+    same('a day v171 wrote: its car with the driver, the man it gave a seat and the man it did not; the man its lock left in a vehicle kept home is waiting; the contractor\'s man is absent from it',
+        elder.call('transportSummaryText', DAY).split('\n'), [HEAD, '',
+            `רכב: ${car('טויוטה קורולה 2013')} – 3 מתוך 5`, `נהג: ${named('אחמד')} – ${named('הרצליה')}`,
+            man('מוחמד', 'הרצליה'), man('יוסי', 'חיפה'), '',
+            'ממתינים לשיבוץ (1):', man('סמיר', 'חיפה'), '',
+            `רכבים ריקים: ${car('פולקסווגן 2018')}`, '',
+            `רכבים שלא זמינים היום: ${car('BYD סיל U 2025')}`]);
+    same('READING REWRITES NOTHING: that day is byte for byte what v171 wrote', elder.raw(DAY_KEY), V171_DAY);
+    same('and so is its list', elder.raw(SETTINGS), V171_SETTINGS);
+
+    // With the switch off there is no summary, and nothing is read to find that out.
+    const reads = [];
+    const off = bare('d_summary_off');
+    const get = off.Store.get.bind(off.Store);
+    off.Store.get = key => { reads.push(String(key)); return get(key); };
+    load(off);
+    same('with the switch off there is no summary and no dialog', [off.call('transportSummaryText', DAY), off.call('openTransportSummary')], ['', false]);
+    same('and the only transport key read is the switch', [...new Set(reads.filter(key => /transport/i.test(key)))], [ENABLED]);
+
+    // The code that composes, shows, sends and copies it calls nothing that writes.
+    const section = (from, to) => SCREEN.slice(SCREEN.indexOf(from), SCREEN.indexOf(to))
+        .split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
+    const code = section('== the summary of the day', '== the list of vehicles, changed')
+        + section('== the summary\'s dialog', '== carrying a man');
+    given('the summary\'s two sections were found in the screen\'s file', /function transportSummaryBlocks/.test(code)
+        && /function openTransportSummary/.test(code) && /function planTransportPrintout/.test(code));
+    same('nothing in them writes, marks, commits or touches the store',
+        code.match(/transportKeep|transportSaveDay|transportSaveSettings|transportWrite|transportMarkOpened|transportRedrawn|Store\.|localStorage|State\.(commit|commitMany|save|persist)|FarkadSync|window\.print/g) || [], []);
+    check('the text goes out by the day message\'s own two doors, and the picture by the printout\'s',
+        /shareTextOut\(/.test(code) && /copyTextOut\(/.test(code) && /sharePrintout\('transport'\)/.test(code)
+        && !/navigator\.share|wa\.me|clipboard|execCommand|window\.open/.test(code));
+});
+
 await block('a number becomes a wa.me number only by the seder\'s rule', async () => {
     const device = crewPhone('d_numbers');
     const number = phone => {
@@ -931,7 +1068,24 @@ await block('the words, every one of them, and no other', async () => {
         mPassenger: [['ראמי', 'חדרה'], '- ראמי – חדרה'],
         mPassengerOnly: [['ראמי'], '- ראמי'],
         mAlone: 'בלי נוסעים.',
-        mDestinations: [['חיפה, חדרה'], 'יעדים: חיפה, חדרה']
+        mDestinations: [['חיפה, חדרה'], 'יעדים: חיפה, חדרה'],
+        // v179: the summary of the day - the button, the dialog, the picture's file, and
+        // the lines the summary does not borrow from the driver's message.
+        summaryButton: 'סיכום הסעות ליום',
+        summaryTitle: 'סיכום הסעות',
+        summaryLabel: 'תצוגה מקדימה של הסיכום',
+        summarySend: 'שליחה בוואטסאפ',
+        summaryCopy: 'העתקה',
+        summaryPicture: 'שיתוף כתמונה',
+        summaryClose: 'סגירה',
+        summaryFile: [['2026-11-10'], 'farkad-הסעות-2026-11-10.png'],
+        sHeading: [['יום שלישי', '10/11/2026'], 'סיכום הסעות ליום שלישי 10/11/2026:'],
+        sVehicle: [['סוואנה', 3, 5], 'רכב: סוואנה – 3 מתוך 5'],
+        sDriver: [['אחמד', 'חדרה'], 'נהג: אחמד – חדרה'],
+        sNoneSeated: 'אף עובד לא שובץ לרכב.',
+        sWaiting: [[2], 'ממתינים לשיבוץ (2):'],
+        sEmpty: [['סוואנה, קורולה'], 'רכבים ריקים: סוואנה, קורולה'],
+        sHome: [['סוואנה, קורולה'], 'רכבים שלא זמינים היום: סוואנה, קורולה']
     };
     same('the block holds exactly these words', Object.keys(T).sort(), Object.keys(W).sort());
     Object.keys(W).forEach(key => {
