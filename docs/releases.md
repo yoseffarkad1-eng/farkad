@@ -163,9 +163,9 @@ Three phones with three edited lists: the last «להשתמש ברשימה של�
 a field to a shared vehicle or day needs every sharing phone updated first (the rule above, in
 general).
 
-## v184 — «בניית סידור»: the seder as one journey; «כרטיס עובד»; a vehicle turned off and on again (candidate, not served)
+## v184 — «בניית סידור»: the seder as one journey; «כרטיס עובד»; a vehicle turned off and on again (served 2026-11-10)
 
-**Not served until the merge and the Pages deployment are recorded here by the next release.**
+**Served.** Merged as `a2cf33c` (PR #66) on 2026-11-10 after both gates exited 0 on `990f5b4`; the Pages deployment succeeded at 20:07 UTC.
 Built on `1af6729` (v183). Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`,
 `js/recovery.js` or the rules. Nothing here writes the record by any new code.
 
