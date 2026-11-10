@@ -656,7 +656,7 @@ const State = {
             // for one would lay a count somebody cleared back over the clear. The keep loop
             // no longer writes one (js/sync/sync.js); an entry already in the ring is
             // refused here, because this is where boot reads it.
-            if (isRimaFieldPath(entry.path)) return false;
+            if (isSiteCountFieldPath(entry.path)) return false;
             return nothing(readPath(theirs, entry.path));
         });
     },
@@ -1373,6 +1373,26 @@ function normaliseSchedule(raw, hints) {
                 if (Object.keys(rima).length > 0) schedule.days[date].rima = rima;
             } else {
                 schedule.days[date].rima = JSON.parse(JSON.stringify(day.rima));
+            }
+        }
+        // AND HOW MANY OF «עובדי יוסף גבס» (v183) - the second count per site, see its
+        // section in js/model/schema.js. Named here for the reason `rima` is: this function
+        // keeps only what it names. Every build before v183 does NOT name it, v166-v180
+        // included, so each of them drops it from its own copy at the next read - measured
+        // against their real bytes in tests/yosefgeves.test.mjs. Carried as it arrived, on
+        // exactly Rima's terms.
+        const geves = day[YOSEF_GEVES_LAYER];
+        if (geves !== undefined && geves !== null) {
+            if (isPlainObject(geves)) {
+                const kept = {};
+                Object.keys(geves).forEach(placeId => {
+                    if (POISON_SEGMENTS.indexOf(placeId) !== -1) return;
+                    if (geves[placeId] === null || geves[placeId] === undefined) return;
+                    kept[placeId] = JSON.parse(JSON.stringify(geves[placeId]));
+                });
+                if (Object.keys(kept).length > 0) schedule.days[date][YOSEF_GEVES_LAYER] = kept;
+            } else {
+                schedule.days[date][YOSEF_GEVES_LAYER] = JSON.parse(JSON.stringify(geves));
             }
         }
     });

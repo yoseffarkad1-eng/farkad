@@ -547,7 +547,8 @@ export function makeCloud(options = {}) {
         // Match patchToUpdateArgs: worker-day and Rima-count nulls remove the field; all
         // other nulls, including roster tombstones, remain literal values.
         if (value === null && parts.length === 4 && parts[0] === 'days'
-            && (parts[2] === 'plan' || parts[2] === 'actual' || parts[2] === 'rima')) delete node[last];
+            && (parts[2] === 'plan' || parts[2] === 'actual' || parts[2] === 'rima'
+                || parts[2] === 'yosefGeves')) delete node[last];
         else node[last] = value;
     }
 

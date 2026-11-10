@@ -573,7 +573,7 @@ Object.assign(FarkadSync, {
             this._outbox.forEach((item, path) => {
                 if (movedUnder.indexOf(String(path)) !== -1) return;
                 if (item.sent || item.held || this._heldNow.has(String(path))) return;
-                if (settledHere.has(String(path)) || !isRimaFieldPath(path)) return;
+                if (settledHere.has(String(path)) || !isSiteCountFieldPath(path)) return;
                 if (!mayHaveLanded(item)) return;
                 if (ask(item, path)) movedUnder.push(String(path));
             });
@@ -1182,19 +1182,24 @@ Object.assign(FarkadSync, {
     // changes nothing. Held anyway, both phones having moved one count to the same new site
     // left the old site's clear in ⋯ as «אין רישום» against «אין רישום», with nothing to
     // decide and the phone saying there was, after the real row had been decided.
+    //
+    // EACH LAYER BY ITSELF (v183). A held Rima count holds the day's other RIMA counts, a
+    // held «עובדי יוסף גבס» count the day's other counts of THAT list: a move is within one
+    // list, and the two lists have nothing to do with each other - a hold on one must
+    // never keep the other's count on the phone.
     rimaCompanions(held, skip, document) {
-        const days = new Set((held || []).filter(path => isRimaFieldPath(path))
-            .map(path => String(path).split('.')[1]));
+        const dayOf = path => `${String(path).split('.')[1]}.${siteCountLayerOf(path)}`;
+        const days = new Set((held || []).filter(path => isSiteCountFieldPath(path)).map(dayOf));
         const out = [];
         if (days.size === 0) return out;
         const known = Boolean(document) && typeof document === 'object';
         this._outbox.forEach((item, path) => {
             const key = String(path);
-            if (!isRimaFieldPath(key) || held.indexOf(key) !== -1) return;
+            if (!isSiteCountFieldPath(key) || held.indexOf(key) !== -1) return;
             if (item.sent || item.held || this._heldNow.has(key)) return;
             if (typeof skip === 'function' && skip(key)) return;
             if (known && marksOf(key, readPath(document, key)).indexOf(valueMark(item.value)) !== -1) return;
-            if (days.has(key.split('.')[1])) out.push(key);
+            if (days.has(dayOf(key))) out.push(key);
         });
         return out;
     },
@@ -1218,7 +1223,7 @@ Object.assign(FarkadSync, {
         const base = Number(this._baseDoc.revision);
         if (Number.isInteger(base) && base >= reached) return;
         sent.forEach((entry, path) => {
-            if (!isRimaFieldPath(path)) return;
+            if (!isSiteCountFieldPath(path)) return;
             if (!Object.prototype.hasOwnProperty.call(patch, path)) return;
             writeFieldPath(this._baseDoc, String(path), patch[path]);
         });

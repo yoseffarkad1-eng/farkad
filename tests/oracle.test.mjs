@@ -254,6 +254,18 @@ function makeRecord(seed, app) {
                 day.rima = day.rima || {};
                 day.rima[op.place] = op.count;
             }
+        } else if (op.op === 'yosefGeves') {
+            if (!record.days[op.date]) record.days[op.date] = { plan: {}, actual: {} };
+            const day = record.days[op.date];
+            if (op.count === null) {
+                if (day.yosefGeves) {
+                    delete day.yosefGeves[op.place];
+                    if (Object.keys(day.yosefGeves).length === 0) delete day.yosefGeves;
+                }
+            } else {
+                day.yosefGeves = day.yosefGeves || {};
+                day.yosefGeves[op.place] = op.count;
+            }
         } else if (op.op === 'rate') {
             const who = rosterWorker(op.w);
             who.dailyRate = op.daily;
@@ -495,6 +507,28 @@ function makeRecord(seed, app) {
     if (!made.orphan && chance(0.11) && record.places.length > 2) {
         record.places = record.places.slice(0, -1);
         made.notes.add('a site off the roster');
+    }
+
+    // «עובדי יוסף גבס» (v183): a second count per site, IN NO ACCOUNT - not in pay and not
+    // on the invoice. Laid over the finished record from a stream of its own, so that not
+    // one draw of the generator above is spent on it: every record is, day for day and
+    // shekel for shekel, the record it was before this block existed, with these counts on
+    // top. The second calculator has never heard of the layer; it has to agree with the
+    // app all the same, and section 3b strips the counts off and asks both again.
+    const aside = prng((Math.imul(seed, 0x9E3779B1) ^ 0x59474556) >>> 0);
+    const maybe = p => aside() < p;
+    const some = (low, high) => low + Math.floor(aside() * (high - low + 1));
+    const everySite = Array.from({ length: placeCount }, (_, n) => `p_${String(n + 1).padStart(2, '0')}`);
+    for (let date = start; date <= last; date = oracle.addDays(date, 1)) {
+        everySite.forEach(placeId => {
+            if (maybe(0.08)) {
+                doOp({ op: 'yosefGeves', date, place: placeId,
+                    count: maybe(0.05) ? [10, 42, 99][some(0, 2)] : some(1, 6) });
+            } else if (maybe(0.01) && date > oracle.addDays(start, 3)) {
+                doOp({ op: 'yosefGeves', date: oracle.addDays(date, -some(1, 3)), place: placeId,
+                    count: null });
+            }
+        });
     }
     return made;
 }
@@ -858,6 +892,7 @@ function compareWriters(app, made, tally) {
         else if (op.op === 'absent') done = app.markAbsent(schedule, op.date, op.w, 'actual');
         else if (op.op === 'clear') done = app.clearWorkerDay(schedule, op.date, op.w, 'actual');
         else if (op.op === 'rima') done = app.setRimaCount(schedule, op.date, op.place, op.count);
+        else if (op.op === 'yosefGeves') done = app.setYosefGevesCount(schedule, op.date, op.place, op.count);
         else if (op.op === 'unstamped') {
             if (!schedule.days[op.date]) schedule.days[op.date] = { plan: {}, actual: {} };
             schedule.days[op.date].actual[op.w] = clone(op.held);
@@ -882,8 +917,14 @@ function compareWriters(app, made, tally) {
             const rima = days[date].rima || {};
             const counts = {};
             Object.keys(rima).sort().forEach(placeId => { counts[placeId] = rima[placeId]; });
-            if (Object.keys(line).length > 0 || Object.keys(counts).length > 0) {
+            const geves = days[date].yosefGeves || {};
+            const outside = {};
+            Object.keys(geves).sort().forEach(placeId => { outside[placeId] = geves[placeId]; });
+            if (Object.keys(line).length > 0 || Object.keys(counts).length > 0
+                || Object.keys(outside).length > 0) {
                 out[date] = { actual: line, rima: counts };
+                // Named only where there is one, so a day without one reads as it always did.
+                if (Object.keys(outside).length > 0) out[date].yosefGeves = outside;
             }
         });
         return out;
@@ -1358,6 +1399,83 @@ const records = [];
         `${tally['accounts opening on a credit']} open on a credit, ${tally['accounts where a credit came off new money']} use one, ${tally['closed accounts handing a credit forward']} closed periods hand one on, ${tally['closes written on a credit'] || 0} payslips written on one`);
     same('and nothing is left out of the comparison under any name',
         Object.keys(tally).filter(name => name.indexOf('left to') === 0), []);
+}
+
+// ---------------------------------------------------------------- 3b. the list in no account
+//
+// «עובדי יוסף גבס» (v183) is on every record above, and the second calculator - which reads
+// `plan`, `actual` and `rima` by name and has never heard of the layer - agreed with the app
+// on every figure with the counts there. That is one half. This is the other: the counts
+// are taken off a copy of each record, and BOTH calculators are asked again, over every
+// range. Not one figure may differ between the record with the counts and without them.
+{
+    suite('«עובדי יוסף גבס»: on every record, and not one figure of either calculator moved by it');
+
+    const moved = [];
+    let asked = 0;
+    let counted = 0;
+    let alone = 0;
+    let offRoster = 0;
+    records.forEach(made => {
+        const withCounts = made.record;
+        const bare = clone(withCounts);
+        Object.keys(bare.days).forEach(date => { delete bare.days[date].yosefGeves; });
+        const dates = Object.keys(withCounts.days);
+        const has = dates.filter(date => Object.keys(withCounts.days[date].yosefGeves || {}).length > 0);
+        if (has.length > 0) counted += 1;
+        if (has.some(date => Object.keys(withCounts.days[date].rima || {}).length === 0
+            && Object.values(withCounts.days[date].actual || {}).every(held => !held.entries || held.entries.length === 0))) alone += 1;
+        const listed = new Set(withCounts.places.map(place => place.id));
+        if (has.some(date => Object.keys(withCounts.days[date].yosefGeves).some(id => !listed.has(id)))) offRoster += 1;
+
+        const appSays = record => {
+            const schedule = appSchedule(APP, Object.assign({}, made, { record }));
+            return JSON.stringify(rangesOf(made).map(({ from, to }) => ({
+                payroll: APP.payrollReport(schedule, from, to),
+                invoice: APP.invoiceReport(schedule, from, to),
+                withoutRima: (table => ({ dates: table.dates, places: table.places, total: table.total }))(
+                    APP.invoiceWithoutRima(schedule, from, to)),
+                rima: (table => ({ dates: table.dates, places: table.places, total: table.total }))(
+                    APP.rimaReport(schedule, from, to)),
+                labels: [...APP.placeLabelsIn(schedule, from, to)],
+                days: schedule.workers.map(worker => APP.workerDaysReport(schedule, worker, from, to)),
+                accounts: schedule.workers.map(worker => APP.advanceAccount(schedule, worker.id, from, to))
+            })));
+        };
+        const ruleSays = record => oracle.reading(record, () => JSON.stringify(rangesOf(made).map(({ from, to }) => ({
+            payroll: oracle.payroll(record, from, to),
+            invoice: oracle.invoice(record, from, to),
+            sites: oracle.sitesIn(record, from, to),
+            days: oracle.workersOf(record).map(worker => oracle.workerDays(record, worker, from, to)),
+            accounts: oracle.workersOf(record).map(worker => oracle.accountOf(record, worker.id, from, to)),
+            open: oracle.workersOf(record).map(worker => oracle.openBalance(record, worker.id))
+        }))));
+        asked += rangesOf(made).length;
+        if (appSays(withCounts) !== appSays(bare)) moved.push(`seed ${made.seed}: the app`);
+        if (ruleSays(withCounts) !== ruleSays(bare)) moved.push(`seed ${made.seed}: the second calculator`);
+    });
+
+    given('the generator puts the counts on the records - with the owner\'s men, alone on a day, and on a site off the roster',
+        counted >= RECORDS - 5 && alone >= 20 && offRoster >= 5, `${counted} records, ${alone} with a day of its own, ${offRoster} on a site off the roster`);
+    check('the app: pay sheet, invoice, the invoice without Rima, the Rima table, the site names, every man\'s days and account',
+        moved.filter(text => text.endsWith('the app')).length === 0 && asked > 3000,
+        `${asked} ranges over ${RECORDS} records. ${few(moved)}`);
+    check('the second calculator: its pay sheet, invoice, sites, days, accounts and open balances',
+        moved.filter(text => text.endsWith('the second calculator')).length === 0, few(moved));
+    // And the mutant this section exists for: a build that billed the list like Rima.
+    const billing = clone(records.find(made => Object.keys(made.record.days)
+        .some(date => Object.keys(made.record.days[date].yosefGeves || {}).length > 0)));
+    Object.keys(billing.record.days).forEach(date => {
+        const day = billing.record.days[date];
+        Object.keys(day.yosefGeves || {}).forEach(placeId => {
+            day.rima = day.rima || {};
+            day.rima[placeId] = (day.rima[placeId] || 0) + day.yosefGeves[placeId];
+        });
+    });
+    const honest = records.find(made => made.seed === billing.seed).record;
+    check('a record whose counts were billed like Rima\'s is not the same invoice - the comparison can see one',
+        JSON.stringify(APP.invoiceReport(billing.record, '0000-01-01', '9999-12-31'))
+            !== JSON.stringify(APP.invoiceReport(honest, '0000-01-01', '9999-12-31')));
 }
 
 // ---------------------------------------------------------------- 4. the mutants

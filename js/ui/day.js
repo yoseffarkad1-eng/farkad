@@ -1063,6 +1063,10 @@ function anyRecordOnRestDay(date) {
     const day = (State.schedule.days && State.schedule.days[date]) || {};
     if (Object.keys(isPlainObject(day.rima) ? day.rima : {})
         .some(placeId => rimaCount(State.schedule, date, placeId) > 0)) return true;
+    // And a «עובדי יוסף גבס» count (v183): billed to nobody, and still something somebody
+    // recorded on that Saturday - a day the arrows step over is a record nobody can reach.
+    if (Object.keys(isPlainObject(day.yosefGeves) ? day.yosefGeves : {})
+        .some(placeId => yosefGevesCount(State.schedule, date, placeId) > 0)) return true;
     const layers = Object.keys(day);
     return State.schedule.workers.some(worker => layers.some(layer =>
         isAbsent(State.schedule, date, worker.id, layer) ||
@@ -1142,7 +1146,14 @@ function renderSiteCard(place) {
 
     // On every card, the empty ones included: Rima's men can be on a site that has none
     // of the owner's that day, and that day is billed all the same.
-    card.appendChild(renderRimaField(place));
+    //
+    // AND «עובדי יוסף גבס» BESIDE IT (v183), on the same line: the two counts of a site
+    // are one row at the foot of its card, so the second one costs no card any height
+    // (the line wraps only where the two will not fit - doubled text on a 320px phone).
+    const counts = el('div', 'site-counts');
+    counts.appendChild(renderRimaField(place));
+    counts.appendChild(renderYosefGevesField(place));
+    card.appendChild(counts);
 
     return card;
 }
@@ -1158,27 +1169,55 @@ function renderSiteCard(place) {
 // same as the extra-hours box in the assign sheet: "1" on its way to "12" is not a count
 // anybody recorded.
 function renderRimaField(place) {
-    const date = State.date;
-    const stored = rimaCount(State.schedule, date, place.id);
+    return renderSiteCountField(place, {
+        name: 'rima', label: 'רימא', max: RIMA_MAX, refused: RIMA_REFUSED,
+        read: rimaCount, write: setRimaCount
+    });
+}
 
-    const row = el('label', 'rima-field');
-    row.dataset.anchor = 'rima:' + place.id;
-    row.appendChild(el('span', 'rima-label', 'רימא'));
+// HOW MANY OF «עובדי יוסף גבס» were on this site today (v183) - the owner's second list,
+// "outside any account": a number per site and nothing else, in no pay and on no invoice.
+// The same box as Rima's in every respect - see renderSiteCountField - beside it.
+//
+// The label is the list's name without «עובדי», the way Rima's box says «רימא» and its
+// table «עובדי רימא». PROPOSED; the list's name itself is the owner's.
+const YOSEF_GEVES_LABEL = 'יוסף גבס';
+
+function renderYosefGevesField(place) {
+    return renderSiteCountField(place, {
+        name: 'yosefgeves', label: YOSEF_GEVES_LABEL, max: YOSEF_GEVES_MAX,
+        refused: YOSEF_GEVES_REFUSED, read: yosefGevesCount, write: setYosefGevesCount
+    });
+}
+
+// ONE BOX, TWO LISTS (v183). Everything v166 worked out for the Rima box - saved when it
+// is left, never by a redraw, ↶ forgotten after a count, the focus carried to the next
+// box - is true of any count typed on a site card, so the second list's box is this same
+// function with its own name, words, cap and writer. `spec.name` is the class prefix and
+// the place key's prefix (`rima:<site>`, `yosefgeves:<site>`).
+function renderSiteCountField(place, spec) {
+    const date = State.date;
+    const stored = spec.read(State.schedule, date, place.id);
+
+    const row = el('label', spec.name + '-field site-count-field');
+    row.dataset.anchor = spec.name + ':' + place.id;
+    row.appendChild(el('span', spec.name + '-label site-count-label', spec.label));
 
     const input = document.createElement('input');
     input.type = 'number';
-    input.className = 'rima-input';
+    input.className = spec.name + '-input site-count-input';
     input.inputMode = 'numeric';
     input.min = '0';
-    input.max = String(RIMA_MAX);
+    input.max = String(spec.max);
     input.step = '1';
     input.dir = 'ltr';
     input.placeholder = '0';
     input.value = stored > 0 ? String(stored) : '';
     // Named with the site, like every other control on a card: there are ten of these
     // on the screen at once.
-    input.setAttribute('aria-label', `רימא ב${isolate(place.name)}`);
+    input.setAttribute('aria-label', `${spec.label} ב${isolate(place.name)}`);
     input.dataset.placeId = place.id;
+    input.dataset.count = spec.name;
 
     // Set by a commit of this box that stood; read by the blur that follows it (below).
     let stood = false;
@@ -1190,10 +1229,10 @@ function renderRimaField(place) {
         // number" - its value is then '' and would otherwise read as a clear.
         const bad = Boolean(input.validity && input.validity.badInput);
         const next = bad ? NaN : (text === '' ? 0 : (/^\d+$/.test(text) ? Number(text) : NaN));
-        if (next === rimaCount(State.schedule, date, place.id)) return;
+        if (next === spec.read(State.schedule, date, place.id)) return;
         const change = Number.isNaN(next)
-            ? { refused: true, reason: RIMA_REFUSED }
-            : setRimaCount(State.schedule, date, place.id, next);
+            ? { refused: true, reason: spec.refused }
+            : spec.write(State.schedule, date, place.id, next);
         // A refusal, or a commit with nowhere durable to live, puts the field back to
         // what the record says - the screen never shows a count the record does not hold.
         // A count the disk guard KEPT in the journal - another window of this app wrote
@@ -1217,15 +1256,17 @@ function renderRimaField(place) {
     // before it can take the focus - the keyboard drops and the tap is lost. The blur that
     // follows still names where the focus was going; when that was another site's Rima box,
     // that site's new box takes it. Focus only, never a value: what a box shows is either
-    // typed by the person or stored.
+    // typed by the person or stored. Since v183 the box the finger went to can be either
+    // list's - the same site's other box included - and it is found by its list and site.
     input.addEventListener('blur', event => {
         const going = event.relatedTarget;
         const redrawn = stood;
         stood = false;
         if (!redrawn || !going || going.isConnected || !going.classList
-            || !going.classList.contains('rima-input')) return;
-        const replacement = [...document.querySelectorAll('.rima-input')]
-            .find(node => node.dataset.placeId === going.dataset.placeId);
+            || !going.classList.contains('site-count-input')) return;
+        const replacement = [...document.querySelectorAll('.site-count-input')]
+            .find(node => node.dataset.placeId === going.dataset.placeId
+                && node.dataset.count === going.dataset.count);
         if (replacement) replacement.focus({ preventScroll: true });
     });
     row.appendChild(input);

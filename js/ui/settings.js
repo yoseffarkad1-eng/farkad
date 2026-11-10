@@ -566,6 +566,10 @@ const HELD_MOVED = 'הרישום בענן השתנה בזמן שהחלון הי�
 const HELD_LEDGER = 'רישום כספי שהענן מחזיק אחרת. נשמר כאן ואינו נשלח; אין לו פתרון מהמסך הזה.';
 const HELD_LIST_UNREADABLE = 'רשימת הרישומים המוחזקים לא נקראה במכשיר הזה.';
 const HELD_UNLISTED_WORKER = 'עובד שאינו ברשימה';
+// The word between the day and the site in a held count's title: «רימא» since v166, and
+// for the second count (v183) the list's own name without «עובדי» - the word on its field
+// on the site card. PROPOSED, like every v183 string but the list's name.
+const HELD_COUNT_WORDS = { rima: 'רימא', yosefGeves: 'יוסף גבס' };
 
 // A worker's day record, in the words the day screen uses for the same record.
 function describeDayValue(value, schedule) {
@@ -621,7 +625,14 @@ function describeHeldRecord(row, schedule) {
     // worker-day reading below would name a man who does not exist. Two people typing two
     // counts for one site that evening is the ordinary way this row appears; each side is
     // the number it says, and the decision is a count, written through setRimaCount.
-    if (parts[0] === 'days' && parts.length === 4 && parts[2] === 'rima') {
+    //
+    // AND A «עובדי יוסף גבס» COUNT (v183), days.<date>.yosefGeves.<placeId>: the same row,
+    // read off its own layer, titled with its own word, decided through its own writer.
+    const countLayer = parts[0] === 'days' && parts.length === 4 ? siteCountLayerOf(row.path) : null;
+    if (countLayer !== null) {
+        const word = HELD_COUNT_WORDS[countLayer];
+        const kind = countLayer === 'rima' ? 'rima' : 'yosefGeves';
+        const isCount = value => isSiteCountValue(countLayer, value);
         const site = placeLabelFrom(placeLabelsIn(roster), parts[3]);
         const dated = isRealDate(parts[1]);
         const when = dated
@@ -629,14 +640,14 @@ function describeHeldRecord(row, schedule) {
             : parts[1];
         const describe = value => {
             if (value === null || value === undefined) return HELD_NOTHING;
-            return isRimaCount(value) ? String(value) : HELD_UNREADABLE;
+            return isCount(value) ? String(value) : HELD_UNREADABLE;
         };
         const readable = [row.mine, row.cloud, row.disk]
-            .every(value => value === null || value === undefined || isRimaCount(value));
-        const title = `${when} · רימא · ${isolate(site)}`;
+            .every(value => value === null || value === undefined || isCount(value));
+        const title = `${when} · ${word} · ${isolate(site)}`;
         const heard = Boolean(row && row.heard);
         if (!heard && dated && readable && Boolean(row && row.answerable) && row.disk !== undefined) {
-            return { kind: 'rima', title, mine: describe(row.mine), cloud: describe(row.disk),
+            return { kind, title, mine: describe(row.mine), cloud: describe(row.disk),
                 otherLabel: HELD_DISK, takeLabel: HELD_TAKE_DISK, local: true, note: '',
                 decidable: true, takeable: !sameHeldBytes(row.mine, row.disk) };
         }
@@ -654,23 +665,23 @@ function describeHeldRecord(row, schedule) {
         if (heard && dated) {
             const cloudDay = row && row.cloudDay && typeof row.cloudDay === 'object' ? row.cloudDay : {};
             const day = ((roster.days || {})[parts[1]]) || {};
-            const mineDay = day.rima && typeof day.rima === 'object' ? day.rima : {};
+            const mineDay = day[countLayer] && typeof day[countLayer] === 'object' ? day[countLayer] : {};
             const order = (roster.places || []).map(item => item && item.id);
             const rank = id => (order.indexOf(id) === -1 ? order.length : order.indexOf(id));
             [...new Set(Object.keys(mineDay).concat(Object.keys(cloudDay)))]
                 .filter(id => id !== parts[3])
                 .sort((one, two) => (rank(one) - rank(two)) || (one < two ? -1 : one > two ? 1 : 0))
                 .forEach(id => {
-                    const here = rimaCount(roster, parts[1], id);
+                    const here = siteCountAt(roster, countLayer, parts[1], id);
                     const there = Object.prototype.hasOwnProperty.call(cloudDay, id) ? cloudDay[id] : undefined;
                     const sideHere = describe(here > 0 ? here : undefined);
                     const sideThere = describe(there);
                     if (sideHere === HELD_NOTHING && sideThere === HELD_NOTHING) return;
-                    context.push({ title: `${when} · רימא · ${isolate(placeLabelFrom(placeLabelsIn(roster), id))}`,
+                    context.push({ title: `${when} · ${word} · ${isolate(placeLabelFrom(placeLabelsIn(roster), id))}`,
                         mine: sideHere, cloud: sideThere });
                 });
         }
-        return { kind: 'rima', title, mine: describe(row.mine), cloud, otherLabel: HELD_CLOUD,
+        return { kind, title, mine: describe(row.mine), cloud, otherLabel: HELD_CLOUD,
             takeLabel: HELD_TAKE, local: false, note: '', context,
             decidable, takeable: decidable && !sameHeldBytes(row.mine, row.cloud) };
     }
@@ -796,10 +807,13 @@ function resolveHeldRecord(row, takeCloud) {
         const chosen = takeCloud ? row.disk : row.mine;
         const localParts = String(row.path).split('.');
         let wrote = true;
-        if (localParts[0] === 'days' && localParts.length === 4 && localParts[2] === 'rima') {
-            // A count, cleared by deletion - never a null left standing in the map.
-            const change = setRimaCount(State.schedule, localParts[1], localParts[3],
-                chosen === undefined ? null : chosen);
+        const localCount = localParts[0] === 'days' && localParts.length === 4
+            ? siteCountLayerOf(row.path) : null;
+        if (localCount !== null) {
+            // A count, cleared by deletion - never a null left standing in the map. Each
+            // layer through its own writer (v183).
+            const change = (localCount === 'rima' ? setRimaCount : setYosefGevesCount)(
+                State.schedule, localParts[1], localParts[3], chosen === undefined ? null : chosen);
             wrote = !change.refused && State.commit(change) === true;
         } else if (localParts[0] === 'days' && localParts.length === 4) {
             const side = ensureDay(State.schedule, localParts[1], localParts[2]);
@@ -829,13 +843,15 @@ function resolveHeldRecord(row, takeCloud) {
     const layer = parts[2];
     const workerId = parts[3];
     const vehicle = layer === 'vehicleRuns';
-    const rima = layer === 'rima';
+    // A count of either list (v183): the same two sides and the same decision.
+    const rima = siteCountLayerOf(row.path) !== null;
     if ((vehicle || rima) && !describeHeldRecord(row, State.schedule).decidable) return Promise.resolve(false);
     if (!vehicle && !rima && layer !== 'plan' && layer !== 'actual') return Promise.resolve(false);
     const write = value => {
         if (vehicle && !describeHeldRecord(row, State.schedule).decidable) return false;
         if (rima) {
-            const change = setRimaCount(State.schedule, date, workerId, value);
+            const change = (layer === 'rima' ? setRimaCount : setYosefGevesCount)(
+                State.schedule, date, workerId, value);
             if (change.refused) return false;
             // An answer given looking at the cloud's side: the base is what the person saw,
             // even where this phone's own earlier attempt keeps it from counting otherwise
@@ -934,9 +950,10 @@ function renderHeldRecords() {
     // sides are part of what is drawn.
     const rimaDayHere = row => {
         const parts = String(row.path).split('.');
-        if (parts[0] !== 'days' || parts.length !== 4 || parts[2] !== 'rima') return null;
+        const layer = parts[0] === 'days' && parts.length === 4 ? siteCountLayerOf(row.path) : null;
+        if (layer === null) return null;
         const day = (((State.schedule || {}).days || {})[parts[1]]) || {};
-        return [day.rima || null, row.cloudDay === undefined ? null : row.cloudDay];
+        return [day[layer] || null, row.cloudDay === undefined ? null : row.cloudDay];
     };
     const signature = unreadable ? 'unreadable' : JSON.stringify(rows.map(row =>
         [row.path, row.heard, row.mine === undefined ? null : row.mine,
@@ -967,7 +984,8 @@ function renderHeldRecords() {
         // other kind is a title and a note. A count sent down the note branch was drawn as a
         // title over an empty hint - no sides, no buttons - and its hold could not be
         // answered from anywhere, the field included: retyping the held number is no change.
-        if (said.kind !== 'day' && said.kind !== 'vehicle' && said.kind !== 'rima') {
+        if (said.kind !== 'day' && said.kind !== 'vehicle' && said.kind !== 'rima'
+            && said.kind !== 'yosefGeves') {
             card.appendChild(el('p', 'hint', said.note));
             list.appendChild(card);
             return;

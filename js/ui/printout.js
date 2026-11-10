@@ -367,6 +367,9 @@ function readReportPrintout() {
     const period = printoutText(section.querySelector('.report-period'));
     // NOT «בלי עובדי רימא» (v167): the owner's own table, screen and workbook only - the
     // picture goes to the client like the paper does, and the print stylesheet hides it.
+    // «עובדי יוסף גבס» (v183) IS read: the owner asked for it in print too, "as a separate
+    // list that does not enter any other list's account" (2026-11-10). It is one more group,
+    // the last, under its own title - never a column or a row of another group.
     const tables = [...section.querySelectorAll('table.report-table')]
         .filter(table => !table.closest('.report-norima'));
     const cellsOf = tr => [...tr.children].map(printoutText);
@@ -377,7 +380,8 @@ function readReportPrintout() {
         // body - so its heading «סיכום התקופה» is found the same way a cycle's is.
         // And the Rima table under the invoice (v166), titled «רישום לרימא» the same way,
         // so the picture says whose men the second table counts.
-        const wrap = table.closest('.report-payroll-group, .report-reconcile-group, .report-rima-group');
+        // And «עובדי יוסף גבס» after it (v183), titled the same way.
+        const wrap = table.closest('.report-payroll-group, .report-reconcile-group, .report-rima-group, .report-yosefgeves-group');
         let heading = wrap && wrap.previousElementSibling;
         while (heading && !heading.matches('h3.report-group')) heading = heading.previousElementSibling;
         return {
@@ -407,7 +411,10 @@ function readReportPrintout() {
         // .report-rima-note is one too: the line under the Rima table that says those men
         // are not the owner's, are in no pay figure, and are each one worker-site day in
         // the billing above (the owner's ruling, 2026-11-01).
-        notes: [...section.querySelectorAll('.hint-warn, .hint-money, .report-finance-text, .report-rima-note')]
+        //
+        // .report-yosefgeves-note (v183) is the last: the line saying that list is in no pay
+        // and in no billing.
+        notes: [...section.querySelectorAll('.hint-warn, .hint-money, .report-finance-text, .report-rima-note, .report-yosefgeves-note')]
             .map(printoutText).filter(Boolean)
     };
 }

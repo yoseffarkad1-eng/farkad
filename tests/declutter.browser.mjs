@@ -270,9 +270,13 @@ try {
             const node = __name(site, name);
             return node ? (node.getAttribute('aria-label') || '').replace(/[⁦-⁩]/g, '') : null;
         }, [HADAR, 'אבו נאדר']), `אבו נאדר ב${HADAR} · ${WORDS.normal}`);
-        same('every site card keeps its רימא box, as v166 drew it', await page.evaluate(() =>
+        // v183 MOVED: the last thing on a card is the LINE of counts (.site-counts), and the
+        // רימא box is the first thing on that line - «יוסף גבס» sits beside it. Still one
+        // box of hers on every card, still at the card's foot.
+        same('every site card keeps its רימא box at its foot, first on the line of counts', await page.evaluate(() =>
             [...document.querySelectorAll('#dayView .site-card')].map(card => [card.querySelectorAll('.rima-field .rima-input').length,
-                card.lastElementChild.classList.contains('rima-field')])), [[1, true], [1, true], [1, true]]);
+                card.lastElementChild.classList.contains('site-counts')
+                    && card.lastElementChild.firstElementChild.classList.contains('rima-field')])), [[1, true], [1, true], [1, true]]);
         same('and its count', await page.evaluate(site => __card(site).querySelector('.rima-input').value, HADAR), '2');
     });
 

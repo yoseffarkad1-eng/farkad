@@ -221,7 +221,7 @@ input, select, textarea { border-radius: 12px; }
 .assign-row { border-color: var(--line-soft) !important; }
 .assign-main { background: transparent !important; border-color: transparent !important; color: var(--ink) !important; }
 .assign-name { font-size: 20px; font-weight: 700; }
-.rima-label { color: var(--ink-2); font-weight: 600; }
+.rima-label, .yosefgeves-label { color: var(--ink-2); font-weight: 600; }
 .tray { border: 0 !important; background: var(--surface) !important; border-radius: 14px !important; }
 .tray .chip { border-color: transparent !important; background: var(--surface-2) !important; }
 .tray .chip button { background: transparent !important; border-color: transparent !important; color: var(--ink) !important; }
