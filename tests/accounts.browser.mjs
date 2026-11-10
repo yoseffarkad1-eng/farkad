@@ -181,14 +181,13 @@ given('the crew is on the cloud and Khaled has three advances', Boolean(K1 && K2
     check('and the list is up', await shown(a.page, row('w_khaled')));
 }
 
-// Ahmad's first week, closed and paid in full on the Friday after it - a fixture, through
-// the real door.
-given('week 1 of the weekly man closes, paid in full', (await transact(a.page, 'planClosure',
-    ['w_ahmad', WEEK1, { allocations: {}, paid: 1800, method: 'cash' }], '2026-10-09')).ok);
-await a.page.waitForTimeout(200);
-
 {
     suite('the unified list: one row a man, his open period only, two balances apart');
+    // Ahmad's first week, closed and paid in full on the Friday after it - a fixture,
+    // through the real door.
+    given('week 1 of the weekly man closes, paid in full', (await transact(a.page, 'planClosure',
+        ['w_ahmad', WEEK1, { allocations: {}, paid: 1800, method: 'cash' }], '2026-10-09')).ok);
+    await a.page.waitForTimeout(200);
     same('AHMAD, weekly, 1,800 closed and paid: his row shows the open week - 2,000 - and nothing else',
         [await txt(a.page, `${row('w_ahmad')} .acc-row-wage`), await txt(a.page, `${row('w_ahmad')} .acc-cycle`),
             await txt(a.page, `${row('w_ahmad')} .acc-row-period`), await a.page.locator(`${row('w_ahmad')} .acc-sum`).count()],
@@ -634,12 +633,11 @@ await b.context.close();
     const net2 = makeBrowserCloud();
     const c = await openPhone(browser, server.url, { cloud: net2, flags: OPEN });
     await seed(c.page);
+    suite('the group walk: one by one, skip and return');
     given('tracking is opened', (await transact(c.page, 'planOpening', ['2026-10-02'], '2026-10-09')).ok);
     await showAccounts(c.page);
     const sent = () => writes(net2, 'transact').map(write => write.patch.closedId);
     const start = sent().length;
-
-    suite('the group walk: one by one, skip and return');
     same('Ahmad\'s first week, which nobody closed, is a quiet line of its own - not added to his 2,000',
         [await txt(c.page, `${row('w_ahmad')} .acc-row-wage`), await txt(c.page, `${row('w_ahmad')} .acc-pending`)],
         ['2000 ₪', `${T.waiting}02/10 - 08/101800 ₪`]);
@@ -781,6 +779,7 @@ await b.context.close();
     const net4 = makeBrowserCloud();
     const first = await openPhone(browser, server.url, { cloud: net4, flags: OPEN, scheme: 'light' });
     await seed(first.page);
+    suite('the floors: one crew, one account closed and owed, on three phones');
     given('tracking is opened', (await transact(first.page, 'planOpening', ['2026-10-02'], '2026-10-09')).ok);
     given('one account is closed and owed', (await transact(first.page, 'planClosure', ['w_nasser', FORTNIGHT, { allocations: {} }])).ok);
     const phones = [[first, '440 light']];
@@ -789,6 +788,9 @@ await b.context.close();
         await next.page.waitForFunction(() => Boolean((State.schedule.pay || {}).ps_w_nasser_20261002), null, { timeout: 15000 });
         phones.push([next, `${width} ${scheme}`]);
     }
+    same('every phone holds the same book', await Promise.all(phones.map(([phone]) =>
+        phone.page.evaluate(() => Object.keys(State.schedule.pay).sort().join(' ')))),
+        Array(3).fill('po_open ps_w_nasser_20261002'));
     for (const [phone, label] of phones) {
         suite(`the floors at ${label}: every screen`);
         const page = phone.page;

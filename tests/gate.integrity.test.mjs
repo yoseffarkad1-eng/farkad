@@ -37,7 +37,10 @@ const HELPERS = ['network-guard.mjs', 'emulator-host.mjs', 'exports-proof.lib.mj
     'pdf.mjs', 'runner.mjs', 'serve.mjs', 'shell.mjs', 'shot.mjs', 'treecheck.mjs',
     // v173: the one crew the four pay book suites share. It asserts nothing and is
     // imported by every one of them, each of which IS in the gate.
-    'paybook.world.mjs'];
+    'paybook.world.mjs',
+    // v176: the crew and the played cloud of tests/accounts.browser.mjs. Neither asserts
+    // anything; the suite that imports both IS in the gate (test:all).
+    'accounts.world.mjs', 'accounts.cloud.mjs'];
 
 // This file. The auditor who wrote it may not edit package.json, so it cannot yet be
 // named by a script; the exemption is ONE file and the check below pins that it is one,
