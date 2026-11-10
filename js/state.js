@@ -73,6 +73,13 @@ const State = {
         // read the legacy field either way - the mirror exists so the ledger can be
         // JUDGED against it for a while before anything depends on the fold.
         this.migrateLedger();
+        // The cold store (js/cold.js), last: what this record's indexes name and the
+        // record itself does not hold is read from IndexedDB - asynchronously, so this
+        // returns before it has. With the flag shut and no mark on the disk it opens
+        // nothing and this line is the whole cost.
+        if (typeof Cold !== 'undefined' && Cold.begin) {
+            try { Cold.begin(); } catch (error) { console.warn('cold store did not begin:', error); }
+        }
         return result;
     },
 
@@ -152,7 +159,8 @@ const State = {
                     : ['הרישום השמור אינו מסמך של לוח עבודה.'];
                 if (problems.length > 0) throw new Error(problems[0]);
 
-                this.schedule = normaliseSchedule(upgraded);
+                this.coldNote(upgraded);
+                this.schedule = normaliseSchedule(this.coldLaid(upgraded));
                 this.durableText = v2;
                 this.migrationIssues = readIssues();
                 // Anything the journal is still holding goes back on top. This is the
@@ -649,6 +657,8 @@ const State = {
         let theirs = null;
         try { theirs = JSON.parse(held); } catch (error) { return []; }
         const nothing = value => value === undefined || value === null;
+        const coldNamed = (typeof coldReaderActive === 'function' && coldReaderActive())
+            ? coldUnitsNamed(theirs) : [];
         return FarkadSync.keptEntries().filter(entry => {
             if (nothing(entry.value)) return false;
             // A RIMA COUNT IS NEVER A LOSS TO PUT BACK (v166). Its clear is a deleted field
@@ -657,6 +667,14 @@ const State = {
             // no longer writes one (js/sync/sync.js); an entry already in the ring is
             // refused here, because this is where boot reads it.
             if (isRimaFieldPath(entry.path)) return false;
+            // NOR IS A FIELD THE COLD STORE KEEPS (Phase 7). The record on the disk holds
+            // nothing there by design - it is in a unit - and reading that as "an older
+            // build's copy never had it" would call every boot a regression.
+            if (coldNamed.some(unit => (unit.kind === 'month'
+                    ? String(entry.path).indexOf('days.' + unit.month + '-') === 0
+                    : unit.paths.some(path => entry.path === path || String(entry.path).indexOf(path + '.') === 0)))) {
+                return false;
+            }
             return nothing(readPath(theirs, entry.path));
         });
     },
@@ -762,9 +780,11 @@ const State = {
         // Verified, not assumed. This is the record; a write that did not land is the
         // evening gone at the next reload, and the old line here could not tell the
         // difference between that and a save.
-        const text = JSON.stringify(this.schedule);
+        const forDisk = this.coldForDisk();
+        const text = JSON.stringify(forDisk);
         const landed = Store.setVerified(V2_KEY, text);
         this.saveFailed = !landed;
+        if (landed) this.coldNote(forDisk);
 
         // DID OUR WRITE SURVIVE THE INSTANT AFTER IT?
         //
@@ -822,9 +842,17 @@ const State = {
         const durable = typeof this.durableText === 'string' ? this.durableText : null;
 
         try {
-            this.schedule = durable === null
-                ? emptySchedule()
-                : normaliseSchedule(JSON.parse(durable));
+            // (The units the cold store keeps are laid back BEFORE the record is
+            // normalised, so that memory is what a phone holding everything in one place
+            // would hold - from what the cold store handed this session, or from the
+            // memory being replaced: a unit never changes. See coldLaid.)
+            if (durable === null) {
+                this.schedule = emptySchedule();
+            } else {
+                const parsed = JSON.parse(durable);
+                this.coldNote(parsed);
+                this.schedule = normaliseSchedule(this.coldLaid(parsed));
+            }
         } catch (error) {
             return false;
         }
@@ -900,6 +928,7 @@ const State = {
             return false;
         }
         if (this.refuseArchivedMonth([change])) return false;
+        if (this.refuseColdMoney([change])) return false;
 
         // The journal first, and the schedule only if the journal took it.
         //
@@ -1036,6 +1065,147 @@ const State = {
         return true;
     },
 
+    // ------------------------------------------------------------ the cold store (Phase 7)
+    //
+    // Memory holds the whole record. The localStorage record gives up what has left the
+    // server's live document once the cold store (js/cold.js) has been READ BACK holding
+    // it. Everything State needs to know about that is here.
+
+    // What the localStorage record held when this window last read or wrote it: how many
+    // days of each month, and which ledger and pay entries. A skeleton, never the
+    // record - it answers one question, "does the disk hold this unit", without parsing
+    // megabytes on every save.
+    coldNote(record) {
+        if (typeof coldReaderActive !== 'function' || !coldReaderActive()) { this.coldOnDisk = null; return; }
+        const keysOf = map => {
+            const out = {};
+            if (map && typeof map === 'object') Object.keys(map).forEach(key => { out[key] = true; });
+            return out;
+        };
+        this.coldOnDisk = {
+            days: coldDayCounts(record),
+            ledger: { advances: keysOf(record && record.ledger && record.ledger.advances) },
+            pay: keysOf(record && record.pay)
+        };
+    },
+
+    // WHAT A WRITE OF THE RECORD MAY LEAVE OUT. One rule:
+    //
+    //   - a unit this SESSION read back from the cold store with the right digest; or
+    //   - a unit the localStorage record does not hold now.
+    //
+    // Never a unit on the strength of a mark alone: a mark says the cold store held it
+    // once, and a browser may have evicted the cold store since. And never ADDS one: a
+    // phone that refetched years of archive from the server must not try to put them
+    // into five megabytes. A unit the record holds and nothing has read back stays in
+    // the record - in both places is the safe side of every doubt.
+    coldStripSet() {
+        if (typeof coldReaderActive !== 'function' || !coldReaderActive()) return [];
+        // No record under the key at all is a reading too: the disk holds none of it.
+        const disk = this.coldOnDisk || (this.recordOnDisk() === null
+            ? { days: {}, ledger: { advances: {} }, pay: {} } : null);
+        const counts = coldDayCounts(this.schedule);
+        return coldUnitsNamed(this.schedule).filter(unit => {
+            if (Cold.verified[unit.key] === true) return true;
+            // No reading of the disk at all (a first write): what memory holds is written.
+            if (!disk) return false;
+            const onDisk = unit.kind === 'month'
+                ? (disk.days[unit.month] || 0) > 0
+                : unit.paths.some(path => coldReadAt(disk, path) === true);
+            if (onDisk) return false;
+            // Not on the disk. Leaving it out changes nothing there - and if memory does
+            // not hold it either there is nothing to leave out.
+            return coldUnitHeld(this.schedule, unit, counts);
+        }).map(unit => unit.key);
+    },
+
+    // The record as it is written to localStorage. The SAME OBJECT as memory when the
+    // reader is not active, so that with the flag shut the bytes are today's bytes.
+    coldForDisk() {
+        if (typeof coldReaderActive !== 'function' || !coldReaderActive()) return this.schedule;
+        return coldStrip(this.schedule, this.coldStripSet());
+    },
+
+    // A record just parsed off the disk, with every unit that can be produced laid back.
+    coldLaid(raw) {
+        if (typeof Cold === 'undefined' || !Cold.layInto) return raw;
+        try { return Cold.layInto(raw, this.schedule); } catch (error) { return raw; }
+    },
+
+    // The units the indexes name that memory does not hold. Empty on every phone there
+    // has ever been; while it is not, the record has a hole and SAYS so.
+    coldMissing() {
+        if (typeof coldUnitsNamed !== 'function') return [];
+        const named = coldUnitsNamed(this.schedule);
+        if (named.length === 0) return [];
+        const counts = coldDayCounts(this.schedule);
+        return named.filter(unit => !coldUnitHeld(this.schedule, unit, counts)).map(unit => unit.key);
+    },
+
+    // Null, or the sentence for why nothing computed over the archive may be shown.
+    //
+    // ALL of it, not only a range that touches a missing month: a missing closure makes
+    // every advance read as never deducted and every closed period as open, in any range.
+    coldRefusal() {
+        const missing = this.coldMissing();
+        if (missing.length === 0) return null;
+        if (typeof Cold !== 'undefined' && Cold.state === 'loading') return COLD_TEXT.loading;
+        const offline = typeof navigator !== 'undefined' && navigator && navigator.onLine === false;
+        return COLD_TEXT.missing + (offline ? ' ' + COLD_TEXT.missingOffline : '');
+    },
+
+    // Is this day one the record cannot show - a day of an archived month whose copy is
+    // not on this phone? An empty day would read as "nobody worked".
+    coldMissingDay(date) {
+        const month = String(date).slice(0, 7);
+        return this.coldMissing().indexOf('m:' + month) !== -1;
+    },
+
+    // AN EDIT OF MONEY WHILE THE ARCHIVE IS NOT WHOLE. An advance, a repayment, a
+    // correction, a closure: each is planned against folds that are missing entries, and
+    // a closure of a period whose own closure is among the missing would be written under
+    // an id the record already has on the server. Refused before the journal, like an
+    // edit of an archived day. True when it refused.
+    refuseColdMoney(changes) {
+        const money = (changes || []).some(change => change && typeof change.path === 'string'
+            && /^(ledger|advances|pay)\./.test(change.path));
+        if (!money || this.coldMissing().length === 0) return false;
+        this.rollback();
+        if (typeof render === 'function') render();
+        if (typeof askTell === 'function') {
+            askTell({ title: COLD_TEXT.refusedTitle, message: COLD_TEXT.refusedMoney });
+        }
+        return true;
+    },
+
+    // The cold store finished reading (or a unit arrived late): if it produced anything
+    // memory lacks, memory is rebuilt the way a reopen would build it - the disk, the
+    // units, the journal. True when memory changed.
+    coldRebuild() {
+        if (typeof this.durableText !== 'string') return false;
+        const missing = this.coldMissing();
+        if (!missing.some(key => Cold.verified[key] === true)) return false;
+        return this.rollback();
+    },
+
+    // Is a unit that was read back still in the localStorage record?
+    coldDropOwed() {
+        const disk = this.coldOnDisk;
+        if (!disk || typeof coldUnitsNamed !== 'function') return false;
+        return coldUnitsNamed(this.schedule).some(unit => Cold.verified[unit.key] === true
+            && (unit.kind === 'month' ? (disk.days[unit.month] || 0) > 0
+                : unit.paths.some(path => coldReadAt(disk, path) === true)));
+    },
+
+    // THE DROP: the record written again, now without what the cold store was read back
+    // holding. Only onto the record this window last agreed with - a second window's
+    // newer record is never written over for this; the next ordinary save drops instead.
+    coldDrop() {
+        if (!this.stillCurrent()) return false;
+        this._coldDropping = true;
+        try { return this.persist(); } finally { this._coldDropping = false; }
+    },
+
     // The shared ending for a commit with nowhere to live.
     refuseEdit(options) {
         this.rollback();
@@ -1129,10 +1299,14 @@ const State = {
     // comparison is made against.
     persist() {
         if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) return false;
-        const text = JSON.stringify(this.schedule);
+        const forDisk = this.coldForDisk();
+        const text = JSON.stringify(forDisk);
         const landed = Store.setVerified(V2_KEY, text);
         this.saveFailed = !landed;
         if (landed) {
+            this.coldNote(forDisk);
+            // A snapshot that named something new as archived was just adopted: move it.
+            if (typeof Cold !== 'undefined' && Cold.moveSoon && !this._coldDropping) Cold.moveSoon();
             this.durableText = text;
             this.rememberConfirmed(text);
             if (typeof FarkadSync !== 'undefined' && FarkadSync.markSaved) FarkadSync.markSaved();
@@ -1180,6 +1354,7 @@ const State = {
             return false;
         }
         if (this.refuseArchivedMonth(accepted)) return false;
+        if (this.refuseColdMoney(accepted)) return false;
 
         // All or nothing, and ONE write. Journalling them one at a time was all-or-nothing
         // in what it reported and not in what it did: the first entry landed, the second

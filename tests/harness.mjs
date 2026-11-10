@@ -26,6 +26,8 @@ const FILES = [
     'js/ui/dom.js',
     'js/store.js',
     'js/recovery.js',
+    // The phone's cold store (Phase 7). After recovery.js, as in index.html.
+    'js/cold.js',
     'js/model/schema.js',
     'js/model/money.js',
     'js/model/migrate.js',
@@ -331,6 +333,10 @@ export function makeDevice(options = {}) {
     const downloads = [];
     const sandbox = {
         localStorage,
+        // A device has NO IndexedDB unless a suite hands it one (tests/fake-indexeddb.mjs,
+        // the `indexedDB` of makeIndexedDB()) - which is also how "this browser has none"
+        // is staged, and how two tabs or two sessions share one.
+        indexedDB: options.indexedDB || undefined,
         // See APP_STAMP. A classic script's top-level `const` is a binding rather than a
         // property, so this is spelled as a sandbox global on purpose: it is what
         // `typeof APP_VERSION` resolves against inside store.js.

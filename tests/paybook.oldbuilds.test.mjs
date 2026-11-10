@@ -52,7 +52,7 @@ const OLDER = [
 // v175 adds js/sync/transact.js, the pay book's server-first door: no older build has it,
 // and none of them needs it to do what is measured here.
 const NEW_HERE = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
-    'js/model/months.js', 'js/sync/months.js'];
+    'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
 const olderOrder = loadOrder().filter(file => NEW_HERE.indexOf(file) === -1);
 
 function sourcesOf(name, sha) {

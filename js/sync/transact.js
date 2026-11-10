@@ -131,6 +131,11 @@ Object.assign(FarkadSync, {
         // older than the server's, and a closure drawn on it would be aimed at a revision
         // that is already spent. Said as what it is, before anything is sent.
         if (typeof this.closedWaiting === 'function' && this.closedWaiting()) return 'waiting';
+        // The same word for the same condition met another way (Phase 7): something the
+        // indexes name is on this phone in neither the record nor its cold store, so the
+        // folds a closure would be planned on have a hole in them.
+        if (typeof State !== 'undefined' && typeof State.coldMissing === 'function'
+            && State.coldMissing().length > 0) return 'waiting';
         if (!this.adapter) return 'offline';
         if (typeof this.adapter.transact !== 'function' || typeof this.adapter.readClosed !== 'function'
             || typeof this.adapter.read !== 'function') return 'unsupported';

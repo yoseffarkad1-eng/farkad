@@ -762,6 +762,14 @@ Object.assign(FarkadSync, {
         // document - from this phone's own record, or from the closed documents - and a
         // document that cannot be made whole yet is held, fetched for, and handed to
         // this function again. Free when the index names nothing: the same object.
+        // (`served` is the document as the server sent it. FOUND AT PHASE 7, a fault of
+        // Phase 6: `_latestRaw` below was given the document AFTER the gate had laid the
+        // archived months' days into it, and the two callers that hand `_latestRaw` back
+        // to this function - readoptAfter and the held-snapshot replay - then presented
+        // the gate with a live document "holding a day of an archived month", which it
+        // rightly calls broken. A phone that came back with one ordinary unsent day
+        // after a month had left never said synced again. tests/cold.test.mjs, K3.)
+        const served = raw;
         if (typeof this.closedGate === 'function') {
             raw = this.closedGate(raw);
             if (raw === null) return;
@@ -823,7 +831,7 @@ Object.assign(FarkadSync, {
             return;
         }
 
-        this._latestRaw = raw;
+        this._latestRaw = served;
         this._heldSnapshot = false;
 
         // A restore is waiting to go out. Everything arriving right now is, by
@@ -1006,7 +1014,12 @@ Object.assign(FarkadSync, {
             // AND NO MONTH THIS COPY DOES NOT KNOW HAS LEFT (Phase 6) - the same trap once
             // more: a copy written by a build that never kept `monthIndex`, under the
             // cloud's own stamps, must adopt the document that names the months.
-            && (typeof monthIndexCovers !== 'function' || monthIndexCovers(State.schedule, remote))) {
+            && (typeof monthIndexCovers !== 'function' || monthIndexCovers(State.schedule, remote))
+            // AND NOTHING THE INDEXES NAME IS MISSING FROM THIS COPY (Phase 7). A phone
+            // whose cold store was evicted holds the rows and not the days: the document
+            // just made whole by closedGate carries them, and reading it as this phone's
+            // own echo would say «מסונכרן» over a record with a month cut out of it.
+            && (typeof State.coldMissing !== 'function' || State.coldMissing().length === 0)) {
             this.noteCloudHeard();
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
@@ -1014,7 +1027,10 @@ Object.assign(FarkadSync, {
         }
 
         // Keep what was on screen, so an unexpected remote change is recoverable.
-        Store.set('scheduleData:v2backup', JSON.stringify(State.schedule));
+        // (As the record itself is written - without what the cold store keeps, Phase 7.
+        // A unit never changes, so the copy needs none of them to be put back whole.)
+        Store.set('scheduleData:v2backup', JSON.stringify(
+            typeof State.coldForDisk === 'function' ? State.coldForDisk() : State.schedule));
 
         const previous = State.schedule;
         // Ledger entries are append-only against the other phones too: a device that has

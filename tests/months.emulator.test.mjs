@@ -55,7 +55,7 @@ const source = readFileSync(ADAPTER, 'utf8');
 const MAIN = '8c943fa';
 const OLDER = [['v167', 'a25566f'], ['v171', '0acaceb'], ['v172', MAIN]];
 const NEW_HERE = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
-    'js/model/months.js', 'js/sync/months.js'];
+    'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
 const FLAGS = { paybookQueue: false, months: true };
 const SEP = '2026-09';
 const OCT = '2026-10';

@@ -33,7 +33,7 @@ const corpus = readdirSync(HERE).filter(name => name.endsWith('.mjs')).sort();
 // deliberately: a new helper is a decision somebody made, and the alternative - inferring
 // "not a suite" from the filename - would let a real suite named without .test. slip out
 // of the gate unnoticed, which is exactly the failure this file exists for.
-const HELPERS = ['network-guard.mjs', 'emulator-host.mjs', 'exports-proof.lib.mjs', 'harness.mjs', 'moneydom.mjs', 'nodes.mjs',
+const HELPERS = ['network-guard.mjs', 'cold.world.mjs', 'emulator-host.mjs', 'exports-proof.lib.mjs', 'fake-indexeddb.mjs', 'harness.mjs', 'moneydom.mjs', 'nodes.mjs',
     'oracle.mjs', 'pdf.mjs', 'runner.mjs', 'serve.mjs', 'shell.mjs', 'shot.mjs', 'treecheck.mjs',
     // v173: the one crew the four pay book suites share. It asserts nothing and is
     // imported by every one of them, each of which IS in the gate.
@@ -379,9 +379,12 @@ function commitSubject(git, sha) {
     // months of days leaving the live document (js/model/months.js), declared so that it
     // can be declared SHUT - the owner approved building and testing it on 2026-11-10,
     // not publishing it. What is open in the shipped build has not moved.
-    same('and the shipped flags are the six that were argued over',
+    // MOVED AT PHASE 7, deliberately: six became seven. `cold` is the gate of the phone's
+    // cold store (js/cold.js), declared so that it can be declared shut.
+    same('and the shipped flags are the seven that were argued over',
         declared.map(one => one.flag).sort(),
-        ['carryAdvances', 'months', 'paybook', 'paybookQueue', 'permanentDeletion', 'vehicles']);
+        ['carryAdvances', 'cold', 'months', 'paybook', 'paybookQueue', 'permanentDeletion', 'vehicles']);
+    same('the phone\'s cold store ships shut', declared.filter(one => one.flag === 'cold').map(one => one.value), ['false']);
     same('closed months leaving the live document ships shut', declared.filter(one => one.flag === 'months').map(one => one.value), ['false']);
     same('the pay book\'s writer ships shut, and so does its old door through the queue',
         declared.filter(one => one.flag === 'paybook' || one.flag === 'paybookQueue').map(one => one.value),

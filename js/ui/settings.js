@@ -250,6 +250,16 @@ function renderSettings() {
     if (typeof renderCloudRestorePoints === 'function') renderCloudRestorePoints();
     if (typeof renderBackupAge === 'function') renderBackupAge();
     if (typeof renderStorageRoom === 'function') renderStorageRoom();
+    // Phase 7, and nothing at all while no cold store is in use: the same line also says
+    // where the archive is kept on this phone, and whether any of it is missing.
+    if (typeof coldDeviceLine === 'function') {
+        const more = coldDeviceLine();
+        const room = document.getElementById('storageRoom');
+        if (more && room) {
+            room.textContent = (room.textContent ? room.textContent + ' ' : '') + more;
+            if (State.coldMissing().length > 0) room.className = 'hint hint-warn';
+        }
+    }
     if (typeof renderAppVersion === 'function') renderAppVersion();
     renderInstallState();
     renderLedgerParity();

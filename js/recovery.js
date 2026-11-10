@@ -301,6 +301,17 @@ const Recovery = {
                 if (held !== null) out[key] = held;
             });
 
+        // WHAT THE COLD STORE KEEPS (Phase 7, js/cold.js). On a phone that uses one, the
+        // record above no longer holds the archived months or the archived closures -
+        // they are in IndexedDB, which cannot be read inside a tap. So this carries what
+        // the cold store handed this session at boot, raw, verified or not, under
+        // cold:<unit>: a rescue file without them would be a schedule with years cut out
+        // of it and nothing saying so. Read whether or not the main record could be.
+        if (typeof Cold !== 'undefined' && Cold.rescue) {
+            const cold = Cold.rescue().records;
+            Object.keys(cold).forEach(key => { out[key] = cold[key]; });
+        }
+
         return out;
     },
 

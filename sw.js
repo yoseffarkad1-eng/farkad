@@ -71,6 +71,7 @@ const SHELL = [
     './calendars/daily-everyday-1800.ics',
     './js/store.js',
     './js/recovery.js',
+    './js/cold.js',
     './js/dates.js',
     './js/model/schema.js',
     './js/model/money.js',

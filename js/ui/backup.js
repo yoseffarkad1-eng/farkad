@@ -116,7 +116,11 @@ function takeDailySnapshot() {
     // optional so that on a full device it cannot buy its own space by deleting the older
     // restore points - the reclaim hook below is the only thing Store can throw away, and
     // a new photograph is not worth the whole album.
-    Store.set(SNAPSHOT_PREFIX + today, JSON.stringify(State.schedule), { optional: true });
+    // (Without what the cold store keeps, as the record itself is written - Phase 7. A
+    // restore from it loses nothing: an archived unit never changes, and the restore
+    // doors lay this phone's own over whatever a restored document holds.)
+    Store.set(SNAPSHOT_PREFIX + today, JSON.stringify(
+        typeof State.coldForDisk === 'function' ? State.coldForDisk() : State.schedule), { optional: true });
 
     snapshotDates().slice(SNAPSHOT_KEEP).forEach(date => Store.remove(SNAPSHOT_PREFIX + date));
 }
@@ -468,7 +472,11 @@ const UNDO_KEEP = 3;
 // the questions the migration had raised about it gone - answered by nobody, and gone
 // from the only place they existed. The decisions travel in the entry beside it.
 function pushUndoState(schedule) {
-    const entry = JSON.stringify(schedule);
+    // (This phone's record is kept as the record itself is written - without what the
+    // cold store keeps, Phase 7. A step back loses nothing by it: an archived unit never
+    // changes, and the restore doors lay this phone's own over what they are handed.)
+    const entry = JSON.stringify(schedule === State.schedule && typeof State.coldForDisk === 'function'
+        ? State.coldForDisk() : schedule);
     const decisions = JSON.stringify(
         Array.isArray(State.migrationIssues) ? State.migrationIssues : []);
 
@@ -929,6 +937,12 @@ function exportRecoveryData() {
     if (carried) payload.aboutClosedAccounts = carried;
     const monthsCarried = monthArchiveCarried(State.schedule);
     if (monthsCarried) payload.aboutArchivedMonths = monthsCarried;
+    // And what this phone keeps in its cold store (Phase 7): the units are in `records`
+    // under cold:<unit>, put there by Recovery.rawRecords; this says what they are, which
+    // are missing, and the marks. Present only on a phone that has a cold store in use.
+    if (typeof Cold !== 'undefined' && typeof coldReaderActive === 'function' && coldReaderActive()) {
+        payload.aboutColdStore = Object.assign(Cold.rescue().about, { marks: Cold.marks() });
+    }
 
     const name = `farkad-recovery-${todayStr()}.json`;
     const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
@@ -1005,6 +1019,14 @@ function exportRecoveryData() {
 // recovery export - the one that exists to rescue data that cannot be read - is not
 // bound by this; see exportRecoveryData.
 function exportBackup() {
+    // A backup that silently lacks the archive is a false backup (Phase 7): while
+    // something the indexes name is not on this phone, the file is not made and the
+    // reason is said. The rescue file is still made - it says what it lacks.
+    const coldHole = typeof State.coldRefusal === 'function' ? State.coldRefusal() : null;
+    if (coldHole) {
+        askTell({ title: COLD_TEXT.refusedTitle, message: coldHole });
+        return;
+    }
     if (typeof FarkadSync !== 'undefined' && FarkadSync.forgetLocalOrigin
         && !FarkadSync.forgetLocalOrigin(cloudDocument(State.schedule))) {
         askTell({

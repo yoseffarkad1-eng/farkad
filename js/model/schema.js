@@ -104,7 +104,16 @@ const FARKAD_SHIPPED_FLAGS = {
     // refuses before it reads anything. It needs the pay book as well: a month is
     // eligible only through closed and settled accounts. READING is deliberately not
     // behind it - a phone must make whole a document another phone has archived from.
-    months: false
+    months: false,
+
+    // THE PHONE'S COLD STORE (Phase 7, js/cold.js). OFF. What has left the server's live
+    // document - archived months, archived closures - MOVES from the localStorage record
+    // to IndexedDB on this phone. The owner approved building it on 2026-11-10 as a
+    // condition of ever opening the pay book. With this off nothing is moved, nothing is
+    // left out of the record, and no database is opened. READING is not behind it once a
+    // phone has moved something (a mark on the disk): a build that could not read what an
+    // earlier session moved would read a record with holes.
+    cold: false
 };
 
 // FROZEN. `const` binds the name, not the object: anything holding a reference could set

@@ -325,4 +325,61 @@ const serverTable = {};
         [over.adopted, over.status === 'synced', over.chars > CHARS], [false, false, true]);
 }
 
+// ------------------------------------------------------------------------------------
+{
+    suite('C3: A PHONE\'S STORAGE WITH THE COLD STORE (Phase 7) - what localStorage holds once what has left the server leaves it too');
+
+    // With the cold store the localStorage record is what the server's live document
+    // holds - and one mark per unit that has left (js/cold.js): the key, the unit's name
+    // and sixteen hex digits. Counted from the units the built record actually names.
+    const CHARS = 5 * MIB / 2;
+    const P = { closuresLeave: true, monthsLeave: true };
+    const todays = TODAYS_KB * 1024;
+    const MARK = 'farkad:cold:u:'.length;
+    // (From the rows themselves, not through coldUnitsNamed: the closures built above are
+    // weighed, not folded - their rows are stamped out of one template and a reader would
+    // refuse them. A mark is its key - the prefix, `c:` or `m:`, the row's name - and
+    // sixteen hex digits.)
+    const marks = record => Object.keys((record.payIndex || {}).rows || {}).reduce((sum, id) => sum + MARK + 2 + id.length + 16, 0)
+        + Object.keys((record.monthIndex || {}).rows || {}).reduce((sum, month) => sum + MARK + 2 + month.length + 16, 0);
+    const cold = (weeks, cycle) => { const built = build(weeks, cycle, P).server; return JSON.stringify(built).length + marks(built); };
+    const table = {};
+    [['biweekly', 'closed fortnightly'], ['weekly', 'closed weekly']].forEach(([cycle, label]) => {
+        const before = weeks => phoneChars(weeks, cycle, P);
+        const after = weeks => cold(weeks, cycle);
+        const row = {
+            beforeAlone: weeksUntil(weeks => before(weeks) + todays, CHARS),
+            beforeCopy: weeksUntil(weeks => (before(weeks) + todays) * 2, CHARS),
+            afterAlone: weeksUntil(weeks => after(weeks) + todays, CHARS),
+            afterCopy: weeksUntil(weeks => (after(weeks) + todays) * 2, CHARS),
+            y1: [before(52), after(52)], y3: [before(156), after(156)], y10: [before(520), after(520)],
+            marksAYear: Math.round((marks(build(520, cycle, P).server) - marks(build(416, cycle, P).server)) / 2),
+            growsAYear: Math.round((after(520) - after(416)) / 2),
+            coldAtYear10: before(520) - JSON.stringify(build(520, cycle, P).server).length
+        };
+        table[cycle] = row;
+        console.log(`    ${label}, localStorage, K characters of 2,621 (on top of today's ${TODAYS_KB} KB):`);
+        console.log(`        BEFORE (Phase 6): year 1 ${KB(row.y1[0])} · year 3 ${KB(row.y3[0])} · year 10 ${KB(row.y10[0])} · record and one copy stop fitting after ${yrs(row.beforeCopy)} · record alone after ${yrs(row.beforeAlone)}`);
+        console.log(`        AFTER (cold store): year 1 ${KB(row.y1[1])} · year 3 ${KB(row.y3[1])} · year 10 ${KB(row.y10[1])} · record and one copy stop fitting after ${yrs(row.afterCopy)} · record alone after ${yrs(row.afterAlone)}`);
+        console.log(`        still growing in localStorage: ${KB(row.growsAYear)} K characters a year, of which the marks are ${KB(row.marksAYear)} · in the cold store at year 10: ${KB(row.coldAtYear10)} K characters`);
+    });
+    const two = table.biweekly;
+    const one = table.weekly;
+    check('closing fortnightly, the record and one copy of it now fit for more than four years from today - where they stopped fitting inside one',
+        two.afterCopy > 52 * 4 && two.beforeCopy < 52 * 1.3, JSON.stringify([yrs(two.beforeCopy), yrs(two.afterCopy)]));
+    check('and the record alone for more than ten',
+        two.afterAlone > 52 * 10 && two.beforeAlone < 52 * 2.5, JSON.stringify([yrs(two.beforeAlone), yrs(two.afterAlone)]));
+    check('closing weekly, the record and a copy fit for more than two years and the record alone for more than five',
+        one.afterCopy > 52 * 2 && one.afterAlone > 52 * 5, JSON.stringify([yrs(one.afterCopy), yrs(one.afterAlone)]));
+    const serverFortnightly = serverTable['closed fortnightly, closures AND months leave (Phase 6)'].fullFromToday;
+    check('THE PHONE IS NO LONGER THE FIRST WALL: closing fortnightly its record alone outlasts the server\'s document',
+        two.afterAlone > serverFortnightly, JSON.stringify([yrs(two.afterAlone), yrs(serverFortnightly)]));
+    check('but localStorage STILL GROWS WITHOUT BOUND: the rows of the closure index, the marks, the advances - about a hundred and fifty thousand characters a year fortnightly',
+        two.growsAYear > 100 * 1024 && two.growsAYear < 220 * 1024 && one.growsAYear > two.growsAYear, JSON.stringify([two.growsAYear, one.growsAYear]));
+    check('of which the marks themselves are a real share - one per closure, never folded',
+        two.marksAYear > 20 * 1024 && two.marksAYear < 60 * 1024, String(two.marksAYear));
+    check('ten years of archive in the cold store is megabytes, which is what IndexedDB is for and localStorage is not',
+        two.coldAtYear10 > 5 * MIB / 2, KB(two.coldAtYear10));
+}
+
 report();

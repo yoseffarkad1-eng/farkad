@@ -180,6 +180,11 @@ Object.assign(FarkadSync, {
         if (typeof layPaybookUnion === 'function') {
             layPaybookUnion(document, State.schedule, document);
         }
+        // NOR DOES A RESTORE RUN ON A PHONE WHOSE ARCHIVE IS NOT WHOLE (Phase 7). The two
+        // unions around this line take the archived closures and months from this
+        // phone's own record; while some of them are in neither the record nor the cold
+        // store there is nothing to take them from.
+        if (typeof State.coldMissing === 'function' && State.coldMissing().length > 0) return false;
 
         // AND NEITHER IS A MONTH THAT HAS LEFT THE LIVE DOCUMENT (Phase 6).
         //

@@ -122,11 +122,22 @@ function render() {
     const dayActions = document.querySelector('.day-actions');
     if (dayActions) dayActions.style.display = currentView === 'day' ? '' : 'none';
 
-    if (currentView === 'day') renderDay();
-    if (currentView === 'week') renderWeek();
+    // Phase 7, and `null` on every phone there is: while something the record's indexes
+    // name is on this phone in neither the record nor its cold store, nothing computed
+    // over the archive is drawn - the sentence is drawn in its place (coldNotice, below).
+    const coldHole = typeof State.coldRefusal === 'function' ? State.coldRefusal() : null;
+    if (currentView === 'day') {
+        renderDay();
+        coldNotice('dayView', coldHole && State.coldMissingDay(State.date) ? COLD_TEXT.missingDay : null);
+    }
+    if (currentView === 'week') {
+        renderWeek();
+        coldNotice('weekView', coldHole && typeof weekDates === 'function'
+            && weekDates().some(date => State.coldMissingDay(date)) ? COLD_TEXT.missingDay : null);
+    }
     if (currentView === 'roster') renderRoster();
-    if (currentView === 'reports') renderReports();
-    if (currentView === 'advances') renderAdvances();
+    if (currentView === 'reports' && !coldNotice('reportsView', coldHole)) renderReports();
+    if (currentView === 'advances' && !coldNotice('advancesView', coldHole)) renderAdvances();
 
     renderMigration();
     // The day header is rebuilt from scratch on every render, so the ↶ comes back
@@ -153,6 +164,46 @@ function render() {
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not
     // for a number somebody wrote down once.
     scheduleBarMeasure();
+}
+
+// THE SENTENCE IN PLACE OF A SCREEN (Phase 7). With a sentence: everything else in that
+// view is hidden and the sentence is its first child. With none: the sentence is gone
+// and what this function hid is shown again. Returns whether the view is covered.
+//
+// Hidden, not removed: these views hold elements index.html put there, and a screen that
+// comes back must come back whole.
+function coldNotice(viewId, sentence) {
+    const view = document.getElementById(viewId);
+    if (!view) return Boolean(sentence);
+    let note = null;
+    Array.prototype.forEach.call(view.children, child => {
+        if (child.classList && child.classList.contains('cold-notice')) note = child;
+    });
+    if (!sentence) {
+        if (note) view.removeChild(note);
+        Array.prototype.forEach.call(view.children, child => {
+            if (child.dataset && child.dataset.coldHid === '1') {
+                child.style.display = child.dataset.coldWas || '';
+                delete child.dataset.coldHid;
+                delete child.dataset.coldWas;
+            }
+        });
+        return false;
+    }
+    if (!note) {
+        note = document.createElement('p');
+        note.className = 'cold-notice hint hint-warn';
+        note.setAttribute('role', 'status');
+        view.insertBefore(note, view.firstChild);
+    }
+    note.textContent = sentence;
+    Array.prototype.forEach.call(view.children, child => {
+        if (child === note || (child.dataset && child.dataset.coldHid === '1')) return;
+        child.dataset.coldWas = child.style.display || '';
+        child.dataset.coldHid = '1';
+        child.style.display = 'none';
+    });
+    return true;
 }
 
 // The chip beside the app's name: the sync line, shortened. Read from #storageNotice

@@ -62,7 +62,7 @@ const V179 = '17788f8e1e5e78be8f105769624f97e7fe051886';
 const git = args => execFileSync('git', ['-C', ROOT, ...args],
     { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const NOT_IN_V179 = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
-    'js/model/months.js', 'js/sync/months.js'];
+    'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
 let v179Sources = null;
 function v179(options = {}) {
     if (v179Sources === null) {
