@@ -751,6 +751,18 @@ Object.assign(FarkadSync, {
             return;
         }
 
+        // WHOLE, OR NOT ADOPTED (Phase 5, js/sync/closed.js). Once a settled closure has
+        // left the live document, the server's document names it in `payIndex` and no
+        // longer holds its entries. This phone's record must: every fold of money in the
+        // app reads them. So they are laid back here, before anything below sees the
+        // document - from this phone's own record, or from the closed documents - and a
+        // document that cannot be made whole yet is held, fetched for, and handed to
+        // this function again. Free when the index names nothing: the same object.
+        if (typeof this.closedGate === 'function') {
+            raw = this.closedGate(raw);
+            if (raw === null) return;
+        }
+
         // The base every write from here is built on, taken from the server's own answer
         // rather than from anything this device believes. Recorded FIRST, before any of
         // the branches below can return early: a snapshot this device refuses to ADOPT is

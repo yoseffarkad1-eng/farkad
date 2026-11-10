@@ -1820,6 +1820,26 @@ function normaliseSchedule(raw, hints) {
         });
         if (Object.keys(beside).length > 0) schedule.payConflicted = beside;
     }
+    // THE INDEX OF WHAT HAS LEFT THE LIVE DOCUMENT (Phase 5), carried as it lies - every
+    // row, readable or not. It is not named in emptySchedule, so that a record with no
+    // row is byte for byte the record it was; and because this function copies across only
+    // what it names, without this block the first save would drop the one thing that says
+    // a closure's entries exist in a closed document. A row is never judged here: the
+    // readers (paybookStoredIndex) skip one they cannot read, and it stays.
+    if (raw.payIndex !== undefined && raw.payIndex !== null) {
+        if (isPlainObject(raw.payIndex) && isPlainObject(raw.payIndex.rows)) {
+            const rows = {};
+            Object.keys(raw.payIndex.rows).forEach(id => {
+                if (POISON_SEGMENTS.indexOf(id) !== -1) return;
+                keepUnder(rows, id, raw.payIndex.rows[id]);
+            });
+            if (Object.keys(rows).length > 0) {
+                schedule.payIndex = { v: raw.payIndex.v === undefined ? 1 : raw.payIndex.v, rows };
+            }
+        } else if (!(isPlainObject(raw.payIndex) && Object.keys(raw.payIndex).every(key => key === 'v'))) {
+            payHeld.payIndex = raw.payIndex;
+        }
+    }
     if (Object.keys(payHeld).length > 0) schedule.payUnreadableContainer = payHeld;
 
     // AND SOMEBODY IS TOLD, from here, because here is the only place every door meets.

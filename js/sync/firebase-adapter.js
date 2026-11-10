@@ -345,6 +345,57 @@ export function firestoreOps(db, scheduleRef, receiptRef, closedRef) {
                 throw error;
             }));
         },
+        // A SETTLED CLOSURE LEAVES THE LIVE DOCUMENT (Phase 5, js/sync/closed.js).
+        //
+        // The same transaction as update(), with deletions in it: the field paths in
+        // `removals` are taken out of the schedule in the commit that writes the index
+        // row the patch carries. NEVER BEFORE THE SERVER HAS CONFIRMED THE COPY, and the
+        // confirmation is made here, inside the transaction, against what this very
+        // transaction read: every closed document named must exist, and between them
+        // they must hold every entry being removed, equal to the live one. Anything less
+        // is `closed-unconfirmed` and nothing is written. firestore.rules repeats the
+        // part it can (the closed document the write names exists; the index only grows).
+        archiveClosed(patch, removals, closedIds) {
+            const paths = Array.isArray(removals) ? removals : [];
+            const ids = Array.isArray(closedIds) ? closedIds : [];
+            if (typeof closedRef !== 'function' || paths.length === 0 || ids.length === 0) {
+                const error = new Error('nothing may leave the schedule without a closed document');
+                error.code = 'no-closed-document';
+                error.unsent = true;
+                return Promise.reject(error);
+            }
+            const stable = value => {
+                if (value === null || value === undefined || typeof value !== 'object') {
+                    return JSON.stringify(value === undefined ? null : value);
+                }
+                if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+                return '{' + Object.keys(value).filter(key => value[key] !== undefined).sort()
+                    .map(key => JSON.stringify(key) + ':' + stable(value[key])).join(',') + '}';
+            };
+            const at = (root, path) => path.split('.').reduce((node, key) =>
+                (node && typeof node === 'object' && Object.prototype.hasOwnProperty.call(node, key)
+                    ? node[key] : undefined), root);
+            return withReceipt(patch, transaction => {
+                const args = patchToUpdateArgs(patch);
+                paths.forEach(path => args.push(new FieldPath(...path.split('.')), deleteField()));
+                transaction.update(scheduleRef, ...args);
+            }, (transaction, snapshot) => Promise.all(
+                ids.map(id => transaction.get(closedRef(id)))).then(found => {
+                const live = snapshot.data();
+                const held = {};
+                found.forEach(entry => {
+                    const entries = entry.exists() ? (entry.data().entries || {}) : {};
+                    Object.keys(entries).forEach(path => { if (!(path in held)) held[path] = entries[path]; });
+                });
+                const unconfirmed = paths.filter(path => !Object.prototype.hasOwnProperty.call(held, path)
+                    || at(live, path) === undefined || stable(held[path]) !== stable(at(live, path)));
+                if (found.every(entry => entry.exists()) && unconfirmed.length === 0) return;
+                const error = new Error('a closed document does not hold what would leave the schedule');
+                error.code = 'closed-unconfirmed';
+                error.paths = unconfirmed;
+                throw error;
+            }));
+        },
         // The receipt of one operation, or null: the server's own record that it was
         // applied, and at which revision. How a phone that lost an answer - or was
         // reloaded before one came - learns what happened WITHOUT sending again.
@@ -572,6 +623,9 @@ if (!isConfigured()) {
             transact: ops.transact,
             readClosed: ops.readClosed,
             readReceipt: ops.readReceipt,
+            // A settled closure leaving the live document for its closed copy
+            // (js/sync/closed.js): the drop, confirmed inside its own transaction.
+            archiveClosed: ops.archiveClosed,
 
             // Sync is not a backup: a deletion syncs as faithfully as a correction, and
             // by the time it is noticed every phone agrees with it. These are the copies

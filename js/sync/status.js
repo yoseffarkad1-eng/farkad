@@ -32,7 +32,9 @@ Object.assign(FarkadSync, {
         // the same queue behind them.
         this.stopListening();
 
-        this.adapter = adapter;
+        // The same adapter, with its whole-document writes leaving out what has left the
+        // live document for a closed one (Phase 5, js/sync/closed.js).
+        this.adapter = typeof this.closedAware === 'function' ? this.closedAware(adapter) : adapter;
         this.loadOutbox();
         this._recoveryHold = false;
         this.setStatus('connecting');

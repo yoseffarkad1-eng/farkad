@@ -1102,7 +1102,11 @@ function replacementContent(source) {
         // document from before the pay book reads `{}` and nothing-beside on both of
         // them and compares exactly as it did.
         pay: schedule.pay,
-        payConflicted: schedule.payConflicted
+        payConflicted: schedule.payConflicted,
+        // And the index of what has left the live document (Phase 5): absent on every
+        // record until a closure moves, so both sides read `undefined` and compare as
+        // they did.
+        payIndex: schedule.payIndex
     });
 }
 

@@ -605,7 +605,11 @@ Object.assign(FarkadSync, {
         }
         const paySubstance = document => canonicalJson({
             pay: (document && document.pay) || {},
-            beside: (document && document.payConflicted) || {}
+            beside: (document && document.payConflicted) || {},
+            // And the rows of what has left the live document (Phase 5). A cloud that
+            // gained a row while this restore waited is a cloud whose row this write
+            // must carry: the rules refuse a whole document that takes one away.
+            index: (document && document.payIndex && document.payIndex.rows) || {}
         });
 
         // Compared on the ledger alone, and WITHOUT normalising: replacementContent

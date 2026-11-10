@@ -608,6 +608,13 @@ function layPaybookUnion(target, standing, other) {
             target.payUnreadableContainer = side.payUnreadableContainer;
         }
     });
+    // AND THE INDEX of what has left the live document (Phase 5), by the same law: rows
+    // only ever arrive. A document that has never heard of a row - a backup written before
+    // the closure moved, a restore point - must not be what takes it off, because the row
+    // is the only thing in the live document that says those entries exist at all. Laid
+    // here so that the three callers (receive, prepareReplace, absorbCloudLedger) carry it
+    // without each having to remember to.
+    layPaybookIndexUnion(target, standing, other);
     return union.clashes;
 }
 
@@ -664,7 +671,7 @@ function paybookCovers(mine, theirs) {
         const known = ownsKey(held, id) ? (Array.isArray(held[id]) ? held[id] : [held[id]]) : [];
         return variants.every(body => paybookHoldsEntry(mine, id, body)
             || known.some(had => sameLedgerBytes(had, body)));
-    });
+    }) && paybookIndexCovers(mine, theirs);
 }
 
 // Every entry of the map this build could not have written, by id, exactly as it lies.
@@ -2877,4 +2884,354 @@ function paybookSuggestAllocations(review) {
         putKey(out, row.advanceId, take / 100);
     });
     return out;
+}
+
+// =====================================================================================
+// PHASE 5: the stored index, and what leaves the live document
+// =====================================================================================
+//
+// WHAT THIS IS FOR. The schedule is one Firestore document and Firestore refuses one over
+// a mebibyte; closures are what fill it (docs/payroll-closure.md, Capacity). Since Phase 3
+// every closure has a create-once copy under closed/. Here the LIVE document gives up its
+// own copy of a settled closure and keeps one small row in its place.
+//
+// THE ONE INVARIANT EVERYTHING BELOW KEEPS: a phone's own record never has a hole.
+//
+//   the server's live document     the open accounts, the days, and `payIndex` - one row
+//                                  per closure whose entries have left it
+//   the server's closed documents  those entries, verbatim, create-once
+//   a phone's record               BOTH, laid together: every entry at the field path it
+//                                  was written at, exactly as before anything left
+//
+// So no fold in this app reads the index for money. closedPeriods, advanceOutstanding,
+// the judge, payrollReport and the pay book's own folds read the entries they have always
+// read, because on a phone the entries are still there. What the index is for is the
+// boundary: it says which closed documents make the live document whole again
+// (paybookWhole, on the way in), and which entries a whole-document write must leave out
+// (paybookStripCovered, on the way out). A phone that cannot fetch a closed document it
+// lacks does NOT adopt the server's document with a hole in it - it keeps the record it
+// has, says so, and tries again (js/sync/closed.js).
+//
+// WHAT THIS DOES NOT DO, said here so nobody reads it in: it does not shrink the copy a
+// PHONE keeps. A phone's record is as large as it always was. Folds that read the index
+// instead of the entries - which is what would let a phone hold less - are not built.
+
+const PAYBOOK_INDEX_VERSION = 1;
+
+// How long a settled closure stays in the live document before the app moves it by
+// itself. A phone that was out of signal for the whole life of a closure in the live
+// document has to fetch its closed copy before it can adopt anything; two weeks makes
+// that the rare case. The person can move a settled closure sooner, by hand.
+const PAYBOOK_ARCHIVE_AFTER_DAYS = 14;
+
+const PAYBOOK_INDEX_FIELDS = ['w', 'f', 't', 'at', 'g', 'ci', 'bo', 'a', 'x', 'n', 'o', 'p', 's', 'e', 'd'];
+
+// The one entry every closed document is named after: a closed document's id is the id of
+// one of the entries it holds (the statement, the payment, the void, the answer - or the
+// frozen payslip, for the ledger half of a closure from before statements).
+function paybookAnchorPath(closedId) {
+    const id = String(closedId);
+    return id.indexOf('le_') === 0 ? ledgerPath(id) : paybookPath(id);
+}
+
+function paybookReadAt(document, path) {
+    let node = document;
+    const parts = String(path).split('.');
+    for (let i = 0; i < parts.length; i += 1) {
+        if (!isPlainObject(node) || !ownsKey(node, parts[i])) return undefined;
+        node = node[parts[i]];
+    }
+    return node;
+}
+
+function paybookWriteAt(document, path, value) {
+    const parts = String(path).split('.');
+    let node = document;
+    for (let i = 0; i < parts.length - 1; i += 1) {
+        if (!ownsKey(node, parts[i]) || !isPlainObject(node[parts[i]])) putKey(node, parts[i], {});
+        node = node[parts[i]];
+    }
+    putKey(node, parts[parts.length - 1], value);
+}
+
+function paybookDeleteAt(document, path) {
+    const parts = String(path).split('.');
+    let node = document;
+    for (let i = 0; i < parts.length - 1; i += 1) {
+        if (!isPlainObject(node) || !ownsKey(node, parts[i])) return;
+        node = node[parts[i]];
+    }
+    if (isPlainObject(node) && ownsKey(node, parts[parts.length - 1])) delete node[parts[parts.length - 1]];
+}
+
+// Everything wrong with one stored index row. Empty means this build could have written
+// it. A row is the manifest of what left: a row that cannot be read names nothing, lays
+// nothing back and strips nothing - and is kept exactly as it lies.
+function paybookIndexRowProblems(id, row) {
+    if (!isPlainObject(row)) return ['an index row that is not a record'];
+    const out = [];
+    const safe = value => typeof value === 'string' && isSafeId(value);
+    const day = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+    Object.keys(row).forEach(key => {
+        if (PAYBOOK_INDEX_FIELDS.indexOf(key) === -1) {
+            out.push(`an index row with a field this build does not write (${key.slice(0, 20)})`);
+        }
+    });
+    if (!safe(row.w)) out.push('an index row that names nobody');
+    if (!day(row.f)) out.push('an index row with no period');
+    if (row.t !== undefined && !day(row.t)) out.push('an index row whose period does not end on a day');
+    if (row.at !== undefined && typeof row.at !== 'string') out.push('an index row closed at no moment');
+    ['g', 'ci', 'bo', 'x', 'n', 'o', 'p'].forEach(key => {
+        if (row[key] !== undefined && (typeof row[key] !== 'number' || !Number.isFinite(row[key]))) {
+            out.push(`an index row whose ${key} is not a number`);
+        }
+    });
+    if (row.s !== 'statement' && row.s !== 'legacy') out.push('an index row of a closure nobody answered for');
+    if (!Array.isArray(row.a) || !row.a.every(one => Array.isArray(one) && one.length === 3 && safe(one[0])
+        && typeof one[1] === 'number' && Number.isFinite(one[1])
+        && (one[2] === null || (typeof one[2] === 'number' && Number.isFinite(one[2]))))) {
+        out.push('an index row whose advance deductions cannot be read');
+    }
+    ['e', 'd'].forEach(key => {
+        if (row[key] !== undefined && (!Array.isArray(row[key]) || !row[key].every(safe)
+            || new Set(row[key]).size !== row[key].length)) {
+            out.push(`an index row whose list ${key} cannot be read`);
+        }
+    });
+    if (Array.isArray(row.e) && !row.e.every(one => typeof one === 'string' && one.indexOf('p') === 0)) {
+        out.push('an index row listing an entry that is not a pay entry');
+    }
+    if (out.length === 0) {
+        const want = row.s === 'statement' ? paybookStatementId(row.w, row.f)
+            : paybookLegacyId(periodArtifactId(row.w, row.f));
+        if (String(id) !== want || !isSafeId(String(id))) out.push('an index row filed under another name');
+    }
+    return out;
+}
+
+// The stored index as this build reads it: the rows it can read, and the ids of the ones
+// it cannot. Never throws, never repairs.
+function paybookStoredIndex(schedule) {
+    const held = (schedule && isPlainObject(schedule.payIndex) && isPlainObject(schedule.payIndex.rows))
+        ? schedule.payIndex.rows : {};
+    const rows = {};
+    const unreadable = [];
+    Object.keys(held).sort().forEach(id => {
+        if (POISON_SEGMENTS.indexOf(id) !== -1) return;
+        if (paybookIndexRowProblems(id, held[id]).length === 0) putKey(rows, id, held[id]);
+        else unreadable.push(id);
+    });
+    return { rows, unreadable };
+}
+
+// Every field path one row stands for - exactly the entries that left the live document
+// with it, derived from the row alone: the frozen payslip, one deduction per advance, the
+// row's own pay entry, and the other pay entries it lists.
+function paybookRowPaths(id, row) {
+    return [ledgerPath(periodArtifactId(row.w, row.f))]
+        .concat(row.a.map(one => ledgerPath(closureId(one[0], row.f))))
+        .concat([paybookPath(String(id))])
+        .concat((row.e || []).map(one => paybookPath(one)));
+}
+
+// The closed documents that hold them: the one the row is named after, and the others.
+function paybookRowDocs(id, row) {
+    return [String(id)].concat(row.d || []);
+}
+
+// paybookWhole(document, local, closed) -> { document, missing, broken, laid }
+//
+// The server's live document made whole: for every row of its index, the entries the row
+// stands for put back at their paths - from this phone's own record where it holds them
+// (they are the same bytes; the union in receive() would keep them anyway), and from the
+// closed documents in `closed` ({ id: document }, as fetched) where it does not.
+//
+//   missing   closed documents that have to be fetched before this can be whole
+//   broken    rows whose closed documents are all here and still do not hold what the row
+//             says. Nothing can make that whole; it is said, never papered over
+//   laid      how many entries were put back
+//
+// `document` is returned AS IT CAME - the same object - when its index names nothing,
+// which is every document there has ever been until the first closure leaves.
+function paybookWhole(document, local, closed) {
+    const index = paybookStoredIndex(document);
+    const ids = Object.keys(index.rows);
+    if (ids.length === 0) return { document, missing: [], broken: [], laid: 0 };
+    const out = paybookClone(document);
+    const have = isPlainObject(closed) ? closed : {};
+    const missing = [];
+    const broken = [];
+    let laid = 0;
+    ids.forEach(id => {
+        const row = index.rows[id];
+        let absent = paybookRowPaths(id, row).filter(path => paybookReadAt(out, path) === undefined);
+        absent = absent.filter(path => {
+            const mine = paybookReadAt(local, path);
+            if (mine === undefined) return true;
+            paybookWriteAt(out, path, paybookClone(mine));
+            laid += 1;
+            return false;
+        });
+        if (absent.length === 0) return;
+        const docs = paybookRowDocs(id, row);
+        const lacking = docs.filter(doc => !ownsKey(have, doc)
+            || paybookClosedProblems(doc, have[doc]).length > 0);
+        docs.filter(doc => lacking.indexOf(doc) === -1).forEach(doc => {
+            absent = absent.filter(path => {
+                if (!ownsKey(have[doc].entries, path)) return true;
+                paybookWriteAt(out, path, paybookClone(have[doc].entries[path]));
+                laid += 1;
+                return false;
+            });
+        });
+        if (absent.length === 0) return;
+        if (lacking.length > 0) {
+            lacking.forEach(doc => { if (missing.indexOf(doc) === -1) missing.push(doc); });
+        } else broken.push(id);
+    });
+    return { document: out, missing, broken, laid };
+}
+
+// The other direction: what a WHOLE-document write may carry. Every entry an index row
+// stands for is left out - it lives in a closed document, the rules refuse a write that
+// would put a pay entry back without creating one, and putting the ledger half back
+// would only refill the document the move emptied. The index itself is carried.
+// Returns the same object when there is nothing to leave out.
+function paybookStripCovered(document) {
+    const index = paybookStoredIndex(document);
+    const ids = Object.keys(index.rows);
+    if (ids.length === 0) return document;
+    const out = paybookClone(document);
+    ids.forEach(id => paybookRowPaths(id, index.rows[id]).forEach(path => paybookDeleteAt(out, path)));
+    return out;
+}
+
+// The index of two documents, unioned: rows only ever arrive. `standing`'s row stands
+// where both have one. Bytes, not judgements - an unreadable row is carried like any other.
+function paybookIndexUnion(standing, other) {
+    const rowsOf = side => (side && isPlainObject(side.payIndex) && isPlainObject(side.payIndex.rows))
+        ? side.payIndex.rows : {};
+    const rows = {};
+    [rowsOf(standing), rowsOf(other)].forEach(held => Object.keys(held).forEach(id => {
+        if (POISON_SEGMENTS.indexOf(id) === -1 && !ownsKey(rows, id)) putKey(rows, id, held[id]);
+    }));
+    return rows;
+}
+
+function layPaybookIndexUnion(target, standing, other) {
+    const rows = paybookIndexUnion(standing, other);
+    if (Object.keys(rows).length > 0) target.payIndex = { v: PAYBOOK_INDEX_VERSION, rows };
+}
+
+// Does `mine` hold every index row `theirs` does? Asked beside paybookCovers, for the
+// same reason: a snapshot naming a closure that has left the live document, on a phone
+// that has no row for it, is not that phone's own echo.
+function paybookIndexCovers(mine, theirs) {
+    const rows = (theirs && isPlainObject(theirs.payIndex) && isPlainObject(theirs.payIndex.rows))
+        ? theirs.payIndex.rows : {};
+    const held = (mine && isPlainObject(mine.payIndex) && isPlainObject(mine.payIndex.rows))
+        ? mine.payIndex.rows : {};
+    return Object.keys(rows).every(id => ownsKey(held, id));
+}
+
+// planArchive(schedule, today, options) -> { ok, reasons, bundles, totals, changes: [] }
+//
+// THE DRY RUN the owner reads before anything moves, and the list the move works from.
+// It writes nothing. One row per closed period per man (planHistoryMove's bundles), each
+// with the one thing the move needs to know and a person needs to be told:
+//
+//   state 'archived'   it has already left the live document (its row is in the index)
+//   state 'ready'      settled, and may leave now
+//   state 'waiting'    settled, and younger than `options.olderThanDays`
+//   state 'held'       it stays, and `why` says why:
+//     unanswered   a closure from before payments were recorded that nobody answered for
+//     owed         its wage has not been paid in full
+//     overpaid     more was paid than was owed - it needs a person first
+//     disputed     two phones recorded different amounts for this man
+//     corrected    a ledger correction points at one of its deductions
+//     irregular    an entry of it is not where this build would have written it
+//
+// `row` is the index row that would be stored (paybookIndexFrom's own, plus `e`, the pay
+// entries that leave with it; the move adds `d`, the closed documents, when it has read
+// them). Nothing unsettled moves, ever: what can still change must stay where every
+// phone reads it without asking.
+function planArchive(schedule, today, options) {
+    const want = isPlainObject(options) ? options : {};
+    const move = planHistoryMove(schedule);
+    const stored = paybookStoredIndex(schedule);
+    const derived = paybookIndexFrom(schedule).rows;
+    const fold = paybookFold(schedule);
+    const ledger = paybookLedger(schedule);
+    const reasons = paybookWritesEnabled() ? [] : ['gate'];
+    const horizon = Number.isInteger(want.olderThanDays) && want.olderThanDays > 0 && typeof today === 'string'
+        ? advanceDayStep(today, -want.olderThanDays) : null;
+    const names = {};
+    ((schedule && schedule.workers) || []).forEach(man => {
+        if (man && man.id !== undefined) putKey(names, String(man.id), String(man.name || ''));
+    });
+    const bundles = move.bundles.map(bundle => {
+        const artifactId = periodArtifactId(bundle.workerId, bundle.periodFrom);
+        const statementId = paybookStatementId(bundle.workerId, bundle.periodFrom);
+        const legacyId = paybookLegacyId(artifactId);
+        const rowId = bundle.source === 'statement' ? statementId : (bundle.source === 'legacy' ? legacyId : null);
+        const of = bundle.source === 'statement' ? fold.statements[statementId]
+            : (bundle.source === 'legacy' ? fold.legacy[legacyId] : null);
+        const base = { rowId, workerId: bundle.workerId,
+            name: ownsKey(names, bundle.workerId) ? names[bundle.workerId] : '',
+            periodFrom: bundle.periodFrom, periodTo: bundle.periodTo, source: bundle.source,
+            paths: bundle.paths.slice(), bytes: bundle.bytes,
+            closedOn: paybookDayOf(String((ledger[artifactId] || {}).at || '')),
+            owed: of ? of.owed : null, paid: of ? of.paid : null, due: of ? of.due : null };
+        if (rowId !== null && ownsKey(stored.rows, rowId)) {
+            return Object.assign(base, { state: 'archived', why: null, row: stored.rows[rowId] });
+        }
+        const held = why => Object.assign(base, { state: 'held', why, row: null });
+        if (!of) return held('unanswered');
+        if (fold.conflicts.some(one => one.workerIds.indexOf(bundle.workerId) !== -1)) return held('disputed');
+        if (of.overpaid !== 0) return held('overpaid');
+        if (of.due !== 0) return held('owed');
+        const row = ownsKey(derived, rowId) ? paybookClone(derived[rowId]) : null;
+        if (!row) return held('irregular');
+        const entries = bundle.paths.filter(path => !isPaybookPath(path)).map(path => path.split('.')[2]);
+        if (Object.keys(ledger).some(id => ledger[id] && String(ledger[id].kind) === 'reversed'
+            && entries.indexOf(String(ledger[id].targetId || '')) !== -1)) return held('corrected');
+        const extra = bundle.paths.filter(isPaybookPath).map(path => path.split('.')[1]).filter(id => id !== rowId);
+        if (extra.length > 0) row.e = extra.slice().sort();
+        // The row must be one this build reads back, and must stand for exactly the
+        // entries the bundle holds - no more, so nothing leaves that the row cannot
+        // name, and no fewer, so nothing is named that never left.
+        if (paybookIndexRowProblems(rowId, row).length > 0) return held('irregular');
+        const named = paybookRowPaths(rowId, row).slice().sort();
+        const there = bundle.paths.slice().sort();
+        if (named.length !== there.length || named.some((path, at) => path !== there[at])) return held('irregular');
+        if (horizon !== null && (base.closedOn === '' || base.closedOn > horizon)) {
+            return Object.assign(base, { state: 'waiting', why: 'recent', row });
+        }
+        return Object.assign(base, { state: 'ready', why: null, row });
+    });
+    const count = state => bundles.filter(bundle => bundle.state === state);
+    const bytesOf = list => list.reduce((sum, bundle) => sum + bundle.bytes, 0);
+    const rowBytes = list => list.reduce((sum, bundle) => sum + paybookEntryBytes(bundle.rowId, bundle.row), 0);
+    const ready = count('ready');
+    // What the SERVER's document weighs is this phone's record less what has already
+    // left it: the phone keeps the entries, the live document does not.
+    const liveNow = JSON.stringify(paybookStripCovered(schedule === undefined ? null : schedule) || null).length;
+    return {
+        ok: reasons.length === 0,
+        reasons,
+        bundles,
+        totals: {
+            bundles: bundles.length,
+            ready: ready.length,
+            readyBytes: bytesOf(ready),
+            waiting: count('waiting').length,
+            held: count('held').length,
+            archived: count('archived').length,
+            unreadableRows: stored.unreadable.length,
+            liveBytes: liveNow,
+            liveBytesAfter: liveNow - bytesOf(ready) + rowBytes(ready),
+            limitBytes: 1048576
+        },
+        changes: []
+    };
 }

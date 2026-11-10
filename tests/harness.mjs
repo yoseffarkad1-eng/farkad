@@ -41,6 +41,7 @@ const FILES = [
     'js/sync/status.js',
     // The pay book's server-first door (v175). Above boot.js, like every split.
     'js/sync/transact.js',
+    'js/sync/closed.js',
     // Last of the sync group, and last for a reason - see the file's own header.
     'js/sync/boot.js',
     // For the backup, snapshot and undo-stack machinery. It builds DOM nodes and calls
@@ -655,6 +656,25 @@ export function makeCloud(options = {}) {
             'a receipt of this name describes a different operation');
     }
 
+    // WHAT firestore.rules SAY ABOUT THE PAY BOOK AND ITS INDEX, for a whole-document
+    // write (Phase 3 and Phase 5). Opt-in (`payRules: true`): the Phase 2 suites write pay
+    // entries through the ordinary queue on purpose, which these rules refuse. A whole
+    // document may not change the `pay` map at all (it cannot create a closed document),
+    // may not change the index, and - once an index exists - must speak protocol 2.
+    cloud.payRules = options.payRules === true;
+    function payRulesProblem(data) {
+        if (!cloud.payRules || !cloud.doc) return null;
+        const flat = value => JSON.stringify(Object.keys(value || {}).sort().map(key => [key, value[key]]));
+        const rowsOf = doc => ((doc && doc.payIndex) || {}).rows || {};
+        const deny = why => { const error = new Error(why); error.code = 'permission-denied'; return error; };
+        if (flat(data.pay) !== flat(cloud.doc.pay)) return deny('a whole document may not change the pay book');
+        if (flat(rowsOf(data)) !== flat(rowsOf(cloud.doc))) return deny('a whole document may not change the index');
+        if (Object.keys(rowsOf(cloud.doc)).length > 0 && !(data.protocol >= 2)) {
+            return deny('a build that does not keep the pay book may not write over an index');
+        }
+        return null;
+    }
+
     cloud.adapter = {
         // The envelope travels IN the patch, exactly as it does on the wire: the client
         // sets protocol, revision and lastOpId as ordinary fields of the same write.
@@ -744,6 +764,80 @@ export function makeCloud(options = {}) {
                 }
             });
         },
+        // A SETTLED CLOSURE LEAVING THE LIVE DOCUMENT (Phase 5), modelled on the production
+        // adapter's archiveClosed and on firestore.rules: protocol 2, the closed documents
+        // exist and hold every entry being removed exactly as the live document does, the
+        // write names the one index row it adds and that row's closed document exists,
+        // and the index only grows.
+        archiveClosed(patch, removals, closedIds) {
+            const paths = Array.isArray(removals) ? removals : [];
+            const ids = Array.isArray(closedIds) ? closedIds : [];
+            if (paths.length === 0 || ids.length === 0) {
+                return Promise.reject(refuse('no-closed-document', 'nothing may leave without a closed document'));
+            }
+            const problem = guard('archiveClosed', patch);
+            if (problem) {
+                if (problem.code === 'unavailable') problem.unsent = true;
+                return Promise.reject(problem);
+            }
+            return landing('archiveClosed', patch, () => {
+                if (!cloud.doc) throw refuse('not-found', 'No document to update');
+                if (cloud.protocol && receiptFor(patch.lastOpId)) {
+                    cloud.writes.push({ kind: 'archiveClosed', patch, replayed: true });
+                    return { replayed: true, revision: receiptFor(patch.lastOpId).revision };
+                }
+                const said = protocolProblem(patch, false);
+                if (said) throw said;
+                const stable = value => {
+                    if (value === null || value === undefined || typeof value !== 'object') {
+                        return JSON.stringify(value === undefined ? null : value);
+                    }
+                    if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+                    return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + stable(value[key])).join(',') + '}';
+                };
+                const at = (root, path) => path.split('.').reduce((node, key) =>
+                    (node && typeof node === 'object' && Object.prototype.hasOwnProperty.call(node, key) ? node[key] : undefined), root);
+                const held = {};
+                ids.forEach(id => {
+                    const entries = cloud.closed.has(String(id)) ? (cloud.closed.get(String(id)).entries || {}) : {};
+                    Object.keys(entries).forEach(path => { if (!(path in held)) held[path] = entries[path]; });
+                });
+                const unconfirmed = paths.filter(path => !Object.prototype.hasOwnProperty.call(held, path)
+                    || at(cloud.doc, path) === undefined || stable(held[path]) !== stable(at(cloud.doc, path)));
+                if (!ids.every(id => cloud.closed.has(String(id))) || unconfirmed.length > 0) {
+                    const none = refuse('closed-unconfirmed', 'a closed document does not hold what would leave');
+                    none.paths = unconfirmed;
+                    throw none;
+                }
+                // The rules' half.
+                const rowKeys = Object.keys(patch).filter(key => key.indexOf('payIndex.rows.') === 0);
+                const before = ((cloud.doc.payIndex || {}).rows) || {};
+                if (patch.protocol < 2 || typeof patch.archivedId !== 'string'
+                    || rowKeys.length !== 1 || rowKeys[0] !== 'payIndex.rows.' + patch.archivedId
+                    || Object.prototype.hasOwnProperty.call(before, patch.archivedId)
+                    || !cloud.closed.has(patch.archivedId)
+                    || Object.keys(patch).some(key => key.indexOf('pay.') === 0)) {
+                    const denied = new Error('the rules refuse this archive write');
+                    denied.code = 'permission-denied';
+                    throw denied;
+                }
+                Object.keys(patch).forEach(path => setByPath(cloud.doc, path, patch[path]));
+                paths.forEach(path => {
+                    const parts = path.split('.');
+                    let node = cloud.doc;
+                    for (let i = 0; i < parts.length - 1 && node; i += 1) node = node[parts[i]];
+                    if (node) delete node[parts[parts.length - 1]];
+                });
+                landReceipt(patch);
+                cloud.writes.push({ kind: 'archiveClosed', patch, removed: paths.slice(), closed: ids.map(String) });
+                publish();
+                if (cloud.loseAnswer && cloud.loseAnswer('archiveClosed', patch)) {
+                    const lost = new Error('the connection dropped before the answer');
+                    lost.code = 'unavailable';
+                    throw lost;
+                }
+            });
+        },
         readClosed(id) {
             if (!cloud.online) return Promise.reject(offlineError('read'));
             return Promise.resolve(cloud.closed.has(String(id))
@@ -766,6 +860,8 @@ export function makeCloud(options = {}) {
                 }
                 const said = protocolProblem(data, !cloud.doc);
                 if (said) throw said;
+                const denied = payRulesProblem(data);
+                if (denied) throw denied;
                 cloud.doc = JSON.parse(JSON.stringify(data));
                 landReceipt(data);
                 cloud.writes.push({ kind: 'save', data });

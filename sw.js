@@ -83,6 +83,7 @@ const SHELL = [
     './js/sync/send.js',
     './js/sync/status.js',
     './js/sync/transact.js',
+    './js/sync/closed.js',
     './js/sync/boot.js',
     './js/state.js',
     './js/ui/dom.js',
