@@ -385,6 +385,38 @@ given('both phones run the build as it ships', (await Promise.all([a, b].map(pho
     await c.context.close();
 }
 
+// =====================================================================================
+{
+    suite('a record with NO carry approval: the screen says so, writes it first, waits for it to reach the server, and goes on by itself');
+
+    // tests/activation.test.mjs (V2, V4) holds the model's half. This is the screen's own
+    // sequence - accDrawActivate and accActivationRetry - on a record whose carry nobody
+    // ever approved, which is the one record the other sections do not have.
+    const net3 = makeBrowserCloud({ payRules: true });
+    const g = await openPhone(browser, server.url, { cloud: net3 });
+    await seed(g.page, { advances: [], approveCarry: false });
+    given('this record carries no approval', await g.page.evaluate(() => !((State.schedule.ledger || {}).migrations || {}).cm_carry) && !(await on(g.page)));
+    await openSheet(g.page);
+    await g.page.locator('#paybookActivationBox button').click();
+    await g.page.waitForTimeout(250);
+    same('THE SCREEN SAYS the step also approves the carry, once', [await screen(g.page), await g.page.locator(`${V} .acc-activation-carry`).count(),
+        (await txt(g.page, `${V} [data-line="carry"]`)).startsWith('ההפעלה מאשרת גם, פעם אחת, שיתרת מקדמה עוברת לחשבון הבא.')], ['activate', 1, true]);
+    const wrote = net3.cloud.writes.length;
+    await tapText(g.page, T.run);
+    await g.page.locator('#askOk').click();
+    await g.page.waitForFunction(() => paybookOn(State.schedule) === true, null, { timeout: 30000 });
+    await g.page.waitForTimeout(400);
+    same('ONE PRESS: the approval went up by the ordinary queue, then the opening as one transaction - and the record is on',
+        [net3.cloud.writes.slice(wrote).filter(write => !write.replayed).map(write => write.kind), Object.keys(net3.cloud.doc.ledger.migrations),
+            Object.keys(net3.cloud.doc.pay), net3.cloud.closed.has('po_open')], [['update', 'transact'], ['cm_carry'], ['po_open'], true]);
+    same('the phone is on the accounts home and says it once; nothing is in doubt and nothing is queued',
+        [await screen(g.page), await all(g.page, `${V} .acc-banner .acc-note-ok`),
+            await g.page.evaluate(() => [FarkadSync.payIntent(), FarkadSync.pendingCount(), carryReportingEnabled(State.schedule)])],
+        ['list', [T.done], [null, 0, true]]);
+    same('no page error', g.errors, []);
+    await g.context.close();
+}
+
 await a.context.close();
 await b.context.close();
 await browser.close();
