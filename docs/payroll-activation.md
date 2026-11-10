@@ -250,17 +250,17 @@ file, right after the receipts block. **The owner pastes ONE file holding both.*
   `probe/` and before the brace that closes `match /schedules/{docId}`** — a sibling of
   the four, sharing no function and no field with them (`tests/activation.test.mjs`, V12,
   pins that place).
-- **How it is built, not typed:** by a script, not by hand - take the transport branch's
-  file, diff it against main's, require that the difference is ONE insertion after the
-  receipts block and that no function name it declares exists in this branch's file, and
-  insert those lines at the place above. (The script that did this on 2026-11-10,
-  `combine-rules.py`, was a working file of that session and is not in the repository;
-  the four checks in this bullet are the whole of it.)
-- **The file as built on 2026-11-10** (a working file of that session, handed over with
-  the branch, not committed): this branch's rules plus the 67 lines of the transport
-  block. Every emulator suite of this branch is to be run with it in place of
-  `firestore.rules` before it is pasted - see «What was NOT verified» for whether that
-  was done.
+- **How it is built, not typed:** `python3 tools/combine-rules.py <this branch's
+  firestore.rules> <main's firestore.rules> <the transport branch's firestore.rules>
+  <out>`. It does not merge text. It takes the other branch's change only if it is ONE
+  insertion into main's file right after the receipts block, holding one `match` block
+  and declaring no function this branch's file declares; inserts those lines at the place
+  above; and checks that every line of both is in the result. Anything else and it stops.
+- **The file as built on 2026-11-10** (a working file handed over with the branch, not
+  committed - it belongs to whichever branch is merged second): this branch's rules plus
+  the 67 lines of the transport block, 41,260 bytes. **Every emulator suite of this
+  branch is run with it in place of `firestore.rules` before it is pasted** - «What was
+  NOT verified» says whether that was done.
 - **Whichever branch is merged second** carries the combined file as its
   `firestore.rules`, so that the file in the repository is again exactly what is live.
   The probe's name does **not** move for the transport block: no client refuses to run
