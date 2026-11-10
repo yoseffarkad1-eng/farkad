@@ -1768,6 +1768,16 @@ function sameLedgerFact(one, two) {
 // whole family, or a day, or a roster entry, is never superseded by this rule.
 function ledgerPathSupersededBy(path, mine, theirs) {
     const parts = String(path).split('.');
+    // AND A PAY BOOK ENTRY (v173), by the pay book's own rule. `pay.<id>` is append-only
+    // with deterministic ids for exactly the reason a closure's are, so two phones that
+    // close one account with the same choices send the same path with the same money and
+    // a different hand on it - and a queue that held that as a contest would stop both
+    // of them over a statement they agree on. paybookSameFact owns what "the same" is
+    // there (its list of who-and-when fields is not this file's); asked at run time,
+    // because js/model/payroll.js loads after this file.
+    if (parts.length === 2 && parts[0] === 'pay') {
+        return typeof paybookSameFact === 'function' && paybookSameFact(mine, theirs);
+    }
     if (parts.length !== 3 || parts[0] !== 'ledger') return false;
     if (parts[1] !== 'advances' && parts[1] !== 'migrations') return false;
     return sameLedgerFact(mine, theirs);

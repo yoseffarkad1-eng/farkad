@@ -30,6 +30,9 @@ const FILES = [
     'js/model/money.js',
     'js/model/migrate.js',
     'js/model/ledger.js',
+    // The pay book's model (v173): after the ledger it builds on, and before anything that
+    // reads a queue - a queued `pay.<id>` is validated by payEntryProblems in this file.
+    'js/model/payroll.js',
     'js/state.js',
     'js/sync/sync.js',
     'js/sync/restore.js',

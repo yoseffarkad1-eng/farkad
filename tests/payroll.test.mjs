@@ -2,9 +2,13 @@
 //
 //   node tests/payroll.test.mjs
 //
-// js/model/payroll.js is NOT shipped: index.html does not load it and sw.js does not cache
-// it. This suite loads it into a device beside the shipped model, the way a later build
-// would, and it is the only thing that runs it. Synthetic data only.
+// js/model/payroll.js is shipped SHUT since v173: every device in the harness loads it,
+// and its writer is behind FARKAD_FLAGS.paybook, which is false in what a person installs.
+// This suite is about the model with the writer OPEN, so every device here is built with
+// the flag on through the test seam - the same thing a build with the gate open would do.
+// (Until v173 the file was loaded by this suite alone, into a device that did not have it;
+// that second load would now declare every const twice.) What the shut gate does is
+// tests/paybook.store.test.mjs's business. Synthetic data only.
 //
 // PHASE 0 comes first and asserts nothing about the new file. It pins what the app does
 // TODAY in the three places the owner called wrong or the audit found open, so that the
@@ -26,7 +30,7 @@
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeDevice, sourceRoot } from './harness.mjs';
+import { makeDevice, sourceRoot, loadOrder } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
 const PAYROLL = readFileSync(join(sourceRoot(), 'js/model/payroll.js'), 'utf8');
@@ -45,9 +49,8 @@ const stamp = (today, by = 'd_boss', hour = '10') => ({ at: `${today}T${hour}:00
 let devices = 0;
 function device(options = {}) {
     devices += 1;
-    const d = makeDevice(Object.assign({ deviceId: `d_pay${devices}` }, options));
-    vm.runInContext(PAYROLL, d.ctx, { filename: 'js/model/payroll.js' });
-    return d;
+    return makeDevice(Object.assign({ deviceId: `d_pay${devices}` }, options,
+        { flags: Object.assign({ paybook: true }, options.flags || {}) }));
 }
 
 // The crew, recorded through the app's own doors: the roster by commitRoster, every day
@@ -182,11 +185,16 @@ const without = (record, fields) => {
     same('TODAY: one chosen total of 700 is split by the app, oldest first',
         split.rows.map(row => [row.amount, row.balanceAfter]), [[500, 0], [200, 200]]);
 
-    // AND NOTHING ANYWHERE SAYS "PAID". No entry kind, no field.
+    // AND NOTHING ANYWHERE SAYS "PAID". No entry kind, and nothing in the pay book.
+    //
+    // MOVED AT v173, deliberately: this read `S.pay === undefined`. The record now carries
+    // the map (emptySchedule names it, so that normaliseSchedule keeps what another phone
+    // wrote), so the fact being pinned is spelled as what it always meant - the existing
+    // closure writes nothing into it. An empty map is still "no notion of a payment".
     const kinds = Object.values(S.ledger.advances).map(entry => entry.kind);
-    check('TODAY: the record has no notion of a payment - a closure says what was deducted and no more',
+    check('TODAY: the existing closure records no payment - it says what was deducted and no more',
         kinds.every(kind => ['given', 'closed', 'deducted', 'repaid', 'reversed', 'corrected', 'cancelled'].includes(kind))
-        && S.pay === undefined, JSON.stringify([...new Set(kinds)]));
+        && JSON.stringify(S.pay) === '{}', JSON.stringify([[...new Set(kinds)], S.pay]));
 
     // AN ADVANCE WHOSE OWN PERIOD WAS NEVER CLOSED: two folds, two answers. Found while
     // building the planner, on unchanged code. advanceOutstanding says 500 is still owed -
@@ -1219,8 +1227,15 @@ const without = (record, fields) => {
     // device: the behaviour follows the constant and nothing else had to be touched.
     const flipped = (line, replacement) => {
         given(`the rule is spelled once in the file (${line})`, PAYROLL.split(line).length === 2);
-        const other = makeDevice({ deviceId: `d_flip${++devices}` });
-        vm.runInContext(PAYROLL.replace(line, replacement), other.ctx, { filename: 'js/model/payroll.js (one rule flipped)' });
+        // The whole app, with that one file's one line changed - through the harness's
+        // own door for running a device on other bytes, since the file is in the load
+        // order now and cannot be loaded a second time beside itself.
+        const sources = loadOrder().map(file => ({
+            file,
+            code: file === 'js/model/payroll.js' ? PAYROLL.replace(line, replacement)
+                : readFileSync(join(sourceRoot(), file), 'utf8')
+        }));
+        const other = makeDevice({ deviceId: `d_flip${++devices}`, sources, flags: { paybook: true } });
         return (name, ...args) => other.call(name, ...args);
     };
     const week1Open = clone(S0);
@@ -1380,7 +1395,8 @@ const without = (record, fields) => {
     given('a repayment is recorded', d.State.commitMany([d.call('recordAdvanceRepaid', d.State.schedule, repaidId, 300,
         '2026-10-12', 'מזומן', '2026-10-12T09:00:00.000Z', d.id, 'cash')]) === true);
     const S = clone(d.State.schedule);
-    given('the record carries no pay map', S.pay === undefined);
+    // v173: the map exists on every record and is empty on this one - see the Phase 0 pin.
+    given('the record carries no pay entry', JSON.stringify(S.pay) === '{}' && S.payConflicted === undefined);
 
     const workers = ['w_ahmad', 'w_khaled', 'w_nasser', 'w_salim'];
     const days = ['2026-10-05', '2026-10-08', '2026-10-12', '2026-10-15', '2026-10-16', '2026-10-30'];
@@ -1426,8 +1442,8 @@ const without = (record, fields) => {
         { running: 2000 + 0 + 3000 + 3600, wageDue: 0, debt: 300 + 200 + 500 });
 
     // THE LEDGER HALF OF A NEW CLOSURE IS ACCEPTED BY TODAY'S JOURNAL AND TODAY'S READERS.
-    // The `pay.*` half is not a path the shipped normaliser keeps - that is a later phase -
-    // but the part every phone in the field will read has to pass every existing door now.
+    // The `pay.*` half is stored since v173 and is tests/paybook.store.test.mjs's subject;
+    // this is the part every phone in the field already reads, through today's own doors.
     const live = world({ advances: [['w_khaled', '2026-10-03', 500], ['w_khaled', '2026-10-06', 400], ['w_khaled', '2026-10-10', 300]] });
     const L0 = opened(live);
     const [k1, k2, k3] = advancesOf(L0, 'w_khaled');
@@ -1437,7 +1453,7 @@ const without = (record, fields) => {
     same('today\'s journal takes the person\'s per-advance split in one batch', live.State.commitMany(clone(ledgerHalf)), true);
     const reopened = makeDevice({ storage: live.dump() });
     reopened.State.load();
-    same('and after a reopen the phone is not blocked, holds nothing unreadable and calls no closure impossible',
+    same('and after a reopen - on a device with the SHIPPED flags - the phone is not blocked, holds nothing unreadable and calls no closure impossible',
         [reopened.call('farkadWritesBlocked'), Object.keys(reopened.State.schedule.ledger.unreadable || {}),
             reopened.call('impossibleClosures', reopened.State.schedule),
             [k1, k2, k3].map(id => reopened.call('advanceOutstanding', reopened.State.schedule, id).left)],

@@ -161,6 +161,26 @@ Object.assign(FarkadSync, {
             });
         }
 
+        // AND NEITHER IS THE PAY BOOK (v173) - the same rule, for the same reason, at the
+        // same moment.
+        //
+        // A restore point from last month, a backup file written before the first
+        // closure, a cloud copy from a phone that has not updated: each is a document
+        // with fewer pay entries than this phone holds, or none, and without this line
+        // each would be a button that un-pays people - the statement and the payment
+        // gone from this phone and, one whole-document write later, from the cloud and
+        // the other two. Entries are unioned by id and none is removed.
+        //
+        // WHAT IS LIVE STANDS over what is being restored, where one id holds two
+        // different bodies - the direction is the opposite of the ledger's just above,
+        // on purpose. An entry is never rewritten, and a restore that put a file's older
+        // body over the one this phone and the cloud already agree on would be exactly
+        // that rewrite. The file's copy is kept beside it under `payConflicted`, travels
+        // inside the document this restore sends, and is every phone's to see.
+        if (typeof layPaybookUnion === 'function') {
+            layPaybookUnion(document, State.schedule, document);
+        }
+
         // Checked before it is written down, not only when it is read back. A record
         // that would be quarantined on the next read is a record that should never have
         // been written: it would block every restore on the device and halt recording,
@@ -570,14 +590,35 @@ Object.assign(FarkadSync, {
             });
         }
 
+        // THE PAY ENTRIES THE CLOUD LEARNED IN THAT SAME WINDOW (v173), by the same union.
+        // A payment another phone recorded while this restore was waiting is on the
+        // server and on nothing this phone holds - it is deliberately adopting nothing -
+        // and the whole-document write about to go would put a document that has never
+        // heard of it over the only copy the other phones are not themselves holding.
+        //
+        // THE CLOUD'S COPY STANDS here, as it does in receive(): what the server already
+        // holds under an id is what every other phone is folding, and this write must
+        // not be the thing that changes it. `base` is the raw document, never normalised;
+        // paybookUnion reads only a `pay` that is a record and judges no entry.
+        if (typeof layPaybookUnion === 'function') {
+            layPaybookUnion(merged, base, merged);
+        }
+        const paySubstance = document => canonicalJson({
+            pay: (document && document.pay) || {},
+            beside: (document && document.payConflicted) || {}
+        });
+
         // Compared on the ledger alone, and WITHOUT normalising: replacementContent
         // normalises, and normalising a document that carries disputed bodies tells
         // Recovery before anything durable has happened - see disputedBodiesIn. And
         // compared on what the container SAYS rather than on its shape - see
-        // ledgerSubstance, which is a bug that cost a recorded day.
+        // ledgerSubstance, which is a bug that cost a recorded day. (And on the pay book,
+        // the same way and for the same reason: what it says, not whether an empty map
+        // happens to be spelled out.)
         if (arrivedAdvances.length === 0
             && ledgerSubstance(merged.ledger)
-            === ledgerSubstance(envelope.document.ledger)) {
+            === ledgerSubstance(envelope.document.ledger)
+            && paySubstance(merged) === paySubstance(envelope.document)) {
             return envelope;
         }
 

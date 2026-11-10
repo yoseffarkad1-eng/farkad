@@ -966,9 +966,20 @@ Object.assign(FarkadSync, {
             const wanted = isRimaCount(item.value) ? item.value : 0;
             return rimaCount(State.schedule, date, placeId) === wanted;
         };
+        //
+        // AND NOTHING IN THE PAY BOOK THIS COPY LACKS (v173) - the same trap, one map
+        // over. A phone that wrote last on v171 or earlier carries that build's copy,
+        // which never kept `pay`, under exactly the cloud's stamps; opened on this build
+        // its first snapshot read as its own echo and was skipped, so a closure and a
+        // payment another phone had recorded were on no screen of this one while the
+        // line said synced - until somebody else happened to write. Measured against
+        // v167, v169 and v171 in tests/paybook.oldbuilds.test.mjs. Asked one way only:
+        // an entry THIS copy holds and the snapshot does not is this phone's own unsent
+        // work, which is what an echo looks like, and adopting changes nothing about it.
         if (remote.updatedAt === State.schedule.updatedAt
             && remote.updatedBy === syncDeviceId()
-            && sameRimaLayers(remote, State.schedule, owes)) {
+            && sameRimaLayers(remote, State.schedule, owes)
+            && (typeof paybookCovers !== 'function' || paybookCovers(State.schedule, remote))) {
             this.noteCloudHeard();
             this.setStatus('synced');
             this.archiveDaily(State.schedule);
@@ -998,6 +1009,22 @@ Object.assign(FarkadSync, {
                     here: clash.mine, arrived: clash.theirs
                 };
             });
+        }
+        // THE PAY BOOK, UNIONED (v173) - append-only against the other phones exactly as
+        // the ledger is. A snapshot from a phone that has not updated carries no `pay`
+        // at all, and that is a phone that has never heard of one, not one that has
+        // removed it: nothing this device holds leaves. See paybookUnion.
+        //
+        // THE CLOUD'S COPY STANDS where the two disagree about an id, and this phone's
+        // is kept beside it under `payConflicted` - on the record, so it survives the
+        // persist below and every reopen. Nothing is told to Recovery and nothing stops:
+        // both bodies are readable, the fold counts the one every other phone counts,
+        // the planners refuse that man, and the queued write that lost is held by the
+        // pre-send pass (replacesWhole) and listed in ⋯ like any contested write. The
+        // ledger half of the same disagreement, if there is one, is the block above this
+        // one and stops the device exactly as it always has.
+        if (typeof layPaybookUnion === 'function') {
+            layPaybookUnion(State.schedule, remote, previous);
         }
         // And the vehicles, on the same rule and for the same reason - see
         // mergeVehiclesInto. They are dormant in this build, which means nothing writes
@@ -1654,6 +1681,16 @@ function applyJournalEntry(schedule, path, value, perEntity, tombstoned) {
                 return;
             }
 
+            // pay.<entry id> (v173). Put back when the schedule does not have it - an
+            // arriving snapshot that has not heard of an entry has not disagreed with it
+            // - and NEVER laid over one it does have: see layPaybookEntry in
+            // js/model/payroll.js, which owns the rule. Asked at run time; a queue that
+            // holds a pay path was read through that same file.
+            if (parts.length === 2 && parts[0] === 'pay') {
+                if (typeof layPaybookEntry === 'function') layPaybookEntry(schedule, parts[1], value);
+                return;
+            }
+
             // One person, queued by id. A worker added seconds ago must not be dropped by
             // the snapshot that arrives before the send completes.
             if (parts.length === 3 && parts[0] === 'roster'
@@ -1794,6 +1831,15 @@ function scheduleHoldsEntry(schedule, path, value) {
         const approvals = (schedule.ledger || {}).migrations || {};
         return Object.prototype.hasOwnProperty.call(approvals, parts[2])
             && same(approvals[parts[2]], value);
+    }
+
+    // A pay book entry (v173) is never removed either, so a null owes nothing; and it is
+    // HELD when the record has that id saying the same thing, whoever signed the copy
+    // that stands - see paybookHoldsEntry for why bytes are the wrong question here.
+    if (parts.length === 2 && parts[0] === 'pay') {
+        if (value === null) return true;
+        return typeof paybookHoldsEntry === 'function'
+            && paybookHoldsEntry(schedule, parts[1], value);
     }
 
     if (parts.length === 3 && parts[0] === 'roster'

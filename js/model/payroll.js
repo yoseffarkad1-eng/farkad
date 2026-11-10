@@ -1,11 +1,16 @@
 // Worker accounts: what a man is owed, what was closed, and what actually reached him.
 //
-// NOT SHIPPED. index.html does not load this file, sw.js does not precache it and no build
-// stamp moved for it. It is the pure half of a feature that has no screen, no storage and
-// no wire yet: every function here takes a schedule and hands back plain data, and none of
-// them touches the DOM, Store, the journal or a clock. tests/payroll.test.mjs loads it into
-// a device beside the shipped model and is the only thing that runs it. What a later phase
-// has to add before any of this may reach a phone is listed in docs/payroll-closure.md.
+// SHIPPED SHUT (v173). The file is loaded - index.html, after model/ledger.js and above
+// the sync group, because reading the queue at load reaches payEntryProblems - and the
+// record it describes is stored, merged, backed up and sent like the ledger. What is NOT
+// on is the writer: FARKAD_FLAGS.paybook is false, so every planner here refuses with
+// `gate` and State.commitPaybook refuses whatever reaches it. A phone on this build keeps
+// a pay book it is handed and never starts one. There is still no screen.
+//
+// It is the pure half: every function here takes a schedule and hands back plain data,
+// and none of them touches the DOM, Store, the journal or a clock. The half that writes is
+// State.commitPaybook (js/state.js); the half that merges calls paybookUnion below from
+// the three doors a document arrives by. docs/payroll-closure.md has both phases as built.
 //
 // ---------------------------------------------------------------- why
 //
@@ -506,6 +511,235 @@ function paybookSameFact(one, two) {
         return out;
     };
     return sameLedgerBytes(facts(one), facts(two));
+}
+
+// ---------------------------------------------------------------- the writer's gate
+//
+// Does this BUILD create pay entries? One answer, read off the frozen flags, so that a
+// planner, the commit and a future screen cannot each have their own idea of it. Reading,
+// keeping, merging and sending are deliberately not behind it - see FARKAD_SHIPPED_FLAGS.
+function paybookWritesEnabled() {
+    return typeof FARKAD_FLAGS !== 'undefined' && FARKAD_FLAGS.paybook === true;
+}
+
+// ---------------------------------------------------------------- two documents, one book
+//
+// paybookUnion(standing, other) -> { pay, payConflicted, clashes }
+//
+// The pay book of two documents, as one: every entry either of them holds, and nothing
+// removed. A document that carries no `pay` at all - every phone before v173, every backup
+// written before the first closure - has not disagreed with one, so it takes nothing away.
+// That is mergeLedgerInto's rule, and it is the whole reason a not-updated phone's
+// snapshot cannot erase somebody's payment from a phone that has it.
+//
+// ONE ID, TWO BODIES. Same money with a different hand on it (paybookSameFact) is one
+// fact and `standing`'s copy is the record. Different money is a disagreement nobody but
+// a person may settle: `standing`'s copy STANDS, the other is kept verbatim beside it
+// under `payConflicted[<id>]`, and the id is named in `clashes`. Never merged, never
+// chosen between by a clock, never last-write-wins.
+//
+// WHO STANDS is the caller's statement, and the three callers say the same thing in
+// three places: what the cloud holds outranks what a phone holds, and what is live
+// outranks what is being restored. So every phone that has heard the cloud folds the SAME
+// entry under a disputed id - the one the other two fold - and the loser's own figure is
+// beside it rather than in the arithmetic. (The ledger does it the other way round on the
+// phone that lost, which is why that phone has to be stopped; this map can afford not to
+// stop it. See docs/payroll-closure.md, «the conflict rule».)
+//
+// An entry this build cannot read is treated as bytes like any other: it stands if it is
+// `standing`'s, it is kept beside if it is not. Nothing here repairs or judges one.
+//
+// Pure. Neither input is touched; the entries themselves are shared, not copied, as
+// mergeLedgerInto shares them.
+function paybookUnion(standing, other) {
+    const bookOf = side => (side && isPlainObject(side.pay)) ? side.pay : {};
+    const besideOf = side => (side && isPlainObject(side.payConflicted)) ? side.payConflicted : {};
+    const usable = id => POISON_SEGMENTS.indexOf(id) === -1;
+    const pay = {};
+    const beside = {};
+    const clashes = [];
+
+    const sameAsStanding = (id, body) => ownsKey(pay, id)
+        && (sameLedgerBytes(pay[id], body) || paybookSameFact(pay[id], body));
+    const keepBeside = (id, body) => {
+        if (body === undefined || sameAsStanding(id, body)) return;
+        if (!ownsKey(beside, id)) putKey(beside, id, []);
+        if (!beside[id].some(had => sameLedgerBytes(had, body))) beside[id].push(body);
+    };
+
+    const first = bookOf(standing);
+    Object.keys(first).forEach(id => { if (usable(id)) putKey(pay, id, first[id]); });
+    const second = bookOf(other);
+    Object.keys(second).forEach(id => {
+        if (!usable(id)) return;
+        if (!ownsKey(pay, id)) { putKey(pay, id, second[id]); return; }
+        if (sameAsStanding(id, second[id])) return;
+        clashes.push(id);
+        keepBeside(id, second[id]);
+    });
+    // What either side was ALREADY keeping beside an entry stays kept: a second reading
+    // of a disagreement is not a licence to forget half of it.
+    [standing, other].forEach(side => {
+        const held = besideOf(side);
+        Object.keys(held).forEach(id => {
+            if (!usable(id)) return;
+            (Array.isArray(held[id]) ? held[id] : [held[id]]).forEach(body => keepBeside(id, body));
+        });
+    });
+    return { pay, payConflicted: beside, clashes };
+}
+
+// The union, written onto a document. `target` is usually one of the two sides; it is
+// named separately because which side STANDS and which object is being built are two
+// different questions, and conflating them is how mergeLedgerInto's direction went
+// unnoticed for a release (see the note inside it).
+function layPaybookUnion(target, standing, other) {
+    const union = paybookUnion(standing, other);
+    target.pay = union.pay;
+    if (Object.keys(union.payConflicted).length > 0) target.payConflicted = union.payConflicted;
+    else delete target.payConflicted;
+    // And the bytes of a container neither side could read (normaliseSchedule's
+    // `payUnreadableContainer`), from whichever side is holding them: the evidence is part
+    // of the record so that the hold outlives a session, and a document that has simply
+    // never seen it must not be what takes it off.
+    [standing, other].forEach(side => {
+        if (target.payUnreadableContainer === undefined && side
+            && side.payUnreadableContainer !== undefined) {
+            target.payUnreadableContainer = side.payUnreadableContainer;
+        }
+    });
+    return union.clashes;
+}
+
+// ONE ENTRY, laid onto a schedule by the same law - for the journal's replay, where the
+// thing arriving is a single (path, value) and not a document.
+//
+// Never an overwrite. A queued entry is put where there is nothing; where the record
+// already holds that id it is left exactly as it is, and a body that differs is kept
+// beside it. That order matters at the one moment it can bite: a snapshot has just been
+// adopted carrying another phone's statement, and this phone's own pending one is about
+// to be laid back "on top" (reapplyPending). On top is what every other path family
+// means there. For this one it would be a rewrite of the entry the cloud holds, on this
+// phone's screen, with the send then held for ever - a phone folding a figure nobody
+// else folds.
+//
+// Returns 'added', 'same' or 'beside'. A null is a deletion and does nothing at all.
+function layPaybookEntry(schedule, id, value) {
+    if (value === null || value === undefined) return 'same';
+    if (typeof id !== 'string' || POISON_SEGMENTS.indexOf(id) !== -1) return 'same';
+    if (!isPlainObject(schedule.pay)) schedule.pay = {};
+    if (!ownsKey(schedule.pay, id)) { putKey(schedule.pay, id, value); return 'added'; }
+    const standing = schedule.pay[id];
+    if (sameLedgerBytes(standing, value) || paybookSameFact(standing, value)) return 'same';
+    if (!isPlainObject(schedule.payConflicted)) schedule.payConflicted = {};
+    if (!ownsKey(schedule.payConflicted, id)) putKey(schedule.payConflicted, id, []);
+    const beside = schedule.payConflicted[id];
+    if (Array.isArray(beside) && !beside.some(had => sameLedgerBytes(had, value))) beside.push(value);
+    return 'beside';
+}
+
+// Does a schedule already HOLD this entry - the same fact, whoever's hand is on it? The
+// queue's collector asks before it lets an acknowledged operation go, and for this map
+// "the same bytes" is the wrong question: when two phones wrote one fact the record keeps
+// the first writer's copy, so this phone's operation is settled by a body that is not
+// byte for byte its own, and would otherwise sit in the queue for ever.
+function paybookHoldsEntry(schedule, id, value) {
+    const map = paybookMap(schedule);
+    if (!ownsKey(map, id)) return false;
+    return sameLedgerBytes(map[id], value) || paybookSameFact(map[id], value);
+}
+
+// Does `mine` already hold everything `theirs` says - every entry, and everything kept
+// beside one? The receive path asks before it treats a snapshot as this phone's own echo:
+// an echo teaches a phone nothing, and a snapshot carrying a pay entry this copy has never
+// held is not one, whatever its stamps say. One-directional on purpose - what `mine`
+// holds beyond `theirs` is this phone's own unsent work and is not the question.
+function paybookCovers(mine, theirs) {
+    const book = paybookMap(theirs);
+    if (!Object.keys(book).every(id => paybookHoldsEntry(mine, id, book[id]))) return false;
+    const beside = (theirs && isPlainObject(theirs.payConflicted)) ? theirs.payConflicted : {};
+    const held = (mine && isPlainObject(mine.payConflicted)) ? mine.payConflicted : {};
+    return Object.keys(beside).every(id => {
+        const variants = Array.isArray(beside[id]) ? beside[id] : [beside[id]];
+        const known = ownsKey(held, id) ? (Array.isArray(held[id]) ? held[id] : [held[id]]) : [];
+        return variants.every(body => paybookHoldsEntry(mine, id, body)
+            || known.some(had => sameLedgerBytes(had, body)));
+    });
+}
+
+// Every entry of the map this build could not have written, by id, exactly as it lies.
+// The bar is payEntryProblems - the same one the queue applies on the way out - and it is
+// about SHAPE: a payment whose statement has not arrived yet is readable and waits in the
+// fold; it is not here.
+function paybookUnreadable(schedule) {
+    const map = paybookMap(schedule);
+    const out = {};
+    Object.keys(map).sort().forEach(id => {
+        if (payEntryProblems(id, map[id]).length > 0) putKey(out, id, map[id]);
+    });
+    return out;
+}
+
+// ---------------------------------------------------------------- what a commit may carry
+//
+// paybookCommitPlan(schedule, changes) -> { ok, reasons, write, same }
+//
+// The last question before a plan's `changes` reach the journal, asked of the record AS IT
+// IS NOW rather than as it was when the plan was drawn. It exists because the journal
+// takes a path and a value and nothing else: it cannot know that `pay.ps_w1_20261002` is
+// already on this phone saying something different, and a batch that reached it would
+// journal a rewrite of an entry that is never rewritten.
+//
+//   gate       this build does not write the pay book, or the record's own financial gate
+//              is shut. Nothing is written.
+//   rejected   a path that is not `pay.<id>` or `ledger.advances.<id>`, a value the
+//              journal's own reader would refuse (a null among them - a deletion), or one
+//              path twice in one batch. A closure writes entries; it edits nothing else.
+//   conflict   an id already on the record with DIFFERENT content, or one somebody is
+//              still being asked about. Refused whole: a local write never creates a
+//              disagreement - only two phones can - and half a closure is not a closure.
+//
+// An id already there with the SAME content is the same fact and is left out of `write`
+// (named in `same`): committing a plan twice, or after the other phone's copy of it has
+// arrived, writes nothing and is not an error.
+//
+// ALL OR NOTHING. `ok` is false if any change is refused, and `write` is then empty.
+function paybookCommitPlan(schedule, changes) {
+    const reasons = [];
+    const write = [];
+    const same = [];
+    if (!paybookWritesEnabled()
+        || (typeof financialWritingEnabled === 'function' && !financialWritingEnabled(schedule))) {
+        paybookAddReason(reasons, 'gate');
+    }
+    const book = paybookMap(schedule);
+    const beside = (schedule && isPlainObject(schedule.payConflicted)) ? schedule.payConflicted : {};
+    const ledger = paybookLedger(schedule);
+    const seen = {};
+    const list = Array.isArray(changes) ? changes : [];
+    if (list.length === 0) paybookAddReason(reasons, 'rejected');
+    list.forEach(change => {
+        const path = isPlainObject(change) && typeof change.path === 'string' ? change.path : '';
+        const value = isPlainObject(change) ? change.value : undefined;
+        const parts = path.split('.');
+        const isPay = parts.length === 2 && parts[0] === 'pay';
+        const isEntry = parts.length === 3 && parts[0] === 'ledger' && parts[1] === 'advances';
+        if ((!isPay && !isEntry) || ownsKey(seen, path)
+            || journalEntryProblems(path, value).length > 0) {
+            paybookAddReason(reasons, 'rejected');
+            return;
+        }
+        putKey(seen, path, true);
+        const id = parts[parts.length - 1];
+        const map = isPay ? book : ledger;
+        if (isPay && ownsKey(beside, id)) { paybookAddReason(reasons, 'conflict'); return; }
+        if (!ownsKey(map, id)) { write.push({ path, value }); return; }
+        const one = isPay ? paybookSameFact(map[id], value) : sameLedgerFact(map[id], value);
+        if (one) same.push(path);
+        else paybookAddReason(reasons, 'conflict');
+    });
+    const ok = reasons.length === 0;
+    return { ok, reasons, write: ok ? write : [], same };
 }
 
 // ---------------------------------------------------------------- small readers
@@ -1134,7 +1368,12 @@ function paybookMayClose(stamp) {
 // would be a second door into the ledger with no gate on it.
 function paybookGateReasons(schedule, stamp) {
     const out = [];
-    if (typeof financialWritingEnabled === 'function' && !financialWritingEnabled(schedule)) {
+    // BOTH GATES, and the new one first. `paybook` is this build's own answer to "does
+    // this phone create pay entries at all"; financialWritingEnabled is the record's
+    // answer to "may anything be written against these accounts". Either one shut is
+    // `gate` - a caller has nothing different to do about the two.
+    if (!paybookWritesEnabled()
+        || (typeof financialWritingEnabled === 'function' && !financialWritingEnabled(schedule))) {
         out.push('gate');
     }
     if (!paybookMayClose(stamp)) out.push('permission');
@@ -1901,11 +2140,12 @@ function planGroupClosure(schedule, workers, scope, choicesByWorker, stamp) {
 // the other is kept beside it under `payConflicted` for a person, never merged and never
 // chosen between - there is no honest rule that could (mergeLedgerInto's own words).
 //
-// This is NOT the write path. A real commit is the journal's (State.commitMany) and, for
-// money, a later phase's single server transaction; `pay.*` is not a path the shipped
-// journal, normaliser, receive or restore know yet. This exists so the suites - and a
-// dry run - can ask what the record would say AFTER a plan, and what two phones' plans
-// say together, without any of that machinery.
+// This is NOT the write path. A real commit is State.commitPaybook (journal first, one
+// batch) and, for money, a later phase's single server transaction. This exists so the
+// suites - and a dry run - can ask what the record would say AFTER a plan, and what two
+// phones' plans say together, without any of that machinery. It keeps the first copy it
+// was handed; the stored record's rule for WHICH copy stands between two phones is
+// paybookUnion's, and it is stricter: the cloud's.
 function paybookApply(schedule, changes) {
     const next = paybookClone(schedule) || {};
     const out = { schedule: next, applied: [], same: [], conflicts: [], refused: [] };

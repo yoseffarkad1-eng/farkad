@@ -19,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v171">
+<meta name="farkad-build" content="v173">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -669,6 +669,11 @@
 <script src="js/model/money.js"></script>
 <script src="js/model/migrate.js"></script>
 <script src="js/model/ledger.js"></script>
+<!-- v173, the pay book's model - shipped shut (FARKAD_FLAGS.paybook). After ledger.js, whose
+     writers and folds it calls, and ABOVE the sync group: boot.js reads the outbox the
+     moment it loads, that read validates every queued path, and a queued pay.<id> is
+     validated by payEntryProblems in this file. -->
+<script src="js/model/payroll.js"></script>
 <script src="js/sync/sync.js"></script>
 <script src="js/sync/restore.js"></script>
 <script src="js/sync/receive.js"></script>

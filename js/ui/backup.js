@@ -259,7 +259,8 @@ async function restoreFromCloud(date) {
     const parsed = parseLocalDate(date);
     const go = await askConfirm({
         title: `לחזור למצב של ${formatFullDate(parsed)}?`,
-        message: 'העותק הזה יוחלף בכל המכשירים. המצב הנוכחי יישמר כאן, כך שאפשר לחזור ממנו.',
+        message: 'העותק הזה יוחלף בכל המכשירים. המצב הנוכחי יישמר כאן, כך שאפשר לחזור ממנו.'
+            + payKeptOnRestoreNotice(),
         ok: 'שחזר'
     });
     if (!go) return;
@@ -303,7 +304,8 @@ async function restoreSnapshot(date) {
     const parsed = parseLocalDate(date);
     const go = await askConfirm({
         title: `לחזור למצב של ${formatFullDate(parsed)}?`,
-        message: 'כל מה שנרשם מאז יוחלף. המצב הנוכחי יישמר, כך שאפשר לחזור ממנו.',
+        message: 'כל מה שנרשם מאז יוחלף. המצב הנוכחי יישמר, כך שאפשר לחזור ממנו.'
+            + payKeptOnRestoreNotice(),
         ok: 'שחזר'
     });
     if (!go) return;
@@ -319,6 +321,27 @@ async function restoreSnapshot(date) {
     tellRestoreResult(
         await FarkadSync.replaceEverything(normaliseSchedule(document)),
         'שוחזר.');
+}
+
+// WHAT A RESTORE DOES NOT REPLACE, said in the confirmation of every door (v173).
+//
+// Each of them tells the person that what is here will be replaced, and for the pay book
+// that is not what happens: a restore never removes a statement or a payment (see
+// prepareReplace in js/sync/restore.js - the entries are unioned in, the way the advances
+// history always has been). A confirmation that promised to take them away would have
+// somebody restoring last month's copy in order to undo a closure, and finding it still
+// there. So the sentence is added - and only on a phone that actually holds one, which
+// with the writer shut is no phone at all: every confirmation reads exactly as it did.
+//
+// PROPOSED WORDING. No screen writes a pay entry yet, so nobody has been shown this; it
+// is the owner's to correct before the gate opens (iron law 6).
+function payKeptOnRestoreNotice() {
+    const book = (typeof State !== 'undefined' && State.schedule) ? State.schedule.pay : null;
+    const held = (book && typeof book === 'object' && !Array.isArray(book))
+        ? Object.keys(book).length : 0;
+    return held > 0
+        ? ' סגירות חשבון ותשלומים שכבר נרשמו אינם נמחקים בשחזור - הם נשארים רשומים.'
+        : '';
 }
 
 // The state a restore replaced, kept so the restore itself can be undone.
@@ -1194,6 +1217,20 @@ function recoveryFacts(schedule) {
     const advances = schedule.advances || {};
     Object.keys(advances).forEach(id => put(`advance:${id}`, advances[id]));
 
+    // The pay book (v173), one fact per entry, and what is kept beside one. Without them
+    // a capture that had lost every statement and every payment still "contained
+    // everything" the others held, and the rescue could choose the capture in which
+    // nobody had been paid. A container that is not a record is one fact of its own,
+    // as an unreadable Rima layer is.
+    ['pay', 'payConflicted'].forEach(family => {
+        const held = schedule[family];
+        if (held && typeof held === 'object' && !Array.isArray(held)) {
+            Object.keys(held).forEach(id => put(`${family}:${id}`, held[id]));
+        } else if (held !== undefined && held !== null) {
+            put(`${family}Unreadable`, held);
+        }
+    });
+
     // The ledger is a map of families keyed by kind - { advances: { id: entry } } today -
     // not a list. Walking it as an array threw, and the throw was being caught one level
     // up as "this capture cannot be rebuilt", which is how a mistake in this function
@@ -1528,6 +1565,12 @@ function scheduleFromRecoveryRecords(records, fallback) {
     lostMoney('מקדמה', (document || {}).advances, rebuilt.advances);
     lostMoney('רישום מקדמה', ((document || {}).ledger || {}).advances,
         (rebuilt.ledger || {}).advances);
+    // And the pay book (v173). normaliseSchedule carries every entry where it lies, so
+    // nothing should fall out here - which is exactly the kind of sentence this check
+    // exists not to take on trust: a statement or a payment that did is somebody's wage.
+    const payOf = from => (from && typeof from.pay === 'object' && from.pay !== null
+        && !Array.isArray(from.pay)) ? from.pay : {};
+    lostMoney('רישום סגירת חשבון', payOf(document), payOf(rebuilt));
 
     return {
         schedule: rebuilt,
@@ -1793,12 +1836,14 @@ function importBackup(event) {
                 message: `${loaded.summary}\n\nזה לא קובץ גיבוי רגיל: זה מה שהצלחנו לחלץ ממכשיר `
                     + 'שלא הצליח לקרוא את הנתונים שלו. הקובץ יחליף את כל הנתונים הקיימים כאן, '
                     + 'והמצב הנוכחי יישמר כגיבוי מקומי. הרשומות הפגומות שבקובץ נשארות בקובץ '
-                    + 'ולא נכתבות למכשיר הזה, ומחיקה לצמיתות תישאר חסומה אחרי הטעינה.',
+                    + 'ולא נכתבות למכשיר הזה, ומחיקה לצמיתות תישאר חסומה אחרי הטעינה.'
+                    + payKeptOnRestoreNotice(),
                 ok: 'טען חילוץ'
             }
             : {
                 title: 'לטעון את הגיבוי?',
-                message: `${loaded.summary} הקובץ יחליף את כל הנתונים הקיימים, והמצב הנוכחי יישמר כגיבוי מקומי.`,
+                message: `${loaded.summary} הקובץ יחליף את כל הנתונים הקיימים, והמצב הנוכחי יישמר כגיבוי מקומי.`
+                    + payKeptOnRestoreNotice(),
                 ok: 'טען'
             });
         if (!go) {
@@ -1921,10 +1966,13 @@ function importBackup(event) {
 }
 
 async function restoreLocalBackup() {
-    const go = await askConfirm({
+    // The sentence about the pay book is the whole message here, and there is none at
+    // all on a phone that holds no pay entry - the dialog is then the one it always was.
+    const kept = payKeptOnRestoreNotice().trim();
+    const go = await askConfirm(Object.assign({
         title: 'לשחזר את המצב שלפני הטעינה האחרונה?',
         ok: 'שחזר'
-    });
+    }, kept ? { message: kept } : {}));
     if (!go) return;
 
     // READ, not popped. The entry only leaves the stack once it has been checked and
