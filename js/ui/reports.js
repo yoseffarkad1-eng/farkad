@@ -124,6 +124,23 @@ function workerAdvanceSummary(workerId) {
     return summary;
 }
 
+// Nothing left to give back, and nothing to look at: the one case that is drawn quieter.
+// An overpaid account also has `left` 0, and it is the opposite of quiet.
+function advanceSettledQuiet(summary) {
+    return !(summary.left > 0) && !(summary.overpaid > 0);
+}
+
+// The empty crew, said the way the roster says it, with the roster's own button. The
+// button goes to the roster first - the same two steps the day's setup card takes - so
+// the man who was added is on the screen when the form closes.
+const NO_WORKERS_YET = 'אין עובדים. הוסף עובד כדי להתחיל.';
+const ADD_WORKER_LABEL = '+ הוסף עובד';
+function appendNoWorkersYet(root) {
+    root.appendChild(emptyHint(NO_WORKERS_YET));
+    root.appendChild(button(ADD_WORKER_LABEL, 'btn-add empty-action',
+        () => { showView('roster'); showAddWorkerModal(); }));
+}
+
 function showWorkerAdvances(id) {
     ADVANCE_WORKER = id;
     const root = document.getElementById('advancesView');
@@ -172,6 +189,10 @@ function renderAdvances() {
         root.appendChild(el('h2', null, `מקדמות · ${worker.name}`));
         const summary = workerAdvanceSummary(worker.id);
         const balance = el('div', 'advance-balance');
+        // A man who owes nothing reads quieter than one who owes: the same words in the
+        // same place, in weaker ink and without the accent (css/design.css). Never for an
+        // account that asks to be looked at - that one is not settled, it is in question.
+        if (advanceSettledQuiet(summary)) balance.classList.add('advance-balance-zero');
         balance.appendChild(el('span', null, summary.overpaid > 0 ? 'החשבון דורש בדיקה' : 'נשאר להחזיר'));
         balance.appendChild(el('strong', null, `${moneyText(summary.left)} ₪`));
         balance.appendChild(el('p', null, `נמסר: ${moneyText(summary.given)} ₪ · הוחזר וקוזז: ${moneyText(summary.repaid + summary.deducted)} ₪`));
@@ -210,6 +231,14 @@ function renderAdvances() {
         return;
     }
     root.appendChild(el('h2', null, 'מקדמות'));
+    // NOBODY TO CHOOSE. The line under the heading says "choose a worker" and the field
+    // under it searches them; with no workers both act on nothing, and the search's own
+    // answer - «לא נמצא עובד» - reads as a search that failed rather than a crew that was
+    // never entered. One sentence (the roster's own) and the button that mends it.
+    if (State.schedule.workers.length === 0) {
+        appendNoWorkersYet(root);
+        return;
+    }
     if (State.schedule.workers.length > 1) {
         root.appendChild(button('סידור', 'btn-secondary', openAdvanceOrder, 'סידור עמוד המקדמות'));
     }
@@ -224,6 +253,8 @@ function renderAdvances() {
         advanceWorkersInOrder().filter(w => w.name.includes(ADVANCE_SEARCH)).forEach(w => {
             const summary = workerAdvanceSummary(w.id);
             const card = button('', 'advance-worker-card btn-secondary', () => showWorkerAdvances(w.id));
+            // Same row, same words, same place in the order - only quieter (design.css).
+            if (advanceSettledQuiet(summary)) card.classList.add('advance-worker-zero');
             card.appendChild(el('strong', null, w.name + (w.active === false ? ' · כבוי' : '')));
             card.appendChild(el('span', null, summary.overpaid > 0 ? 'דורש בדיקה'
                 : `${moneyText(summary.left)} ₪ נשארו`));

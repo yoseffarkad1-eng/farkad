@@ -1794,6 +1794,12 @@ a[href]:focus-visible,
 .crew-search-field input { flex: 1; min-width: 0; width: 100%; min-height: 46px; font-size: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--ink); }
 .crew-search-field button { min-width: 44px; min-height: 44px; padding-inline: 10px; }
 #rosterSearchClear[hidden], #rosterSearchResult[hidden] { display: none; }
+/* An empty crew: js/ui/roster.js hides the tools that act on nobody. Each of the three has
+   a `display` of its own above, and an author's `display` outranks the browser's rule for
+   [hidden] - so the attribute alone would have hidden nothing. */
+.crew-search[hidden], .crew-shortcuts[hidden], #reorderOpenBtn[hidden] { display: none; }
+/* The button under an empty screen's one sentence. A finger's size, and its own width. */
+.empty-action { display: block; min-height: 44px; min-width: 44px; font-size: 16px; padding: 10px 18px; margin: 0 0 14px; }
 #rosterView .crew-search .hint { margin: 0; }
 #rosterView .roster-row { padding: 10px; margin-bottom: 8px; gap: 10px; border: 1px solid var(--line); border-radius: 12px; align-items: flex-start; flex-wrap: wrap; }
 #rosterView .roster-row:last-child { margin-bottom: 0; }
@@ -4774,6 +4780,8 @@ body.day-tight .topbar { margin-bottom: 2px; }
 /* Weekly paper uses its own page, leaving payroll/invoice A4 portrait intact. */
 .week-print-title { display: none; }
 @media print {
+    /* The screen's sentence over a week nobody is on. Paper carries the table. */
+    #weekView .week-empty-note, .empty-action { display: none; }
     @page farkad-week { size: A4 landscape; margin: 10mm; }
     body.week-print-layout { page: farkad-week; }
     body.week-print-layout .app { max-width: none; padding: 0; margin: 0; }

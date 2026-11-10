@@ -51,7 +51,18 @@ function renderWeek() {
 
     clear(root);
     root.classList.toggle('week-phone-grid', weekPhoneMode === 'grid');
-    root.appendChild(renderWeekHeader());
+    // NO CREW AT ALL: there is no week to step through, print or share, in this week or
+    // any other, so the header that does those three things is not drawn. The sentence
+    // is the one this screen has always said; the button under it is the roster's own,
+    // reached the way the day's setup card reaches it.
+    if (State.schedule.workers.length === 0) {
+        root.appendChild(emptyHint('אין עובדים להצגה. הוסף עובד במסך עובדים ואתרים.'));
+        root.appendChild(button('+ הוסף עובד', 'btn-add empty-action',
+            () => { showView('roster'); showAddWorkerModal(); }));
+        return;
+    }
+    const shown = weekDates().filter(date => parseLocalDate(date).getDay() !== 6);
+    root.appendChild(renderWeekHeader(weekWorkers(shown).length === 0));
 
     // Saturday is hidden here only; calendar navigation and saved records keep all dates.
     const dates = weekDates().filter(date => parseLocalDate(date).getDay() !== 6);
@@ -66,6 +77,11 @@ function renderWeek() {
         root.appendChild(emptyHint('אין עובדים להצגה. הוסף עובד במסך עובדים ואתרים.'));
         return;
     }
+
+    // A WEEK NOBODY IS ON YET. The grid stays - a cell is still the way into its day -
+    // but thirty blank cells do not say whether the week is empty or failed to load, so
+    // one sentence does. On the screen only: paper and the picture carry the table.
+    if (weekIsBlank()) root.appendChild(el('p', 'empty-hint week-empty-note', WEEK_BLANK));
 
     root.appendChild(renderWeekPhone(dates, workers));
 
@@ -150,6 +166,19 @@ function renderWeek() {
         '\u25CF = יום כפול \u00B7 + = שעות נוספות \u00B7 \u2014 = נעדר'));
     root.appendChild(el('p', 'hint week-grid-hint', 'לחיצה על תא פותחת את היום לעריכה.'));
     root.appendChild(el('p', 'hint week-phone-grid-hint', 'לחצו על כותרת יום לפירוט, או על תא לעריכת היום.'));
+}
+
+// PROPOSED Hebrew, in the voice of the reports' «אין רישומים בטווח הזה.»
+const WEEK_BLANK = 'אין רישומים בשבוע הזה.';
+
+// Nobody worked and nobody is marked absent on any day of this week - ALL SEVEN of them,
+// the Saturday the grid does not draw included, and every man on the roster, archived or
+// not. The sentence says "no records this week", and a week whose only record is on a day
+// this screen hides is not that: there it stays silent rather than say something untrue.
+function weekIsBlank() {
+    return !weekDates().some(date => State.schedule.workers.some(worker =>
+        isAbsent(State.schedule, date, worker.id, State.layer) ||
+        entriesFor(State.schedule, date, worker.id, State.layer).length > 0));
 }
 
 // The table opens first. A date heading opens its full-text detail on phones.
@@ -317,6 +346,13 @@ function renderWeekCell(worker, date) {
                 // every cell - and where two different sites must not look alike.
                 const line = el('div', 'cell-line tag tag-place');
                 const place = placeLabelFrom(labels, entry.placeId);
+                // The site's first letter, for the phone's colour map: drawn INSIDE the
+                // block by the stylesheet (css/design.css), so a cell can be read without
+                // looking down at the legend. An attribute and not a child, on purpose -
+                // the cell's text, its accessible name, the paper and the picture are all
+                // read off the children, and none of them may gain a stray letter.
+                const initial = siteInitial(place);
+                if (initial) line.dataset.initial = initial;
                 appendSiteName(line, entry.placeId, place);
                 paintSite(line, entry.placeId);
 
@@ -361,7 +397,10 @@ function renderWeekCell(worker, date) {
     return cell;
 }
 
-function renderWeekHeader() {
+// `bare`: nobody is on this week at all (every worker is archived and none of them
+// worked in it). Another week may hold their days, so the three steps stay; printing
+// and sharing a table that is not drawn do not.
+function renderWeekHeader(bare) {
     const header = el('div', 'week-header');
 
     const back = button('שבוע קודם', 'btn-secondary btn-nav nav-back', () => stepWeek(-7));
@@ -383,6 +422,7 @@ function renderWeekHeader() {
     fwd.appendChild(chevronIcon('fwd'));
     header.appendChild(fwd);
     header.appendChild(button('השבוע', 'btn-secondary week-today-action', () => { weekPhoneDate = todayStr(); setWeekFromDate(todayStr()); render(); }));
+    if (bare) return header;
 
     // Not window.print() bare. On the home-screen app on an iPhone that call opens
     // nothing and says nothing; printWithFallback (js/ui/printout.js) still makes it,

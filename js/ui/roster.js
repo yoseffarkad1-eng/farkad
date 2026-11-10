@@ -86,6 +86,19 @@ function renderWorkerList() {
     const clearSearch = document.getElementById('rosterSearchClear');
     if (clearSearch) clearSearch.hidden = !query;
 
+    // WITH NOBODY ON THE LIST there is nothing to search and nothing to put in order, so
+    // the field and the reorder button are not drawn; and with no site either, the two
+    // shortcuts that jump between the lists have nowhere to jump. What stays is what
+    // starts a crew: «+ הוסף עובד» on the heading and «הדבק רשימה» under it. Hidden,
+    // never removed - the nodes are the page's own, and they come back with the first man.
+    const nobody = State.schedule.workers.length === 0;
+    const searchBox = document.querySelector('#rosterView .crew-search');
+    if (searchBox) searchBox.hidden = nobody;
+    const reorder = document.getElementById('reorderOpenBtn');
+    if (reorder) reorder.hidden = nobody;
+    const shortcuts = document.querySelector('#rosterView .crew-shortcuts');
+    if (shortcuts) shortcuts.hidden = nobody && State.schedule.places.length === 0;
+
     if (State.schedule.workers.length === 0) {
         container.appendChild(emptyHint('אין עובדים. הוסף עובד כדי להתחיל.'));
         return;

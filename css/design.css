@@ -632,4 +632,67 @@ input, select, textarea { border-radius: 12px; }
 #transportSummarySend, #transportSummaryClose, #transportSummaryStatus { grid-column: 1 / -1; }
 #transportSummaryStatus:empty { display: none; }
 
+/* ---- THE QUIET ZERO -----------------------------------------------------------------
+   On the advances page a man who owes nothing is still there, in his place, under the
+   same words - he is only quieter than the man who owes, so the eye lands on the money
+   that is out. Weaker ink and an ordinary weight; on his own page the figure loses the
+   accent and the box its tint. Both inks are the palette's own and clear 7:1 on a surface
+   in both schemes (tests/polish.browser.mjs measures it). An account that asks to be
+   looked at is never quiet: js/ui/reports.js does not give it the class. */
+.advance-worker-card.advance-worker-zero strong { color: var(--ink-2) !important; font-weight: 500 !important; }
+.advance-worker-card.advance-worker-zero span { color: var(--ink-3) !important; font-weight: 500 !important; }
+.advance-balance.advance-balance-zero { background: var(--surface) !important; color: var(--ink-2) !important; }
+.advance-balance.advance-balance-zero > strong { color: var(--ink-2) !important; font-weight: 600 !important; }
+
+/* ---- AN EMPTY SCREEN ----------------------------------------------------------------
+   One sentence and, under it, the button that mends it - the roster's own tonal «+». */
+.empty-action { border-radius: 12px !important; }
+
+/* ---- THE BACKUP ROW ----------------------------------------------------------------
+   After two weeks without a file: one line on the row, in the warning ink and nothing
+   else - no box, no icon, no tint. The age beside it is an ordinary hint. */
+.settings-card-head .settings-row-reminder { color: var(--warn) !important; }
+
+/* ---- THE WEEK ON A PHONE: THE SITE'S LETTER IN ITS SQUARE ---------------------------
+   The cell was a 16px block of colour and the legend under the grid was the only thing
+   that said which site a colour was. Now the block carries the site's first letter
+   (data-initial, js/ui/week.js), so a row reads «ה ת ר» without the eye leaving it.
+
+   The block grows from 16 to 20px to hold a 13px letter, and becomes a row: the cycle
+   diamond (when the palette has wrapped), the letter, then the rate mark - the white dot
+   of a doubled day or the plus of extra hours, which used to sit in the middle of the
+   block and now stand after the letter instead of through it. Nothing overlaps, so the
+   halo that kept the diamond from merging with the dot is no longer what separates them;
+   it stays, because it is also what holds a white glyph on all ten colours.
+
+   WHITE ON THE SITE'S OWN COLOUR, which is not touched here: the ten are readability.css's
+   and the letter clears 4.5:1 on every one of them in both schemes (measured, same file).
+   Two sites on one day stack, 44px in a 48px cell. Screen only - paper writes the names. */
+@media (max-width: 700px) {
+    .week-cell .cell-line {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        width: fit-content;
+        min-width: 20px;
+        max-width: 100%;
+        height: 20px;
+        padding: 0 3px;
+        margin: 1px auto;
+        border-radius: 6px;
+        box-sizing: border-box;
+    }
+    .week-cell .cell-line[data-initial]::before {
+        content: attr(data-initial);
+        color: #fff;
+        font-size: 13px;
+        font-weight: 800;
+        line-height: 1;
+    }
+    .week-cell .cell-line .site-mark { position: static; order: -1; font-size: 8px; }
+    .week-cell .cell-double::after { position: static; inset: auto; margin: 0; flex: none; }
+    .week-cell .cell-extra::after { position: static; inset: auto; display: block; flex: none; }
+}
+
 }
