@@ -167,6 +167,17 @@ const KHALED_PATHS = ['ledger.advances.le_period_w_khaled_20261002',
             return [drawn.bundles.filter(bundle => bundle.row).some(bundle => nested(bundle.row)), nested({ a: [[1]] })]; })(), [false, true]);
     same('and the stored row turns back into the row the index folds read, fact for fact',
         canonical(a.call('paybookDerivedRow', khaled.row)), canonical(a.call('paybookIndexFrom', S).rows[KHALED]));
+    // What a row costs, weighed the way Phase 3 weighed its own (the key and the JSON of the
+    // value): the stored row is the derived one plus the names of the pay entries that left
+    // with it. The capacity curve in docs/payroll-closure.md was drawn with the derived row.
+    const weigh = (id, row) => id.length + JSON.stringify(row).length;
+    const extra = drawn.bundles.filter(bundle => bundle.row && bundle.source === 'statement')
+        .map(bundle => weigh(bundle.rowId, bundle.row) - weigh(bundle.rowId, a.call('paybookDerivedRow', bundle.row)));
+    check('a stored row is heavier than the row Phase 3 weighed by the name of the payment that left with it - under 40 bytes',
+        extra.length === 2 && extra.every(more => more > 0 && more < 40), JSON.stringify(extra));
+    check('and is still under an eighth of the closure it stands for, on the smallest closure here (nine days, no advance)',
+        drawn.bundles.filter(bundle => bundle.row && bundle.source === 'statement').every(bundle => weigh(bundle.rowId, bundle.row) * 8 < bundle.bytes),
+        JSON.stringify(drawn.bundles.filter(bundle => bundle.row).map(bundle => [weigh(bundle.rowId, bundle.row), bundle.bytes])));
     same('an older closure answered «שולם» is ready too, under the answer\'s id',
         [by['w_ahmad 2026-10-02'].rowId, by['w_ahmad 2026-10-02'].source], [AHMAD, 'legacy']);
     same('a young closure waits when a horizon is given - and is ready past it',
@@ -401,6 +412,47 @@ const KHALED_PATHS = ['ledger.advances.le_period_w_khaled_20261002',
         await settled([back]);
         same('A PHONE THAT WAS AWAY FOR BOTH comes back to the whole record',
             [money(back) === money(mover), payIds(back.State.schedule).indexOf(SALIM) !== -1, rowsOf(back.State.schedule)], [true, true, [SALIM]]);
+    }
+
+    // a phone that was away, cannot fetch, and goes on working meanwhile
+    {
+        const cloud4 = cloudWith();
+        const mover = phone('d_m4c', cloud4);
+        const away = phone('d_w4c', cloud4);
+        await settled([mover, away]);
+        const awayDisk = away.dump();
+        cloud4.subscribers.splice(1, 1);
+        await close(mover, 'w_salim', FORTNIGHT, { method: 'transfer' });
+        given('moved while the other phone is away', (await mover.Sync.archiveClosed({ today: TODAY })).ok === true);
+        const real = cloud4.adapter.readClosed;
+        let failing = true;
+        cloud4.adapter.readClosed = id => (failing ? Promise.reject(Object.assign(new Error('no signal'), { code: 'unavailable' })) : real(id));
+        const back = payDevice({ storage: awayDisk, deviceId: 'd_w4c', flags: { paybookQueue: false } });
+        back.Sync.pushDelayMs = 5;
+        back.State.load();
+        back.Sync.connect(cloud4.adapter);
+        await settle(60);
+        given('it is waiting for the detail', back.Sync.closedWaiting() !== null && back.Sync.status !== 'synced');
+        same('WHILE IT WAITS its record is the one it had - whole, and not yet the server\'s',
+            [payIds(back.State.schedule).indexOf(SALIM), rowsOf(back.State.schedule), back.State.schedule.workers.length > 0], [-1, [], true]);
+        given('a day is recorded on it meanwhile', back.State.commit(back.call('assignPlace', back.State.schedule, '2026-10-16', 'w_nasser', 'actual', 'p_a', undefined, 0)) === true);
+        const tried = plan(back, 'planClosure', 'w_nasser', FORTNIGHT, { paid: 0 }, stamp(TODAY, back.id));
+        given('a closure can be drawn on its own record', tried.ok === true, JSON.stringify(tried.reasons));
+        const writes = cloud4.writes.length;
+        const answer = await back.Sync.transactPaybook(tried);
+        same('A CLOSURE FROM IT IS REFUSED while it waits - and nothing is sent',
+            [answer.ok, answer.state, answer.reasons, cloud4.writes.filter(write => write.kind === 'transact').length - cloud4.writes.slice(0, writes).filter(write => write.kind === 'transact').length,
+                back.dump()['farkad:payIntent'] === undefined], [false, 'refused', ['waiting'], 0, true]);
+        await settle(300);
+        same('the day is still on that phone, whatever became of sending it', Boolean(back.State.schedule.days['2026-10-16'].actual.w_nasser), true);
+        failing = false;
+        await settleUntil(() => quiet(back) && quiet(mover), 30000, 20);
+        same('WHEN THE DETAIL CAN BE READ everything meets: the phone is whole and synced, its day is on the server, the index is where it was',
+            [back.Sync.closedWaiting(), back.Sync.status, payIds(back.State.schedule).indexOf(SALIM) !== -1,
+                Boolean(at(cloud4.doc, 'days.2026-10-16.actual.w_nasser')), rowsOf(cloud4.doc), back.Sync.pendingCount()],
+            [null, 'synced', true, true, [SALIM], 0]);
+        same('and it pays from the same figures as the phone that never left', money(back) === money(mover), true);
+        cloud4.adapter.readClosed = real;
     }
 
     // a broken copy on the server
@@ -642,6 +694,13 @@ const KHALED_PATHS = ['ledger.advances.le_period_w_khaled_20261002',
     same('and its comparison of two captures knows each row as a fact of its own',
         Object.keys(a.call('recoveryFacts', a.State.schedule)).filter(key => key.indexOf('payIndex:') === 0).sort(),
         [AHMAD, KHALED, SALIM].sort().map(id => 'payIndex:' + id));
+
+    // A draft of a closure (js/ui/accounts.js) is this phone's typing and nothing else's.
+    a.Store.set('farkadPayDraft', JSON.stringify({ v: 1, workerId: 'w_khaled', typed: 'DRAFT-MARKER' }), { optional: true });
+    a.call('exportBackup');
+    a.call('exportRecoveryData');
+    same('a draft of a closure is in neither file', a.downloads.slice(-2).map(file => /farkadPayDraft|DRAFT-MARKER/.test(file.text)), [false, false]);
+    same('nor anywhere on the cloud', /farkadPayDraft|DRAFT-MARKER/.test(JSON.stringify([cloud.doc, [...cloud.closed.values()], [...cloud.history.values()]])), false);
 
     // What the note warns of, measured: the same record offered to a project that does not exist yet.
     {

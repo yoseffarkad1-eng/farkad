@@ -120,10 +120,17 @@ Object.assign(FarkadSync, {
     //                 on; the queue drains first, and it is asked to now
     //   pending       an earlier operation's fate is not known yet - see resolvePayIntent
     //   busy          one is in flight in this window right now
+    //   waiting       this phone lacks the detail of a closure in the archive and has not
+    //                 adopted the server's document yet
     payTransactRefusal() {
         if (this._payBusy) return 'busy';
         const held = this.payIntent();
         if (held) return 'pending';
+        // The server's document names a closure whose closed copy this phone could not
+        // fetch yet, so this phone has NOT adopted it (js/sync/closed.js): its record is
+        // older than the server's, and a closure drawn on it would be aimed at a revision
+        // that is already spent. Said as what it is, before anything is sent.
+        if (typeof this.closedWaiting === 'function' && this.closedWaiting()) return 'waiting';
         if (!this.adapter) return 'offline';
         if (typeof this.adapter.transact !== 'function' || typeof this.adapter.readClosed !== 'function'
             || typeof this.adapter.read !== 'function') return 'unsupported';

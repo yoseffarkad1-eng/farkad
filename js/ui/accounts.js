@@ -321,6 +321,7 @@ const ACC_SERVER = Object.freeze({
     busy: 'busyElsewhere',
     pending: 'pending',
     restoring: 'restoring',
+    waiting: 'closedWaiting',
     unsupported: 'unsupported',
     plan: 'nothingToWrite',
     storage: 'storage',
