@@ -77,6 +77,8 @@ and after a snapshot is adopted, when the flag is on.
 3. **COMPARE** - with the digest of what memory holds (and, for a month, with the row's
    `h`). Different: the cold copy is not believed, nothing is marked, nothing is dropped.
 4. **MARK** - `Store.setVerified('farkad:cold:u:<unit>', digest)`. Not landed: stop.
+   (As built: a copy with no mark is never believed afterwards, whatever it looks like -
+   the fault real Chromium found; see Phase 7 as built.)
 5. **DROP** - the next write of the record leaves the unit out
    (`State.persist` of `coldStrip(schedule)`), read back as every record write is.
 
@@ -112,8 +114,8 @@ flag is on or a mark exists** (`farkad:cold:any`), `Cold.begin()`:
   the phone does not say synced, and Phase 5/6's gate does what it already does for a
   phone that lacks detail: the next server document is made whole from the server's
   `closed/` and `months/` documents (`closedGate`, `fetchClosed`), adopted, and
-  `Cold.move()` then writes the units to the cold store again. A slow open keeps trying
-  in the background.
+  `Cold.move()` then writes the units to the cold store again. A database that answers
+  after the deadline is still used; one that refused is asked again at the next open.
 - **Private mode / no IndexedDB at all:** nothing is ever moved (step 1 fails), so
   everything stays in localStorage as today, and ⋯ says so.
 
@@ -172,6 +174,197 @@ move stops before the drop). Nothing in the ladder waits on IndexedDB.
 database is opened**, nothing is stripped, and every byte written is today's. The READER
 is active whenever a mark exists, flag or not - a build that could not read what an
 earlier session moved would read holes.
+
+### Phase 7 as built
+
+    node tests/cold.test.mjs                 # the whole of it on a fake IndexedDB (tests/fake-indexeddb.mjs)
+    node tests/cold.browser.mjs              # the same questions put to the REAL IndexedDB, in Chromium
+    node tests/months.capacity.test.mjs      # C3: the phone's table, before and after
+
+**Built, behind `FARKAD_FLAGS.cold` (shipped `false`):**
+
+| | where |
+|---|---|
+| the units, the digests, the move, the boot read with its deadline, what the rescue file carries, the words | `js/cold.js` |
+| memory kept whole on load, rollback and rebase; what a write of the record may leave out; what is missing; the refusals | `js/state.js` (`coldNote`, `coldStripSet`, `coldForDisk`, `coldLaid`, `coldMissing`, `coldRefusal`, `refuseColdMoney`, `coldRebuild`, `coldDrop`) |
+| a document made whole is not read as this phone's own echo while anything is missing | `js/sync/receive.js` |
+| closing and paying refused (`waiting`); a restore does not run | `js/sync/transact.js`, `js/sync/restore.js` |
+| the sentence in place of the reports, the accounts, and a day or week of a missing month | `js/app.js` (`coldNotice`) |
+| the backup refused while partial; restore points, the undo slot and the pre-adoption copy written as the record is; the rescue file's `aboutColdStore` | `js/ui/backup.js`, `js/recovery.js` |
+| one line in ⋯ → מצב המכשיר | `js/ui/settings.js`, `coldDeviceLine` |
+
+**Each requirement, and the check that proves it** (`tests/cold.test.mjs` unless said):
+
+1. **Law 3 - nothing dropped before it is durable elsewhere.** K2: the move is stopped at
+   each of its 30 steps (copy, copied, read, marked for seven units; drop; dropped) and as
+   each of the 15 cold-store transactions commits. At every one: each unit is in the
+   record, or in the cold store under a mark whose digest the copy has; no unit is out of
+   the record before its mark is on the disk; the next open has the whole record in memory
+   with no signal, and finishes. A mark followed by an eviction does not cost the unit
+   (the record still holds it and is not stripped on the mark alone). A copy that reads
+   back wrong is not marked; a cold store with no room keeps the unit in the record.
+2. **Law 10 - gone is not empty.** K3, eight kinds of damage (evicted; a unit deleted; a
+   day changed in a month; an amount changed in a closure; a unit emptied; the database
+   refusing to open; never answering; throwing when asked): exactly the affected units are
+   listed missing; the app opens and shows the roster and the open month; the sentence is
+   said; an advance is refused before the journal, the backup is not made, closing is
+   refused, a day of the missing month reads as missing, today's day still records and
+   that save writes no hole; the rescue file is made and names what is missing. With
+   signal the document is made whole from the server's `closed/` and `months/` documents
+   and the phone says synced only then - including when the server's document looks
+   exactly like this phone's own echo. The refetched archive goes to the cold store and
+   is never written into localStorage.
+3. **Boot.** K1: in the first tick after a reopen the archived days are not in memory and
+   the phone says «טוען»; once the cold store answers memory is byte for byte what it was.
+   A database slower than the deadline: the phone stops saying «טוען» and says what is
+   missing. K7: no IndexedDB at all - nothing moves, the record keeps everything, ⋯ says so.
+4. **The files and the restore doors.** K4: the backup file is the file a phone with
+   everything in one place writes; the rescue file carries every unit and they lay back
+   into the whole record; **with the main record quarantined the rescue file still
+   carries every unit**; a restore point is written without the units and a restore from
+   it leaves the archive whole in memory and the cold store untouched; a backup file
+   imported on the same phone, the same.
+5. **Two tabs.** K5: both move at once; one rebases onto the other's smaller record and
+   keeps the archive; a tab that never read the cold store neither loses it nor writes it
+   back; told of a mark, it reads the unit for itself.
+6. **The ladder.** K6: a full disk spends restore points and takes no mark and nothing
+   from the cold store; with no room for even a mark nothing is dropped and a day still
+   records.
+7. **Capacity** - below.
+8. **A fake IndexedDB and the real one.** `tests/fake-indexeddb.mjs`: asynchronous
+   delivery, transactions that commit by themselves and leave nothing if the page dies
+   first, copies in and out, quota, eviction, a disk that lies, open failing / hanging /
+   blocked on `versionchange`. `tests/cold.browser.mjs`, real Chromium, real IndexedDB:
+   no database with the flag shut; the move and a reload; the page closed at four points
+   of the move; `deleteDatabase` under an open page (the app lets go of its connection)
+   and between sessions, with the sentence on the reports and accounts screens and not
+   one ₪ figure drawn; two tabs; no IndexedDB.
+
+**With the flag shut** (K0, B0): through five closures, both archive moves and every save
+no database was opened, no mark written, and the record written is `JSON.stringify` of
+memory, byte for byte.
+
+**Fourteen mutants** of the shipped code were each run against `tests/cold.test.mjs` and
+each is caught (a unit stripped on a mark alone; the read-back not compared; missing read
+as empty; a refetched unit written into localStorage; a rebuild forgetting the units; the
+echo; no mark written; the boot not checking digests; money accepted while partial; the
+backup made while partial; the reader active with the flag shut; the rescue file without
+the units; a whole restore point; the Phase 6 fault below).
+
+**Two faults the suites found, both fixed:**
+
+- **Of Phase 6:** `receive()` kept the document AFTER the gate as `_latestRaw`, and the
+  two callers that hand `_latestRaw` back to `receive()` then showed the gate a live
+  document "holding a day of an archived month", which it calls broken. A phone back from
+  no signal with one ordinary unsent day, after a month had left, never said synced again.
+  `_latestRaw` is now the document as served.
+- **Of this phase, found only in real Chromium:** a copy made and not yet marked when the
+  page was closed was believed at the next boot by its shape alone, and the closure's
+  entries were then left out of the record with no mark and no comparison. A unit is now
+  verified only against its mark. The Node invariant had asked the same lenient question;
+  it now asks for the mark.
+
+**NOT built - where the work stopped, exactly:**
+
+1. **No screen beyond the sentence.** A view that is refused shows one sentence; there is
+   no progress, no «נסה שוב», no list of which months are missing. The line in ⋯ is drawn
+   by `renderSettings` and its WORDS are pinned, but it was not looked at in a browser.
+2. **The sentence was not seen on the week grid**, nor the day sentence under a real
+   keyboard. The reports, the accounts and the day ARE measured in Chromium (B3).
+3. **Not on a real phone, and not a real eviction.** `deleteDatabase` is what a test can
+   do; what iOS does after days of disuse is not measured. `navigator.storage.persist()`
+   is asked for at the first move and its answer is not read.
+4. **The undo slot and the copy kept before an adopted snapshot** are written stripped by
+   the same call as a restore point; only the restore point is asserted.
+5. **`lostFields`** (the "record went backwards" detector) skips fields the cold store
+   keeps; argued, not tested - no suite builds a kept-ring entry under an archived unit.
+6. **A phone with years of rows:** `coldMissing()` walks both indexes on every render and
+   every save. Not measured at ten years of rows.
+7. **A later build that changes the database's version** while an older window is open is
+   not designed: this build closes its connection on `versionchange` and reopens at its
+   own version, which would then fail and read as "no cold store" - loudly, not silently.
+8. **Nothing compacts the marks** (decision 68).
+
+### The phone's capacity, with the cold store
+
+`tests/months.capacity.test.mjs`, C3 - Phase 6's method: 5 MiB at two bytes a character is
+2,621,440 characters for everything the app keeps; 20 men; on top of today's 185 KB.
+
+| 20 men | year 1 | year 3 | year 10 | the record AND one copy stop fitting | the record ALONE stops fitting |
+|---|---|---|---|---|---|
+| closed fortnightly, BEFORE (Phase 6) | 1,715 K chars | 5,152 K | 17,183 K | **after 0.7 years** | **after 1.4 years** |
+| **closed fortnightly, WITH THE COLD STORE** | 452 K | 809 K | 2,103 K | **after 4.5 years** | **after 11.6 years** |
+| closed weekly, BEFORE (Phase 6) | 3,118 K | 9,369 K | 31,247 K | after 0.4 years | after 0.8 years |
+| **closed weekly, WITH THE COLD STORE** | 630 K | 1,253 K | 3,479 K | **after 2.4 years** | **after 6.5 years** |
+
+The server's document, from Phase 6's table, is full after 4.3 years fortnightly and 2.3
+weekly - so **the phone is no longer the first wall**: with one copy it now lasts as long
+as the server's document does, and alone far longer. In the cold store at year 10: 15.3
+million characters fortnightly, 28.3 million weekly - megabytes, which is what IndexedDB
+is for.
+
+**What still grows in localStorage without bound** - 179 K characters a year fortnightly,
+312 K weekly:
+
+| | |
+|---|---|
+| the rows of the closure index (`payIndex`) - one per closure, never folded | the largest part; decision 59 |
+| the marks - one key per unit, about 48 characters a closure | 25 K a year fortnightly, 49 K weekly; decision 68 |
+| advances and their ledger origin - none ever leaves | decision 60 |
+| the month index - a row and the calendar dates of each month | small |
+| today's 185 KB of days from before the tracking day | constant, unless decision 55 |
+| restore points (up to the album's limit) and the copy before an adopted snapshot | each is one more copy of the record as written; the ladder spends them first |
+
+### Hebrew in Phase 7
+
+All **proposed**, in one block (`COLD_TEXT` in `js/cold.js`), pinned word for word in
+`tests/cold.test.mjs`.
+
+| string | where |
+|---|---|
+| טוען את הארכיון השמור במכשיר… | in place of a screen, while the cold store is being read |
+| חלק מהרישום הישן שהועבר לארכיון לא נמצא כרגע במכשיר הזה. הדוחות, החשבונות והגיבוי לא יוצגו עד שהוא יושלם מהשרת, כדי שלא יוצג סכום חסר. רישום הימים ממשיך כרגיל. | in place of the reports and the accounts; the refusal of the backup |
+| אין כרגע קליטה. כשתהיה, המכשיר ישלים את החסר בעצמו. | added to it when the browser says it is offline |
+| הארכיון במכשיר לא שלם | the title of a refusal |
+| אי אפשר לרשום עכשיו מקדמה, החזר או סגירת חשבון: חלק מהרישום הישן לא נמצא במכשיר, והחישוב היה יוצא חסר. הרישום לא שונה ודבר לא נשמר. המכשיר ישלים את החסר מהשרת כשתהיה קליטה. | the refusal of an advance, a repayment, a correction or a closure |
+| היום הזה שייך לחודש שהועבר לארכיון, והעותק שלו לא נמצא כרגע במכשיר. הוא לא ריק - הוא חסר. | in place of a day (or a week) of a missing archived month |
+| ארכיון במכשיר: שלם ({n} פריטים) | ⋯ → מצב המכשיר |
+| ארכיון במכשיר: חסרים {n} פריטים מתוך {of} | ⋯ → מצב המכשיר |
+| ארכיון במכשיר: בטעינה | ⋯ → מצב המכשיר |
+| ארכיון במכשיר: אין בדפדפן הזה אחסון נפרד, ולכן הכול נשמר באחסון הרגיל | ⋯ → מצב המכשיר, a browser with no IndexedDB |
+
+Closing and paying while anything is missing reuse Phase 5's `waiting` and its sentence.
+
+### Pinned expectations this phase and the merge moved
+
+None was weakened.
+
+- `tests/gate.integrity.test.mjs`: the shipped flags are SEVEN (`cold`, declared so that
+  it can be declared shut, with a line asserting `false`); `HELPERS` gains `oracle.mjs`
+  (main's), `fake-indexeddb.mjs` and `cold.world.mjs`.
+- Six lists of files an older build never had gain `js/cold.js`: `NOT_IN_V165`
+  (`tests/rima.test.mjs`), `NOT_IN_V179` (`tests/overpayment.test.mjs`, new at the merge),
+  and `NEW_HERE` in `tests/paybook.oldbuilds.test.mjs`, `tests/paybook.split.emulator.test.mjs`,
+  `tests/paybook.archive.emulator.test.mjs`, `tests/months.emulator.test.mjs`.
+- `tests/accounts.test.mjs`: «reports.js without its hooks is main's file» and «index.html
+  gained no element» are asked of the new merge base, `d3103d6` (v180), not `893def8`.
+- `tests/oracle.test.mjs`: the anchor of one mutant («a deduction larger than the wage»)
+  is this branch's line - the same deduction with `advanceLiveRoom` beside it.
+- The stamps are v181 on this branch. The commits after the merge change cached files
+  without moving them, so `tests/build.test.mjs` and `tests/gate.integrity.test.mjs` are
+  red on their stamp checks, as on this branch before.
+
+### Decisions for the owner (64 to 70)
+
+| # | the question | recommended default |
+|---|---|---|
+| 64 | Once a phone has moved anything to the cold store, a build with no reader would read a record with holes. | **Accept: one way.** Every later build carries the reader (it is not behind the flag). Never serve a build older than the first one that had `cold` on to a phone that used it. |
+| 65 | While part of the archive is on a phone in neither place: reports, accounts, the backup, advances and closures are refused with a sentence, and the day screen goes on recording. | **As built.** The alternative - blocking the whole app - stops the crew recording today's work over a problem with last year's. |
+| 66 | Ask the browser not to evict (`navigator.storage.persist()`), at the first move. Some browsers show a question. | **Ask.** It is the one thing that makes an eviction less likely; the answer is not relied on. |
+| 67 | (From the merge.) The accounts page now shows «חוב מקדמות» net of a man's credit, and has no line naming the credit. | **Add the line «יתרת זכות» to the account row and the review page before the gate opens**, in v180's words. Not built. |
+| 68 | The marks grow 25 K characters a year (49 K weekly). | **Leave them** until decision 59's index pages are built; a page of rows can then carry one digest for all of its units. |
+| 69 | The first move on a phone that already holds years of archive writes it all to IndexedDB in one run after boot (seven units are what the suites move; thousands were not measured). | **Measure on a real phone with a year of synthetic data before opening the gate.** |
+| 70 | The sentences of this phase are proposed. | The owner reads the table above. |
 
 ## Phase 6 — closed months of days leave the live document (design, then as built)
 

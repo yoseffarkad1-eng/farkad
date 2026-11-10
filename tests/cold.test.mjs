@@ -242,6 +242,7 @@ const WORDS = {
     same('MEMORY IS WHAT IT WAS BEFORE THE REOPEN, to the byte', memory(b) === live, true);
     same('and every figure', figures(b) === liveFigures, true);
     same('the record on the disk was not grown by the boot', b.raw(SCHEDULE) === a.raw(SCHEDULE), true);
+    same('and the boot did not read the smaller record as one that "went backwards"', b.State.recordWasReplaced === true, false);
     given('a day is recorded on the reopened phone', b.State.commit(b.call('assignPlace', b.State.schedule,
         '2026-11-05', 'w_salim', 'actual', 'p_a', undefined, 0)) === true);
     same('and a save on the reopened phone keeps the units out', daysIn(onDisk(b), OCT), []);
