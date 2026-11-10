@@ -106,6 +106,10 @@ async function reopen(phone) {
     await phone.page.reload({ waitUntil: 'load' });
     await phone.page.waitForTimeout(300);
     await phone.page.evaluate(day => { todayStr = () => day; }, TODAY);
+    // The played cloud subscribes a page once; a reloaded page is the same page with a new
+    // listener, so it is handed the document as a listener is on subscribing.
+    await phone.page.waitForFunction(() => typeof window.__accSnapshot === 'function', null, { timeout: 15000 });
+    await phone.page.evaluate(doc => window.__accSnapshot(doc), JSON.parse(JSON.stringify(net.cloud.doc)));
     await phone.page.waitForFunction(() => FarkadSync.adapter && FarkadSync._heardFromCloud === true, null, { timeout: 15000 });
 }
 
