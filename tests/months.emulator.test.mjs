@@ -126,7 +126,10 @@ const BASE = (() => {
     openBook(first, undefined, 'd_seed');
     const put = change => given('a base edit is committed', first.State.commit(change) === true, JSON.stringify(change));
     put(first.call('setRimaCount', first.State.schedule, '2026-10-05', 'p_a', 3));
+    // v183's second count rides on the same days: «every layer» is measured, not argued.
+    put(first.call('setYosefGevesCount', first.State.schedule, '2026-10-05', 'p_a', 4));
     put(first.call('setRimaCount', first.State.schedule, '2026-09-28', 'p_b', 2));
+    put(first.call('setYosefGevesCount', first.State.schedule, '2026-09-28', 'p_b', 1));
     put(first.call('assignPlace', first.State.schedule, '2026-11-02', 'w_salim', 'actual', 'p_a', undefined, 0));
     const schedule = clone(first.State.schedule);
     const bare = clone(schedule);
@@ -256,6 +259,7 @@ const figures = device => {
         invoice: device.call('invoiceReport', S, RANGE[0], RANGE[1]),
         each: S.workers.map(man => device.call('workerDaysReport', S, man, RANGE[0], RANGE[1])),
         rima: device.call('rimaReport', S, RANGE[0], RANGE[1]),
+        geves: device.call('yosefGevesReport', S, RANGE[0], RANGE[1]),
         days: S.days
     });
 };
@@ -370,6 +374,8 @@ let wholeFigures = null;
     const held = await server(envNew, 'months', docs[0]);
     same('holding the month\'s days exactly as the schedule held them - the Rima count included',
         [canonical(held.days) === canonical(model.call('monthDaysOf', before, SEP)), held.days['2026-09-28'].rima.p_b, held.month], [true, 2, SEP]);
+    same('and v183\'s second count, «עובדי יוסף גבס», beside it under its own layer - through the real adapter',
+        held.days['2026-09-28'].yosefGeves, { p_b: 1 });
     same('and it is a document this build reads back: its digest is the digest of its days after the round trip through Firestore',
         model.call('monthDocumentProblems', docs[0], held), []);
     same('both phones hold every day and read every report as before', [figures(a) === wholeFigures, figures(b) === wholeFigures], [true, true]);
@@ -461,6 +467,7 @@ let wholeFigures = null;
 
     // what no write may do afterwards
     await denied('REFUSED: a field-path write to a day of an archived month', pathWrite(db, { 'days.2026-10-05.rima.p_a': 6 }));
+    await denied('REFUSED: a field-path write of «עובדי יוסף גבס» (v183) to a day of an archived month', pathWrite(db, { 'days.2026-10-05.yosefGeves.p_a': 6 }));
     await denied('REFUSED: a field-path write to a date of that month that held nothing', pathWrite(db, { 'days.2026-10-20.actual.w_salim': { entries: [] } }));
     await denied('REFUSED: removing a row', pathWrite(db, { ['monthIndex.rows.' + OCT]: undefined }));
     await denied('REFUSED: changing a row', pathWrite(db, { ['monthIndex.rows.' + OCT + '.n']: 3 }));

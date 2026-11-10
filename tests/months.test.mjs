@@ -19,6 +19,8 @@
 //   M9  the files: the backup, the rescue file, the daily cloud copy
 //   M10 the gates: either flag shut and nothing moves; reading is not behind them
 //   M11 with Phase 5: closures that have left and months that have left, in both orders
+//   M12 v183's second count, «עובדי יוסף גבס»: it leaves with its month, comes back with it,
+//       and is refused for edit on an archived day exactly as a Rima count is
 //
 // The fake cloud runs with `payRules: true`: it refuses what firestore.rules refuse. The
 // real rules and the production adapter are measured in tests/months.emulator.test.mjs.
@@ -45,7 +47,10 @@ const BASE = (() => {
     openBook(first, undefined, 'd_seed');
     const put = change => given('a base edit is committed', first.State.commit(change) === true, JSON.stringify(change));
     put(first.call('setRimaCount', first.State.schedule, '2026-10-05', 'p_a', 3));
+    // v183's second count rides on the same days: «every layer» is measured, not argued.
+    put(first.call('setYosefGevesCount', first.State.schedule, '2026-10-05', 'p_a', 4));
     put(first.call('setRimaCount', first.State.schedule, '2026-09-28', 'p_b', 2));
+    put(first.call('setYosefGevesCount', first.State.schedule, '2026-09-28', 'p_b', 1));
     put(first.call('assignPlace', first.State.schedule, '2026-11-02', 'w_salim', 'actual', 'p_a', undefined, 0));
     const schedule = clone(first.State.schedule);
     return { schedule, wire: first.call('cloudDocument', schedule) };
@@ -89,6 +94,7 @@ const figures = device => {
         invoice: device.call('invoiceReport', S, RANGE[0], RANGE[1]),
         each: S.workers.map(man => device.call('workerDaysReport', S, man, RANGE[0], RANGE[1])),
         rima: device.call('rimaReport', S, RANGE[0], RANGE[1]),
+        geves: device.call('yosefGevesReport', S, RANGE[0], RANGE[1]),
         accounts: device.call('accountsList', S, LATER),
         days: S.days
     });
@@ -756,6 +762,109 @@ const WANT = {
         same('THE OTHER ORDER: the closures leave after their months, from the other phone', [closures.ok, payRows(cloud.doc).length, monthsOut(cloud.doc)], [true, 5, [SEP, OCT]]);
         same('and nothing moved on either phone', [figures(a) === whole, figures(b) === whole], [true, true]);
     }
+}
+
+// ------------------------------------------------------------------------------------
+{
+    suite('M12: «עובדי יוסף גבס» (v183) - the second count leaves with its month, byte for byte, and is as final there as a Rima count');
+
+    // The base record carries the count on 2026-10-05 (beside Rima's 3) and on 2026-09-28
+    // (beside Rima's 2), so every «byte for byte» above was already asked with the layer
+    // in the day. This section asks about the layer BY NAME, so that a build which
+    // dropped it and its test fixture together could not pass.
+    given('the base record holds the second count where this section looks for it',
+        BASE.schedule.days['2026-10-05'].yosefGeves.p_a === 4 && BASE.schedule.days['2026-09-28'].yosefGeves.p_b === 1
+        && BASE.schedule.days['2026-10-05'].rima.p_a === 3, JSON.stringify(BASE.schedule.days['2026-10-05']));
+    const { cloud, a, b } = await closedWorld({ tag: '12' });
+    const gevesOf = device => canonical(device.call('yosefGevesReport', device.State.schedule, RANGE[0], RANGE[1]));
+    const table = gevesOf(a);
+    given('the list\'s own table counts both', a.call('yosefGevesReport', a.State.schedule, RANGE[0], RANGE[1]).total === 5, table);
+    const fileBefore = clone(a.State.schedule);
+    const bDisk = b.dump();
+    cloud.subscribers.splice(1, 1);                       // phone b goes dark before the move
+    given('moved', (await a.Sync.archiveMonths({ today: LATER })).ok === true);
+    await settled([a]);
+
+    const octDoc = cloud.months.get(cloud.doc.monthIndex.rows[OCT].d);
+    const sepDoc = cloud.months.get(cloud.doc.monthIndex.rows[SEP].d);
+    same('THE MONTH DOCUMENTS HOLD THE COUNT as it was typed, beside Rima\'s, each under its own layer',
+        [octDoc.days['2026-10-05'].yosefGeves, octDoc.days['2026-10-05'].rima, sepDoc.days['2026-09-28'].yosefGeves, sepDoc.days['2026-09-28'].rima],
+        [{ p_a: 4 }, { p_a: 3 }, { p_b: 1 }, { p_b: 2 }]);
+    same('the live document holds no day of either month - so no count of either list for them', [daysIn(cloud.doc, OCT), daysIn(cloud.doc, SEP)], [[], []]);
+    same('a month whose only content is counts (September) left with both of them: its digest is of the days WITH the layer',
+        cloud.doc.monthIndex.rows[SEP].h === a.call('monthDigest', { '2026-09-28': BASE.schedule.days['2026-09-28'] })
+        && cloud.doc.monthIndex.rows[SEP].h !== a.call('monthDigest', { '2026-09-28': { rima: { p_b: 2 } } }), true);
+    same('the phone that moved it still reads the list\'s table exactly as before', gevesOf(a) === table, true);
+
+    const fresh = phone('d_new12', cloud, { storage: {} });
+    await settled([fresh]);
+    same('A PHONE INSTALLED AFTERWARDS is made whole from the month documents: the same table, the same days',
+        [gevesOf(fresh) === table, fresh.State.schedule.days['2026-10-05'].yosefGeves, canonical(fresh.State.schedule.days) === canonical(a.State.schedule.days)],
+        [true, { p_a: 4 }, true]);
+
+    // Refused for edit, exactly as a Rima count is (M6).
+    const disk = JSON.stringify(a.dump());
+    const wrote = cloud.writes.length;
+    a.said.length = 0;
+    same('A COUNT OF THE LIST ON AN ARCHIVED DAY IS NOT CHANGED: the commit answers false, in the archive\'s own sentence',
+        [a.State.commit(a.call('setYosefGevesCount', a.State.schedule, '2026-10-05', 'p_a', 9)), a.said], [false, [`${WANT.refusedTitle} | ${WANT.refused}`]]);
+    same('nor cleared', a.State.commit(a.call('setYosefGevesCount', a.State.schedule, '2026-10-05', 'p_a', null)), false);
+    same('nor typed for a site that had none on a day of that month', a.State.commit(a.call('setYosefGevesCount', a.State.schedule, '2026-10-06', 'p_b', 2)), false);
+    await settle(40);
+    same('nothing was journalled, queued or sent; the disk is byte for byte what it was; memory was put back',
+        [a.Sync.pendingCount(), cloud.writes.length - wrote, JSON.stringify(a.dump()) === disk, a.State.schedule.days['2026-10-05'].yosefGeves,
+            Boolean((a.State.schedule.days['2026-10-06'] || {}).yosefGeves), gevesOf(a) === table], [0, 0, true, { p_a: 4 }, false, true]);
+    same('in a month that has not left the list is typed as ever',
+        a.State.commit(a.call('setYosefGevesCount', a.State.schedule, '2026-11-02', 'p_a', 2)), true);
+    await settled([a]);
+
+    // The server's own answer (the fake cloud speaking firestore.rules): daysGuard is by DATE.
+    const head = name => ({ updatedAt: new Date().toISOString(), updatedBy: 'x', protocol: 2, lastOpId: name, opFingerprint: 'f', revision: cloud.doc.revision + 1 });
+    const tried = payload => cloud.adapter.update(payload).then(() => 'accepted', error => error.code);
+    same('THE SERVER refuses a field-path write of the list to an archived day', await tried(Object.assign(head('op12a'), { 'days.2026-10-05.yosefGeves.p_a': 6 })), 'permission-denied');
+    same('and its clear', await tried(Object.assign(head('op12b'), { 'days.2026-09-28.yosefGeves.p_b': null })), 'permission-denied');
+
+    // The phone that was away typed a correction to the list with no signal.
+    const back = payDevice({ storage: bDisk, deviceId: b.id, flags: FLAGS });
+    back.Sync.pushDelayMs = 5;
+    back.State.load();
+    given('the correction is accepted on the phone that has not heard', back.State.commit(
+        back.call('setYosefGevesCount', back.State.schedule, '2026-10-05', 'p_a', 7)) === true);
+    given('and so is an ordinary day', back.State.commit(back.call('assignPlace', back.State.schedule, '2026-11-05', 'w_khaled', 'actual', 'p_a', undefined, 0)) === true);
+    const sentBefore = cloud.attempts.length;
+    back.Sync.connect(cloud.adapter);
+    await settleUntil(() => Boolean(cloud.doc.days['2026-11-05']), 8000, 5);
+    await settle(200);
+    same('AN EDIT OF THE LIST QUEUED BEFORE THE PHONE HEARD is never sent', cloud.attempts.slice(sentBefore).filter(attempt => attempt.payload
+        && Object.keys(attempt.payload).some(key => key.indexOf('days.2026-10') === 0)).length, 0);
+    const rows = back.Sync.heldRecords();
+    same('it is held, durably, with the archive\'s value beside it, and the day behind it went up',
+        [rows.map(row => [row.path, row.mine, row.cloud, row.archived]), Boolean(cloud.doc.days['2026-11-05']), back.Sync.status === 'synced'],
+        [[['days.2026-10-05.yosefGeves.p_a', 7, 4, true]], true, false]);
+    same('a person lets it go, and the phone holds the archive\'s count again - Rima\'s beside it untouched throughout',
+        [back.Sync.retireArchivedHold(rows[0].opId), back.Sync.heldRecords().length, back.State.schedule.days['2026-10-05'].yosefGeves, back.State.schedule.days['2026-10-05'].rima],
+        [true, 0, { p_a: 4 }, { p_a: 3 }]);
+    await settled([a, back]);
+
+    // A restore from a file whose count of the list disagrees with the archive.
+    const tampered = clone(fileBefore);
+    tampered.days['2026-10-05'].yosefGeves.p_a = 1;
+    delete tampered.days['2026-09-28'].yosefGeves;
+    const archivedOct = canonical(a.call('monthDaysOf', a.State.schedule, OCT));
+    const archivedSep = canonical(a.call('monthDaysOf', a.State.schedule, SEP));
+    const result = await back.Sync.replaceEverything(back.call('normaliseSchedule', clone(tampered)));
+    await settled([a, back]);
+    same('A RESTORE of a file whose list disagrees with the archive is accepted, and the archive\'s counts stand on both phones',
+        [result.ok, a.State.schedule.days['2026-10-05'].yosefGeves, back.State.schedule.days['2026-10-05'].yosefGeves, back.State.schedule.days['2026-09-28'].yosefGeves,
+            canonical(a.call('monthDaysOf', a.State.schedule, OCT)) === archivedOct, canonical(back.call('monthDaysOf', back.State.schedule, SEP)) === archivedSep],
+        [true, { p_a: 4 }, { p_a: 4 }, { p_b: 1 }, true, true]);
+    same('the month documents were not touched by any of it',
+        [canonical(cloud.months.get(cloud.doc.monthIndex.rows[OCT].d)) === canonical(octDoc), canonical(cloud.months.get(cloud.doc.monthIndex.rows[SEP].d)) === canonical(sepDoc), cloud.months.size], [true, true, 2]);
+
+    // The files.
+    a.call('exportBackup');
+    const backup = JSON.parse(a.downloads[a.downloads.length - 1].text);
+    same('the backup file carries the list\'s counts of the archived months', [backup.days['2026-10-05'].yosefGeves, backup.days['2026-09-28'].yosefGeves], [{ p_a: 4 }, { p_b: 1 }]);
 }
 
 report();

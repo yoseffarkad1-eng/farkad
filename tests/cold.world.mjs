@@ -15,7 +15,10 @@ export async function archivedPhone() {
     openBook(first, undefined, 'd_seed');
     const put = change => { if (first.State.commit(change) !== true) throw new Error('a base edit was refused'); };
     put(first.call('setRimaCount', first.State.schedule, '2026-10-05', 'p_a', 3));
+    // v183's second count rides on the same days: «every layer» is measured, not argued.
+    put(first.call('setYosefGevesCount', first.State.schedule, '2026-10-05', 'p_a', 4));
     put(first.call('setRimaCount', first.State.schedule, '2026-09-28', 'p_b', 2));
+    put(first.call('setYosefGevesCount', first.State.schedule, '2026-09-28', 'p_b', 1));
     put(first.call('assignPlace', first.State.schedule, '2026-11-02', 'w_salim', 'actual', 'p_a', undefined, 0));
     const schedule = clone(first.State.schedule);
     const cloud = makeCloud({ payRules: true,

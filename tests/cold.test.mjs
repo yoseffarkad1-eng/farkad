@@ -46,7 +46,10 @@ const baseOf = octoberRima => {
     openBook(first, undefined, 'd_seed');
     const put = change => given('a base edit is committed', first.State.commit(change) === true, JSON.stringify(change));
     if (octoberRima) put(first.call('setRimaCount', first.State.schedule, '2026-10-05', 'p_a', 3));
+    // v183's second count rides on the same days: «every layer» is measured, not argued.
+    if (octoberRima) put(first.call('setYosefGevesCount', first.State.schedule, '2026-10-05', 'p_a', 4));
     put(first.call('setRimaCount', first.State.schedule, '2026-09-28', 'p_b', 2));
+    put(first.call('setYosefGevesCount', first.State.schedule, '2026-09-28', 'p_b', 1));
     put(first.call('assignPlace', first.State.schedule, '2026-11-02', 'w_salim', 'actual', 'p_a', undefined, 0));
     const schedule = clone(first.State.schedule);
     return { schedule, wire: first.call('cloudDocument', schedule) };
@@ -78,6 +81,7 @@ const figures = device => {
         invoice: device.call('invoiceReport', S, RANGE[0], RANGE[1]),
         each: S.workers.map(man => device.call('workerDaysReport', S, man, RANGE[0], RANGE[1])),
         rima: device.call('rimaReport', S, RANGE[0], RANGE[1]),
+        geves: device.call('yosefGevesReport', S, RANGE[0], RANGE[1]),
         accounts: device.call('accountsList', S, LATER),
         history: device.call('closureHistory', S, {}),
         days: S.days, ledger: S.ledger.advances, pay: S.pay
@@ -745,6 +749,49 @@ const WORDS = {
     const next = phone('d_k7', null, { flags: FLAGS_ON, storage: none.dump() });
     await ready(next);
     same('and the next open is whole from localStorage alone', [next.State.coldMissing(), figures(next) === figures(none)], [[], true]);
+}
+
+// ------------------------------------------------------------------------------------
+{
+    suite('K8: «עובדי יוסף גבס» (v183) - the second count goes to the cold store with its month and comes back with it');
+
+    // WORLD's record carries the count on 2026-10-05 and 2026-09-28 (tests/months.test.mjs,
+    // M12, measures the server's side). Asked here BY NAME of the phone's two stores.
+    given('the world holds the count in both archived months', WORLD.a.State.schedule.days['2026-10-05'].yosefGeves.p_a === 4
+        && WORLD.a.State.schedule.days['2026-09-28'].yosefGeves.p_b === 1);
+    const gevesOf = device => canonical(device.call('yosefGevesReport', device.State.schedule, RANGE[0], RANGE[1]));
+    const { device: a, fake } = coldPhone('d_k8');
+    await ready(a);
+    const table = gevesOf(a);
+    given('the move finished', (await cold(a).move()).failed.length === 0);
+    const units = fake.disk.dump(DB, UNITS);
+    const unitText = key => (typeof units[key] === 'string' ? units[key] : JSON.stringify(units[key]));
+    same('THE RECORD ON THE DISK holds no count of the list for the archived days, and the cold units do - beside Rima\'s',
+        [/yosefGeves/.test(JSON.stringify({ d: onDisk(a).days['2026-10-05'] || null, s: onDisk(a).days['2026-09-28'] || null })),
+            /"yosefGeves":\{"p_a":4\}/.test(unitText('m:' + OCT)), /"yosefGeves":\{"p_b":1\}/.test(unitText('m:' + SEP)),
+            /"rima":\{"p_a":3\}/.test(unitText('m:' + OCT))], [false, true, true, true]);
+    same('memory still reads the list\'s table as it did', gevesOf(a) === table, true);
+    const b = reopen(a, fake);
+    await ready(b);
+    same('AFTER A REOPEN the counts are back in memory from the cold store, and the table is the same',
+        [b.State.schedule.days['2026-10-05'].yosefGeves, b.State.schedule.days['2026-09-28'].yosefGeves, gevesOf(b) === table, b.State.coldMissing()],
+        [{ p_a: 4 }, { p_b: 1 }, true, []]);
+    b.said.length = 0;
+    same('an edit of the list on an archived day is refused on the reopened phone, and memory is still whole',
+        [b.State.commit(b.call('setYosefGevesCount', b.State.schedule, '2026-10-05', 'p_a', 9)), b.said.length, b.State.schedule.days['2026-10-05'].yosefGeves, b.State.coldMissing()],
+        [false, 1, { p_a: 4 }, []]);
+    b.downloads.length = 0;
+    b.call('exportBackup');
+    same('the backup file carries the list\'s archived counts though the record on the disk does not',
+        (file => [file.days['2026-10-05'].yosefGeves, file.days['2026-09-28'].yosefGeves])(JSON.parse(b.downloads[0].text)), [{ p_a: 4 }, { p_b: 1 }]);
+    // A cold copy whose count of the list was changed is not believed (law 10): the unit is missing, not different.
+    const changed = fake.disk.dump(DB, UNITS)['m:' + OCT];
+    changed.days['2026-10-05'].yosefGeves.p_a = 5;
+    fake.disk.putRaw(DB, UNITS, 'm:' + OCT, changed);
+    const c = reopen(a, fake);
+    await ready(c);
+    same('A COLD COPY WHOSE COUNT OF THE LIST WAS CHANGED is not believed: that month is missing, and said so - never shown as 5',
+        [c.State.coldMissing(), Boolean((c.State.schedule.days['2026-10-05'] || {}).yosefGeves), c.State.coldRefusal()], [['m:' + OCT], false, WORDS.missing]);
 }
 
 report();
