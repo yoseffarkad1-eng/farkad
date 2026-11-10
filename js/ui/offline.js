@@ -155,8 +155,18 @@ function catchUpWhenSafe() {
     setTimeout(catchUpWhenSafe, 500);
 }
 
+// Is a new build sitting installed and waiting for a yes? Asked by the settings sheet
+// (js/ui/settings.js), which opens its עדכון וגרסה row over one: the banner that offers
+// the update can be dismissed with «אחר כך», and a waiting build behind a dismissed banner
+// AND a closed row would be an update nothing on the screen admits to.
+function updateWaiting() {
+    return Boolean(waitingWorker || (swRegistration && swRegistration.waiting));
+}
+
 function showUpdateBanner(worker) {
     waitingWorker = worker;
+    // A build that arrives while the sheet is open is news for the sheet too.
+    if (typeof revealSettingsFolds === 'function') revealSettingsFolds();
     const banner = document.getElementById('updateBanner');
     if (!banner) return;
 
@@ -224,6 +234,9 @@ function watchConnection() {
 // This asks the server directly, takes whatever is waiting, and reloads onto it.
 function checkForUpdate() {
     const say = text => askTell(text);
+    // The check answers in a dialog and its version line is in the עדכון וגרסה row; whoever
+    // presses this from anywhere but that row finds the row open when the dialog is gone.
+    if (typeof settingsSendTo === 'function') settingsSendTo('settingsFoldUpdate');
 
     if (!swRegistration) {
         say(`הגרסה הפעילה: ${APP_VERSION}. עדכונים אוטומטיים אינם זמינים כאן - פתח את האתר בדפדפן.`);

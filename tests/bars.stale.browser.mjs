@@ -302,6 +302,9 @@ const brief = s => JSON.stringify({ ot: s.ot, tabs: s.tabs && [s.tabs.position, 
     // The ⋯ report: copied at the top, where the drop is 0 - it says what it DID.
     const text = await page.evaluate(async () => {
         openSettings();
+        // v172: מידע טכני is a row that is shut when the sheet opens; the row, then the button.
+        const fold = document.querySelector('#diagnosticGroup > summary');
+        if (fold) fold.click();
         const toggle = document.getElementById('diagnosticToggle');
         if (toggle) toggle.click();
         await new Promise(done => setTimeout(done, 1300));

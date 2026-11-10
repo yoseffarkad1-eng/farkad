@@ -47,7 +47,7 @@
 // every one, word for word, and changing one here moves the pinned line there in the
 // same commit. A name in a template is already bidi-isolated by the caller.
 const TRANSPORT_TEXT = Object.freeze({
-    // --- the switch, in ⋯ under «מכשיר ועזרה»
+    // --- the switch, in ⋯: the last row of «כללי» (v172; under «מכשיר ועזרה» until then)
     switchTitle: 'הסעות',
     switchSub: 'שיבוץ עובדים לרכבים',
     switchLead: 'שיבוץ העובדים לרכבים והודעה לכל נהג. פועל במכשיר הזה בלבד: לא מסונכרן, לא משותף עם הטלפונים האחרים, ולא נכלל בגיבוי.',
@@ -1971,28 +1971,35 @@ function transportInstallEntry() {
     actions.insertBefore(entry, after ? after.nextSibling : actions.firstChild);
 }
 
-// The card in ⋯, under «מכשיר ועזרה». Built here rather than written into index.html
-// because every word on it is one of the words above.
+// The row in ⋯, the last of «כללי» (v172; it was a card at the foot of «מכשיר ועזרה», after
+// the technical report, which is not where a person looks for something they switch on).
+// Built here rather than written into index.html because every word on it is one of the
+// words above. It is the same thing as every other row on that sheet - a <details> with
+// the card head as its <summary> - and it is shut when the sheet opens: nothing on it is
+// ever something a person has to be shown, so nothing opens it but a tap.
 function transportInstallSwitch() {
     if (typeof document === 'undefined' || !document.getElementById) return;
-    const host = document.getElementById('settingsHelpCards');
+    const host = document.getElementById('settingsDailySection');
     if (!host || document.getElementById('transportSwitchCard')) return;
     const T = TRANSPORT_TEXT;
-    const card = el('section', 'settings-group transport-switch');
+    const card = el('details', 'settings-group settings-fold transport-switch');
     card.id = 'transportSwitchCard';
-    const head = el('div', 'settings-card-head');
+    const head = el('summary', 'settings-card-head');
+    if (typeof FarkadIcons !== 'undefined' && FarkadIcons.card) head.appendChild(FarkadIcons.card('van'));
     const titles = el('div');
     titles.appendChild(el('h3', null, T.switchTitle));
     titles.appendChild(el('p', 'hint', T.switchSub));
     head.appendChild(titles);
     card.appendChild(head);
-    card.appendChild(el('p', 'hint', T.switchLead));
+    const body = el('div', 'settings-fold-body');
+    body.appendChild(el('p', 'hint', T.switchLead));
     const state = el('p', 'hint settings-status');
     state.id = 'transportSwitchState';
-    card.appendChild(state);
+    body.appendChild(state);
     const toggle = button('', 'btn-secondary', () => transportSetEnabled(!transportEnabled()));
     toggle.id = 'transportSwitch';
-    card.appendChild(toggle);
+    body.appendChild(toggle);
+    card.appendChild(body);
     host.appendChild(card);
     transportRenderSwitch();
 }

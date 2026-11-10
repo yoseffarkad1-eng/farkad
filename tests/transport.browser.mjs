@@ -224,10 +224,18 @@ async function evening(width, height, scheme) {
     suite(`${at}: the switch in ⋯`);
     await page.locator('#settingsBtn').click();
     await page.locator('#transportSwitchCard').scrollIntoViewIfNeeded();
-    check('the card is under «מכשיר ועזרה»', await page.evaluate(() => {
+    // MOVED IN v172, and the move is the point: the settings sheet was put in strict order
+    // and the switch is now the last row of «כללי», not a card at the foot of «מכשיר ועזרה»
+    // under the technical report. It is a row that is shut when the sheet opens - nothing
+    // on it is ever urgent - so it is opened by a tap, as a person opens it.
+    check('the card is the last row of «כללי»', await page.evaluate(() => {
         const card = document.getElementById('transportSwitchCard');
-        return Boolean(card && card.closest('#settingsHelpCards'));
+        const section = document.getElementById('settingsDailySection');
+        return Boolean(card && section && section.lastElementChild === card
+            && card.tagName === 'DETAILS' && !card.closest('#settingsHelpCards'));
     }));
+    same('shut until it is tapped', await page.evaluate(() => document.getElementById('transportSwitchCard').open), false);
+    await page.locator('#transportSwitchCard > summary').click();
     check('it says this phone only, not shared, not in a backup',
         (await text(page, '#transportSwitchCard')).includes(THIS_PHONE));
     same('its button offers to turn it on', await text(page, '#transportSwitch'), SWITCH_ON);
@@ -541,6 +549,8 @@ async function evening(width, height, scheme) {
     check('the back button closes it too', !(await visible(page, '#transportPanel')));
 
     await page.locator('#settingsBtn').click();
+    // v172: the row is shut again at every opening of the sheet; one tap opens it.
+    await page.locator('#transportSwitchCard > summary').click();
     await page.locator('#transportSwitch').click();
     await page.evaluate(() => closeSettings());
     same('turned off in ⋯, the entry is gone from the WhatsApp dialog', await page.locator('#transportEntry').count(), 0);

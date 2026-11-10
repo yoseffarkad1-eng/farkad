@@ -99,7 +99,8 @@
     .push-reminder-times > div { display: grid; gap: 6px; padding: 12px; border-radius: 8px; background: var(--accent-soft); }
     .push-reminder-times strong { font-size: 32px; line-height: 1.2; color: var(--accent); }
     .push-reminder-times span { font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
-    .push-reminder select, .push-reminder > button { width: 100%; min-width: 0; min-height: 48px; margin-block: 4px; border-radius: 8px; white-space: normal; }
+    /* v172: the card became a row that opens, and its controls moved one box in. */
+    .push-reminder select, .push-reminder .settings-fold-body > button { width: 100%; min-width: 0; min-height: 48px; margin-block: 4px; border-radius: 8px; white-space: normal; }
     .push-reminder-enable { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 700; }
     .push-reminder-status { font-size: 17px; font-weight: 650; line-height: 1.6; }
     .push-reminder-help { border-top: 1px solid var(--line-soft); margin-top: 12px; }

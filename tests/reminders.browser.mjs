@@ -29,6 +29,12 @@ try {
     await page.goto(server.url);
     const before = await page.evaluate(() => JSON.stringify(State.schedule));
     await page.locator('#settingsBtn').click();
+    // v172: תזכורות בטלפון is a row that is shut each time the sheet opens, unless the
+    // server says a subscribed phone is not registered (tests/settings-order.browser.mjs).
+    // Every opening of the sheet below is followed by the one tap a person makes.
+    const openReminders = target => target.locator('#settingsFoldReminders > summary').click();
+    same('the reminders row is shut when the sheet opens', await page.evaluate(() => document.getElementById('settingsFoldReminders').open), false);
+    await openReminders(page);
     suite('activation is explicit and needs a durable server response');
     same('opening never asks permission', await page.evaluate(() => pushFixture.promptCalls), 0);
     check('no transport cannot enable reminders', await page.locator('#pushReminderEnable').isDisabled());
@@ -67,6 +73,8 @@ try {
     check('test says accepted request, not proved phone delivery', (await page.locator('#pushReminderStatus').innerText()).includes('בדוק אם התקבלה'));
     await page.keyboard.press('Escape'); await page.locator('#settingsBtn').click();
     await page.waitForFunction(() => document.getElementById('pushReminderStatus').textContent.includes('התזכורות מופעלות'));
+    same('reminders that are on and registered do not open their row', await page.evaluate(() => document.getElementById('settingsFoldReminders').open), false);
+    await openReminders(page);
     same('reopening restores server days', await page.locator('#pushReminderDays').inputValue(), 'friday');
     await page.locator('#pushReminderDays').selectOption('everyday');
     check('changing days requires saving before claiming a new schedule', (await page.locator('#pushReminderStatus').innerText()).includes('עדיין לא נשמרו'));
@@ -102,6 +110,7 @@ try {
             FarkadReminders.setTransport(null);
         }, {ua, installed});
         await page.locator('#settingsBtn').click();
+        await openReminders(page);
         await page.waitForFunction(text => document.getElementById('pushReminderStatus').textContent.includes(text), expected);
         check(`${ua.includes('iPhone') ? 'iPhone' : 'Galaxy'} installed=${installed}: relevant instructions`, (await page.locator('#pushReminderStatus').innerText()).includes(expected));
         await page.keyboard.press('Escape');
@@ -115,6 +124,7 @@ try {
     await frame.waitForFunction(() => typeof FarkadReminders !== 'undefined' && document.getElementById('dayView').children.length > 0);
     check('sandboxed app still boots', await frame.locator('#dayView').isVisible());
     await frame.locator('#settingsBtn').click();
+    await openReminders(frame);
     check('restricted preview explains unsupported notifications', (await frame.locator('#pushReminderStatus').innerText()).includes('אינו תומך'));
     check('restricted preview cannot ask permission', await frame.locator('#pushReminderEnable').isDisabled());
     check('no sandbox boot exception', !embeddedErrors.length, JSON.stringify(embeddedErrors));

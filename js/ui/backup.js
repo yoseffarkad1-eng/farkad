@@ -206,6 +206,10 @@ function renderCloudRestorePoints() {
         });
         fold.appendChild(list);
         box.appendChild(fold);
+        // These dates arrived after the sheet was drawn. On a phone whose crew is gone
+        // they are the way back, and the row they are in is shut until something says so
+        // (settingsFoldReasons, js/ui/settings.js) - so it is asked again now.
+        if (typeof revealSettingsFolds === 'function') revealSettingsFolds();
     });
 }
 
@@ -537,6 +541,9 @@ function dropUndoState(raw) {
 // state kept before it, which ↶ never was.
 function tellRestoreResult(result, done) {
     if (typeof hideUndo === 'function') hideUndo();
+    // The answer is read over the row it came from (v172): the restore points under the
+    // dialog have just changed, and a row found shut behind «שוחזר.» hides what changed.
+    if (typeof openSettingsFold === 'function') openSettingsFold('settingsFoldRestore');
     if (result.ok) { askTell(done); return; }
 
     if (result.stage === 'invalid') { askTell(notAScheduleNotice()); return; }
