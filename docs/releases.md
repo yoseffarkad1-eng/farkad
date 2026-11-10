@@ -1,4 +1,47 @@
-## v180 — the credit, and the wage rounded once (CANDIDATE - NOT SERVED - AWAITING THE OWNER'S APPROVAL)
+## v181 — polish: a quiet zero, emptier empty screens, a letter in the week, the backup's age (candidate, not served)
+
+**Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `d3103d6` (v180). No number and no data path moved; nothing in `js/sync`, `js/model`,
+`js/state.js`, `js/store.js`, `js/recovery.js` or the rules. The owner asked (2026-11-10) for
+more features, faster, and to be surprised; this is the first of them.
+
+- **Advances:** a man who owes nothing reads quieter than one who owes - weaker ink, ordinary
+  weight, no accent on his own page. Same words, same order, nobody hidden; an account that
+  asks to be checked is never quiet.
+- **Empty screens:** advances with no crew shows the roster's sentence and «+ הוסף עובד»
+  instead of a search over nobody; the week with no crew shows its sentence and the same button
+  and no header; a crew of archived men with nothing this week keeps the three week steps and
+  loses print/share; the crew screen hides search and reorder (and the two shortcuts when there
+  is no site) until the first man. A week with a crew and no record keeps its whole header and
+  grid under one sentence, on screen only. Reports are unchanged - `tests/wording.test.mjs`
+  says their sentence is a fact about a range, not a setup problem.
+- **Week on a phone:** each colour block carries the site's first letter (`siteInitial`,
+  `js/ui/sitecolor.js`); the block is 20px, and the doubled-day dot, the extra-hours plus and
+  the second-lap diamond stand beside the letter instead of through it. Site colours untouched;
+  nothing changes on paper, in the picture, or on a desktop. The letter is an attribute drawn by
+  the stylesheet, so the cell's text and accessible name are what they were.
+- **Backup row in ⋯:** shut, the row itself repeats the existing age sentence; after 14 days
+  without a file from this phone, one quiet line on the row. No new key - it reads
+  `scheduleData:lastBackup`, which the export already wrote.
+
+**New Hebrew, PROPOSED, not read by the owner** (pinned in `tests/polish.test.mjs` and
+`tests/polish.browser.mjs`): «אין רישומים בשבוע הזה.» · «שבועיים ויותר בלי קובץ גיבוי חדש מהמכשיר הזה.»
+No existing string changed; «אין עובדים. הוסף עובד כדי להתחיל.» and «+ הוסף עובד» are reused.
+
+**Known not covered.** Not tried on a real phone. Two sites can share a first letter (colour and
+diamond still tell them apart). The 13px letter was not checked at doubled text beyond what the
+mobile suite measures. The reminder is not shown on a phone that never made a file (the existing
+sentence says so) and knows nothing of files made on other phones. A week whose only record is on
+the hidden Saturday shows an empty grid with no sentence. The rescue file was not checked for the
+pre-existing `scheduleData:lastBackup` key.
+
+## v180 — the credit, and the wage rounded once (served 2026-11-10, on the owner's explicit approval)
+
+**Served.** The owner was shown the worked examples and answered «انشر v180» on 2026-11-10; he also ruled
+that an over-settled advance keeps reading «דורש בדיקה» until a person looks. Merged as `d3103d6`
+(PR #62); the Pages deployment for that commit succeeded at 13:45 UTC. Both gates exited 0 on
+`ac684f8`, the commit that was merged. He reported both phones updated the same day. What follows
+is the entry as it was written BEFORE it was served.
 
 **Not served, and not to be served until the owner has seen it.** On 2026-11-10 he approved
 repairing both faults below ON A SEPARATE BRANCH, to be shown to him before anything is

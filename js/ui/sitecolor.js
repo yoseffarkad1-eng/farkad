@@ -62,3 +62,14 @@ function appendSiteName(node, placeId, name, markClass) {
     node.appendChild(el('span', 'site-name', name));
     return node;
 }
+
+// The one letter that stands for a site inside its colour block, where there is no room
+// for the name (the phone's week): the first letter or digit of the name as it is shown,
+// skipping quotes, dashes and spaces. It NARROWS, it does not identify - two sites may
+// share a letter, and then the colour (and past ten sites, the diamond) is what tells
+// them apart, exactly as before. Nothing is stored and nothing is assigned: the letter is
+// read off the name every time, so a renamed site changes its letter and never its colour.
+function siteInitial(name) {
+    const found = /[\p{L}\p{N}]/u.exec(String(name || ''));
+    return found ? found[0] : '';
+}
