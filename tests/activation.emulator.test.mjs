@@ -276,6 +276,7 @@ function pathWrite(db, fields, protocol) {
 }
 
 // ================================================================ T
+const BEFORE_RULES = {};
 {
     suite('T: the build as it ships under the rules PUBLISHED TODAY - refused by asking, and refused whole if sent');
 
@@ -286,9 +287,13 @@ function pathWrite(db, fields, protocol) {
     same('it works as ever under those rules: a day is recorded', (day(t, 'w_nasser', '2026-10-18'), await reached(() => quiet(t)),
         dayOn(await server(envOld), '2026-10-18', 'w_nasser')), true);
     const stood = canonical(await server(envOld));
-    same('THE STEP IS REFUSED BY ASKING: `rules`', (await activate(t)).reasons, ['rules']);
+    const asked = (await activate(t)).reasons;
+    same('THE STEP IS REFUSED BY ASKING: `rules`', asked, ['rules']);
     const sent = await t.Sync.transactPaybook(t.call('planOpening', S(t), OPENING, at(t)));
     await settle(1500);
+    BEFORE_RULES.asked = asked.join();
+    BEFORE_RULES.sent = `${sent.state}:${sent.reasons.join()}`;
+    BEFORE_RULES.closed = (await names(envOld, 'closed')).length;
     same('SENT ANYWAY, the opening is refused whole by those rules: `server`, nothing in doubt, nothing queued',
         [sent.state, sent.reasons, t.Sync.payIntent(), t.Sync.pendingCount()], ['refused', ['server'], null, 0]);
     same('the server\'s document is exactly what it was, there is no closed document, and the record is not on',
@@ -459,7 +464,8 @@ for (const [name, sha] of OLDER) {
         OLDER.map(() => [true, true, true, true, true, true]));
     check('1. the new rules can be published while every phone is still on an older build: nobody working is refused',
         olds.every(cell => cell.dayBefore && cell.restoreBefore));
-    check('2. the record cannot be turned on before the rules are published: the step asks, and the server refuses it whole', true);
+    same('2. the record cannot be turned on before the rules are published: the step asks and is told `rules`, and sent anyway it is refused whole',
+        BEFORE_RULES, { asked: 'rules', sent: 'refused:server', closed: 0 });
     check('3. from the moment it is on, a phone that has not updated can write NOTHING - not a day, not an old-style closure, not a restore',
         olds.every(cell => cell.dayRefused && cell.closeRefused && cell.restoreRefused));
     check('4. and the published rules must never come back once it is on: under them an older build\'s restore erases the opening',

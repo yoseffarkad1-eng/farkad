@@ -763,7 +763,7 @@ function accPaintBanner(box) {
 // Called by the sync layer when what it is waiting for changes, so the sentence above
 // appears and goes without a tap.
 function renderAccountsNotice() {
-    if (!accountsOpen() || typeof currentView === 'undefined' || currentView !== 'advances') return;
+    if (!(accountsOpen() || accountsActivationUp()) || typeof currentView === 'undefined' || currentView !== 'advances') return;
     if (typeof render === 'function') render();
 }
 
@@ -780,7 +780,9 @@ function accWatchIntent() {
     }
     if (ACC.watch) return;
     ACC.watch = setInterval(() => {
-        if (!accountsOpen() || !sync.payIntent()) {
+        // (The activation screen too: an opening whose answer was lost is settled the
+        // same way, by looking - and the record is not on until it has been.)
+        if (!(accountsOpen() || accountsActivationUp()) || !sync.payIntent()) {
             clearInterval(ACC.watch);
             ACC.watch = null;
             render();
@@ -879,7 +881,11 @@ function renderAccounts(root) {
         ACC.screen = 'list';
         ACC.activating = false;
         ACC.activation = null;
-        if (accountsOpen() && !ACC.flash) ACC.flash = ACC_TEXT.activationElsewhere;
+        // (Not when this phone's own opening was in doubt and has just been found on the
+        // server: the banner says that in its own words.)
+        const own = typeof FarkadSync !== 'undefined' && typeof FarkadSync.payOutcome === 'function'
+            ? FarkadSync.payOutcome() : null;
+        if (accountsOpen() && !ACC.flash && !own) ACC.flash = ACC_TEXT.activationElsewhere;
     }
     clear(root);
     const node = el('div', 'acc-screen acc-screen-' + ACC.screen);

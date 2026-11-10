@@ -603,4 +603,38 @@ let ACTIVATED = null;
         at: '2026-10-09T10:00:00.000Z', by: 'd' } } }), true);
 }
 
+// ------------------------------------------------------------------------------------
+{
+    suite('V12: the rules file a person pastes - the published file with lines ADDED, and nothing else');
+
+    const published = readFileSync(join(ROOT, 'docs/firestore.rules.before-paybook'), 'utf8').split('\n');
+    const pasted = readFileSync(join(ROOT, 'firestore.rules'), 'utf8').split('\n');
+    // Every line of the published file is in the new one, in the same order: nothing that
+    // is enforced today was removed or reworded. (The emulator suite holds that the
+    // published file is main's, byte for byte.)
+    let at = 0;
+    const missing = [];
+    published.forEach(line => {
+        const found = pasted.indexOf(line, at);
+        if (found === -1) missing.push(line); else at = found + 1;
+    });
+    same('NOT ONE LINE of the rules published today is removed or changed', missing, []);
+    same('what is added: 380 lines', pasted.length - published.length, 380);
+    const added = pasted.join('\n');
+    same('the additions, by name: the pay map, the index of closures, the months, the record that is on, and the three kinds of document',
+        ['function payGuard(docId)', 'function indexGuard(docId)', 'function indexedNeedsPaybook()', 'function daysGuard()',
+            'function monthGuard(docId)', 'function monthsNeedPaybook()', 'function activatedNeedsPaybook()', 'function payGuardOnCreate(docId)',
+            'function indexGuardOnCreate()', 'function monthGuardOnCreate()', 'match /closed/{entryId}', 'match /months/{monthId}', 'match /probe/{generation}']
+            .filter(name => added.includes(name) && !published.join('\n').includes(name)).length, 13);
+    same('who may read and write is the same list, to the letter', (text => (/function allowed\(\) \{[\s\S]*?\n    \}/.exec(text) || [''])[0])(added)
+        === (text => (/function allowed\(\) \{[\s\S]*?\n    \}/.exec(text) || [''])[0])(published.join('\n')), true);
+    // Where another pending addition goes (docs/payroll-activation.md, «one file»): the
+    // probe block is the LAST block inside match /schedules/{docId}, so a block of
+    // sibling documents is added after it and before the brace that closes the schedule.
+    check('the place another block of documents under the schedule is added: after probe/, before the schedule\'s closing brace',
+        /      match \/probe\/\{generation\} \{\n        allow get: if allowed\(\) && generation == 'paybook-8';\n        allow list, create, update, delete: if false;\n      \}\n    \}\n/.test(added));
+    same('the app asks for the generation the rules answer to', [/RULES_GENERATION: 'paybook-8'/.test(readFileSync(join(ROOT, 'js/sync/transact.js'), 'utf8')),
+        (added.match(/paybook-8/g) || []).length >= 2], [true, true]);
+}
+
 report();
