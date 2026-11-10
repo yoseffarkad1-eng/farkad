@@ -147,8 +147,11 @@ Object.assign(FarkadSync, {
                 if (monthRowProblems(month, row).length > 0) return fail('row');
                 return this.monthDrop(month, docId, row, live.revision).then(next);
             });
-        // A read that failed is no signal. Nothing was written on the strength of one.
-        }).catch(() => fail('offline'));
+        // A read that failed is no signal, and nothing was written on the strength of
+        // one. A read the SERVER refused is said as that: rules that know nothing of
+        // months/ (the ones published before this) refuse it, and «no signal» would send
+        // somebody looking for a connection that is fine.
+        }).catch(error => fail(error && error.code === 'permission-denied' ? 'server' : 'offline'));
     },
 
     // THE COPY: the month document, created once, in a commit that moves the schedule's
