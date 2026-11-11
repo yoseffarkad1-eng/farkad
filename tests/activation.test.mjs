@@ -10,8 +10,10 @@
 // (js/model/schema.js, paybookOn; js/model/payroll.js, planOpening and planActivation;
 // docs/payroll-activation.md). This suite is that sentence, measured:
 //
-//   V1  the build AS IT SHIPS, on a record nobody activated, is the build main serves:
-//       every gate shut, the old arithmetic, nothing new written
+//   V1  the build that OFFERS the step, on a record nobody activated, is the build main
+//       serves: every gate shut, the old arithmetic, nothing new written
+//   V13 THE BUILD AS IT SHIPS (v190): it offers nothing - no plan, no opening, no figure
+//       moved, nothing written - and it HONOURS a record another phone turned on, wholly
 //   V2  the dry run a person reads first: what it says, and that reading it writes nothing
 //   V3  the server still runs the rules published today: refused in a sentence's worth of
 //       code, before anything is attempted - and refused whole by the server if attempted
@@ -50,11 +52,26 @@ const F3 = { from: '2026-09-04', to: '2026-09-17' };           // nobody closed 
 const F4 = { from: '2026-09-18', to: '2026-10-01' };           // closed the old way
 const LATER = '2027-05-01';
 
-// THE BUILD AS IT SHIPS: no flag named. `off` is the way back - the same build with the
-// record's switch not honoured (FARKAD_FLAGS.paybookActivation false).
+// THREE BUILDS, SINCE v190 (the owner's decision 71, option B, 2026-11-11: nobody sees the
+// row until he says "activate"). OFFERING the step and HONOURING the entry are two flags:
+//
+//   SHIPS   no flag named: THE BUILD AS IT SHIPS. v190 does not offer the step
+//           (`paybookActivation: false`) and honours a record another phone turned on
+//           (`paybookHonour: true`). V13 is this build, by itself and beside the next.
+//   OFFER   the build that OFFERS the step - this build with the one line changed
+//           (`paybookActivation: true`), which is the whole of the build served on the
+//           day he says so. Every section that TURNS A RECORD ON does it on this build,
+//           named through the seam; a phone made with no word is this one.
+//   OFF     the way back: the record's switch not honoured (`paybookHonour: false`), the
+//           step not offered.
+//
+// Wherever a section below hands a phone `SHIPS`, it is asking the question of v190: the
+// phone that did NOT turn the record on and is handed it.
+const SHIPS = null;
+const OFFER = { paybookActivation: true };
 function phone(id, options = {}) {
     const device = makeDevice(Object.assign({ deviceId: id }, options,
-        { flags: options.flags === undefined ? null : options.flags }));
+        { flags: options.flags === undefined ? OFFER : options.flags }));
     device.setToday(options.today || TODAY);
     device.said = [];
     const note = said => device.said.push(typeof said === 'string' ? said
@@ -64,7 +81,7 @@ function phone(id, options = {}) {
     device.Sync.pushDelayMs = 5;
     return device;
 }
-const OFF = { paybookActivation: false };
+const OFF = { paybookActivation: false, paybookHonour: false };
 const quiet = device => device.Sync.status === 'synced' && device.Sync.pendingCount() === 0;
 const settled = (devices, limit = 8000) => settleUntil(() => devices.every(quiet), limit, 5);
 const S = device => device.State.schedule;
@@ -170,12 +187,19 @@ async function activate(device, date = OPENING, hour = '10') {
 
 // ------------------------------------------------------------------------------------
 {
-    suite('V1: the build as it ships, on a record nobody activated, is the build main serves');
+    suite('V1: the build that offers the step, on a record nobody activated, is the build main serves');
 
     const d = seed({ id: 'd_v1', carry: true });
-    same('the shipped flags: the three switches false, and the step offered',
-        (flags => [flags.paybook, flags.months, flags.cold, flags.paybookQueue, flags.paybookActivation])(d.global('FARKAD_FLAGS')),
-        [false, false, false, false, true]);
+    // MOVED AT v190, deliberately (decision 71, option B): «the shipped flags: the three
+    // switches false, and the step offered» was [.., paybookActivation: true]. The build
+    // as it ships no longer offers the step; it honours an entry (a flag of its own).
+    same('the shipped flags: the three switches false, the step NOT offered, an opening on the record honoured',
+        (flags => [flags.paybook, flags.months, flags.cold, flags.paybookQueue, flags.paybookActivation, flags.paybookHonour])(
+            phone('d_v1ships', { flags: SHIPS }).global('FARKAD_FLAGS')),
+        [false, false, false, false, false, true]);
+    same('and the build this suite turns records on with differs from it by that one flag',
+        (flags => [flags.paybook, flags.months, flags.cold, flags.paybookQueue, flags.paybookActivation, flags.paybookHonour])(d.global('FARKAD_FLAGS')),
+        [false, false, false, false, true, true]);
     same('every gate is shut for this record', gates(d), ALL_OFF);
     same('the walk is today\'s: Khaled\'s 500 from the fortnight nobody closed is counted as taken, and nothing is carried',
         [d.call('advanceCarryInto', S(d), 'w_khaled', FORTNIGHT.from), d.call('advanceOutstanding', S(d), Object.keys(S(d).advances)[0]).left], [0, 500]);
@@ -196,7 +220,7 @@ async function activate(device, date = OPENING, hour = '10') {
 
     // The same record on the build with the step NOT offered: nothing differs.
     const off = join_('d_v1off', d, null, { flags: OFF });
-    same('the way-back build (the step not offered) reads this record exactly as the build as it ships does',
+    same('the way-back build (the step not offered, the entry not honoured) reads this record exactly as the offering build does',
         [figures(off) === figures(d), gates(off)], [true, ALL_OFF]);
     same('- and there the opening is refused like everything else', off.call('planOpening', S(off), OPENING, at(off)).reasons, ['gate']);
 }
@@ -305,8 +329,11 @@ let ACTIVATED = null;
     const base = seed({ id: 'd_v4seed', carry: false, oldClosure: false });
     const cloud = cloudFor(base);
     const a = join_('d_owner', base, cloud);
-    const b = join_('d_fore', base, cloud);
-    const c = join_('d_third', base, null);             // has the record, no signal today
+    // v190: the phone that presses is on the build that offers; THE OTHER TWO ARE ON THE
+    // BUILD AS IT SHIPS, which does not - the state of the fleet on the day, while the
+    // phones update one by one.
+    const b = join_('d_fore', base, cloud, { flags: SHIPS });
+    const c = join_('d_third', base, null, { flags: SHIPS });   // has the record, no signal today
     await settled([a, b]);
     const before = { figures: figures(a), parts: parts(a), record: clone(S(a)), revision: cloud.doc.revision };
     given('the three phones start on one record, all gates shut',
@@ -332,7 +359,7 @@ let ACTIVATED = null;
     same('no intent is left, nothing is pending, nobody is stopped',
         [a, b].map(d => [d.Sync.payIntent(), d.Sync.pendingCount(), d.call('farkadWritesBlocked')]), [[null, 0, false], [null, 0, false]]);
     same('after a reopen both are still on - from their own disks', [a, b].map(d => {
-        const next = phone(d.id, { storage: d.dump() });
+        const next = phone(d.id, { storage: d.dump(), flags: d === a ? OFFER : SHIPS });
         next.State.load();
         return gates(next).on;
     }), [true, true]);
@@ -394,7 +421,7 @@ let ACTIVATED = null;
         [Boolean(cloud.doc.days['2026-10-16']), Object.keys(cloud.doc.pay), cloud.closed.size, back.Sync.status], [true, ['po_open'], 1, 'synced']);
     same('its closures are refused with `gate`, as on any build with the pay book shut',
         back.call('planClosure', S(back), 'w_nasser', FORTNIGHT, {}, at(back)).reasons, ['gate']);
-    same('and the build as it ships, beside it on the same record, is still on', gates(a).on, true);
+    same('and the offering build, beside it on the same record, is still on', gates(a).on, true);
 }
 
 // ------------------------------------------------------------------------------------
@@ -471,7 +498,7 @@ let ACTIVATED = null;
     const base = seed({ id: 'd_v8seed', carry: true });
     const cloud = cloudFor(base);
     const a = join_('d_8a', base, cloud);
-    const b = join_('d_8b', base, null);                 // the foreman's phone, no signal
+    const b = join_('d_8b', base, null, { flags: SHIPS });   // the foreman's phone, no signal, on the build as it ships
     await settled([a]);
     given('the owner turns it on', (await activate(a)).state === 'closed');
     await settled([a]);
@@ -614,7 +641,7 @@ let ACTIVATED = null;
     const cloud = cloudFor(base);
     const fake = makeIndexedDB();
     const a = join_('d_10a', base, cloud, { indexedDB: fake.indexedDB });
-    const b = join_('d_10b', base, cloud);
+    const b = join_('d_10b', base, cloud, { flags: SHIPS });   // the phone that watches is on the build as it ships
     await settled([a, b]);
     same('before: no database is opened on a phone whose record is not on', [fake.disk.opens, gates(a).cold], [0, false]);
     given('turned on, from the day before Nasser\'s old closure so that every day here is inside tracking',
@@ -646,7 +673,7 @@ let ACTIVATED = null;
 
     const closures = await a.Sync.archiveClosed({ today: LATER });
     await settled([a, b]);
-    same('PHASE 5 on the build as it ships: the settled closures leave the live document',
+    same('PHASE 5 with every one of the three flags false: the settled closures leave the live document',
         [closures.ok, closures.failed, Object.keys(cloud.doc.payIndex.rows).length, Object.keys(cloud.doc.pay)], [true, [], 7, ['po_open']]);
     const months = await a.Sync.archiveMonths({ today: LATER });
     await settled([a, b]);
@@ -670,11 +697,153 @@ let ACTIVATED = null;
     same('and the phone with no IndexedDB keeps everything in its record', [b.State.coldMissing(), figures(b) === whole], [[], true]);
 
     // A phone installed afterwards, on the build as it ships.
-    const fresh = phone('d_10new', {});
+    const fresh = phone('d_10new', { flags: SHIPS });
     fresh.State.load();
     fresh.Sync.connect(cloud.adapter);
     await settled([fresh]);
     same('A PHONE INSTALLED AFTERWARDS is made whole from the closed and month documents, is on, and computes the same', [gates(fresh).on, figures(fresh) === whole], [true, true]);
+}
+
+// ------------------------------------------------------------------------------------
+// v190. THE BUILD AS IT SHIPS, asked by itself. The owner's decision 71 (option B,
+// 2026-11-11): nobody on any phone sees anything of the pay book until he says so. So the
+// build that is served first OFFERS nothing - and, because the phones will not all be on
+// the next build at the moment he presses, it HONOURS a record that another phone turned
+// on. The two halves are two flags (js/model/schema.js) and are asked apart here.
+{
+    suite('V13a: THE BUILD AS IT SHIPS on a record nobody turned on - it offers nothing, plans nothing, and computes what v186 computes');
+
+    const git = args => execFileSync('git', ['-C', sourceRoot()].concat(args), { maxBuffer: 64 * 1024 * 1024 });
+    const base = seed({ id: 'd_v13seed', carry: true });
+    // The server's document AS v186 LEFT IT: no `pay` key at all (v186 has never heard of
+    // one). The other fixtures of this suite take the wire form this build makes, which
+    // carries an empty map - and the question here is what this build ADDS to the server.
+    const asV186Left = () => { const doc = wireOf(base); delete doc.pay; delete doc.payConflicted; delete doc.payIndex; return doc; };
+    const cloud = cloudFor(base, { doc: asV186Left() });
+    given('the server\'s document holds no `pay` key before this build touches it', !Object.prototype.hasOwnProperty.call(cloud.doc, 'pay'));
+    const s = join_('d_13s', base, cloud, { flags: SHIPS });
+    await settled([s]);
+    const disk = JSON.stringify(s.dump());
+    const wrote = cloud.writes.length;
+    same('every gate is shut', gates(s), ALL_OFF);
+    const drawn = s.call('planActivation', S(s), OPENING, at(s));
+    same('THE STEP IS NOT OFFERED: `off`, no report, no opening, no carry plan - there is nothing for a screen to draw',
+        [drawn.state, drawn.ok, drawn.report, drawn.opening, drawn.carry, drawn.changes], ['off', false, null, null, null, []]);
+    same('NO PLANNER OF THIS BUILD WRITES AN OPENING: refused with `gate`, no change handed back - on any day asked',
+        [OPENING, TODAY, '2026-10-09'].map(day => (plan => [plan.ok, plan.reasons, plan.changes.length, plan.activating])(s.call('planOpening', S(s), day, at(s)))),
+        [[false, ['gate'], 0, false], [false, ['gate'], 0, false], [false, ['gate'], 0, false]]);
+    same('nor the carry approval as part of a step it does not offer', s.call('planCarryApproval', S(s), at(s)).reasons, ['gate']);
+    same('every other planner refuses with `gate`', [s.call('planClosure', S(s), 'w_khaled', FORTNIGHT, {}, at(s)).reasons.indexOf('gate') !== -1,
+        s.call('planLegacy', S(s), 'w_nasser', F4.from, { state: 'paid' }, at(s)).reasons.indexOf('gate') !== -1,
+        s.call('planArchive', S(s), LATER).reasons, s.call('planMonths', S(s), LATER).reasons, s.State.commitPaybook([{ path: 'pay.x', value: {} }]).reasons[0]],
+        [true, true, ['gate'], ['gate'], 'gate']);
+    await settle(60);
+    same('asking all of that wrote nothing: the disk byte for byte, the cloud untouched, the server not asked',
+        [JSON.stringify(s.dump()) === disk, cloud.writes.length - wrote, cloud.probes.length], [true, 0, 0]);
+    const offering = join_('d_13o', base, null);
+    same('every figure anybody reads is the offering build\'s on the same record (which V1 holds to be main\'s)', figures(s) === figures(offering), true);
+
+    // And against v186 ITSELF - its real bytes out of Git - on the same record.
+    const NOT_ON_MAIN = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js', 'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
+    const sources = loadOrder().filter(file => NOT_ON_MAIN.indexOf(file) === -1)
+        .map(file => ({ file, code: git(['show', `9846d7f:${file}`]).toString('utf8') }));
+    const otherCloud = cloudFor(base, { doc: asV186Left() });
+    const v186 = makeDevice({ sources, appVersion: 'v186', deviceId: 'd_13v186', storage: { [SCHEDULE]: JSON.stringify(base.State.schedule) } });
+    v186.setToday(TODAY);
+    v186.ctx.askTell = () => Promise.resolve();
+    v186.ctx.askConfirm = () => Promise.resolve(true);
+    v186.Sync.pushDelayMs = 5;
+    v186.State.load();
+    given('the other build is v186, out of Git', (/const APP_VERSION = '([^']+)'/.exec(git(['show', '9846d7f:js/app.js']).toString('utf8')) || [])[1] === 'v186');
+    same('EVERY FIGURE IS v186\'s: the pay sheet, the invoice, each man\'s days, Rima, יוסף גבס, what is carried and what is owed, and the days themselves',
+        Object.keys(parts(s)).filter(key => JSON.stringify(parts(s)[key]) !== JSON.stringify(parts(v186)[key])), []);
+
+    // WHAT IT WRITES THAT v186 DOES NOT - measured, not argued (the release entry says so):
+    // the same day typed on each, each on a cloud of its own holding the same document.
+    v186.Sync.connect(otherCloud.adapter);
+    await settled([v186]);
+    const day = device => device.State.commit(device.call('assignPlace', device.State.schedule, '2026-10-16', 'w_salim', 'actual', 'p_a', undefined, 0)) === true;
+    const before = [cloud.writes.length, otherCloud.writes.length];
+    given('the same day is typed on both', day(s) && day(v186));
+    await settled([s, v186]);
+    const sent = (one, from) => one.writes.slice(from).filter(write => !write.replayed);
+    const mine = sent(cloud, before[0]);
+    const theirs = sent(otherCloud, before[1]);
+    const ENVELOPE = ['updatedAt', 'updatedBy', 'protocol', 'revision', 'lastOpId', 'opFingerprint'];
+    const business = write => Object.keys(write.patch || {}).filter(key => ENVELOPE.indexOf(key) === -1).sort();
+    same('one write each, of the same kind, carrying the same ONE field path - and no path under `pay`',
+        [mine.map(write => write.kind), theirs.map(write => write.kind), mine.map(business), theirs.map(business)],
+        [['update'], ['update'], [['days.2026-10-16.actual.w_salim']], [['days.2026-10-16.actual.w_salim']]]);
+    same('THE ONE DIFFERENCE ON THE WIRE: this build says protocol 2 where v186 says 1 (as every build of the pay book\'s branch since v175: "I keep the pay book")',
+        [mine[0].patch.protocol, theirs[0].patch.protocol], [2, 1]);
+    same('the server\'s document after it: the day is there, the protocol is 2, and NO `pay` MAP WAS WRITTEN onto a record nobody turned on',
+        [Boolean(cloud.doc.days['2026-10-16']), cloud.doc.protocol, Object.prototype.hasOwnProperty.call(cloud.doc, 'pay'),
+            Object.prototype.hasOwnProperty.call(cloud.doc, 'payIndex'), cloud.closed.size], [true, 2, false, false, 0]);
+    same('on its own DISK the record carries an empty pay map, as every build that keeps the pay book does - a key on this phone, not on the server',
+        (stored => [stored.pay, Object.prototype.hasOwnProperty.call(JSON.parse(v186.raw(SCHEDULE)), 'pay')])(JSON.parse(s.raw(SCHEDULE))), [{}, false]);
+    console.log('  measured, the document this build would send WHOLE (only a restore does) holds beyond v186\'s: '
+        + JSON.stringify(Object.keys(s.call('cloudDocument', S(s))).filter(key => !Object.prototype.hasOwnProperty.call(v186.call('cloudDocument', v186.State.schedule), key))));
+}
+
+{
+    suite('V13b: THE BUILD AS IT SHIPS IS HANDED A RECORD ANOTHER PHONE TURNED ON - it is on, wholly, with the step never offered to it');
+
+    const base = seed({ id: 'd_v13bseed', carry: false, oldClosure: true });
+    const cloud = cloudFor(base);
+    const owner = join_('d_13owner', base, cloud);                       // the build that offers
+    const s = join_('d_13fore', base, cloud, { flags: SHIPS });          // v190, with signal
+    const t = join_('d_13third', base, null, { flags: SHIPS });          // v190, no signal
+    await settled([owner, s]);
+    const before = figures(s);
+    given('before: one record, nobody on, and the shipped build offers nothing',
+        figures(owner) === before && !gates(s).on && s.call('planActivation', S(s), OPENING, at(s)).state === 'off');
+    given('the owner turns the record on, from the build that offers', (await activate(owner)).state === 'closed');
+    await settled([owner, s]);
+
+    same('THE SHIPPED BUILD IS ON - the pay book, the one-debt ruling, the months and the cold store - by the record alone', gates(s), ALL_ON);
+    same('with `paybookActivation` false in its flags: the honouring is not behind the offer',
+        (flags => [flags.paybookActivation, flags.paybookHonour, flags.paybook, flags.months, flags.cold])(s.global('FARKAD_FLAGS')), [false, true, false, false, false]);
+    same('ONE ARITHMETIC: every figure on it is the figure on the phone that pressed, and not what it read before', [figures(s) === figures(owner), figures(s) === before], [true, false]);
+    same('Khaled owes 500 going into the open fortnight on both; the card and the accounts page agree on it',
+        [owner, s].map(d => [d.call('advanceCarryInto', S(d), 'w_khaled', FORTNIGHT.from), d.call('openAdvanceBalance', S(d), 'w_khaled').total,
+            d.call('accountFor', S(d), S(d).workers[1], TODAY).debt]), [[500, 500, 500], [500, 500, 500]]);
+    same('it SAYS so: the plan a screen would draw is `on`, since the day; and its own opening plan is the same fact, written already',
+        [(plan => [plan.state, plan.since, plan.report])(s.call('planActivation', S(s), OPENING, at(s))),
+            (plan => [plan.ok, plan.already, plan.changes.length])(s.call('planOpening', S(s), OPENING, at(s))),
+            s.call('planOpening', S(s), '2026-09-18', at(s)).reasons], [['on', OPENING, null], [true, true, 0], ['opened']]);
+    same('the accounts home takes the «מקדמות» tab on it (the screens ask the same one question)', s.call('paybookWritesEnabled', S(s)), true);
+
+    // FULLY on: it CLOSES AND PAYS through the pay book, by the server-first door.
+    const st = at(s, '11');
+    const first = s.call('planClosure', S(s), 'w_salim', FORTNIGHT, { method: 'cash', allocations: {} }, st);
+    given('the shipped build plans a closure', first.ok === true, JSON.stringify(first.reasons));
+    const closure = await s.Sync.transactPaybook(s.call('planClosure', S(s), 'w_salim', FORTNIGHT,
+        { method: 'cash', allocations: {}, paid: first.review.netDue, paidOn: TODAY }, st));
+    await settled([owner, s]);
+    same('IT CLOSES AN ACCOUNT THROUGH THE PAY BOOK: one transaction, on the server, adopted by the phone that pressed the button',
+        [closure.state, Object.keys(cloud.doc.pay).filter(id => id.indexOf('ps_w_salim') === 0).length, cloud.closed.size >= 2,
+            canonical(S(owner).pay) === canonical(S(s).pay), figures(owner) === figures(s)], ['closed', 1, true, true, true]);
+    const legacy = await s.Sync.transactPaybook(s.call('planLegacy', S(s), 'w_nasser', F4.from, { state: 'paid' }, at(s, '12')));
+    await settled([owner, s]);
+    same('and answers an old closure', [legacy.state, owner.call('planPayMigration', S(owner), TODAY).paymentUnknown.length], ['closed', 0]);
+    same('its ordinary days go on, at protocol 2, beside the pay book', [s.State.commit(s.call('assignPlace', S(s), '2026-10-16', 'w_ahmad', 'actual', 'p_a', undefined, 0)),
+        (await settled([owner, s]), s.Sync.status), Boolean(cloud.doc.days['2026-10-16']), Object.keys(cloud.doc.pay).indexOf('po_open') !== -1], [true, 'synced', true, true]);
+    same('nobody is stopped, nothing is held, no intent is left', [owner, s].map(d => [d.call('farkadWritesBlocked'), d.Sync.heldRecords().length, d.Sync.payIntent(), d.Sync.pendingCount()]),
+        [[false, 0, null, 0], [false, 0, null, 0]]);
+    const again = phone(s.id, { storage: s.dump(), flags: SHIPS });
+    again.State.load();
+    same('closed and opened again with no signal, from its own disk: still on, the same figures', [gates(again), figures(again) === figures(s)], [ALL_ON, true]);
+
+    same('THE THIRD PHONE, also as shipped, has not heard: not on, for the whole record', [gates(t), figures(t) === before], [ALL_OFF, true]);
+    t.Sync.connect(cloud.adapter);
+    await settled([t]);
+    same('- and the moment it hears it is on, with the others\' figures, having been offered nothing at any point', [gates(t), figures(t) === figures(owner)], [ALL_ON, true]);
+
+    // The way back from THIS build is the honouring's own flag - and only that.
+    const back = phone(s.id, { storage: s.dump(), flags: { paybookHonour: false } });
+    back.State.load();
+    same('THE WAY BACK is `paybookHonour: false`, by itself: every gate shut on the activated record, the opening still held',
+        [gates(back), Object.keys(S(back).pay).indexOf('po_open') !== -1, back.call('planClosure', S(back), 'w_nasser', FORTNIGHT, {}, at(back)).reasons], [ALL_OFF, true, ['gate']]);
 }
 
 // ------------------------------------------------------------------------------------
@@ -702,9 +871,17 @@ let ACTIVATED = null;
             'js/model/schema.js FARKAD_FLAGS.paybook', 'js/model/schema.js FARKAD_FLAGS.cold'
         ]);
     const schema = readFileSync(join(ROOT, 'js/model/schema.js'), 'utf8');
-    check('the three flags ship false and the step ships offered', /\n\s*paybook: false,/.test(schema) && /\n\s*months: false,/.test(schema)
-        && /\n\s*cold: false,/.test(schema) && /\n\s*paybookActivation: true\n/.test(schema)
-        && !/paybook: true|months: true|cold: true/.test(schema));
+    // MOVED AT v190, deliberately: «the step ships offered» (`paybookActivation: true`) is
+    // «the step ships NOT offered, and the honouring ships on» - the owner's decision 71.
+    check('the three flags ship false, the step ships NOT offered, and an opening on the record ships honoured',
+        /\n\s*paybook: false,/.test(schema) && /\n\s*months: false,/.test(schema)
+        && /\n\s*cold: false,/.test(schema) && /\n\s*paybookActivation: false,\n/.test(schema) && /\n\s*paybookHonour: true\n/.test(schema)
+        && !/paybook: true|months: true|cold: true|paybookActivation: true/.test(schema));
+    same('the honouring reads its own flag and the offer reads its own - in the source',
+        [/function paybookActivated\(schedule\) \{\n    if \(!paybookHonoured\(\)\) return false;/.test(schema),
+            /function paybookHonoured\(\) \{\n    return FARKAD_FLAGS\.paybookHonour === true;/.test(schema),
+            /function paybookActivationOffered\(\) \{\n    return FARKAD_FLAGS\.paybookActivation === true;/.test(schema),
+            (schema.split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n').match(/FARKAD_FLAGS\.paybookActivation\b/g) || []).length], [true, true, true, 1]);
     const called = files.filter(file => /\b(paybookWritesEnabled|monthWritesEnabled|advanceDebtStays)\(\)/.test(
         readFileSync(join(ROOT, file), 'utf8').split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n')));
     same('and nobody asks a gate without handing it the record', called, []);
