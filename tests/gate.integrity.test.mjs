@@ -378,8 +378,17 @@ function commitSubject(git, sha) {
     // honours a record that was (js/model/schema.js, paybookOn; tests/activation.test.mjs).
     // On a record nobody activated the build is what it was, plus one row in the
     // settings sheet. Shut, it is the way back.
-    same('carry and deletion are authorized, and the activation step is offered', open,
-        ['permanentDeletion', 'carryAdvances', 'paybookActivation']);
+    //
+    // MOVED AT v190, deliberately (the owner's decision 71, option B, 2026-11-11: nobody
+    // sees the row until he says "activate"). The offer and the honouring are two flags:
+    // `paybookActivation` - the offer - ships FALSE and is no longer on this list;
+    // `paybookHonour` ships true and is. It opens nothing on a record nobody turned on
+    // and offers nobody anything: it says that a phone on this build which is HANDED a
+    // record another phone turned on is on, wholly, like the phone that pressed
+    // (tests/activation.test.mjs, V13). Shut, it is the way back.
+    same('carry and deletion are authorized, and a record another phone turned on is honoured - the step itself is NOT offered', open,
+        ['permanentDeletion', 'carryAdvances', 'paybookHonour']);
+    same('the offer ships shut', declared.filter(one => one.flag === 'paybookActivation').map(one => one.value), ['false']);
     // MOVED AT v173, deliberately: three flags became four. `paybook` is the pay book's
     // writer, and it arrives the way this section asks a flag to arrive - with a decision
     // about its default, which is SHUT. The line above did not move: what is open in the
@@ -397,9 +406,10 @@ function commitSubject(git, sha) {
     // MOVED AT PHASE 7, deliberately: six became seven. `cold` is the gate of the phone's
     // cold store (js/cold.js), declared so that it can be declared shut.
     // MOVED AT PHASE 8, deliberately: seven became eight. `paybookActivation` - see above.
-    same('and the shipped flags are the eight that were argued over',
+    // MOVED AT v190, deliberately: eight became nine. `paybookHonour` - see above.
+    same('and the shipped flags are the nine that were argued over',
         declared.map(one => one.flag).sort(),
-        ['carryAdvances', 'cold', 'months', 'paybook', 'paybookActivation', 'paybookQueue', 'permanentDeletion', 'vehicles']);
+        ['carryAdvances', 'cold', 'months', 'paybook', 'paybookActivation', 'paybookHonour', 'paybookQueue', 'permanentDeletion', 'vehicles']);
     same('the phone\'s cold store ships shut', declared.filter(one => one.flag === 'cold').map(one => one.value), ['false']);
     same('closed months leaving the live document ships shut', declared.filter(one => one.flag === 'months').map(one => one.value), ['false']);
     same('the pay book\'s writer ships shut, and so does its old door through the queue',

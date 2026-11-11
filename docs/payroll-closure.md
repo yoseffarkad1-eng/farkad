@@ -1983,6 +1983,9 @@ Existing words reused as they are: «מקדמות», «חיפוש עובד», «
 | `activationSize` | גודל הרישום בשרת היום | Phase 8: the activation screen |
 | `activationArchiveNote` | חשבון שנסגר ושולם במלואו עובר אחרי 14 יום לארכיון בשרת. חודש שנסגר לכל העובדים יכול לעבור לארכיון אחרי חצי שנה, ורק כשמבקשים. שום דבר לא נמחק והכול נשאר במכשיר - אבל יום בחודש שעבר לארכיון כבר אי אפשר לשנות. | Phase 8: the activation screen |
 | `activationCarry` | ההפעלה מאשרת גם, פעם אחת, שיתרת מקדמה עוברת לחשבון הבא. שורות שישתנו: | Phase 8: the activation screen |
+| `activationTrackingDecided` | יום תחילת המעקב שנקבע: | v190: the activation screen, under the day - only while the day offered is the day the owner decided (30/10/2026) |
+| `activationTrackingMeans` | תקופה מהיום הזה שעוד לא נסגרה נסגרת בעמוד החדש. תקופה שכבר נסגרה בדרך הישנה לא משתנה, ומופיעה ברשימה «סגירות ישנות לבדיקה». אחרי ההפעלה אי אפשר לשנות את היום הזה. | v190: the same line, after the day |
+| `activationTrackingStranded` | ביום שבחרת, תקופות עם עבודה שעוד לא נסגרו נשארות לפני תחילת המעקב. אחרי ההפעלה אי אפשר יהיה לסגור אותן. מספר התקופות: | v190: the activation screen, a warning - only when the day in the field is LATER than the day offered and would leave unclosed periods before tracking |
 | `activationBeforeTitle` | לפני שמפעילים | Phase 8: the activation screen |
 | `activationBeforePhones` | כל הטלפונים מעודכנים לגרסה הזאת. | Phase 8: the activation screen |
 | `activationBeforeBackup` | נלקח היום גיבוי מהטלפון הזה (⋯ ← גיבוי). | Phase 8: the activation screen |

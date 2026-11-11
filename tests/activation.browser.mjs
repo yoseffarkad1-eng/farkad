@@ -115,23 +115,42 @@ async function geometry(page, label, filled, scope = '#advancesView') {
 
 // THE WORLD: the crew of tests/accounts.world.mjs, two closures made the old way, and
 // one thing more - Khaled took 500 on 2026-09-06, in a fortnight nobody closed.
+//
+// THREE PHONES SINCE v190 (the owner's decision 71, option B: nobody sees the row until he
+// says "activate"). The build as it ships does not OFFER the step; the build served on
+// that day is this one with one line changed, and it is named here through the seam:
+//
+//   a, b   the build that OFFERS the step (`paybookActivation: true`) - the owner's phone,
+//          and the small phone the screen is measured on
+//   s      THE BUILD AS IT SHIPS, no flag named - a phone that has not taken that build
+//          yet, on the same record. It is offered nothing, and when `a` turns the record
+//          on it is on. tests/dormant.browser.mjs holds that it SHOWS nothing before.
+const OFFER = { paybookActivation: true };
 const net = makeBrowserCloud({ payRules: true });
-const a = await openPhone(browser, server.url, { cloud: net });
+const a = await openPhone(browser, server.url, { cloud: net, flags: OFFER });
 await seed(a.page, { legacy: true, advances: [] });
 given('the earlier fortnight and its advance are recorded', await a.page.evaluate(() => {
     ['2026-09-06', '2026-09-07'].forEach(day => State.commit(assignPlace(State.schedule, day, 'w_khaled', 'actual', 'p_01', undefined, 0)));
     return State.commitMany(recordNewAdvance(State.schedule, 'w_khaled', '2026-09-06', 500, 'בדיקה', '2026-09-06T09:00:00.000Z', syncDeviceId(), 'cash')) === true;
 }));
 await settled(a.page);
-const b = await openPhone(browser, server.url, { cloud: net, width: 375, height: 667, scheme: 'light' });
+const b = await openPhone(browser, server.url, { cloud: net, width: 375, height: 667, scheme: 'light', flags: OFFER });
 await settled(b.page);
-given('both phones run the build as it ships', (await Promise.all([a, b].map(phone => phone.page.evaluate(() =>
-    [FARKAD_FLAGS.paybook, FARKAD_FLAGS.months, FARKAD_FLAGS.cold, FARKAD_FLAGS.paybookActivation].join())))).join('|')
-    === 'false,false,false,true|false,false,false,true');
+const s = await openPhone(browser, server.url, { cloud: net });
+await settled(s.page);
+// MOVED AT v190, deliberately: «both phones run the build as it ships» read
+// `paybookActivation` true off a page with no flag named. The build as it ships no longer
+// offers the step, so the two phones that turn the record on name the one line.
+given('two phones run the build that offers the step, the three switches false', (await Promise.all([a, b].map(phone => phone.page.evaluate(() =>
+    [FARKAD_FLAGS.paybook, FARKAD_FLAGS.months, FARKAD_FLAGS.cold, FARKAD_FLAGS.paybookActivation, FARKAD_FLAGS.paybookHonour].join())))).join('|')
+    === 'false,false,false,true,true|false,false,false,true,true');
+given('the third runs the build AS IT SHIPS: no flag named, the step not offered, the honouring on', (await s.page.evaluate(() =>
+    [typeof FARKAD_FLAG_OVERRIDES, FARKAD_FLAGS.paybook, FARKAD_FLAGS.months, FARKAD_FLAGS.cold, FARKAD_FLAGS.paybookActivation, FARKAD_FLAGS.paybookHonour].join()))
+    === 'undefined,false,false,false,false,true');
 
 // =====================================================================================
 {
-    suite('shut: the «מקדמות» tab is the advances list, and the settings sheet has one new row');
+    suite('shut: the «מקדמות» tab is the advances list, and the settings sheet has one new row - on the build that offers the step');
 
     await showAccounts(a.page);
     same('the tab holds no accounts screen', [await screen(a.page), await on(a.page)], [null, false]);
@@ -148,6 +167,14 @@ given('both phones run the build as it ships', (await Promise.all([a, b].map(pho
     await a.page.evaluate(() => renderSettings());
     same('a redraw of the sheet does not draw it twice', await a.page.locator('#paybookActivationBox button').count(), 1);
     await shutSheet(a.page);
+
+    // THE BUILD AS IT SHIPS, on the same record, the same minute.
+    await showAccounts(s.page);
+    await openSheet(s.page);
+    same('THE BUILD AS IT SHIPS HAS NO SUCH ROW: no box, no sentence, no button - and its «מקדמות» tab is the advances list',
+        [await s.page.locator('#paybookActivationBox').count(), (await txt(s.page, '#settingsPanel')).includes('פנקס'), await screen(s.page), await on(s.page)],
+        [0, false, null, false]);
+    await shutSheet(s.page);
 }
 
 // =====================================================================================
@@ -169,7 +196,9 @@ given('both phones run the build as it ships', (await Promise.all([a, b].map(pho
     check('the size of the record is said in KB out of 1,024', /^גודל הרישום בשרת היום\d+ KB מתוך 1,024 KB$/.test(await txt(a.page, `${V} [data-line="size"]`)),
         await txt(a.page, `${V} [data-line="size"]`));
     same('the carry is approved on this record: the screen does not ask for it', await a.page.locator(`${V} .acc-activation-carry`).count(), 0);
-    same('the day offered is the first day of the fortnight that holds today', await a.page.locator(`${V} input[type="date"]`).inputValue(), '2026-10-02');
+    same('the day offered is the first day of the fortnight that holds today (the day the owner decided, 30/10, has not come on this record\'s today)',
+        [await a.page.locator(`${V} input[type="date"]`).inputValue(), await a.page.locator(`${V} .acc-activation-decided`).count(),
+            await a.page.locator(`${V} .acc-activation-stranded`).count()], ['2026-10-02', 0, 0]);
     same('three things to check first, and that it cannot be turned off', [await a.page.locator(`${V} .acc-activation-before li`).count(),
         await txt(a.page, `${V} .acc-activation-noreturn`)], [3, T.noReturn]);
     await geometry(a.page, 'the activation screen at 440', 1);
@@ -241,6 +270,34 @@ given('both phones run the build as it ships', (await Promise.all([a, b].map(pho
         [await txt(a.page, '#paybookActivationBox .hint'), await a.page.locator('#paybookActivationBox button').count()], [`${T.rowOn} 02/10/2026`, 0]);
     await shutSheet(a.page);
     same('no page error on either phone', [a.errors, b.errors], [[], []]);
+}
+
+// =====================================================================================
+{
+    suite('THE BUILD AS IT SHIPS IS HANDED A RECORD THAT IS ON: it is on, wholly, having been offered nothing');
+
+    // `s` has no flag named. It did not turn the record on and could not have: `a` did.
+    await s.page.waitForFunction(() => paybookOn(State.schedule) === true, null, { timeout: 20000 });
+    await s.page.waitForTimeout(400);
+    same('its flags are what ships - the step not offered - and the record alone has turned it on: the pay book, the ruling, the months, the cold store',
+        await s.page.evaluate(() => [FARKAD_FLAGS.paybookActivation, FARKAD_FLAGS.paybook, paybookOn(State.schedule), advanceDebtStays(State.schedule),
+            monthWritesEnabled(State.schedule), coldWriterEnabled()]), [false, false, true, true, true, true]);
+    same('ITS «מקדמות» TAB IS THE ACCOUNTS HOME, with nobody touching it, and it reads the debt the other phones read',
+        [await screen(s.page), await txt(s.page, `${V} .acc-title`), await all(s.page, `${row('w_khaled')} .acc-sum-debt`)], ['list', T.title, [`${T.debt}500 ₪`]]);
+    same('every row of the list is the row on the phone that pressed', await all(s.page, `${V} .acc-row`), await all(a.page, `${V} .acc-row`));
+    await openSheet(s.page);
+    same('its ⋯ sheet now says the pay book is on, since which day - the same line, and no button',
+        [await txt(s.page, '#paybookActivationBox .hint'), await s.page.locator('#paybookActivationBox button').count()], [`${T.rowOn} 02/10/2026`, 0]);
+    await shutSheet(s.page);
+    // FULLY on: it closes an account through the review page's own door.
+    const closedBy = await transact(s.page, 'planClosure', ['w_ahmad', WEEK1, { method: 'cash', allocations: {}, paid: 1800, paidOn: TODAY }]);
+    await s.page.waitForTimeout(500);
+    same('IT CLOSES AN ACCOUNT THROUGH THE PAY BOOK - one transaction on the server - and the phone that pressed the button reads it',
+        [closedBy.state, Object.keys(net.cloud.doc.pay).filter(id => id.indexOf('ps_w_ahmad') === 0).length,
+            await a.page.waitForFunction(() => Object.keys(State.schedule.pay).some(id => id.indexOf('ps_w_ahmad') === 0), null, { timeout: 20000 }).then(() => true, () => false)],
+        ['closed', 1, true]);
+    await geometry(s.page, 'the accounts home on the build as it ships', 1);
+    same('no page error on it', s.errors, []);
 }
 
 // =====================================================================================
@@ -319,7 +376,7 @@ given('both phones run the build as it ships', (await Promise.all([a, b].map(pho
     // A record of its own: the crew's October and nothing else, turned on from the app's
     // own planner on a build as it ships, every account closed and paid.
     const net2 = makeBrowserCloud({ payRules: true });
-    const c = await openPhone(browser, server.url, { cloud: net2 });
+    const c = await openPhone(browser, server.url, { cloud: net2, flags: OFFER });
     await seed(c.page, { advances: [] });
     given('turned on', (await transact(c.page, 'planOpening', ['2026-10-02'])).ok && await on(c.page));
     for (const [worker, period, paid, day] of [['w_nasser', FORTNIGHT, 3000], ['w_khaled', FORTNIGHT, 4400], ['w_salim', FORTNIGHT, 3600],
@@ -393,7 +450,7 @@ given('both phones run the build as it ships', (await Promise.all([a, b].map(pho
     // sequence - accDrawActivate and accActivationRetry - on a record whose carry nobody
     // ever approved, which is the one record the other sections do not have.
     const net3 = makeBrowserCloud({ payRules: true });
-    const g = await openPhone(browser, server.url, { cloud: net3 });
+    const g = await openPhone(browser, server.url, { cloud: net3, flags: OFFER });
     await seed(g.page, { advances: [], approveCarry: false });
     given('this record carries no approval', await g.page.evaluate(() => !((State.schedule.ledger || {}).migrations || {}).cm_carry) && !(await on(g.page)));
     await openSheet(g.page);
@@ -417,8 +474,56 @@ given('both phones run the build as it ships', (await Promise.all([a, b].map(pho
     await g.context.close();
 }
 
+// =====================================================================================
+{
+    suite('the tracking day: opened after 30/10 the screen offers the day the owner decided, says what it means, and warns of a later one');
+
+    // The owner's decision 75 (2026-11-11): tracking begins on 2026-10-30. He presses on a
+    // LATER day - here 14/11, when "the fortnight that holds today" begins on 13/11.
+    const net4 = makeBrowserCloud({ payRules: true });
+    const h = await openPhone(browser, server.url, { cloud: net4, flags: OFFER, today: '2026-11-14', width: 375, height: 667 });
+    await seed(h.page, { advances: [] });
+    given('one man worked inside 30/10-12/11 and nobody closed it', await h.page.evaluate(() =>
+        State.commit(assignPlace(State.schedule, '2026-11-02', 'w_ziad', 'actual', 'p_01', undefined, 0)) === true));
+    await settled(h.page);
+    await openSheet(h.page);
+    await h.page.locator('#paybookActivationBox button').click();
+    await h.page.waitForTimeout(300);
+    const field = h.page.locator(`${V} input[type="date"]`);
+    same('THE DAY OFFERED IS 30/10/2026 - not 13/11, the first day of the fortnight that holds the day he presses',
+        [await field.inputValue(), await h.page.evaluate(() => periodRangeFor({}, todayStr()).from)], ['2026-10-30', '2026-11-13']);
+    same('and the screen says so, with what the day means for a fortnight that has ended',
+        await txt(h.page, `${V} .acc-activation-decided`),
+        'יום תחילת המעקב שנקבע: 30/10/2026. תקופה מהיום הזה שעוד לא נסגרה נסגרת בעמוד החדש. תקופה שכבר נסגרה בדרך הישנה לא משתנה, ומופיעה ברשימה «סגירות ישנות לבדיקה». אחרי ההפעלה אי אפשר לשנות את היום הזה.');
+    same('on that day nothing would be left behind: no warning', await h.page.locator(`${V} .acc-activation-stranded`).count(), 0);
+    await geometry(h.page, 'the activation screen at 375 with the decided day', 1);
+    await shot(h.page, '6-activation-decided-day-375');
+    await field.fill('2026-11-13');
+    await field.dispatchEvent('change');
+    await h.page.waitForTimeout(300);
+    same('A LATER DAY IN THE FIELD: the warning, with how many periods it would leave before tracking - read before anything is written',
+        [await txt(h.page, `${V} .acc-activation-stranded`), await h.page.locator(`${V} .acc-activation-stranded`).getAttribute('role'), await on(h.page), net4.cloud.probes.length],
+        ['ביום שבחרת, תקופות עם עבודה שעוד לא נסגרו נשארות לפני תחילת המעקב. אחרי ההפעלה אי אפשר יהיה לסגור אותן. מספר התקופות: 1', 'alert', false, 0]);
+    await geometry(h.page, 'the activation screen at 375 with the warning', 1);
+    await field.fill('2026-10-30');
+    await field.dispatchEvent('change');
+    await h.page.waitForTimeout(300);
+    same('back on the decided day the warning is gone', await h.page.locator(`${V} .acc-activation-stranded`).count(), 0);
+    await tapText(h.page, T.run);
+    same('the confirmation names 30/10/2026', (await ask(h.page)).message, `${T.confirm} 30/10/2026`);
+    await h.page.locator('#askOk').click();
+    await h.page.waitForFunction(() => paybookOn(State.schedule) === true, null, { timeout: 30000 });
+    await h.page.waitForTimeout(400);
+    same('TURNED ON FROM 30/10: the opening on the server carries that day, and the man nobody closed has his period waiting INSIDE tracking',
+        [net4.cloud.doc.pay.po_open.date, await h.page.evaluate(() => (row => [row.tracking.from, row.pending.map(one => one.from), row.beforeTracking.length])(
+            accountFor(State.schedule, State.worker('w_ziad'), todayStr())))], ['2026-10-30', ['2026-10-30', ['2026-10-30'], 0]]);
+    same('no page error', h.errors, []);
+    await h.context.close();
+}
+
 await a.context.close();
 await b.context.close();
+await s.context.close();
 await browser.close();
 await server.close();
 report();

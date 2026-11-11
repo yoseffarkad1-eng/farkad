@@ -77,12 +77,6 @@ const CONTROLS = [
     'select | pushReminderDays |  | FarkadReminders.daysChanged()',
     'textarea | diagnosticText |  | '
 ];
-// WHAT THE SHEET GAINED SINCE v171, by name (v186): the pay book's one row. Its button has
-// no inline handler - it is made by js/ui/accounts.js, like every control that file draws.
-const ADDED_SINCE = {
-    controls: ['button |  | פנקס שכר - הכנה והפעלה | '],
-    sentences: ['פנקס שכר (סגירת חשבון, תשלומים וארכיון): עוד לא הופעל ברישום הזה.', 'פנקס שכר - הכנה והפעלה']
-};
 // Every run of words on the sheet, sorted. Four lines are left out because what they say
 // depends on the moment and not on the build - the sync sentence and its reason, the
 // reminder status while it is still checking, and the version - and each of those is
@@ -329,21 +323,8 @@ try {
     // ------------------------------------------------------------------ nothing was removed
     suite('nothing was removed: the v171 sheet, control by control and sentence by sentence');
     const found = await page.evaluate(inventory);
-    // MOVED AT v186 (Phase 8 of the pay book), deliberately, and by ADDING: the sheet
-    // gained one sentence and one button - the pay book's row under כללי, drawn by
-    // js/ui/accounts.js on a record nobody has turned on (docs/payroll-activation.md).
-    // It is the ONE thing a person sees of the pay book in the build as it ships. The
-    // v171 lists above are untouched, so "nothing was removed" still asks what it asked;
-    // what was added is named here, apart, so that it cannot grow unnoticed.
-    same('every control, with its id, its words and its inline handler - the v171 sheet, and the one row added since',
-        found.controls, CONTROLS.concat(ADDED_SINCE.controls).sort());
-    same('every sentence, word for word - the same', found.sentences, SENTENCES.concat(ADDED_SINCE.sentences).sort());
-    same('what was added is one sentence and one button, both in the first section and neither behind a shut row',
-        await page.evaluate(() => {
-            const box = document.getElementById('paybookActivationBox');
-            return [Boolean(box), box ? box.closest('section.settings-section').id : null,
-                box ? Boolean(box.closest('details')) : null, box ? box.querySelectorAll('button').length : null];
-        }), [true, 'settingsDailySection', false, 1]);
+    same('every control, with its id, its words and its inline handler', found.controls, CONTROLS);
+    same('every sentence, word for word', found.sentences, SENTENCES);
     same('the version line names this build', await page.locator('#appVersion').textContent(),
         await page.evaluate(() => `גרסה ${APP_VERSION}`));
     // The three controls a script builds have no handler to read, so they are pressed.

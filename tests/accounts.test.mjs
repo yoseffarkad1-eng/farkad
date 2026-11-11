@@ -254,6 +254,11 @@ const WANT_TEXT = {
     activationSize: 'גודל הרישום בשרת היום',
     activationArchiveNote: 'חשבון שנסגר ושולם במלואו עובר אחרי 14 יום לארכיון בשרת. חודש שנסגר לכל העובדים יכול לעבור לארכיון אחרי חצי שנה, ורק כשמבקשים. שום דבר לא נמחק והכול נשאר במכשיר - אבל יום בחודש שעבר לארכיון כבר אי אפשר לשנות.',
     activationCarry: 'ההפעלה מאשרת גם, פעם אחת, שיתרת מקדמה עוברת לחשבון הבא. שורות שישתנו:',
+    // ADDED AT v190 (three; none moved): the tracking day the owner decided, what it means
+    // for a fortnight that has already ended, and the warning for a later day. PROPOSED.
+    activationTrackingDecided: 'יום תחילת המעקב שנקבע:',
+    activationTrackingMeans: 'תקופה מהיום הזה שעוד לא נסגרה נסגרת בעמוד החדש. תקופה שכבר נסגרה בדרך הישנה לא משתנה, ומופיעה ברשימה «סגירות ישנות לבדיקה». אחרי ההפעלה אי אפשר לשנות את היום הזה.',
+    activationTrackingStranded: 'ביום שבחרת, תקופות עם עבודה שעוד לא נסגרו נשארות לפני תחילת המעקב. אחרי ההפעלה אי אפשר יהיה לסגור אותן. מספר התקופות:',
     activationBeforeTitle: 'לפני שמפעילים',
     activationBeforePhones: 'כל הטלפונים מעודכנים לגרסה הזאת.',
     activationBeforeBackup: 'נלקח היום גיבוי מהטלפון הזה (⋯ ← גיבוי).',
@@ -513,6 +518,10 @@ const plain = value => JSON.parse(JSON.stringify(value));
         others.filter(file => /\baccountsActivationRow\b/.test(readFileSync(join(ROOT, file), 'utf8'))), ['js/ui/settings.js']);
     check('- in one guarded line', /if \(typeof accountsActivationRow === 'function'\) accountsActivationRow\(\);/.test(
         readFileSync(join(ROOT, 'js/ui/settings.js'), 'utf8')));
+    // The commit this build is made on is named in two suites, and they must name one:
+    // tests/dormant.browser.mjs puts that whole tree beside this one, screen by screen.
+    same('tests/dormant.browser.mjs compares this build with the same commit',
+        (/export const BASE = '([0-9a-f]+)';/.exec(readFileSync(join(ROOT, 'tests/dormant.browser.mjs'), 'utf8')) || [])[1], '9846d7f');
     const before = git(['show', '9846d7f:index.html']);
     const tabs = text => text.slice(text.indexOf('<nav class="tabs"'), text.indexOf('</nav>', text.indexOf('<nav class="tabs"')));
     same('the tab bar is main\'s, byte for byte: five tabs, the same label', tabs(PAGE) === tabs(before), true);
