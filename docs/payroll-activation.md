@@ -91,6 +91,7 @@ nobody has pressed the button.** Measured, cell by cell
 |---|---|---|---|
 | v180, v183, v184, v186 | live today | not on | records a day, synced - today's state (O, «under the rules LIVE TODAY») |
 | v180, v183, v184, v186 | **new** | not on | records a day, restores a file, synced: every new rule is vacuous without a pay book (O, «BEFORE the record is on») |
+| v187 and an older build side by side | **new** | not on | **the days while the phones update one by one**: v187 writes a day at protocol 2, the older phone one after it at protocol 1, and again each - all on the server and on both phones, both synced, nobody on (O, «beside this build») |
 | **v187** | live today | not on | records a day, shares rides, as v186 does. The button asks the server, is told the rules are the old ones, says so and writes nothing; sent anyway, the opening is refused whole (T) |
 | **v187** | **new** | not on | as v186, plus the row in ⋯; the button works (N) |
 | v180, v183, v184, v186 | **new** | **on** | every write to the record refused: a day, an old-style closure, a restore. The phone shows a sync error and keeps its work. v186's ride plans are still accepted (O, «AFTER»; R) |

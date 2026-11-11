@@ -382,6 +382,7 @@ for (const [name, sha] of OLDER) {
         await reached(() => quiet(old));
         cell.restoreBefore = result.ok === true && (await server(envNew)).updatedBy === old.id;
         same('IT RECORDS A DAY AND RESTORES AS EVER: publishing these rules first stops no phone', [cell.dayBefore, cell.restoreBefore, old.Sync.status], [true, true, 'synced']);
+        old.Sync.disconnect();
     }
 
     suite(`O / ${name} beside this build, under the NEW rules, on a record nobody has turned on - the days while the phones update one by one`);
@@ -478,6 +479,9 @@ for (const [name, sha] of OLDER) {
             [await names(envNew, 'closed'), (day(n, 'w_salim', '2026-10-19'), await reached(() => quiet(n)), dayOn(await server(envNew), '2026-10-19', 'w_salim'))],
             [['po_open'], true]);
         cell.statusAtEnd = old.Sync.status;
+        // Off the cloud before the next section reseeds the document: a phone left connected
+        // still holds refused writes, retries them, and would write into another section's record.
+        [n, old].forEach(device => device.Sync.disconnect());
     }
 
     suite(`O / ${name} under the rules AS PUBLISHED TODAY, on a record that is on - the hazard the rules exist for`);
@@ -496,6 +500,7 @@ for (const [name, sha] of OLDER) {
         cell.oldRulesErase = result.ok === true && (await server(envOld)).pay === undefined;
         check('MEASURED: under the published rules its restore is accepted and the opening is GONE - so the new rules are never rolled back once a closure exists',
             cell.oldRulesErase, JSON.stringify(Object.keys((await server(envOld)).pay || {})));
+        [n, old].forEach(device => device.Sync.disconnect());
     }
 }
 

@@ -82,6 +82,7 @@ build's real bytes and its own adapter, on the emulator.
 |---|---|---|---|
 | older | live today | not on | records a day, synced |
 | older | new | not on | records a day, restores, synced |
+| older, beside v187 | new | not on | the mixed fleet: v187 writes a day (protocol 2), the older phone one after it (protocol 1), and again each - all on the server and on both phones, synced |
 | older | new | on | a day, an old-style closure and a restore each REFUSED; sync error; the work kept |
 | older | live today | on | its restore is accepted and **the pay book is gone** - why the new rules never go back |
 | v187 | live today | not on | records a day, shares rides; the step refused by asking (`rules`); sent anyway, refused whole |
@@ -118,7 +119,7 @@ None was weakened; each moved with its reason beside the check.
 | `docs/firestore.rules.before-paybook` | the rules of v184 | main's rules at v186 | what is live moved (above) |
 | `tests/activation.test.mjs`, V12 | «the place another block of documents under the schedule is added: after probe/, before the schedule's closing brace» - an empty place | the rides' block stands in that place, word for word as the live file holds it; and neither side's rules name the other | the block arrived |
 | `tests/activation.test.mjs`, V9b | v180, v183, v184 | + v186 | the build every phone should be on today |
-| `tests/activation.emulator.test.mjs` | the artifact asked of `990f5b4`; three older builds; six cells each | asked of `9846d7f`; four builds; seven cells (+ the live rules on a record not on); + section R; + one rides check in T | the same, and the question nobody had asked |
+| `tests/activation.emulator.test.mjs` | the artifact asked of `990f5b4`; three older builds; six cells each | asked of `9846d7f`; four builds; eight cells (+ the live rules on a record not on; + the mixed fleet beside this build); + section R; + one rides check in T; every O section takes its phones off the cloud before the next reseeds | the same, and the questions nobody had asked. The last: a phone left connected with refused writes retried them into the next section's record (seen on the emulator when a section was added between two) |
 | `tests/months.emulator.test.mjs`, `tests/paybook.archive.emulator.test.mjs`, `tests/paybook.split.emulator.test.mjs` | the artifact asked of `8c943fa` (v172) | asked of `9846d7f` | the same |
 | `tests/transport.emulator.test.mjs`, ADD | «with that one block taken out, the file is today's file byte for byte», asked of `firestore.rules` | asked of the file it is still true of (the live one); and of this build's file: the block is that block word for word, and no line of the rules of before is gone around it | this build's file also carries the pay book's rules |
 | `tests/transport.share.test.mjs`, `tests/transport.emulator.test.mjs` | an older tree is asked for every file this build loads | less the six only the pay book has (named) | the same rule `tests/yosefgeves.test.mjs` follows |
