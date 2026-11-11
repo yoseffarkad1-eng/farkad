@@ -468,6 +468,44 @@ for (const [name, sha] of OLDER) {
         old.Sync.disconnect();
     }
 
+    suite(`O / ${name} beside this build, under the rules LIVE TODAY - day one: this build is served and the new rules are not pasted yet`);
+    {
+        // ADDED AT v190, and it is the cell the fleet is actually in from the hour the
+        // dormant build is served: the phones update one by one UNDER THE RULES OF TODAY
+        // (the runbook lets the rules be pasted after). The row above asks it of the new
+        // rules; nobody had asked it of the live ones, where the server's document goes
+        // 1 -> 2 -> 1 -> 2 in its protocol number under rules that know nothing of 2.
+        await reseed(envOld);
+        const first = phone(`d_ml_new_${name}`, envOld, { flags: SHIPS });
+        const old = oldPhone(name, sources, `d_ml_${name}`, envOld);
+        await reached(() => quiet(first) && quiet(old));
+        const seen = [];
+        const look = async label => { const held = await server(envOld); seen.push([label, held.revision, held.protocol, held.updatedBy, JSON.stringify(held.pay === undefined ? null : held.pay)]); return held; };
+        day(first, 'w_salim', '2026-10-17');
+        await reached(() => quiet(first) && quiet(old));
+        const afterNew = await look('this build');
+        day(old, 'w_nasser', '2026-10-18');
+        await reached(() => quiet(old) && quiet(first));
+        await settle(800);
+        await look('the older build');
+        day(first, 'w_ahmad', '2026-10-19');
+        await reached(() => quiet(first) && quiet(old));
+        await settle(800);
+        await look('this build again');
+        day(old, 'w_salim', '2026-10-20');
+        await reached(() => quiet(old) && quiet(first));
+        await settle(800);
+        const atEnd = await look('the older build again');
+        const days = ['2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20'].map((date, at) => [date, ['w_salim', 'w_nasser', 'w_ahmad', 'w_salim'][at]]);
+        cell.mixedLive = afterNew.protocol === 2 && days.every(([date, worker]) => dayOn(atEnd, date, worker) && dayOn(S(old), date, worker) && dayOn(S(first), date, worker))
+            && seen.every(row => row[4] === 'null') && on(first) === false && (await names(envOld, 'closed')).length === 0;
+        same('A MIXED FLEET UNDER THE RULES OF TODAY: this build writes a day (protocol 2), the older phone one after it (1), and again each - all four days on the server and on both phones, no `pay` key, nobody on',
+            [cell.mixedLive, old.Sync.status, first.Sync.status, old.Sync.pendingCount(), first.Sync.pendingCount()], [true, 'synced', 'synced', 0, 0]);
+        console.log('  measured, after each write [who, revision, protocol, updatedBy, pay]: ' + JSON.stringify(seen));
+        first.Sync.disconnect();
+        old.Sync.disconnect();
+    }
+
     suite(`O / ${name} under the rules LIVE TODAY, on the record as it is today - the cell every phone is in now`);
     {
         await reseed(envOld);
@@ -637,8 +675,10 @@ for (const [name, sha] of OLDER) {
 
     const olds = OLDER.map(([name]) => found[name]);
     same('every older build answers every question the same way',
-        olds.map(cell => [cell.liveDay, cell.mixed, cell.dayBefore, cell.restoreBefore, cell.dayRefused, cell.closeRefused, cell.restoreRefused, cell.oldRulesErase]),
-        OLDER.map(() => [true, true, true, true, true, true, true, true]));
+        olds.map(cell => [cell.liveDay, cell.mixed, cell.mixedLive, cell.dayBefore, cell.restoreBefore, cell.dayRefused, cell.closeRefused, cell.restoreRefused, cell.oldRulesErase]),
+        OLDER.map(() => [true, true, true, true, true, true, true, true, true]));
+    check('0. the dormant build may be served before the new rules are pasted: under the rules of today, this build and every older build go on recording side by side',
+        olds.every(cell => cell.mixedLive && cell.liveDay));
     same('THE MIXED FLEET, per older build: after each of the four writes the server\'s document holds no `pay` key at all - the build as it ships adds the protocol number and nothing else',
         olds.map(cell => cell.payKey), OLDER.map(() => 'null|null|null|null'));
     check('1. the new rules can be published while every phone is still on an older build: nobody working is refused',

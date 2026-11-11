@@ -40,8 +40,12 @@ answers were «ب», «30/10» and «نعم».
      is harmless for the older phones beside it - the row «older, beside v190 | new rules |
      not on» of the rollout table, **re-run on this build as it ships**: v190 writes a day,
      v180 / v183 / v184 / v186 one after it, and again each - all four days on the server and
-     on both phones, both synced, nobody on. And under the rules live today (T): a day is
-     accepted and synced.
+     on both phones, both synced, nobody on. **And the same row under the rules LIVE TODAY,
+     which nobody had asked** - it is the state the fleet is in from the hour v190 is served
+     until the rules are pasted, and the server's document goes 1 → 2 → 1 → 2 in its protocol
+     number under rules that know nothing of 2: the same four days, both phones synced, no
+     `pay` key, for each of the four older builds (O, «beside this build, under the rules
+     LIVE TODAY»).
   2. **it keeps an empty `pay: {}` map in its own copy of the record** (a key on that
      phone's disk). **It does NOT write one onto the server by an edit**: an edit sends one
      field path, and after it the server's document still has no `pay` key (measured on a
@@ -251,6 +255,12 @@ None was weakened. Each moved because what ships moved, with its reason beside t
   said.
 - **A fleet of v190 and v191 phones on a record that is on** was measured in Node, in
   Chromium and on the emulator with two phones; three real phones on two builds were not.
+- **`tests/settings-order.browser.mjs` (main's file, byte for byte) has a check that fails
+  on a loaded machine - on main's own tree at v186 too**, three runs in four when it was
+  tried there: «every row opened and shut again: the disk is byte for byte what it was»
+  reads the disk twice about a second apart, and `farkad:openBuilds` (written when the
+  service worker answers; `js/ui/offline.js`, main's file byte for byte) can land between
+  the two. It is the suite's timing, not a write by the sheet, and it is not touched here.
 - **The tracking-day walk is one seeded record.** On the real record the list the screen
   shows is the first reading; an unclosed period from BEFORE 30/10 is before tracking under
   either day and stays where it is (its advance is on the debt list - decision 76).

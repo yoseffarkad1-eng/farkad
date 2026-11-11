@@ -870,6 +870,10 @@ let ACTIVATED = null;
     const MEN = ['w_ahmad', 'w_omar', 'w_khaled', 'w_nasser', 'w_salim'];
     const now = (device, hour = '10') => stamp(DAY, device.id, hour);
 
+    // (The suite's line stands above its fixtures: a given() in them is then inside a
+    // suite whose checks are below it, which is what tests/nonassertions.test.mjs asks.)
+    suite('V14a: the day the screen offers - the day the owner decided, once it has come; and never a day he did not choose');
+
     function record() {
         const d = phone('d_v14seed', { today: DAY });
         const schedule = d.State.schedule;
@@ -931,8 +935,6 @@ let ACTIVATED = null;
         await settled([device]);
         return { cloud, device };
     };
-
-    suite('V14a: the day the screen offers - the day the owner decided, once it has come; and never a day he did not choose');
 
     const any = phone('d_v14any');
     same('the decided day is 2026-10-30, a Friday that opens a fortnight for a fortnightly man and a week for a weekly one',

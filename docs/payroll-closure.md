@@ -103,7 +103,7 @@ Asked again because the row is now hidden and "nothing visible" must not hide a 
 | the server's document after it | no `pay` key | **no `pay` key** - an edit writes none |
 | its own disk | no `pay` key | an empty `pay: {}` |
 | a WHOLE-document write (a restore) | no `pay` key | carries the empty `pay: {}` |
-| an older phone writing after it | - | accepted at protocol 1, as ever (the mixed-fleet row, re-run on the build as it ships) |
+| an older phone writing after it | - | accepted at protocol 1, as ever - under the new rules (the mixed-fleet row, re-run on the build as it ships) AND under the rules live today (a row added at v190: day one, before the rules are pasted) |
 
 So the earlier statement "it writes an empty `pay: {}` map and protocol 2 onto an
 unactivated record from its first edit" is half right: protocol 2, yes, from the first
