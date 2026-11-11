@@ -489,6 +489,54 @@ new rules brings them back, and changes made meanwhile meet them by the ordinary
 the share records and copies aside stay on the disk, unread; the documents stay in the
 cloud.
 
+### 3.14 A disk with no room - corrected after the review of v189 (c3, c4)
+
+Every transport write is optional (it never spends a restore point), so on a full disk it is
+refused, and the session's copy can be AHEAD of the disk. Two things followed in v186-v189,
+both measured by the review and both red in `tests/transport.share.test.mjs` on v189's file:
+
+- **c3.** An adopted plan was put in memory and then saved; refused, it stayed drawn and
+  held over the older plan on the disk. The next answer from the cloud found memory equal to
+  itself ('same') and recorded the cloud's revision; after a reopen the disk's older plan
+  read as this phone's change and went up over the other phone's - a seat, or a vehicle
+  turned off, gone on every phone, nothing aside, nobody told. «להשתמש בשלי» the same way.
+- **c4.** An answer to a conflict that recorded nothing counted as progress, and the next
+  write went at once: a phone whose disk refused the share record sent transactions in a
+  tight loop (some 1,400 in two seconds) for as long as the app was open.
+
+The rules now, in `js/ui/transport-share.js`:
+
+1. **Memory never runs ahead of the disk for a shared document.** An adopted plan, and
+   «להשתמש בשלי», are built beside the session's copy and put in its place only once the disk
+   has them. A refused adoption leaves the screen on what the disk holds and the line says
+   **noRoom** (the existing sentence; its first clause, «לשמור בצד את השיבוץ שלך», was written
+   for the copy aside, and for a plain adoption nothing of this phone's needed putting aside -
+   the rest of it is exact); a copy aside it had just written goes back as it was; the next
+   word from the cloud asks the disk again. A refused «להשתמש בשלי» leaves the shared plan
+   drawn, the copy aside with its two buttons, and the screen's «השינוי לא נשמר במכשיר».
+2. **A share record moves only to what the disk holds**, read past Store's session cache
+   (`Store.durableGet`): 'same' gives the disk the plan first.
+3. **Nothing is sent that the disk does not hold.** A change of the person's that the disk
+   refused stays on this phone's screen with «השינוי לא נשמר במכשיר» and is owed; it goes up
+   once a write of that day or list lands (the person's next change of it, made with room).
+   A plan from the cloud meanwhile is drawn only if the disk takes this phone's copy aside
+   AND the plan - then it is said as any loss is; otherwise the line says noRoom and the
+   screen stays as it is. Lost if the app is closed first, as that sentence says. (v186-v189
+   sent it from memory; after a reopen it was reversed on every phone.)
+4. **Progress is the record moving.** A write is followed at once only when this phone's
+   record of the document moved past the revision it was built on; anything else - a refused
+   record, a plan the disk would not take, a document this build cannot read - waits for the
+   ladder (5 s, doubling, never slower than 5 min). Measured at a thousandth of its time: 15
+   writes in what is fifty minutes on a phone, where v189 wrote 2,146.
+
+The exception: a session with no disk at all (`js/store.js` holds everything in memory for
+the rest of the session) takes Store's memory as its storage - nothing of it outlives the
+session to come back - and draws the shared plan as before.
+
+Not covered: a disk that v186-v189 already left with a record ahead of its plan (the review's
+state, before this build) still reads, at its first opening on this build, as this phone's
+change - there is nothing on it to tell the two apart. And not tried on a real phone.
+
 ---
 
 **The v171 design follows.** Its status line at the time: phase 1 built as the v171 candidate

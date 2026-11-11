@@ -1016,8 +1016,13 @@ await block('none of it is in the record\'s cloud, a backup, a restore point or 
     same('every call the phone made to them was a listen or a write of one of those two',
         [...new Set(cloud.transport.attempts.map(one => (one.kind === 'subscribe' ? 'subscribe' : `write:${one.name}`)))].sort(),
         ['subscribe', `write:day_${DAY}`, 'write:settings']);
+    // `updatedAt` is read for its shape and nothing else: it is the clock, and a document
+    // whose milliseconds are .052 or .054 (two in a thousand) matched the phone prefixes
+    // below - a red check that measured nothing but the moment of the run.
     check('what went up has no man\'s name, phone or site, and no mark of an opened chat',
-        !/אחמד|מוחמד|יוסי|סמיר|Ali|052|054|הרצליה|חיפה|marks|openedAt/.test(JSON.stringify([...cloud.transport.docs.values()])));
+        [...cloud.transport.docs.values()].every(one => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(one.updatedAt))
+        && !/אחמד|מוחמד|יוסי|סמיר|Ali|052|054|הרצליה|חיפה|marks|openedAt/.test(JSON.stringify([...cloud.transport.docs.values()]
+            .map(one => Object.assign({}, one, { updatedAt: undefined })))));
     same('and the phone\'s only new keys are its own notes of those two documents',
         Object.keys(device.dump()).filter(key => /:shared:|:aside:/.test(key)).sort(),
         [`farkadTransport:shared:day_${DAY}`, 'farkadTransport:shared:settings']);

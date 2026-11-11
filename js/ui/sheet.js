@@ -459,11 +459,23 @@ function renderWorkerPicker() {
 
 // Emptying a site in one go. Building it up name by name is the normal case; taking it
 // apart one ✓ at a time when the crew moved somewhere else is the same work twice.
+//
+// THE DAY IS THE ONE THE QUESTION WAS ASKED ABOUT. The men were counted before the question
+// and the date read after the answer, so a question left open over midnight («2 עובדים
+// יוסרו מאתר צפון ביום הזה», the picker behind it saying Tuesday) emptied the site on
+// WEDNESDAY - the seder built the evening before, or another phone's record of the morning -
+// and left Tuesday as it was (the review of v189, c2). The date and the layer are read once,
+// before the question, as markAllHoliday (js/ui/day.js) reads its own; and after the answer
+// the men counted are taken off only if they are still on the site that day. A man another
+// phone moved, or marked absent, while the question was up is that phone's answer: rewriting
+// his day to an empty list would have taken his absence or his new site with it.
 async function clearWorkerPicker() {
     const place = State.place(pickerPlaceId);
     if (!place) return;
 
-    const here = workersAtPlace(State.schedule, State.date, place.id, State.layer);
+    const date = State.date;
+    const layer = State.layer;
+    const here = workersAtPlace(State.schedule, date, place.id, layer);
     if (here.length === 0) {
         askTell(`אף אחד לא רשום ב${isolate(place.name)} ביום הזה.`);
         return;
@@ -476,21 +488,25 @@ async function clearWorkerPicker() {
     });
     if (!ok) return;
 
-    const previous = here.map(workerId => ({
+    const still = new Set(workersAtPlace(State.schedule, date, place.id, layer));
+    const leaving = here.filter(workerId => still.has(workerId));
+    if (leaving.length === 0) {
+        renderWorkerPicker();
+        return;
+    }
+    const previous = leaving.map(workerId => ({
         workerId,
-        record: snapshotWorkerDay(State.date, State.layer, workerId)
+        record: snapshotWorkerDay(date, layer, workerId)
     }));
-    const date = State.date;
-    const layer = State.layer;
 
     // Kept in the journal by the disk guard, it is an edit all the same - see editWithUndo.
-    if (!State.commitMany(here.map(workerId =>
+    if (!State.commitMany(leaving.map(workerId =>
         unassignPlace(State.schedule, date, workerId, layer, place.id)))) {
         if (State.lastCommitKept) hideUndo();
         return;
     }
 
-    offerUndo(`${here.length} עובדים הוסרו מ${isolate(place.name)}`, () => {
+    offerUndo(`${leaving.length} עובדים הוסרו מ${isolate(place.name)}`, () => {
         State.commitMany(previous.map(item =>
             setWorkerDay(State.schedule, date, item.workerId, layer, item.record)));
     });
@@ -528,10 +544,17 @@ function openPlacePicker(workerId) {
                 // under the finger): the same site tapped again for the same man inside
                 // DOUBLE_TAP_GUARD_MS is the first tap again (secondTapTooSoon, js/ui/day.js).
                 if (secondTapTooSoon(`place:${workerId}:${place.id}`)) return;
-                const change = inHere
+                // Through editWithUndo, in the sheet's own words for the same two acts. It was
+                // a bare commit, the one write the tray's name led to with no step of its own:
+                // the header's ↶ stayed on the step before - often another man just placed by
+                // his chip (js/ui/usual.js) - and pressed to take this pick back it took HIS day
+                // back instead. The mutation is handed over unmade: assignPlace changes the
+                // schedule the moment it is called, before editWithUndo has taken its copy.
+                editWithUndo(workerId, inHere
+                    ? `${isolate(worker.name)} הוסר מ${isolate(place.name)}`
+                    : `${isolate(worker.name)} נרשם ב${isolate(place.name)}`, () => (inHere
                     ? unassignPlace(State.schedule, State.date, workerId, State.layer, place.id)
-                    : assignPlace(State.schedule, State.date, workerId, State.layer, place.id, RATE_NORMAL);
-                State.commit(change);
+                    : assignPlace(State.schedule, State.date, workerId, State.layer, place.id, RATE_NORMAL)));
                 openPlacePicker(workerId);
             }
         );

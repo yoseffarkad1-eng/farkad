@@ -1,6 +1,104 @@
-## v189 — the reports: each group in its own period, and a card that tells the account with the extra hours on it; the usual site beside a man not yet recorded; «כרטיס אתר» (CANDIDATE - NOT SERVED)
+## v190 — five faults the review of v189 found, repaired: a double tap in «לא נרשמו», midnight under an open sheet, «🧹 רוקן אתר» after midnight, and two in the shared rides (candidate - not served)
 
-**Candidate. Not served until the merge and the Pages deployment are recorded here by the next release.**
+**Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `0790d3f` (v189, served). A repair and nothing else: no new screen, no new key, no new
+field path, no new writer, and no new Hebrew in the app - the two undo sentences it adds are
+the assign sheet's own words for the same acts («… נרשם כנעדר», «… נרשם ב…» / «… הוסר מ…»).
+Nothing in `js/model`, `js/sync`, `js/state.js`, `js/store.js`, `js/recovery.js`,
+`firestore.rules` or `functions`; the files are `js/app.js`, `js/ui/day.js`, `js/ui/sheet.js`,
+`js/ui/usual.js` and `js/ui/transport-share.js`. «מה חדש» has one item, the double tap and
+midnight, so that the owner looks at «נעדרים» for a day he tapped a chip twice on v189.
+
+### How they were found
+
+After v189 was served, an independent review read v186 to v189 again with fresh eyes, each
+finding reproduced by two sceptics before it counted. Seven survived (c0-c6) and two minor
+ones (m0, m1). This build repairs c0-c4. c5 and c6 are in the reports, the next build's
+ground (the extra hours' worth as a line of its own); m0 and m1 wait.
+
+### c0 (v189, served for a few hours): a double tap on a usual-site chip touched ANOTHER man
+
+The chip «האתר הקבוע» places the man and his whole line leaves «לא נרשמו»; what slides up
+under the finger is whatever the next man brings - his chip, but as often his name, his «נעדר»
+or, when he was the last man waiting, a ✕ of «נעדרים» below. The chip's guard was its own key,
+so the second tap of a double tap 150 ms apart marked a man nobody touched absent, cancelled
+another man's absence, or opened another man's «לאן הלך» - measured in Chromium at six phone
+sizes. And «נעדר» in the tray was a bare commit with no step on ↶, so ↶ pressed to take that
+absence back took the FIRST man's placement back and left the second absent.
+
+Now the two trays have ONE clock (`trayTapTooSoon`, `js/ui/day.js`): a control that writes
+(the chip, «נעדר», the ✕ of «נעדרים») starts it whether or not it was let through, and any
+control of either tray tapped inside `DOUBLE_TAP_GUARD_MS` (700 ms) after it does nothing,
+wherever the finger came down; a burst is one tap. «נעדר» in the tray goes through
+`editWithUndo` with the sheet's words, so ↶ takes back exactly it; so does a site picked in
+«לאן הלך» (`openPlacePicker`, `js/ui/sheet.js`), which was the one other bare commit a tray's
+name led to. The window is time and not place: a second man MEANT inside 700 ms is ignored too.
+
+### c1 (old): midnight moved the date under an open sheet
+
+`watchDayRollover` (`js/app.js`) followed the calendar the moment the page came back, whatever
+was open. The assign sheet, «לאן הלך» and a site's picker name their day once, when drawn, and
+write to `State.date` at the tap: a sheet opened at 23:50 on Tuesday and used at 00:05 still
+said Tuesday and wrote Wednesday, rate-stamped and queued; Tuesday was left empty. Now, while
+anything `midEdit()` counts is open, the date stays where the screen says it is; the follow is
+owed, not dropped, and is made the instant the last dialog closes (in that same turn, so no
+frame of the old day is painted after it) or at the next return - never on a timer, and as
+before only if the screen is still on the old today. Nor is the day drawn again while a box is
+being typed in: the digits of a site's count typed when the phone locked are kept.
+
+### c2 (old): «🧹 רוקן אתר» asked about one day and emptied the next
+
+`clearWorkerPicker` counted the men before its question and read the date after the answer, so
+a question left open over midnight emptied the site on WEDNESDAY - tomorrow's seder, or another
+phone's morning - and left Tuesday as it was. The date and the layer are now read once, before
+the question, as «הכל חופש» (`markAllHoliday`) reads its own; and after the answer only the
+men still on that site that day are taken off. A man another phone moved or marked absent
+meanwhile keeps that phone's answer.
+
+### c3 (v185/v186): a full disk lost the other phone's shared plan after a reopen
+
+`adopt()` changed the session's copy in place and then saved it; a disk that refused left the
+other phone's plan drawn and held in memory over an older plan on the disk, which the next
+answer found equal to itself, recorded as this phone's revision - and after a reopen the
+disk's older plan went up over the other phone's, with no copy aside and nothing said. Now an
+adopted plan (and «להשתמש בשלי») is built beside the session's copy and goes into memory only
+once the disk holds it; a share record is moved only to what the disk holds, read past Store's
+session cache (`Store.durableGet`); nothing is sent that the disk does not hold
+(`firstToSend`); a copy put aside and then not needed goes back to what it was. Refused, the
+line says there is no room («noRoom», the existing sentence) and the next word from the cloud
+asks the disk again. A session with no disk at all is the one exception: there memory is the
+storage.
+
+### c4 (v185/v186): a refused record made a tight loop of cloud transactions
+
+The flush counted any answer to a conflict as progress and sent the next write at once. On a
+disk that refused the record, the same document stayed owed on the same revision and the next
+write went immediately, for ever - some 1,400 transactions in two seconds, each a billable read,
+for as long as the app was open. Now progress is the record MOVING (`moved()`): only a write
+that landed, or a newer plan taken, is answered at once; anything else goes through the
+existing retry ladder.
+
+### Tests
+
+`tests/midnight.browser.mjs` (new, `npm run test:midnight-browser`, in `test:all`): each
+writer open across midnight in Chromium - the sheet, «לאן הלך», a site's picker, «🧹 רוקן
+אתר», a typed count - and every write landing on the day the surface named.
+`tests/usual.browser.mjs` and `tests/usual.test.mjs`: the double tap at six sizes onto each
+thing that can slide under the finger, ↶ after «נעדר» and after «לאן הלך».
+`tests/transport.share.test.mjs`: c3 and c4 as sequences on a disk that refuses, on one that
+takes a write and hands back something else, and in a session with no disk at all; the cloud's
+transactions counted. `docs/transport-spec.md` 3.14 says the rules.
+
+### Not covered
+
+Not tried on a real phone. The double-tap window is measured in Chromium with emulated touch;
+a phone that reports two taps further apart than 700 ms is two taps. Records written by a
+double tap on v189 between its deployment (16:20 UTC) and this build are not repaired by it:
+a man marked absent that way stays absent until somebody looks at «נעדרים» and takes it back.
+
+## v189 — the reports: each group in its own period, and a card that tells the account with the extra hours on it; the usual site beside a man not yet recorded; «כרטיס אתר» (served 2026-11-11)
+
+**Served.** Merged as `0790d3f` (PR #71) on 2026-11-11 after both gates exited 0 on `6c63927` (`npm test` 11,087 of 11,087 checks; `npm run test:release` 20,418 of 20,418); the Pages deployment succeeded at 16:20 UTC.
 Built on the v188 candidate (`31f4b8b`). Three things, built apart and brought together here:
 
 1. **The pay sheet's default** - display logic in `js/ui/reports.js` and a few lines of

@@ -313,6 +313,261 @@ try {
         }
     }
 
+    // ============================================================== the next man has NO chip
+    //
+    // The case above is the one the chip's first guard was written for: the man after has
+    // a chip of his own, and it slides into the place of the one tapped. The review of v189
+    // (c0) measured the other one, which is the common one: a man with a chip takes a whole
+    // line of the tray, the men after him have none, and when he is placed their small
+    // rows flow up into his line - so the second tap of a double tap, 150 ms later, came
+    // down on ANOTHER man's «נעדר»: he was marked absent, by a bare commit with no step of
+    // its own on ↶, the undo bar still naming the first man, and ↶ pressed to take the
+    // absence back took the first man's placement back instead. Or on another man's name,
+    // opening «לאן הלך» for him; or - the last man waiting placed - on a ✕ of «נעדרים»
+    // below, cancelling an absence. The layouts are the reviewers' (one site, the first man
+    // the only one with a chip, at their sizes and with their names), and one more for
+    // «נעדרים». Whatever a layout puts under the finger, the trays have one clock
+    // (trayTapTooSoon, js/ui/day.js): exactly the first man is placed and nothing else on
+    // the day moves. A pair the page saw 700 ms or more apart is not a double tap, and a
+    // first tap the page did not deliver to the chip is not this case: each is tried again
+    // in a fresh page, and a third such try fails.
+    const SITE = 'הרצליה';
+    async function crew(width, height, names, away, usual) {
+        const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2,
+            isMobile: true, hasTouch: true, colorScheme: 'dark', serviceWorkers: 'block' });
+        const page = await context.newPage();
+        page.on('pageerror', error => errors.push(error.message));
+        await page.clock.setFixedTime(`${TODAY}T18:00:00`);
+        await page.goto(server.url);
+        await page.waitForFunction(() => typeof usualSiteFor === 'function' && typeof State === 'object');
+        await page.evaluate(([names, away, usual, site, today, day]) => {
+            todayStr = () => today;
+            const id = at => 'w_' + String(at + 1).padStart(2, '0');
+            State.schedule.workers = names.concat(away).map((name, at) => ({ id: id(at), name, active: true, dailyRate: 400 }));
+            State.schedule.places = [{ id: 'p_01', name: site, active: true }];
+            State.commitRoster();
+            ['2026-11-08', '2026-11-09', '2026-11-10'].forEach(date =>
+                State.commit(assignPlace(State.schedule, date, id(usual), 'actual', 'p_01')));
+            away.forEach((name, k) => State.commit(markAbsent(State.schedule, day, id(names.length + k), 'actual')));
+            hideUndo();
+            State.date = day;
+            showView('day'); setDayMode('sites'); render();
+            const banner = document.getElementById('accountBanner');
+            const putAway = banner && banner.style.display !== 'none' && banner.querySelector(':scope > .btn-icon');
+            if (putAway) putAway.click();
+            // Which button each click reached, and when by the page's own clock - the one
+            // the guard reads.
+            window.__hits = [];
+            document.addEventListener('click', event => {
+                const hit = event.target && event.target.closest ? event.target.closest('button') : null;
+                __hits.push({ at: performance.now(), cls: hit ? hit.className : null, aria: hit ? hit.getAttribute('aria-label') : null });
+            }, true);
+            window.__under = (x, y) => {
+                const node = document.elementFromPoint(x, y);
+                const hit = node && node.closest('button');
+                const tray = hit && hit.closest('.tray');
+                return hit ? { cls: hit.className, aria: hit.getAttribute('aria-label'), tray: tray ? tray.className : null } : null;
+            };
+            window.__centre = node => { const b = node.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; };
+            window.__day = () => JSON.stringify(((State.schedule.days[day] || {}).actual) || {});
+            window.__others = except => JSON.stringify(Object.entries(((State.schedule.days[day] || {}).actual) || {})
+                .filter(([key]) => key !== except).sort());
+        }, [names, away, usual, SITE, TODAY, DAY]);
+        await frames(page);
+        return { context, page, chipOf: 'w_' + String(usual + 1).padStart(2, '0'), first: names[usual] };
+    }
+    // Brought to the middle of the screen and left to settle: the bars are measured a frame
+    // after a render, and the day's place is finished then (settleDayAnchor).
+    async function centred(page, find) {
+        for (let pass = 0; pass < 3; pass += 1) {
+            await page.evaluate(find => { const node = (0, eval)(find)();
+                window.scrollTo(0, Math.max(0, scrollY + node.getBoundingClientRect().top - innerHeight * 0.4)); }, find);
+            await settle(page, 60);
+        }
+        await settle(page, 150);
+        return page.evaluate(find => __centre((0, eval)(find)()), find);
+    }
+    const CHIP = `() => document.querySelector('#dayView .tray-pending .chip-usual')`;
+    const N1 = ['אמיר', 'בסאם אבו', 'גדי', 'דאוד', 'הלל', 'וליד', 'זיאד', 'חסן', 'טארק', 'יונס'];
+    const N2 = ['אמיר דוגמה', 'בסאם דוגמה', 'גדי דוגמה', 'דאוד דוגמה', 'הלל דוגמה', 'וליד דוגמה', 'זיאד דוגמה', 'חסן דוגמה'];
+    const N3 = ['מוחמד', 'אחמד', 'עלי', 'יוסי', 'רמי', 'סאמר', 'נביל', 'פאדי'];
+    const N4 = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט', 'י'];
+    const AWAY = ['חיים לוי', 'מאיר כהן', 'שלמה פרץ', 'אהרון דהן'];
+    const LAYOUTS = [
+        [440, 956, N1, [], 0], [430, 932, N3, [], 0], [412, 915, N2, [], 0], [390, 844, N2, [], 0],
+        [375, 667, N2, [], 0], [360, 740, N4, [], 0], [390, 844, N3, [], 0], [375, 667, N2.slice(0, 2), AWAY, 1]];
+    const underFinger = [];
+    suite('a double tap on the chip, the next man with no chip: one man, wherever the second tap lands');
+    for (const [width, height, names, away, usual] of LAYOUTS) {
+        const tag = `${width}x${height}, ${names[0]}…${away.length ? ' and «נעדרים»' : ''}`;
+        let judged = null;
+        for (let attempt = 1; attempt <= 3 && !judged; attempt += 1) {
+            const one = await crew(width, height, names, away, usual);
+            const { page } = one;
+            const point = await centred(page, CHIP);
+            const before = { day: await page.evaluate(() => __day()), paths: await page.evaluate(() => FarkadSync.pendingPaths().slice()) };
+            await page.touchscreen.tap(point.x, point.y);
+            await page.waitForTimeout(150);
+            const under = await page.evaluate(([x, y]) => __under(x, y), [point.x, point.y]);
+            await page.touchscreen.tap(point.x, point.y);
+            await settle(page, 300);
+            const hits = await page.evaluate(() => __hits);
+            const pair = hits.length >= 2 ? Math.round(hits[1].at - hits[0].at) : null;
+            const onChip = hits.length > 0 && /\bchip-usual\b/.test(hits[0].cls || '');
+            if (!onChip || pair === null || pair >= 700) {
+                if (attempt === 3) check(`${tag}: a double tap reached the chip in one of three fresh pages`, false,
+                    JSON.stringify({ hits: hits.map(hit => [Math.round(hit.at), hit.cls, bare(hit.aria)]), pair }));
+                await one.context.close();
+                continue;
+            }
+            judged = { ...one, before, under, pair };
+        }
+        if (!judged) continue;
+        const { page, context, chipOf, first, before, under, pair } = judged;
+        underFinger.push(under);
+        const placed = JSON.parse(await page.evaluate(id => JSON.stringify(((State.schedule.days[State.date] || {}).actual || {})[id] || null), chipOf));
+        check(`${tag}: the man tapped is on the site (the pair ${pair} ms apart, the finger then on «${bare(under && under.aria)}»)`,
+            placed && placed.entries.length === 1 && placed.entries[0].placeId === 'p_01', JSON.stringify(placed));
+        same(`${tag}: nobody else's day moved - no man marked absent, no absence cancelled`,
+            await page.evaluate(id => __others(id), chipOf), JSON.stringify(Object.entries(JSON.parse(before.day)).filter(([key]) => key !== chipOf).sort()));
+        same(`${tag}: the queue holds his one field path more, and nothing else`,
+            (await page.evaluate(() => FarkadSync.pendingPaths().slice())).filter(path => !before.paths.includes(path)), [`days.${DAY}.actual.${chipOf}`]);
+        same(`${tag}: no dialog was opened`, await page.evaluate(() => [...document.querySelectorAll('.modal')].filter(modal => modal.style.display === 'flex').map(modal => modal.id)), []);
+        same(`${tag}: the undo bar names him`, bare(await undoSays(page)), `${first} נרשם ב${SITE}`);
+        await page.evaluate(() => runUndo());
+        await settle(page);
+        same(`${tag}: and ↶ takes back exactly that: he is waiting again and the rest of the day is what it was`,
+            [await page.evaluate(id => JSON.stringify((((State.schedule.days[State.date] || {}).actual || {})[id] || { entries: [] }).entries), chipOf),
+                await page.evaluate(id => __others(id), chipOf), (await waiting(page)).length],
+            ['[]', JSON.stringify(Object.entries(JSON.parse(before.day)).filter(([key]) => key !== chipOf).sort()), names.length]);
+        await context.close();
+    }
+    // The layouts measure what they say only if, on this machine, they put each of the three
+    // under the finger at least once: another man's «נעדר», another man's name, and a ✕ of
+    // «נעדרים». Judged after them, so it is a claim of its own and not a precondition.
+    const saw = kind => underFinger.filter(Boolean).filter(kind).map(hit => bare(hit.aria));
+    check('the layouts measured it: another man\'s «נעדר» came under the finger in at least one',
+        saw(hit => /\bchip-side\b/.test(hit.cls) && /tray-pending/.test(hit.tray)).length > 0, JSON.stringify(underFinger));
+    check('another man\'s name, in at least one', saw(hit => /\bchip-main\b/.test(hit.cls) && /tray-pending/.test(hit.tray)).length > 0,
+        JSON.stringify(underFinger));
+    check('and a ✕ of «נעדרים», in at least one', saw(hit => /\bchip-side\b/.test(hit.cls) && /tray-absent/.test(hit.tray)).length > 0,
+        JSON.stringify(underFinger));
+
+    // The same three, each tapped ON PURPOSE where it is after the first tap - so that what
+    // is measured does not rest on where a layout happens to put it - inside the window and
+    // then after it.
+    suite('the trays\' one clock, control by control: inside 700 ms nothing, after it what the button says');
+    // Each block is judged only on taps the page saw inside the window: a body that finds its
+    // taps arrived 700 ms or more apart (a loaded machine) answers with why, and is tried
+    // again in a fresh page - a third such try fails. A block that cannot finish - on a tree
+    // with the defect the man it means to tap next is already somewhere else - says so as a
+    // failure, and the suite goes on.
+    async function guarded(name, open, body) {
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+            let made = null;
+            try {
+                made = await open();
+                const late = await body(made);
+                if (!late) return;
+                if (attempt === 3) check(`${name}: its taps reached the page inside 700 ms in one of three fresh pages`, false, late);
+            } catch (error) {
+                check(`${name}: ran to its end`, false, String((error && error.message) || error).slice(0, 240));
+                return;
+            } finally { if (made) await made.context.close(); }
+        }
+    }
+    await guarded('control by control', () => crew(440, 956, N1, [], 0), async ({ page }) => {
+        const chip = await centred(page, CHIP);
+        const ABSENT = `() => [...document.querySelectorAll('#dayView .tray-pending .chip')].find(chip => chip.querySelector('.chip-main').textContent === 'דאוד').querySelector('.chip-side')`;
+        const NAME = `() => [...document.querySelectorAll('#dayView .tray-pending .chip')].find(chip => chip.querySelector('.chip-main').textContent === 'גדי').querySelector('.chip-main')`;
+        await page.touchscreen.tap(chip.x, chip.y);
+        await page.waitForTimeout(120);
+        const absent = await page.evaluate(find => __centre((0, eval)(find)()), ABSENT);
+        await page.touchscreen.tap(absent.x, absent.y);
+        await page.waitForTimeout(120);
+        const name = await page.evaluate(find => __centre((0, eval)(find)()), NAME);
+        await page.touchscreen.tap(name.x, name.y);
+        await settle(page, 200);
+        const early = await page.evaluate(() => __hits.map(hit => Math.round(hit.at)));
+        if (!(early.length === 3 && early[2] - early[0] < 700)) return JSON.stringify(early);
+        same('«נעדר» of another man, tapped on purpose inside the window: he is not marked absent', await dayOf(page, 'w_04'), 'null');
+        same('another man\'s name inside it: «לאן הלך» is not opened', await page.evaluate(() => document.getElementById('placePickerModal').style.display), '');
+        same('the undo bar still names the man placed', bare(await undoSays(page)), `אמיר נרשם ב${SITE}`);
+
+        // After the window, «נעדר» is one tap - through ↶ now, in the words of the sheet's own.
+        await page.waitForTimeout(800);
+        const again = await page.evaluate(find => __centre((0, eval)(find)()), ABSENT);
+        await page.touchscreen.tap(again.x, again.y);
+        await settle(page, 200);
+        check('after the window «נעדר» marks him absent', await page.evaluate(day => isAbsent(State.schedule, day, 'w_04', 'actual'), DAY));
+        same('and the undo bar says so, in the sheet\'s words for it', bare(await undoSays(page)), 'דאוד נרשם כנעדר');
+        same('the header\'s ↶ is armed with that step and no other', bare(await page.evaluate(() => document.getElementById('undoBtn').getAttribute('aria-label'))), 'בטל: דאוד נרשם כנעדר');
+        await page.evaluate(() => document.getElementById('undoBtn').click());
+        await settle(page);
+        check('↶ takes back his absence - he is waiting again', await page.evaluate(() => State.unrecorded().some(worker => worker.id === 'w_04')
+            && !isAbsent(State.schedule, State.date, 'w_04', 'actual')));
+        check('and leaves the man placed before him where he was', JSON.parse(await dayOf(page, 'w_01')).entries[0].placeId === 'p_01');
+        await page.evaluate(() => document.getElementById('redoBtn').click());
+        await settle(page);
+        check('↷ marks him absent again', await page.evaluate(day => isAbsent(State.schedule, day, 'w_04', 'actual'), DAY));
+
+        // After the window, the name opens «לאן הלך», as it always did.
+        await page.waitForTimeout(800);
+        const later = await page.evaluate(find => __centre((0, eval)(find)()), NAME);
+        await page.touchscreen.tap(later.x, later.y);
+        await settle(page, 150);
+        same('after the window the name opens «לאן הלך» for him', [await page.evaluate(() => document.getElementById('placePickerModal').style.display),
+            bare(await page.evaluate(() => document.getElementById('placePickerTitle').textContent))], ['flex', 'לאן הלך גדי?']);
+        // And a site picked there has its own step on ↶ - it was a bare commit, and ↶ stayed
+        // on the step before it.
+        await page.locator('#placePickerList .place-btn', { hasText: SITE }).tap();
+        await settle(page, 150);
+        same('a site picked in «לאן הלך» has its own step on ↶, in the sheet\'s words',
+            bare(await page.evaluate(() => document.getElementById('undoBtn').getAttribute('aria-label'))), `בטל: גדי נרשם ב${SITE}`);
+        await page.evaluate(() => closePlacePicker());
+        await page.evaluate(() => document.getElementById('undoBtn').click());
+        await settle(page);
+        same('and ↶ takes back that pick alone: the absence and the placement before it stand', [
+            await page.evaluate(day => entriesFor(State.schedule, day, 'w_03', 'actual').length, DAY),
+            await page.evaluate(day => isAbsent(State.schedule, day, 'w_04', 'actual'), DAY),
+            JSON.parse(await dayOf(page, 'w_01')).entries[0].placeId], [0, true, 'p_01']);
+    });
+    // A double tap on «נעדר» itself: the next man's «נעדר» slides into its place.
+    await guarded('a double tap on «נעדר»', () => crew(390, 844, N2, [], 0), async ({ page }) => {
+        const FIRST = `() => [...document.querySelectorAll('#dayView .tray-pending .chip')].find(chip => chip.querySelector('.chip-main').textContent === 'גדי דוגמה').querySelector('.chip-side')`;
+        const point = await centred(page, FIRST);
+        const before = await page.evaluate(() => __day());
+        await page.touchscreen.tap(point.x, point.y);
+        await page.waitForTimeout(150);
+        await page.touchscreen.tap(point.x, point.y);
+        await settle(page, 250);
+        const hits = await page.evaluate(() => __hits.map(hit => Math.round(hit.at)));
+        if (!(hits.length === 2 && hits[1] - hits[0] < 700)) return JSON.stringify(hits);
+        same('a double tap on «נעדר» marks one man absent - the one tapped',
+            Object.entries(JSON.parse(await page.evaluate(() => __day()))).filter(([key, value]) => value.absent && !JSON.parse(before)[key]).map(([key]) => key), ['w_03']);
+        same('and the undo bar names him', bare(await undoSays(page)), 'גדי דוגמה נרשם כנעדר');
+    });
+    // The last man waiting placed by his chip: «נעדרים» comes up under the finger. A ✕
+    // there inside the window cancels nothing; after it, it cancels the absence it names.
+    await guarded('a ✕ of «נעדרים» after the last man waiting', () => crew(375, 667, N2.slice(0, 2), AWAY, 1), async ({ page }) => {
+        const chip = await centred(page, CHIP);
+        const CANCEL = `() => [...document.querySelectorAll('#dayView .tray-absent .chip')].find(chip => chip.querySelector('.chip-main').textContent === 'מאיר כהן').querySelector('.chip-side')`;
+        await page.touchscreen.tap(chip.x, chip.y);
+        await page.waitForTimeout(150);
+        const cancel = await page.evaluate(find => __centre((0, eval)(find)()), CANCEL);
+        await page.touchscreen.tap(cancel.x, cancel.y);
+        await settle(page, 200);
+        const hits = await page.evaluate(() => __hits.map(hit => [Math.round(hit.at), hit.cls]));
+        if (!(hits.length === 2 && /\bchip-usual\b/.test(hits[0][1] || '') && hits[1][0] - hits[0][0] < 700)) return JSON.stringify(hits);
+        check('a ✕ of «נעדרים» inside the window cancels nothing', await page.evaluate(day => isAbsent(State.schedule, day, 'w_04', 'actual'), DAY));
+        await page.waitForTimeout(800);
+        const later = await page.evaluate(find => __centre((0, eval)(find)()), CANCEL);
+        await page.touchscreen.tap(later.x, later.y);
+        await settle(page, 200);
+        check('after the window it cancels the absence it names', await page.evaluate(day => !isAbsent(State.schedule, day, 'w_04', 'actual'), DAY));
+        same('and the undo bar names him', bare(await undoSays(page)), 'ההיעדרות של מאיר כהן בוטלה');
+    });
+
     // ============================================================== the row's own two controls
     suite('the name and «נעדר» do what they did');
     {

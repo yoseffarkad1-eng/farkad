@@ -94,13 +94,47 @@ function watchDayScroll() {
 const DOUBLE_TAP_GUARD_MS = 700;
 const lastTapAt = new Map();
 
+function tapClock() {
+    return typeof performance !== 'undefined' && performance && typeof performance.now === 'function'
+        ? performance.now() : Date.now();
+}
+
 // True when this activation of `key` is the second of a pair and is to be ignored.
 function secondTapTooSoon(key) {
-    const now = typeof performance !== 'undefined' && performance && typeof performance.now === 'function'
-        ? performance.now() : Date.now();
+    const now = tapClock();
     const last = lastTapAt.get(key);
     lastTapAt.set(key, now);
     return last !== undefined && now - last < DOUBLE_TAP_GUARD_MS;
+}
+
+// THE TWO TRAYS HAVE ONE CLOCK.
+//
+// A key per control was enough while what slid under the finger was the same control of
+// the next man. In the trays it is not. A man placed by his usual site's chip
+// (js/ui/usual.js) takes his whole line of «לא נרשמו» with him, and what comes up under
+// the finger is whatever the men after him bring: the next man's chip, but just as often -
+// when he has no chip - his name or his «נעדר», or, when the man placed was the last one
+// waiting, a ✕ of «נעדרים» below. Measured in Chromium at six phone sizes with a double tap
+// 150 ms apart: a man nobody touched marked absent, his own ↶ never offered and the header's
+// ↶ still holding the first man's placement; another man's absence cancelled; another man's
+// «לאן הלך» opened (tests/usual.browser.mjs). A double tap on «נעדר» itself was the same
+// trap: the next man's «נעדר» slides into its place.
+//
+// So every control of «לא נרשמו» and «נעדרים» reads ONE clock. A control that writes - the
+// usual chip, «נעדר», the ✕ of «נעדרים» - starts it whether or not it was let through, and
+// any control of either tray tapped less than DOUBLE_TAP_GUARD_MS after it does nothing,
+// wherever on the trays the finger came down. The name writes nothing (it opens «לאן הלך»
+// over the trays) and so starts nothing, but it is dropped inside the window like the rest:
+// the picker it would open is a writer, under a finger that meant something else. A tap
+// dropped inside the window starts it again, so a burst is one tap. The window is time and
+// not place, as for every key above: a second man the person MEANS, inside 700 ms, is
+// ignored too.
+function trayTapTooSoon(writes) {
+    const now = tapClock();
+    const last = lastTapAt.get('trays');
+    const soon = last !== undefined && now - last < DOUBLE_TAP_GUARD_MS;
+    if (writes || soon) lastTapAt.set('trays', now);
+    return soon;
 }
 
 // TRUE WHILE THE DAY IS BEING TAKEN DOWN TO BE DRAWN AGAIN (v166).
@@ -1369,9 +1403,19 @@ function renderUnassignedTray(unrecorded) {
     const chips = el('div', 'chips');
     unrecorded.forEach(worker => {
         const chip = el('div', 'chip');
-        chip.appendChild(button(worker.name, 'chip-main', () => openPlacePicker(worker.id), `שבץ את ${isolate(worker.name)}`));
+        // Every control on this row reads the trays' one clock (trayTapTooSoon).
+        chip.appendChild(button(worker.name, 'chip-main', () => {
+            if (trayTapTooSoon(false)) return;
+            openPlacePicker(worker.id);
+        }, `שבץ את ${isolate(worker.name)}`));
+        // Through editWithUndo, in the words of the sheet's own «נעדר», like every other
+        // write on this screen. It was a bare commit: no undo bar, and the header's ↶ left
+        // holding the step before it - often a man just placed by his chip - so ↶ pressed
+        // to take this absence back took HIS placement back and left this man absent.
         chip.appendChild(button('נעדר', 'chip-side', () => {
-            State.commit(markAbsent(State.schedule, State.date, worker.id, State.layer));
+            if (trayTapTooSoon(true)) return;
+            editWithUndo(worker.id, `${isolate(worker.name)} נרשם כנעדר`,
+                () => markAbsent(State.schedule, State.date, worker.id, State.layer));
         }, `סמן את ${isolate(worker.name)} כנעדר`));
         // Where he usually works, as one chip after the two that were here (js/ui/usual.js):
         // a suggestion read off the record at this render, written by nobody until tapped.
@@ -1500,8 +1544,10 @@ function renderAbsentTray() {
         chip.appendChild(el('span', 'chip-main', worker.name));
         chip.appendChild(button('✕', 'chip-side', () => {
             // The next man's chip slides into this one's place, under the finger: a second
-            // tap inside DOUBLE_TAP_GUARD_MS is this one again (secondTapTooSoon).
-            if (secondTapTooSoon('absent-remove')) return;
+            // tap inside DOUBLE_TAP_GUARD_MS is this one again. And this tray comes up under
+            // a finger that placed the last man waiting above it, so it reads the same clock
+            // as «לא נרשמו» (trayTapTooSoon).
+            if (trayTapTooSoon(true)) return;
             editWithUndo(worker.id, `ההיעדרות של ${isolate(worker.name)} בוטלה`,
                 () => clearWorkerDay(State.schedule, State.date, worker.id, State.layer));
         }, `בטל היעדרות של ${isolate(worker.name)}`));
