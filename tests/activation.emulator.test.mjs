@@ -132,8 +132,17 @@ const as = (env, email) => env.authenticatedContext(email.replace(/[^a-z0-9]/gi,
 
 // THE RECORD AS IT IS TODAY: written by a build as it ships, no pay book, the carry
 // approved long ago, Khaled's 500 from a fortnight nobody closed.
+// TWO BUILDS OF THIS TREE SINCE v190 (the owner's decision 71, option B): the build AS IT
+// SHIPS does not offer the step and honours a record that is on (`SHIPS`: no flag named);
+// the build that OFFERS it is this one with one line changed, named through the seam
+// (`OFFER`) - and is what a phone made here is unless it says otherwise, because every
+// section that turns a record on needs it. Where a phone is handed `SHIPS`, the question
+// is asked of v190 itself: the mixed fleet (O), and the phone that is handed an activated
+// record and closes an account on it (N).
+const SHIPS = null;
+const OFFER = { paybookActivation: true };
 function shipped(id, options = {}) {
-    const device = makeDevice(Object.assign({ deviceId: id }, options, { flags: options.flags === undefined ? null : options.flags }));
+    const device = makeDevice(Object.assign({ deviceId: id }, options, { flags: options.flags === undefined ? OFFER : options.flags }));
     device.setToday(TODAY);
     device.ctx.askTell = () => Promise.resolve();
     device.ctx.askConfirm = () => Promise.resolve(false);
@@ -158,9 +167,17 @@ const BASE = (() => {
     return { schedule, wire: Object.assign(clone(d.call('cloudDocument', schedule)), { protocol: 1, revision: 1, lastOpId: 'op_seed' }) };
 })();
 
-async function reseed(env) {
+// THE SERVER'S DOCUMENT AS v186 LEFT IT (moved at v190, in the fixture): the wire form this
+// build makes carries an empty `pay` map, and until v190 that is what every section here
+// was seeded with. The real document has NO `pay` key - v186 has never heard of one - so
+// that is now what is seeded, and what "this build writes no pay map onto a record nobody
+// turned on" is measured against. `emptyPay` seeds the other shape (a document this build
+// once wrote whole, by a restore), and N turns a record on from each.
+async function reseed(env, options = {}) {
+    const wire = clone(BASE.wire);
+    if (options.emptyPay !== true) { delete wire.pay; delete wire.payConflicted; delete wire.payIndex; delete wire.monthIndex; }
     await env.clearFirestore();
-    await env.withSecurityRulesDisabled(async ctx => { await setDoc(doc(ctx.firestore(), ...PATH), clone(BASE.wire)); });
+    await env.withSecurityRulesDisabled(async ctx => { await setDoc(doc(ctx.firestore(), ...PATH), wire); });
 }
 const server = async (env, ...more) => {
     let held = null;
@@ -296,7 +313,7 @@ const tried = async promise => { try { await promise; return 'accepted'; } catch
 // ================================================================ T
 const BEFORE_RULES = {};
 {
-    suite('T: the build as it ships under the rules PUBLISHED TODAY - refused by asking, and refused whole if sent');
+    suite('T: the build that offers the step under the rules PUBLISHED TODAY - refused by asking, and refused whole if sent');
 
     await reseed(envOld);
     const t = phone('d_t', envOld);
@@ -324,17 +341,41 @@ const BEFORE_RULES = {};
     same('and its ride plan is accepted under those rules, as v186\'s is',
         await tried(rideOps(opsOf.new, as(envOld, ALLOWED)).write(`day_${TODAY}`, 0, rideDay({ tv_01: { driver: 'w_ahmad', passengers: [], seats: {} } }, 1, 'd_t'))),
         'accepted');
+
+    // v190 ITSELF under the rules live today - the cell every phone is in from the hour
+    // it is served until the owner pastes the new rules.
+    await reseed(envOld);
+    const v = phone('d_t_ships', envOld, { flags: SHIPS });
+    await reached(() => quiet(v));
+    const untouched = canonical(await server(envOld));
+    same('THE BUILD AS IT SHIPS under those rules offers nothing and asks the server nothing: no step, the opening refused with `gate` before anything is sent',
+        [v.call('planActivation', S(v), OPENING, at(v)).state, v.call('planOpening', S(v), OPENING, at(v)).reasons, canonical(await server(envOld)) === untouched, on(v)],
+        ['off', ['gate'], true, false]);
+    day(v, 'w_nasser', '2026-10-18');
+    await reached(() => quiet(v));
+    const held = await server(envOld);
+    same('it records a day - accepted, at protocol 2, with no `pay` map written and no closed document - and says synced',
+        [dayOn(held, '2026-10-18', 'w_nasser'), held.protocol, Object.prototype.hasOwnProperty.call(held, 'pay'), await names(envOld, 'closed'), v.Sync.status],
+        [true, 2, false, [], 'synced']);
+    same('and its ride plan is accepted, as v186\'s is',
+        await tried(rideOps(opsOf.new, as(envOld, ALLOWED)).write(`day_${TODAY}`, 0, rideDay({ tv_01: { driver: 'w_ahmad', passengers: [], seats: {} } }, 1, 'd_t_ships'))),
+        'accepted');
+    v.Sync.disconnect();
 }
 
 // ================================================================ N
 {
-    suite('N: the build as it ships under the NEW rules, on the document as it is today - turned on');
+    suite('N: under the NEW rules, on the document as it is today - turned on by the build that offers, and THE BUILD AS IT SHIPS beside it is on');
 
     await reseed(envNew);
     const a = phone('d_owner', envNew);
-    const b = phone('d_fore', envNew, { email: SECOND });
+    // v190: the other phone has NOT taken the offering build. It is handed the record.
+    const b = phone('d_fore', envNew, { email: SECOND, flags: SHIPS });
+    given('the other phone is the build as it ships: the step not offered, the honouring on',
+        (flags => flags.paybookActivation === false && flags.paybookHonour === true && flags.paybook === false)(b.global('FARKAD_FLAGS')));
     await reached(() => quiet(a) && quiet(b));
-    same('before: protocol 1, no pay book, nobody on', [(await server(envNew)).protocol, Object.keys((await server(envNew)).pay || {}), on(a), on(b)], [1, [], false, false]);
+    same('before: protocol 1, no `pay` key at all (as v186 left it), nobody on',
+        [(await server(envNew)).protocol, Object.prototype.hasOwnProperty.call(await server(envNew), 'pay'), on(a), on(b)], [1, false, false, false]);
     const answer = await activate(a);
     await reached(() => quiet(a) && quiet(b) && on(b));
     const live = await server(envNew);
@@ -345,13 +386,15 @@ const BEFORE_RULES = {};
         [a, b].map(d => [on(d), d.call('advanceCarryInto', S(d), 'w_khaled', FORTNIGHT.from)]), [[true, 500], [true, 500]]);
     const closing = b.call('planClosure', S(b), 'w_nasser', FORTNIGHT, { allocations: {}, paid: 3000, paidOn: TODAY, method: 'cash' }, at(b, '11'));
     given('the other phone can plan a closure', closing.ok === true, JSON.stringify(closing.reasons));
-    same('and the other phone closes an account through the pay book', (await b.Sync.transactPaybook(closing)).state, 'closed');
+    same('and the other phone - the build as it ships - closes an account through the pay book, on the real rules', (await b.Sync.transactPaybook(closing)).state, 'closed');
     await reached(() => quiet(a) && quiet(b));
     same('which both phones and the server then hold', [Object.keys((await server(envNew)).pay).sort(), Object.keys(S(a).pay).sort()],
         [['po_open', 'pp_ps_w_nasser_20261002', 'ps_w_nasser_20261002'], ['po_open', 'pp_ps_w_nasser_20261002', 'ps_w_nasser_20261002']]);
 
-    // Two phones, the same moment.
-    await reseed(envNew);
+    // Two phones, the same moment - on a document that already holds an EMPTY pay map
+    // (the other shape a record nobody turned on can have: see reseed).
+    await reseed(envNew, { emptyPay: true });
+    given('this document holds an empty pay map before anybody turns it on', canonical((await server(envNew)).pay) === '{}');
     const c = phone('d_c', envNew);
     const d = phone('d_d', envNew, { email: SECOND });
     await reached(() => quiet(c) && quiet(d));
@@ -391,7 +434,8 @@ for (const [name, sha] of OLDER) {
         // the older phone beside it writes at 1. The phones do not update together, so both
         // must go on recording, whoever wrote last.
         await reseed(envNew);
-        const first = phone(`d_m_new_${name}`, envNew);
+        // v190: THE BUILD AS IT SHIPS (no flag named) - the row is re-measured on it.
+        const first = phone(`d_m_new_${name}`, envNew, { flags: SHIPS });
         const old = oldPhone(name, sources, `d_m_${name}`, envNew);
         await reached(() => quiet(first) && quiet(old));
         const seen = [];
@@ -414,6 +458,9 @@ for (const [name, sha] of OLDER) {
         const days = ['2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20'].map((date, at) => [date, ['w_salim', 'w_nasser', 'w_ahmad', 'w_salim'][at]]);
         cell.mixed = afterNew.protocol === 2 && days.every(([date, worker]) => dayOn(atEnd, date, worker) && dayOn(S(old), date, worker) && dayOn(S(first), date, worker))
             && Object.keys(atEnd.pay || {}).length === 0 && on(first) === false;
+        // What this build's first write put on the server beyond the day: the protocol
+        // number. No `pay` map - the seed holds none (v186 left none) and none appears.
+        cell.payKey = seen.map(row => row[4]).join('|');
         same('A MIXED FLEET: this build writes a day (protocol 2), the older phone one after it, and again each - all four days on the server and on both phones, no pay entry, nobody on',
             [cell.mixed, old.Sync.status, first.Sync.status, old.Sync.pendingCount(), first.Sync.pendingCount()], [true, 'synced', 'synced', 0, 0]);
         console.log('  measured, after each write [who, revision, protocol, updatedBy, pay]: ' + JSON.stringify(seen));
@@ -423,8 +470,7 @@ for (const [name, sha] of OLDER) {
 
     suite(`O / ${name} under the rules LIVE TODAY, on the record as it is today - the cell every phone is in now`);
     {
-        await envOld.clearFirestore();
-        await envOld.withSecurityRulesDisabled(async ctx => { await setDoc(doc(ctx.firestore(), ...PATH), clone(BASE.wire)); });
+        await reseed(envOld);
         const old = oldPhone(name, sources, `d_o0_${name}`, envOld);
         await reached(() => quiet(old));
         day(old, 'w_nasser', '2026-10-18');
@@ -560,7 +606,7 @@ for (const [name, sha] of OLDER) {
 
 // ================================================================ W, and the hand-written writes
 {
-    suite('W: the way back - this build with the step not offered, on the activated record; and protocol 1 by hand');
+    suite('W: the way back - this build with the entry not honoured (`paybookHonour: false`), on the activated record; and protocol 1 by hand');
 
     await reseed(envNew);
     const n = phone('d_w_on', envNew);
@@ -574,7 +620,7 @@ for (const [name, sha] of OLDER) {
     await passes('and a protocol-2 day is accepted', pathWrite(as(envNew, SECOND), { 'days.2026-10-20.actual.w_salim': { entries: [{ placeId: 'p_a' }] } }, 2));
     await reached(() => quiet(n));
 
-    const back = phone('d_w_back', envNew, { flags: { paybookActivation: false } });
+    const back = phone('d_w_back', envNew, { flags: { paybookActivation: false, paybookHonour: false } });
     await reached(() => quiet(back));
     same('THE WAY-BACK BUILD on the activated record: not on, the old walk, and it KEEPS the opening in its own copy',
         [on(back), back.call('advanceCarryInto', S(back), 'w_khaled', FORTNIGHT.from) === before, Object.keys(S(back).pay || {})], [false, true, ['po_open']]);
@@ -593,6 +639,8 @@ for (const [name, sha] of OLDER) {
     same('every older build answers every question the same way',
         olds.map(cell => [cell.liveDay, cell.mixed, cell.dayBefore, cell.restoreBefore, cell.dayRefused, cell.closeRefused, cell.restoreRefused, cell.oldRulesErase]),
         OLDER.map(() => [true, true, true, true, true, true, true, true]));
+    same('THE MIXED FLEET, per older build: after each of the four writes the server\'s document holds no `pay` key at all - the build as it ships adds the protocol number and nothing else',
+        olds.map(cell => cell.payKey), OLDER.map(() => 'null|null|null|null'));
     check('1. the new rules can be published while every phone is still on an older build: nobody working is refused',
         olds.every(cell => cell.dayBefore && cell.restoreBefore));
     same('2. the record cannot be turned on before the rules are published: the step asks and is told `rules`, and sent anyway it is refused whole',

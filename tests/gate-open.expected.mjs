@@ -28,7 +28,8 @@ export const SUBJECT = {
     'test:accounts-browser': 'the pay book\'s screens, opened through the seam',
     'test:archive-browser': 'the archive, the draft and «לבדיקה», opened through the seam',
     'test:cold-browser': 'the cold store on a real IndexedDB, its flag shut and open',
-    'test:activation-browser': 'turning it on from the app, on the build as it ships'
+    'test:activation-browser': 'turning it on from the app: the build that offers the step, and the build as it ships beside it',
+    'test:dormant-browser': 'the build as it ships beside the commit it is made on, screen by screen - the shut state is its whole subject'
 };
 
 // THE DIFFERENCES. `fails` are check names, word for word; `died` is where a suite stops
@@ -126,20 +127,11 @@ export const EXPECTED = {
         held: 'tests/accounts.browser.mjs («a man with nothing to close is one quiet line»; a debt figure only when it is above zero)',
         died: 'page.evaluate: TypeError: Failed to execute \'getComputedStyle\' on \'Window\': parameter 1 is not of type \'Element\'.',
         fails: []
-    },
-
-    // THE SEAM IS NOT THE ACTIVATION. The settings sheet's one new row belongs to a record:
-    // «not turned on» with its button, or «on since» a day. A device opened through the
-    // seam has the flag and a record with no opening, which is neither - so the row is
-    // not drawn at all, and the three checks that count it part.
-    'test:settings-order-browser': {
-        kind: 'reading',
-        why: 'the pay book\'s row in the settings sheet is drawn for a RECORD (not on: a sentence and a button; on: the day), and under the seam the record is neither, so no row is drawn. On a record really turned on the row is there, in its second form',
-        held: 'tests/activation.browser.mjs (the row before and after the record is turned on, on the build as it ships)',
-        fails: [
-            'every control, with its id, its words and its inline handler - the v171 sheet, and the one row added since',
-            'every sentence, word for word - the same',
-            'what was added is one sentence and one button, both in the first section and neither behind a shut row'
-        ]
     }
+
+    // (v190: `test:settings-order-browser` LEFT THIS LIST. It was here because the build as
+    // it shipped drew one new row in the settings sheet, which that suite counted and the
+    // seam did not draw. The build as it ships draws no row any more (the owner's decision
+    // 71, option B), the suite is main's file again, and it says with the gates open what
+    // it says with them shut. It comes back, with the row, in the build that offers the step.)
 };
