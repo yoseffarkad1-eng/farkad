@@ -7,7 +7,13 @@
 // end to end by a finger, at 440x956 and 375x667, dark and light:
 //
 //   - the way in: one row in the WhatsApp dialog, after the seder's and הסעות's, and
-//     nothing new on the day screen until a journey is started;
+//     (second pass) ONE button at the foot of the day's list, above «בדיקת היום», that
+//     names the day it opens on - or, with a journey he left, where he is in it; the
+//     header, the dock and the rows above it where they were;
+//   - second pass, the rest: at station 1 the dock is two lines with «מהיום הקודם»
+//     between «יציאה» and the way onward, and «שליחה לוואטסאפ» put away; the rides' bar
+//     silent when nothing is left; a driver whose message was opened named again among
+//     the workers at station 5; the rides' summary read in its own dialog before it leaves;
 //   - station 1 is the day screen itself, on TOMORROW: the journey's row rides in the
 //     day's own dock, js/ui/bars.js measures the dock with it, a man placed by the day's
 //     own picker moves the counter, and the day's own arrows move the journey's date;
@@ -136,6 +142,11 @@ async function open(width, height, scheme, options = {}) {
 }
 
 const WA_BUTTON = 'button[onclick="showDayMessage()"]';
+// The journey's row in the day's dock. Since the second pass #journeyDock itself has no
+// box of its own (display: contents - css/design.css says why), so "is the row on the
+// glass" is asked of its first line.
+const DOCK_ROW = '#journeyDock .journey-dock-top';
+const DAY_ENTRY = 'בניית סידור ליום רביעי 11/11/2026';
 const visible = async (page, selector) => page.locator(selector).first().isVisible().catch(() => false);
 const text = async (page, selector) => bare(await page.locator(selector).first().textContent());
 const station = page => page.evaluate(() => journeyStation());
@@ -224,7 +235,10 @@ async function tapToWhatsApp(page, context, locator) {
 // filled button and that one the way onward, on the glass and under nothing.
 async function floors(page, label) {
     const found = await page.evaluate(() => {
-        const roots = ['#journeyDock', '#journeyRide', '#journeyPanel'].map(sel => document.querySelector(sel)).filter(Boolean)
+        // The dock WITH the journey's row in it is the journey's at station 1: the row's
+        // children and the day's own copy button are one line of it.
+        const roots = [document.getElementById('journeyDock') ? '.day-actions' : null, '#journeyRide', '#journeyPanel']
+            .filter(Boolean).map(sel => document.querySelector(sel)).filter(Boolean)
             .filter(node => { const box = node.getBoundingClientRect(); return box.width > 0 && box.height > 0; });
         const seen = node => {
             const box = node.getBoundingClientRect();
@@ -273,6 +287,23 @@ async function floors(page, label) {
     check(`${label}: the way onward is on the glass and under nothing`, found.nextOnGlass && found.nextOnTop,
         JSON.stringify({ glass: found.nextOnGlass, top: found.nextOnTop }));
     return found;
+}
+
+// The same floors for one of the app's dialogs opened over a station.
+async function floorsOf(page, selector, label) {
+    const found = await page.evaluate(sel => {
+        const root = document.querySelector(sel);
+        const seen = node => { const box = node.getBoundingClientRect(); return box.width > 0 && box.height > 0; };
+        const targets = [...root.querySelectorAll('button, a[href]')].filter(seen);
+        return { count: targets.length,
+            small: targets.map(node => node.getBoundingClientRect()).filter(box => box.width < 43.5 || box.height < 43.5).length,
+            fields: [...root.querySelectorAll('textarea, input')].filter(seen).filter(node => parseFloat(getComputedStyle(node).fontSize) < 16).length,
+            outside: [...root.querySelectorAll('.modal-content, .modal-content *')].filter(seen)
+                .filter(node => { const box = node.getBoundingClientRect(); return box.left < -0.5 || box.right > window.innerWidth + 0.5; }).length,
+            page: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1 };
+    }, selector);
+    same(`${label}: 44px targets, 16px field, nothing off the side`,
+        [found.count > 0, found.small, found.fields, found.outside, found.page], [true, 0, 0, 0, true]);
 }
 
 // tests/mobile.test.mjs says why the cascade is doubled rather than each node.
@@ -327,7 +358,42 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
             panel: getComputedStyle(document.getElementById('journeyPanel')).display };
     });
     same('before a journey the day\'s dock holds its own two buttons and nothing else', dockBefore.kids.length, 2);
-    same('and nothing of the journey is on the day screen', [dockBefore.journey, dockBefore.panel], [0, 'none']);
+    // MOVED, second pass: «nothing of the journey is on the day screen» (0) -> exactly one
+    // thing, the button at the foot of the list.
+    same('and the one thing of the journey on the day screen is the button at the list\'s foot',
+        [await page.evaluate(() => [...document.querySelectorAll('.app [id^="journey"]')].map(node => node.id)), dockBefore.panel],
+        [['journeyDayEntry'], 'none']);
+    const foot = await page.evaluate(() => {
+        const entry = document.getElementById('journeyDayEntry');
+        const row = entry.parentNode;
+        const box = entry.getBoundingClientRect();
+        const list = document.getElementById('dayView').getBoundingClientRect();
+        const above = [...document.querySelectorAll('#dayView .tray, #dayView .site-grid')].map(node => node.getBoundingClientRect().bottom);
+        const names = [...document.querySelectorAll('#dayView .wrow, #dayView .chip-main')].map(node => node.getBoundingClientRect().bottom);
+        const style = getComputedStyle(entry);
+        const under = row.nextElementSibling;
+        return { text: entry.textContent, resume: entry.dataset.resume, w: box.width, h: box.height, list: list.width,
+            next: row.nextElementSibling && row.nextElementSibling.querySelector('#dayCheckEntry') ? 'dayCheckEntry' : null,
+            // v188: that row holds «חיפוש עובד» first and «בדיקת היום» beside it, one line, whole
+            // under the journey's row and touching nothing of it.
+            footIds: under ? [...under.querySelectorAll('button')].map(node => node.id) : [],
+            footClear: under ? [...under.querySelectorAll('button')].every(node => { const b = node.getBoundingClientRect(); return b.top >= box.bottom - 0.5 && b.height >= 47.5 && b.width >= 44; }) : false,
+            footOneLine: under ? new Set([...under.querySelectorAll('button')].map(node => Math.round(node.getBoundingClientRect().top))).size === 1 : false,
+            footTall: under ? Math.round(under.getBoundingClientRect().height) : 0,
+            last: row.nextElementSibling === document.getElementById('dayView').lastElementChild,
+            under: Math.max(...above, ...names) <= box.top + 0.5, font: parseFloat(style.fontSize),
+            inDayView: document.getElementById('dayView').contains(entry),
+            header: document.querySelector('#dayView .day-header').contains(entry), dock: document.querySelector('.day-actions').contains(entry) };
+    });
+    same('it names the day it will open on', [bare(foot.text), foot.resume], [DAY_ENTRY, '0']);
+    check('it is at the FOOT of the list: under every site, tray and name, straight above «בדיקת היום», which is still last',
+        foot.inDayView && foot.under && foot.next === 'dayCheckEntry' && foot.last, JSON.stringify(foot));
+    check('not on the header and not on the dock', !foot.header && !foot.dock);
+    same('the row under it is the day\'s own foot: «חיפוש עובד» then «בדיקת היום», in one line, whole and clear of it',
+        [foot.footIds, foot.footClear, foot.footOneLine], [['findEntry', 'dayCheckEntry'], true, true]);
+    check('and that row is one button tall - the journey\'s row is the only height the foot gained', foot.footTall <= 56, String(foot.footTall));
+    check('the width of the list, 48px or more, in 16px words or larger', foot.w >= foot.list - 1 && foot.h >= 47.5 && foot.font >= 16,
+        JSON.stringify({ w: foot.w, list: foot.list, h: foot.h, font: foot.font }));
     await page.locator(WA_BUTTON).tap();
     const entries = await page.evaluate(() => [...document.querySelectorAll('#shareModal .modal-actions > *')]
         .map(node => node.id).filter(id => ['sederEntry', 'transportEntry', 'journeyEntry'].includes(id)));
@@ -374,8 +440,25 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
             onTabs: Math.abs(box.bottom - tabs.top) < 1.5, row: document.getElementById('journeyDock').parentNode === node };
     });
     check('the row is INSIDE the day\'s own dock - no bar of its own', dock.row && dock.position === 'fixed');
-    same('the dock\'s own two buttons are still there, whole, 44px and under nothing',
-        dock.own.map(one => one.h >= 44 && one.w >= 44 && one.top), [true, true]);
+    // MOVED, second pass: «the dock's own two buttons are still there» -> the WhatsApp
+    // button is put away at this station (sending is the fifth) and the copy button stays.
+    same('of the dock\'s own two buttons «שליחה לוואטסאפ» is put away and «מהיום הקודם» is there, whole, 44px and under nothing',
+        dock.own.map(one => one.h >= 44 && one.w >= 44 && one.top), [false, true]);
+    const lines = await page.evaluate(() => {
+        const tops = sel => { const box = document.querySelector(sel).getBoundingClientRect(); return [Math.round(box.top), Math.round(box.left), Math.round(box.right)]; };
+        const leave = tops('#journeyDock .journey-quiet');
+        const copy = tops('#copyDayBtn');
+        const next = tops('#journeyNext');
+        return { oneLine: Math.abs(leave[0] - copy[0]) <= 1 && Math.abs(copy[0] - next[0]) <= 1,
+            // right to left: «יציאה», the copy button, the way onward
+            order: leave[1] >= copy[2] - 1 && copy[1] >= next[2] - 1,
+            wa: getComputedStyle(document.querySelector('.day-actions .btn-success')).display,
+            copy: document.getElementById('copyDayBtn').parentNode === document.querySelector('.day-actions') };
+    });
+    same('the copy button sits in one line between «יציאה» and the way onward - and was not moved in the document',
+        lines, { oneLine: true, order: true, wa: 'none', copy: true });
+    // 198px was what v184's three lines took on the small phone (docs/releases.md, v184).
+    check('the dock is two lines now: lower than v184\'s three', dock.height <= 160, String(dock.height));
     same('js/ui/bars.js measured the dock as it now stands', dock.published, dock.height);
     check('and it still sits exactly on the tab bar', dock.onTabs);
     check('taller than it was, by the row', dock.height > dockBefore.height, `${dockBefore.height} -> ${dock.height}`);
@@ -417,10 +500,10 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     // Another tab: the journey's row leaves with the day's dock and comes back with it.
     await page.locator('#tab-week').tap();
     await page.waitForTimeout(120);
-    same('on another tab the dock is away, the row with it', [await visible(page, '#journeyDock'), await station(page)], [false, 1]);
+    same('on another tab the dock is away, the row with it', [await visible(page, DOCK_ROW), await station(page)], [false, 1]);
     await page.locator('#tab-day').tap();
     await page.waitForTimeout(120);
-    same('and back on the day it is there', await visible(page, '#journeyDock'), true);
+    same('and back on the day it is there', await visible(page, DOCK_ROW), true);
 
     // ------------------------------------------------------------ station 2
     suite(`${where}: station 2 - the check, which never blocks`);
@@ -448,7 +531,7 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
 
     await page.locator('#journeyBack').tap();
     await page.waitForTimeout(150);
-    same('«חזרה» is the day screen again, with the row in its dock', [await station(page), await visible(page, '#journeyPanel'), await visible(page, '#journeyDock')], [1, false, true]);
+    same('«חזרה» is the day screen again, with the row in its dock', [await station(page), await visible(page, '#journeyPanel'), await visible(page, DOCK_ROW)], [1, false, true]);
     await page.locator('#journeyNext').tap();
     await page.waitForTimeout(150);
 
@@ -519,6 +602,13 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     same('and the bar follows the picture', await text(page, '#journeyRideStatus'), 'בלי מושב: 7');
     // Past the moment in which the click that ends a drag is not a tap (js/ui/transport.js).
     await page.waitForTimeout(500);
+    // AND PAST THE BROWSER'S OWN GESTURE. Chromium makes no click out of a tap that lands
+    // while the scroll a drag set going is still settling - the tap only stops it - and on a
+    // loaded machine that outlasted the 500ms: the chip below got its pointerdown and
+    // pointerup and no click, three runs in a row (2026-11-11, load average 5). A first touch
+    // on the screen's heading, which does nothing, takes that for it.
+    await page.locator('#transportTitle').tap();
+    await page.waitForTimeout(200);
     await page.locator(chip('w_03')).tap();
     await page.locator(seat('tv_01', 3)).tap();
     await page.waitForTimeout(120);
@@ -537,7 +627,12 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
         transportPlace(day, 'w_10', 'tv_03', 3);
         renderTransport();
     }, DAY);
-    same('everybody seated, a driver in every car', [await text(page, '#journeyRideStatus'), await text(page, '#transportTrayTitle')], [ALL_SEATED, ALL_SEATED]);
+    // MOVED, second pass: the bar said «כל העובדים משובצים» under the tray that says it.
+    same('everybody seated, a driver in every car: the screen says so ONCE, and the journey\'s bar says nothing',
+        [await text(page, '#journeyRideStatus'), await text(page, '#transportTrayTitle'),
+            (await page.locator('#transportPanel').textContent()).split(ALL_SEATED).length - 1], ['', ALL_SEATED, 1]);
+    same('its node is still there for the next thing left, and the way onward with it',
+        [await page.locator('#journeyRideStatus').count(), await visible(page, '#journeyRide #journeyNext')], [1, true]);
     const cars = [await drawn(page, 'tv_01'), await drawn(page, 'tv_02'), await drawn(page, 'tv_03')];
     same('three cars, as drawn', cars, ['w_01 w_02 w_03 - -', 'w_04 w_05 w_06 - -', 'w_08 w_07 w_10 - -']);
     same('the seats are the הסעות screen\'s own record, not the day\'s', await recordBytes(page), beforeRides);
@@ -624,6 +719,8 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     await floors(page, 'station 5');
     if (shots) await shot(page, 'station-5-sending');
 
+    same('before any driver is opened nobody is named again among the workers',
+        await page.locator('#journeySendWorkers .journey-send-driver').count(), 0);
     const recordAtSend = await recordBytes(page);
     const opened = await tapToWhatsApp(page, context, door);
     same('his own tap goes to wa.me, to the driver\'s number, with that message',
@@ -635,6 +732,16 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
         ['opened', [OPENED], 1]);
     same('the mark is the הסעות screen\'s own, in its own key', await page.evaluate(key => Object.keys(JSON.parse(localStorage.getItem(key)).marks), RIDES), ['tv_01']);
     check('no word on the station says anything was sent', !/נשלח/.test(await page.locator('#journeyPanel').textContent()));
+    // He is a man with a site too, so the seder to each worker holds a message for him.
+    same('the driver who was opened is named again in the workers\' group: his name, the group he was opened in, the same mark',
+        await page.evaluate(() => [...document.querySelectorAll('#journeySendWorkers .journey-send-driver')].map(row =>
+            [row.dataset.worker, row.querySelector('strong').textContent, row.querySelector('.journey-send-sub').textContent,
+                row.querySelector('.transport-badge').textContent.replace(/[\u2066-\u2069]/g, '')].join(' | '))),
+        ['w_01 | אחמד | הודעות לנהגים | נפתח בוואטסאפ']);
+    check('above the button that opens the list', await page.evaluate(() => {
+        const row = document.querySelector('#journeySendWorkers .journey-send-driver').getBoundingClientRect();
+        return row.bottom <= document.getElementById('journeySederOpen').getBoundingClientRect().top + 0.5;
+    }));
 
     // The seder to each worker: the existing list, OVER the panel.
     await page.locator('#journeySederOpen').tap();
@@ -649,6 +756,8 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
         [await visible(page, '#sederModal'), await over('#sederClose'), await text(page, '#sederContext'),
             await page.locator('#sederList .seder-row').count()],
         [true, true, 'יום רביעי 11/11/2026 · 9 עובדים', 9]);
+    check('and he is still on that list: named, never skipped',
+        (await page.locator('#sederList .seder-row').allTextContents()).some(row => row.includes('אחמד')));
     await page.locator('#sederClose').tap();
     await page.waitForTimeout(150);
     same('closed, he is where he was', [await visible(page, '#sederModal'), await station(page), await visible(page, '#journeyPanel')], [false, 5, true]);
@@ -663,22 +772,44 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     await page.locator('#shareModal button[onclick="closeShareModal()"]').tap();
     await page.waitForTimeout(150);
 
-    // The rides' summary, by the two doors every composed text leaves by - recorders here.
+    // The rides' summary. MOVED, second pass: the button went straight to the share sheet;
+    // it now opens the summary's OWN dialog (v179) for the journey's date, to be read
+    // first, and the words leave by that dialog's doors - recorders here.
     await page.evaluate(() => {
         window.__realOpen = window.open;
         window.open = url => { window.__opened = url; return null; };
         navigator.share = data => { window.__shared = data; return Promise.resolve(); };
     });
+    const diskAtSummary = await diskBut(page);
     await page.locator('#journeySummary').tap();
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(200);
     const summary = await page.evaluate(day => transportSummaryText(day), DAY);
-    same('the rides\' summary goes to the share sheet as text', await page.evaluate(() => window.__shared), { text: summary });
-    await page.evaluate(() => { delete navigator.share; });
+    same('the rides\' summary opens in its own dialog over the station, for the journey\'s date, with the הסעות screen still shut',
+        [await visible(page, '#transportSummaryModal'), await over('#transportSummarySend'), await text(page, '#transportSummaryContext'),
+            await page.locator('#transportSummaryText').inputValue() === summary,
+            await page.locator('#transportPanel').evaluate(node => node.classList.contains('open'))],
+        [true, true, 'יום רביעי 11/11/2026', true, false]);
+    same('opening it sent nothing anywhere and wrote no key',
+        [await page.evaluate(() => [window.__shared === undefined, window.__opened === undefined]), await diskBut(page)],
+        [[true, true], diskAtSummary]);
+    await page.locator('#transportSummarySend').tap();
+    await page.waitForTimeout(150);
+    same('its own send button gives the share sheet the text', await page.evaluate(() => window.__shared), { text: summary });
+    await page.evaluate(() => { delete navigator.share; if (document.getElementById('transportSummaryModal').style.display === 'flex') closeTransportSummary(); });
     await page.locator('#journeySummary').tap();
-    await page.waitForTimeout(100);
-    same('and with no share sheet to wa.me with the text and NO NUMBER - he picks the chat',
+    await page.waitForTimeout(150);
+    await page.locator('#transportSummarySend').tap();
+    await page.waitForTimeout(150);
+    same('and with no share sheet it goes to wa.me with the text and NO NUMBER - he picks the chat',
         await page.evaluate(() => window.__opened), `https://wa.me/?text=${encodeURIComponent(summary)}`);
-    await page.evaluate(() => { window.open = window.__realOpen; });
+    await page.evaluate(() => { window.open = window.__realOpen; if (document.getElementById('transportSummaryModal').style.display === 'flex') closeTransportSummary(); });
+    await page.locator('#journeySummary').tap();
+    await page.waitForTimeout(150);
+    await floorsOf(page, '#transportSummaryModal', 'the summary\'s dialog over station 5');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+    same('Escape shuts the dialog and leaves him at the sending, the journey still on the screen',
+        [await visible(page, '#transportSummaryModal'), await station(page), await visible(page, '#journeyPanel')], [false, 5, true]);
     same('none of the sending touched the record or queued anything', await recordBytes(page), recordAtSend);
 
     // Finished, with two of three drivers never opened: that is his choice.
@@ -693,12 +824,108 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     same('the day\'s dock is its own two buttons again, at the height it had',
         await page.evaluate(() => { const dock = document.querySelector('.day-actions'); return [dock.children.length, Math.round(dock.getBoundingClientRect().height)]; }),
         [2, dockBefore.height]);
+    same('«שליחה לוואטסאפ» is back with it, and the button at the foot offers a new journey',
+        [await visible(page, WA_BUTTON), bare(await page.locator('#journeyDayEntry').textContent())], [true, DAY_ENTRY]);
     same('what he built is all still there: the day, the seats and the one mark',
         await page.evaluate(([day, key]) => [Object.keys(JSON.parse(localStorage.getItem('scheduleData:v2')).days[day].actual).length,
             Object.keys(JSON.parse(localStorage.getItem(key)).trips).length, Object.keys(JSON.parse(localStorage.getItem(key)).marks).length], [DAY, RIDES]),
         [10, 3, 1]);
     same('nothing went wrong on the page', errors, []);
     same('and nothing was asked for off this machine but the one chat he opened', [away, asked.length], [[], 1]);
+    await context.close();
+}
+
+// ================================================================== the button at the foot of the day
+
+for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'light']]) {
+    const { page, context, errors, asked } = await open(width, height, scheme);
+    suite(`${width}x${height} ${scheme}: the journey from the foot of the day's list`);
+    const record = await recordBytes(page);
+    const disk = await diskBut(page);
+    const header = await page.evaluate(() => { const box = document.querySelector('#dayView .day-header').getBoundingClientRect(); return [Math.round(box.top), Math.round(box.height)]; });
+    await tapOnDay(page, page.locator('#journeyDayEntry'));
+    await page.waitForTimeout(200);
+    same('one tap on it is the journey at its first station, for the day it named', [await station(page), await page.evaluate(() => [journeyDate(), State.date])], [1, [DAY, DAY]]);
+    same('started from here it wrote its own key and nothing else', [await recordBytes(page), await diskBut(page, KEY)], [record, disk]);
+    same('with the journey\'s row in the dock the button at the foot is not drawn - one way onward, not two',
+        [await page.locator('#journeyDayEntry').count(), await visible(page, DOCK_ROW), await page.locator('#dayCheckEntry').count()], [0, true, 1]);
+    await walkTo(page, 4);
+    await page.locator('#journeyLeave').tap();
+    await page.waitForTimeout(200);
+    given('he left at the last look', await station(page) === 0 && (await keptOf(page)).station === 4);
+    same('left in the middle, the same button says where he is',
+        [bare(await page.locator('#journeyDayEntry').textContent()), await page.locator('#journeyDayEntry').getAttribute('data-resume')],
+        ['המשך בניית הסידור · שלב 4 מתוך 5', '1']);
+    if (width === 440 && SHOTS) {
+        await page.locator('#journeyDayEntry').evaluate(node => node.scrollIntoView({ block: 'center' }));
+        await shot(page, 'day-foot-continue');
+    }
+    await tapOnDay(page, page.locator('#journeyDayEntry'));
+    await page.waitForTimeout(200);
+    same('and a tap continues it there', [await station(page), await text(page, '#journeyStation')], [4, STATIONS[3]]);
+    await page.locator('#journeyLeave').tap();
+    await page.waitForTimeout(150);
+    await page.clock.fastForward('03:10:00');
+    await page.evaluate(() => render());
+    await page.waitForTimeout(150);
+    same('three hours on it offers a new journey again', bare(await page.locator('#journeyDayEntry').textContent()), DAY_ENTRY);
+    // The by-worker view of the day has the same foot.
+    await page.evaluate(() => { State.date = todayStr(); setDayMode('workers'); });
+    await page.waitForTimeout(200);
+    // v188: the row under the journey's holds «חיפוש עובד» and then «בדיקת היום» (js/ui/day.js).
+    same('the by-worker view ends in the same two rows, in the same order: the journey\'s, then find and the check',
+        await page.evaluate(() => [...document.getElementById('dayView').children].slice(-2).map(row => [...row.querySelectorAll('button')].map(node => node.id))),
+        [['journeyDayEntry'], ['findEntry', 'dayCheckEntry']]);
+    await page.evaluate(() => { setDayMode('sites'); window.scrollTo(0, 0); });
+    await page.waitForTimeout(250);
+    same('the day\'s header is where it was, the size it was', await page.evaluate(() => { const box = document.querySelector('#dayView .day-header').getBoundingClientRect(); return [Math.round(box.top), Math.round(box.height)]; }), header);
+    // At doubled text the words wrap inside the button; nothing runs off the side.
+    given('the cascade was doubled', await doubleEveryFontSize(page) > 100);
+    await page.evaluate(() => render());
+    await page.waitForTimeout(300);
+    const big = await page.evaluate(() => {
+        const entry = document.getElementById('journeyDayEntry');
+        const box = entry.getBoundingClientRect();
+        return { inside: box.left >= -0.5 && box.right <= window.innerWidth + 0.5, tall: box.height >= 47.5,
+            whole: entry.scrollWidth <= entry.clientWidth + 1 && entry.scrollHeight <= entry.clientHeight + 1,
+            page: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1 };
+    });
+    same('at 200% the button holds all its words, inside the screen, and the page does not scroll sideways',
+        big, { inside: true, tall: true, whole: true, page: true });
+    same('nothing went wrong on the page, and WhatsApp was never opened', [errors, asked.length], [[], 0]);
+    await context.close();
+}
+
+// ================================================================== a short screen keeps its last man
+
+// THE GUARANTEE THIS BUTTON MUST NOT COST (tests/mobile.test.mjs): with the list scrolled
+// to its end the last man is on the glass and a tap reaches him. On a phone turned
+// sideways, and on a 320x568 one, there is not room under him for a second button - so
+// there the button is not drawn, and the row in the WhatsApp dialog is the way in.
+for (const [width, height] of [[568, 320], [844, 390], [320, 568]]) {
+    const { page, context, errors } = await open(width, height, 'dark');
+    suite(`${width}x${height}: no room at the foot - the button is not drawn, and the last man is still reachable`);
+    same('the button is not on the glass, and «בדיקת היום» is',
+        [await visible(page, '#journeyDayEntry'), await visible(page, '#dayCheckEntry')], [false, true]);
+    // Asked the way tests/mobile.test.mjs asks it: the by-worker list, scrolled to its end.
+    await page.evaluate(() => setDayMode('workers'));
+    await page.waitForTimeout(250);
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(250);
+    const last = await page.evaluate(() => {
+        const rows = [...document.querySelectorAll('#dayView .worker-list .wrow')].filter(node => node.offsetParent !== null);
+        const node = rows[rows.length - 1];
+        const box = node.getBoundingClientRect();
+        const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return { hit: Boolean(top) && (top === node || node.contains(top)), top: Math.round(box.top), bottom: Math.round(box.bottom),
+            under: top ? (top.id || top.className) : null };
+    });
+    check('with the list at its end the last man is on the glass, under nothing', last.hit, JSON.stringify(last));
+    await page.evaluate(() => { setDayMode('sites'); window.scrollTo(0, 0); });
+    await page.waitForTimeout(250);
+    await start(page);
+    same('the row in the WhatsApp dialog still starts the journey', [await station(page), await page.evaluate(() => journeyDate())], [1, DAY]);
+    same('nothing went wrong on the page', errors, []);
     await context.close();
 }
 
@@ -713,7 +940,7 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     }, DAY);
     await start(page);
     const seen = {
-        1: async () => [await visible(page, '#journeyDock'), await text(page, '#journeyCount')],
+        1: async () => [await visible(page, DOCK_ROW), await text(page, '#journeyCount')],
         2: async () => [await visible(page, '#journeyPanel'), await text(page, '#journeyStation')],
         3: async () => [await page.locator('#transportPanel').evaluate(node => node.classList.contains('open')), await text(page, '#journeyRideStatus')],
         4: async () => [await visible(page, '#journeyPanel'), await text(page, '#journeyStation')],
@@ -832,7 +1059,7 @@ for (const [width, height] of [[440, 956], [375, 667]]) {
     same('which so far changed nothing', await recordBytes(page), record);
     await page.keyboard.press('Escape');
     await page.waitForTimeout(150);
-    same('the sheet shut, the journey\'s row is in the day\'s dock', [await page.evaluate(() => document.getElementById('assignSheet').style.display), await visible(page, '#journeyDock')], ['none', true]);
+    same('the sheet shut, the journey\'s row is in the day\'s dock', [await page.evaluate(() => document.getElementById('assignSheet').style.display), await visible(page, DOCK_ROW)], ['none', true]);
 
     // The day put right - by the day's own writers - and the check is calm.
     await page.evaluate(day => {
@@ -930,7 +1157,7 @@ for (const [width, height] of [[375, 667], [440, 956]]) {
     await page.waitForTimeout(200);
     await page.locator('#journeyBack').tap();
     await page.waitForTimeout(200);
-    same('and back again is the day screen', [await station(page), await visible(page, '#journeyDock')], [1, true]);
+    same('and back again is the day screen', [await station(page), await visible(page, DOCK_ROW)], [1, true]);
 
     // עלי - a passenger of the second car - is taken off חיפה by the day's own ✕, and put
     // on נתניה by the day's own picker; ראמי - a passenger of the third - is taken off his
@@ -1063,9 +1290,9 @@ for (const [width, height] of [[440, 956], [375, 667]]) {
     await start(page);
     given('a new journey is at the day screen', await station(page) === 1);
     await page.evaluate(() => document.body.classList.add('kbd-open'));
-    same('with the keys up the row is away with the dock it rides in', await visible(page, '#journeyDock'), false);
+    same('with the keys up the row is away with the dock it rides in', await visible(page, DOCK_ROW), false);
     await page.evaluate(() => document.body.classList.remove('kbd-open'));
-    same('and back with it', await visible(page, '#journeyDock'), true);
+    same('and back with it', await visible(page, DOCK_ROW), true);
     same('nothing went wrong on the page', errors, []);
     await context.close();
 }

@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v187';
+const APP_VERSION = 'v188';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -156,6 +156,12 @@ function render() {
     if (typeof renderWorkerCardIfOpen === 'function') renderWorkerCardIfOpen();
     // And for the month's summary (js/ui/monthsummary.js), for the same reason.
     if (typeof renderMonthSummaryIfOpen === 'function') renderMonthSummaryIfOpen();
+    // And for «תלוש לכל עובד» (js/ui/payslips.js): every row is a man's pay and a link that
+    // carries his statement, and both must say what the record says now.
+    if (typeof renderPayslipsIfOpen === 'function') renderPayslipsIfOpen();
+    // And for the finder (js/ui/find.js): a man added or turned off on another phone is
+    // found, or not, as the record has him now.
+    if (typeof renderFindIfOpen === 'function') renderFindIfOpen();
 
     // Last, because the two bars it measures have just been shown or hidden by the lines
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not
@@ -526,7 +532,13 @@ function bootOnce() {
     // A seder run the phone killed the app in the middle of - see js/ui/seder.js. Before
     // the reminder link is read, because it stands aside for one.
     if (typeof resumeSederRun === 'function') resumeSederRun();
+    // The same for a run of pay statements (js/ui/payslips.js); it stands aside for any
+    // dialog already open, the seder's list included.
+    if (typeof resumePayslipsRun === 'function') resumePayslipsRun();
     FarkadReminders.openPending();
+    // «מה חדש» (js/ui/whatsnew.js): last, after everything the boot itself reopens - the
+    // quiet line waits for whatever dialog one of them put up.
+    if (typeof whatsNewBoot === 'function') whatsNewBoot();
 }
 
 if (document.readyState === 'loading') {

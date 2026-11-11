@@ -48,9 +48,28 @@
 // why): station 3's bar counts him, the strip marks that station as having something left,
 // and the last look names him in the words the vehicle's own card uses.
 //
-// Entered from the WhatsApp dialog (#shareModal), under the seder's and הסעות's rows: the
-// day screen gets no new button - the owner had said it has too many, and its rectangles
-// are pinned.
+// TWO WAYS IN, and they are the same door (journeyStart). The row in the WhatsApp dialog
+// (#shareModal), under the seder's and הסעות's rows, is v184's. Since the second pass there
+// is also ONE button at the FOOT of the day's list, above «בדיקת היום» (journeyDayEntry,
+// asked for by js/ui/day.js): the owner asked for this as his main evening tool and it was
+// two taps deep in a dialog about something else. The foot, and not the header or the dock:
+// those two are measured to the pixel (tests/mobile.test.mjs, tests/design.browser.mjs -
+// eleven whole names at 440x956), and the foot is under the last name. It says the day it
+// will open on, and while a journey he left is still his (JOURNEY_RESUME_MS) it says where
+// he is in it instead. With the journey's own row in the dock it is not drawn at all, and
+// on a screen under 580px tall the stylesheet does not show it (css/design.css: there the
+// last man of the list must stay reachable at the list's end, and one more row costs him).
+//
+// THE SECOND PASS, the rest of it (each measured in tests/journey.browser.mjs):
+//   - at station 1 the dock's «שליחה לוואטסאפ» is put away (css/design.css) - sending is
+//     station 5 - and «מהיום הקודם» stays: copying the last day is how a seder is begun;
+//   - a driver whose message was opened is named again in the workers' group at station 5
+//     with that same mark, so nobody messages him twice without meaning to - he is not
+//     taken off the seder's list, that choice is the owner's;
+//   - the rides' summary at station 5 opens the summary's own dialog (openTransportSummary)
+//     to be read first, where it used to go straight to the share sheet;
+//   - with nothing left to do on the rides the journey's bar there says nothing: the
+//     screen's own line already says «כל העובדים משובצים», and twice is noise.
 
 // ================================================================== THE WORDS
 //
@@ -82,6 +101,11 @@ const JOURNEY_TEXT = Object.freeze({
     leave: 'יציאה',
     finish: 'סיום',
     notKept: 'המקום בבניית הסידור לא נשמר במכשיר. אם האפליקציה תיסגר, מתחילים מהשלב הראשון.',
+    // --- the button at the foot of the day's list: the day a new journey opens on -
+    // «בניית סידור ליום רביעי 11/11/2026» (never «מחר»: on a Friday evening it is Sunday) -
+    // or, with a journey he left still his, where he is in it.
+    dayEntry: (day, date) => `בניית סידור ל${day} ${date}`,
+    dayResume: n => `המשך בניית הסידור · שלב ${n} מתוך 5`,
 
     // --- 1: the counter in the day's dock. «לא נרשמו» and «נעדרים» are the day screen's
     // own headings for those two groups.
@@ -570,6 +594,8 @@ function renderJourneyIfOpen() {
     journeyDrawDock(onDay ? live : null, read);
     journeyDrawPanel(live.station !== 1 && live.station !== JOURNEY_RIDE ? live : null, read);
     journeyDrawRideBar(live.station === JOURNEY_RIDE ? live : null, read);
+    // The summary's dialog, when station 5 opened it: a man moved under it shows as moved.
+    if (typeof transportSummaryRefresh === 'function') transportSummaryRefresh();
 }
 
 // Put `node`'s children back the way they were focused: the control with the same key.
@@ -653,8 +679,13 @@ function journeyDrawRideBar(live, read) {
     clear(bar);
     bar.appendChild(journeyStripNode(live, read.states));
     const row = el('div', 'journey-ride-row');
-    const status = el('span', 'journey-ride-status' + (journeyRideOpen(read.ride) ? ' journey-ride-left' : ''),
-        journeyRideWords(read.ride));
+    // ONLY WHAT IS LEFT. With nothing left the tray's own title, a finger above this bar,
+    // already says «כל העובדים משובצים» (or that nobody has a site): said twice it is noise
+    // on the one screen where every line is read. The node stays, empty, so the redraw
+    // and a screen reader find the same element when something is left again.
+    const left = journeyRideOpen(read.ride);
+    const status = el('span', 'journey-ride-status' + (left ? ' journey-ride-left' : ''),
+        left ? journeyRideWords(read.ride) : '');
     status.id = 'journeyRideStatus';
     row.appendChild(status);
     row.appendChild(journeyNextButton(JOURNEY_RIDE));
@@ -888,6 +919,24 @@ function journeyLookInto(view, live, read) {
     view.appendChild(rides);
 }
 
+// The drivers whose own message was opened and still stands (the vehicle card's mark), who
+// are also on the seder's list for that day: [{ id, name, vehicle }], in the vehicles' order.
+function journeyOpenedDrivers(date, crew) {
+    if (!journeyRidesOn()) return [];
+    const listed = new Set((crew || []).map(row => row.workerId));
+    const ctx = transportContext(date);
+    const cars = TransportEngine.layout(ctx, transportDayOf(date)).cars;
+    const out = [];
+    ctx.vehicles.forEach(vehicle => {
+        const seats = cars[vehicle.id];
+        const driver = seats ? seats[1] : null;
+        if (!driver || !listed.has(driver) || out.some(one => one.id === driver)) return;
+        if (transportMarkState(date, vehicle.id) !== 'opened') return;
+        out.push({ id: driver, name: transportWorkerName(ctx, driver), vehicle: vehicle.id });
+    });
+    return out;
+}
+
 // ---- 5: sending. HE CHOOSES; nothing is ticked for him and nothing must be sent.
 function journeySendInto(view, live, read) {
     const T = JOURNEY_TEXT;
@@ -949,6 +998,22 @@ function journeySendInto(view, live, read) {
             workers.appendChild(el('p', 'journey-lead', run.done > 0
                 ? `${SEDER_TEXT.count(crew.length)} · ${SEDER_TEXT.progress(run.done, run.total)}`
                 : SEDER_TEXT.count(crew.length)));
+            // A DRIVER IS ALSO A MAN WITH A SITE, so he is on this list too, and a message
+            // to each driver followed by a message to each worker is two messages to him.
+            // He is NOT taken off the list - which of the two he gets is the owner's choice
+            // - but he is named here, before the list is opened, with the mark his own row
+            // above carries and the name of the group it was made in. Read at the draw
+            // (transportMarkState), so it is believed exactly as long as the mark is.
+            journeyOpenedDrivers(live.date, crew).forEach(driver => {
+                const row = el('div', 'journey-send-row journey-send-driver');
+                row.dataset.worker = driver.id;
+                const who = el('div', 'journey-send-who');
+                who.appendChild(el('strong', null, driver.name));
+                who.appendChild(el('span', 'journey-send-sub', T.sendDrivers));
+                row.appendChild(who);
+                row.appendChild(transportBadge(TRANSPORT_TEXT.opened, 'ok'));
+                workers.appendChild(row);
+            });
             const open = journeyButton(SEDER_TEXT.entry, 'btn-secondary journey-wide', 'seder', () => {
                 journeyAlignDate();
                 openSederList(live.date);
@@ -972,18 +1037,15 @@ function journeySendInto(view, live, read) {
     day.id = 'journeyDayMessage';
     all.appendChild(day);
     if (read.ride) {
-        const status = el('span', 'share-status journey-share-status');
-        status.id = 'journeyShareStatus';
-        status.setAttribute('role', 'status');
-        status.setAttribute('aria-live', 'polite');
+        // THE SUMMARY'S OWN DIALOG (v179), for the journey's date: the words are read
+        // before they leave, and they leave by that dialog's own doors - the share sheet
+        // or wa.me with no number, the copy, the picture. It used to go from this button
+        // straight to the share sheet, unread.
         const summary = journeyButton(TRANSPORT_TEXT.summaryButton, 'btn-secondary journey-wide', 'summary', () => {
-            // Inside the tap, with nothing awaited before it: the share sheet and a new
-            // window both need the gesture. Nothing closes behind it - there is no dialog.
-            shareTextOut(transportSummaryText(live.date), status, () => {});
+            openTransportSummary(live.date);
         });
         summary.id = 'journeySummary';
         all.appendChild(summary);
-        all.appendChild(status);
     }
     view.appendChild(all);
 }
@@ -1024,6 +1086,30 @@ function journeyInstallEntry() {
     const after = document.getElementById('transportEntry') || document.getElementById('sederEntry')
         || actions.querySelector('.btn-success');
     actions.insertBefore(entry, after ? after.nextSibling : actions.firstChild);
+}
+
+// THE BUTTON AT THE FOOT OF THE DAY'S LIST (js/ui/day.js asks for it on every draw of the
+// day, through typeof). A new node each time, like everything the day draws. Not drawn
+// while the journey is on the screen: its own row is then in the dock, a thumb below.
+// Pressing it is journeyStart - the same door as the row in the WhatsApp dialog - so a
+// journey he left is continued and anything else starts a new one; if the three hours ran
+// out between the draw and the tap, the tap starts a new one and the label was a minute old.
+function journeyDayEntryWords(now, today) {
+    const T = JOURNEY_TEXT;
+    const kept = journeyStored(now);
+    if (kept) return T.dayResume(kept.station);
+    const parsed = parseLocalDate(journeyDefaultDate(today));
+    return T.dayEntry(hebrewDayName(parsed), formatFullDate(parsed));
+}
+
+function journeyDayEntry() {
+    if (journeyLive) return null;
+    const row = el('div', 'journey-day-row');
+    const entry = button(journeyDayEntryWords(Date.now(), todayStr()), 'btn-secondary journey-day-entry', () => journeyStart());
+    entry.id = 'journeyDayEntry';
+    entry.dataset.resume = journeyStored(Date.now()) ? '1' : '0';
+    row.appendChild(entry);
+    return row;
 }
 
 // Away and back - a call, WhatsApp - is the journey being touched: the three hours are

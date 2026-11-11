@@ -45,7 +45,28 @@ const WORKER_CARD_TEXT = {
     moves: 'תנועות אחרונות',
     noMoves: 'אין תנועות רשומות.',
     strip: '14 הימים האחרונים',
-    month: 'ימים בכל אתר החודש'
+    month: 'ימים בכל אתר החודש',
+    // --- the two doors under his phone number. Words on a button, never a sentence: the
+    // app opens the dialler or his chat and claims nothing about what happened there.
+    call: 'התקשר',
+    whatsapp: 'וואטסאפ',
+    // their accessible names: these words, then the man's name
+    callFor: 'התקשר אל',
+    whatsappFor: 'וואטסאפ אל',
+    // --- the month, drawn as a calendar
+    calendar: 'לוח החודש',
+    months: ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+        'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'],
+    prevMonth: 'חודש קודם',
+    nextMonth: 'חודש הבא',
+    thisMonth: 'חזרה לחודש הנוכחי',
+    // over the count of days per site when the calendar is on another month - the month's
+    // name stands beside it. On the current month the heading is `month`, above.
+    monthOther: 'ימים בכל אתר',
+    // the Saturdays of the month that hold a record: the calendar, like the week screen,
+    // draws no Saturday column, and a day with a record is never left off the card
+    saturdays: 'ימי שבת עם רישום',
+    openDay: 'לחיצה על יום פותחת אותו במסך היום.'
 };
 
 // The words the card borrows, each beside the screen that owns it. They are repeated
@@ -66,7 +87,13 @@ const WORKER_CARD_REUSED = {
     advances: 'מקדמות',                    // js/ui/reports.js, the advances screen
     left: 'נשאר להחזיר',                   // js/ui/reports.js, the advances screen
     absent: 'נעדר',                        // js/ui/reports.js, the sheet's column
-    report: 'שכר - לפי עובד'               // js/ui/reports.js, the sheet's heading
+    report: 'שכר - לפי עובד',              // js/ui/reports.js, the sheet's heading
+    badPhone: 'אין מספר טלפון תקין',       // js/ui/seder.js, the seder's row
+    attended: 'נוכחות',                    // js/ui/reports.js, the sheet's column
+    double: 'כפול',                        // js/ui/week.js, the week's cell
+    extra: 'נוספות',                       // js/ui/week.js, the week's cell
+    blank: 'ללא רישום',                    // js/ui/week.js, the day's detail
+    marks: '\u25CF = יום כפול \u00B7 + = שעות נוספות \u00B7 \u2014 = נעדר'   // js/ui/week.js, under the grid
 };
 
 // How many movements. "The last few": enough to see what happened lately, few enough
@@ -75,9 +102,18 @@ const WORKER_CARD_MOVES = 5;
 // The strip is a fortnight, whatever his cycle: it is about where he was, not about pay.
 const WORKER_CARD_STRIP_DAYS = 14;
 
+// The marks inside a day of the calendar. The week screen's own three, with the meaning
+// its own line under the grid gives them (WORKER_CARD_REUSED.marks) - there they are
+// drawn by the stylesheet, here they are text, because a letter a far-sighted man is
+// meant to read is not decoration.
+const WORKER_CARD_MARKS = { double: '\u25CF', extra: '+', absent: '\u2014' };
+
 // Whose card is open, or null. Memory only - a reload closes the card, and nothing
 // about it is kept anywhere.
 let WORKER_CARD_ID = null;
+// Which month the calendar is on, 'YYYY-MM', or null for the month today is in. Memory
+// only, like the card itself, and put back to null each time a card is opened.
+let WORKER_CARD_MONTH = null;
 
 // ---------------------------------------------------------------- the reading
 
@@ -253,13 +289,11 @@ function workerCardMoves(worker) {
 // site names for the whole card, over the one span that covers both halves: a site that
 // left the list is named «אתר שאינו ברשימה N» by its place in a span, and two spans on
 // one card could give one site two names.
-function workerCardPlaces(worker, today) {
-    const now = parseLocalDate(today);
+function workerCardPlaces(worker, today, labels) {
     const stripFrom = shiftDate(today, -(WORKER_CARD_STRIP_DAYS - 1));
-    const monthFrom = toLocalDateStr(new Date(now.getFullYear(), now.getMonth(), 1, 12));
-    const monthTo = toLocalDateStr(new Date(now.getFullYear(), now.getMonth() + 1, 0, 12));
-    const labels = placeLabelsIn(State.schedule,
-        stripFrom < monthFrom ? stripFrom : monthFrom, monthTo > today ? monthTo : today);
+    const here = workerCardMonthSpan(today.slice(0, 7));
+    const monthFrom = here.from;
+    const monthTo = here.to;
     const sitesOf = day => {
         const ids = [];
         (day.entries || []).forEach(entry => {
@@ -303,6 +337,167 @@ function workerCardPlaces(worker, today) {
     return { strip, month };
 }
 
+// ---------------------------------------------------------------- the month, as a calendar
+
+// 'YYYY-MM' to its first and last day.
+function workerCardMonthSpan(key) {
+    const year = Number(key.slice(0, 4));
+    const month = Number(key.slice(5, 7)) - 1;
+    return {
+        year, month,
+        from: toLocalDateStr(new Date(year, month, 1, 12)),
+        to: toLocalDateStr(new Date(year, month + 1, 0, 12))
+    };
+}
+
+function workerCardMonthStep(key, months) {
+    const span = workerCardMonthSpan(key);
+    return toLocalDateStr(new Date(span.year, span.month + months, 1, 12)).slice(0, 7);
+}
+
+// The month the calendar is on: the one somebody stepped to, or the one today is in.
+function workerCardMonthKey(today) {
+    return /^\d{4}-\d{2}$/.test(String(WORKER_CARD_MONTH)) ? WORKER_CARD_MONTH : today.slice(0, 7);
+}
+
+// THE COLUMNS ARE THE WEEK SCREEN'S, AND THEY ARE ASKED, NOT WRITTEN DOWN.
+//
+// This app's week does not open on Sunday: it opens on the Friday a pay week opens on
+// (snapToWeekStart, js/dates.js), and the week screen draws its seven days from there
+// with the Saturday left out (renderWeek: "Saturday is hidden here only"). The calendar
+// is that screen stacked - each of its rows is one row of that grid for this man, and
+// one pay week - so its columns are found the same way: the day the app's week starts
+// on, then the six that follow, without the Saturday.
+//
+// A SATURDAY WITH A RECORD IS STILL ON THE CARD. The week screen can afford to hide the
+// column because the day screen shows the day; a card that left a worked Saturday out
+// would be a month that quietly says less than was done. Those days are listed under the
+// grid, each one a way into its day like any cell (WORKER_CARD_TEXT.saturdays).
+function workerCardWeekdays() {
+    const first = snapToWeekStart(parseLocalDate(todayStr())).getDay();
+    const days = [];
+    for (let step = 0; step < 7; step += 1) {
+        const day = (first + step) % 7;
+        if (day !== 6) days.push(day);
+    }
+    return days;
+}
+
+// One day of his, as the calendar says it: where he was, in the order his day holds the
+// sites, each with the letter and the mark the week's cell gives it - or that he was
+// absent, or nothing. `day` is that date's line of workerDaysReport, the list his own
+// statement is written from; undefined when the record holds nothing for him.
+//
+// `said` is the cell read aloud, built the way the week's cell builds its own label
+// (renderWeekCell): the day, then each site by name with the word for its rate.
+function workerCardDay(date, day, labels, today) {
+    const parsed = parseLocalDate(date);
+    const cell = {
+        date,
+        number: parsed.getDate(),
+        weekday: parsed.getDay(),
+        today: date === today,
+        absent: Boolean(day && day.absent),
+        sites: []
+    };
+    const said = [];
+    if (cell.absent) said.push(WORKER_CARD_REUSED.absent);
+    else if (day) {
+        (day.entries || []).forEach(entry => {
+            const id = String(entry.placeId);
+            const name = placeLabelFrom(labels, id);
+            const rate = entryRate(entry);
+            const site = { id, name, initial: siteInitial(name), mark: '', word: '' };
+            if (rate === RATE_DOUBLE) {
+                site.mark = 'double';
+                site.word = WORKER_CARD_REUSED.double;
+            } else if (rate === RATE_EXTRA) {
+                const hours = entryExtraHours(entry);
+                site.mark = 'extra';
+                site.word = hours ? plusAmount(hours) : WORKER_CARD_REUSED.extra;
+            }
+            said.push(site.word ? `${isolate(name)} ${site.word}` : isolate(name));
+            cell.sites.push(site);
+        });
+    }
+    if (said.length === 0) said.push(WORKER_CARD_REUSED.blank);
+    cell.said = `${hebrewDayName(parsed)} ${formatFullDate(parsed)} · ${said.join(' · ')}`;
+    return cell;
+}
+
+// His month: every day of it in rows of the app's week, the Saturdays that hold a record,
+// the days per site and the two totals.
+//
+// One reading of workerDaysReport over the month - the reading the count per site has
+// always been made from - so a day is in the grid exactly when it is counted under it.
+// The two totals are counted the way the sheet counts its «נוכחות» and «נעדר» columns:
+// a date with a site on it is one day of attendance however many sites and whatever its
+// rate, and a date marked absent is one absence.
+function workerCardCalendar(worker, today, key, labels) {
+    const span = workerCardMonthSpan(key);
+    const recorded = {};
+    workerDaysReport(State.schedule, worker, span.from, span.to)
+        .forEach(day => { recorded[day.date] = day; });
+
+    const columns = workerCardWeekdays();
+    const weeks = [];
+    const saturdays = [];
+    const counts = {};
+    const order = [];
+    let attended = 0;
+    let absent = 0;
+    let row = null;
+    for (let date = span.from; date <= span.to; date = shiftDate(date, 1)) {
+        const cell = workerCardDay(date, recorded[date], labels, today);
+        if (cell.absent) absent += 1;
+        else if (cell.sites.length > 0) {
+            attended += 1;
+            const seen = [];
+            cell.sites.forEach(site => {
+                if (seen.indexOf(site.id) !== -1) return;
+                seen.push(site.id);
+                if (counts[site.id] === undefined) { counts[site.id] = 0; order.push(site); }
+                counts[site.id] += 1;
+            });
+        }
+        const column = columns.indexOf(cell.weekday);
+        if (column === -1) {
+            if (cell.absent || cell.sites.length > 0) saturdays.push(cell);
+            continue;
+        }
+        // A new row at the first column, and for the month's first days wherever they fall.
+        if (row === null || column === 0) {
+            row = columns.map(() => null);
+            weeks.push(row);
+        }
+        row[column] = cell;
+    }
+
+    return {
+        key,
+        label: `${WORKER_CARD_TEXT.months[span.month]} ${span.year}`,
+        current: key === today.slice(0, 7),
+        columns: columns.map(day => HEBREW_DAY_LETTERS[day]),
+        weeks,
+        saturdays,
+        sites: order.map(site => ({ id: site.id, name: site.name, days: counts[site.id] }))
+            .sort((a, b) => b.days - a.days),
+        attended,
+        absent
+    };
+}
+
+// The two doors under his number, or null when there is no number worth opening.
+//
+// The seder's own reading of a phone number (sederWaNumber, js/ui/seder.js), and its
+// rule with it: only a number that is plainly an Israeli mobile, and never a guess - a
+// guessed number is a stranger's phone ringing. The dialler is handed the same digits
+// WhatsApp is, in the international form both understand.
+function workerCardContact(phone) {
+    const number = phone && typeof sederWaNumber === 'function' ? sederWaNumber(phone) : '';
+    return number ? { tel: `tel:+${number}`, whatsapp: `https://wa.me/${number}` } : null;
+}
+
 // Everything the card says, as plain data, and nothing drawn. Split from the drawing so
 // that the suite can hold each figure against the sheet's without a browser - and so
 // that what is on the screen cannot be anything this did not return.
@@ -321,12 +516,21 @@ function workerCardFacts(workerId) {
         };
     });
     const reading = money.reading;
-    const places = workerCardPlaces(worker, today);
+    // ONE map of site names for everything on the card, over the one span that covers
+    // the strip, this month and the month the calendar is on (see workerCardPlaces).
+    const shown = workerCardMonthKey(today);
+    const spans = [workerCardMonthSpan(today.slice(0, 7)), workerCardMonthSpan(shown)];
+    const stripFrom = shiftDate(today, -(WORKER_CARD_STRIP_DAYS - 1));
+    const labels = placeLabelsIn(State.schedule,
+        [stripFrom, spans[0].from, spans[1].from].sort()[0],
+        [today, spans[0].to, spans[1].to].sort()[2]);
+    const places = workerCardPlaces(worker, today, labels);
     return {
         id: String(worker.id),
         name: worker.name,
         active: worker.active !== false,
         phone: worker.phone ? String(worker.phone) : '',
+        contact: workerCardContact(worker.phone),
         cycle: period.cycle === 'weekly' ? WORKER_CARD_REUSED.weekly : WORKER_CARD_REUSED.biweekly,
         // The roster's rates today - what a day recorded from now on is stamped with.
         // What the days already recorded were paid at is in the period's own cells.
@@ -346,7 +550,8 @@ function workerCardFacts(workerId) {
         credit: money.credit,
         moves: workerCardMoves(worker),
         strip: places.strip,
-        month: places.month
+        month: places.month,
+        calendar: workerCardCalendar(worker, today, shown, labels)
     };
 }
 
@@ -386,6 +591,14 @@ function drawWorkerCard() {
     // He left the record while the card was open - deleted on another phone. A card
     // about nobody closes; it does not keep showing a man who is not there.
     if (!facts) { closeWorkerCard(); return; }
+    // WHAT THE FINGER OR THE KEYBOARD WAS ON, kept across the redraw. The body is built
+    // again from nothing - by a step of the calendar, and by any snapshot another phone
+    // sends while the card is open - and the control that had the focus is then no longer
+    // on the page. Each control in the body carries a key; the one drawn under the same
+    // key takes the focus back, without a scroll.
+    const active = document.activeElement;
+    const held = active && active.dataset && body.contains && body.contains(active)
+        ? active.dataset.wcardKey : '';
 
     title.textContent = `${WORKER_CARD_TEXT.title} · ${facts.name}`;
     clear(body);
@@ -397,6 +610,9 @@ function drawWorkerCard() {
     if (facts.phone) {
         contact.appendChild(el('span', null, '📞 '));
         contact.appendChild(ltr(facts.phone));
+        // A number is written and no door can be made of it: said, in the seder's words
+        // for exactly that, so the missing buttons are not a puzzle.
+        if (!facts.contact) contact.appendChild(el('span', 'wcard-bad-phone', ` · ${WORKER_CARD_REUSED.badPhone}`));
     } else {
         contact.appendChild(el('span', null, WORKER_CARD_REUSED.noPhone));
     }
@@ -411,6 +627,27 @@ function drawWorkerCard() {
     }
     who.appendChild(rates);
     body.appendChild(who);
+
+    // CALL HIM, OR OPEN HIS CHAT. Two real links, so the phone opens the dialler or
+    // WhatsApp inside the person's own tap (iOS opens nothing for a navigation that does
+    // not come from one). Only when the number is one the seder would use: a man with no
+    // number, or one that cannot be read, has the words above and no dead button.
+    if (facts.contact) {
+        const doors = el('div', 'wcard-contact');
+        const call = el('a', 'btn-secondary wcard-door wcard-call', WORKER_CARD_TEXT.call);
+        call.href = facts.contact.tel;
+        call.setAttribute('aria-label', `${WORKER_CARD_TEXT.callFor} ${isolate(facts.name)}`);
+        call.dataset.wcardKey = 'call';
+        doors.appendChild(call);
+        const chat = el('a', 'btn-success wcard-door wcard-whatsapp', WORKER_CARD_TEXT.whatsapp);
+        chat.href = facts.contact.whatsapp;
+        chat.target = '_blank';
+        chat.rel = 'noopener noreferrer';
+        chat.setAttribute('aria-label', `${WORKER_CARD_TEXT.whatsappFor} ${isolate(facts.name)}`);
+        chat.dataset.wcardKey = 'whatsapp';
+        doors.appendChild(chat);
+        body.appendChild(doors);
+    }
 
     // His open period, as the pay sheet has it.
     const period = workerCardBlock(WORKER_CARD_REUSED.period, facts.period.range);
@@ -448,7 +685,26 @@ function drawWorkerCard() {
     });
     body.appendChild(money);
 
-    // Where he was. Today first: the question is usually about this week.
+    // His month as a calendar, and under it the same month counted.
+    body.appendChild(workerCardCalendarBlock(facts.calendar));
+    const month = workerCardBlock(facts.calendar.current ? WORKER_CARD_TEXT.month : WORKER_CARD_TEXT.monthOther,
+        facts.calendar.current ? '' : facts.calendar.label);
+    if (facts.calendar.sites.length === 0) month.appendChild(emptyHint(WORKER_CARD_REUSED.noDays));
+    const sites = el('div', 'wcard-month');
+    facts.calendar.sites.forEach(site => {
+        const row = el('div', 'wcard-month-row');
+        row.appendChild(workerCardSite(site));
+        row.appendChild(el('strong', 'wcard-month-days', String(site.days)));
+        sites.appendChild(row);
+    });
+    if (facts.calendar.sites.length > 0) month.appendChild(sites);
+    const totals = el('div', 'wcard-month-totals');
+    totals.appendChild(workerCardPair(WORKER_CARD_REUSED.attended, String(facts.calendar.attended)));
+    totals.appendChild(workerCardPair(WORKER_CARD_REUSED.absent, String(facts.calendar.absent)));
+    month.appendChild(totals);
+    body.appendChild(month);
+
+    // Where he was, day by day in words. Today first: the question is usually about this week.
     const strip = workerCardBlock(WORKER_CARD_TEXT.strip);
     const days = el('div', 'wcard-strip');
     facts.strip.forEach(day => {
@@ -464,17 +720,120 @@ function drawWorkerCard() {
     strip.appendChild(days);
     body.appendChild(strip);
 
-    const month = workerCardBlock(WORKER_CARD_TEXT.month);
-    if (facts.month.length === 0) month.appendChild(emptyHint(WORKER_CARD_REUSED.noDays));
-    const sites = el('div', 'wcard-month');
-    facts.month.forEach(site => {
-        const row = el('div', 'wcard-month-row');
-        row.appendChild(workerCardSite(site));
-        row.appendChild(el('strong', 'wcard-month-days', String(site.days)));
-        sites.appendChild(row);
+    if (held) {
+        const again = [...body.querySelectorAll('a, button')]
+            .filter(node => node.dataset && node.dataset.wcardKey === held)[0];
+        if (again && again.focus) again.focus({ preventScroll: true });
+    }
+}
+
+// What one day of the calendar shows inside its cell: a block in the site's own colour
+// with the site's letter (and, past ten sites, the diamond every other screen puts on
+// the second lap of the palette), the week's mark for a doubled day or extra hours - or
+// the week's dash for an absence. Hidden from a screen reader: the cell's name says it
+// in words.
+function workerCardDayMarks(cell) {
+    const marks = el('span', 'wcard-cal-marks');
+    marks.setAttribute('aria-hidden', 'true');
+    if (cell.absent) {
+        marks.appendChild(el('span', 'wcard-cal-absent', WORKER_CARD_MARKS.absent));
+        return marks;
+    }
+    cell.sites.forEach(site => {
+        const block = el('span', 'wcard-cal-site',
+            siteMark(site.id) + site.initial + (site.mark ? WORKER_CARD_MARKS[site.mark] : ''));
+        paintSite(block, site.id);
+        if (site.mark) block.classList.add(`wcard-cal-${site.mark}`);
+        marks.appendChild(block);
     });
-    if (facts.month.length > 0) month.appendChild(sites);
-    body.appendChild(month);
+    return marks;
+}
+
+// One day, as a button: it goes to that date on the day screen and does nothing else.
+function workerCardDayButton(cell, className) {
+    const day = button('', className, () => workerCardGoDay(cell.date), cell.said);
+    day.dataset.wcardKey = `day:${cell.date}`;
+    day.dataset.date = cell.date;
+    if (cell.today) day.setAttribute('aria-current', 'date');
+    return day;
+}
+
+function workerCardCalendarBlock(calendar) {
+    const block = workerCardBlock(WORKER_CARD_TEXT.calendar);
+    block.classList.add('wcard-cal');
+
+    // The month and the two steps. The earlier month is the first of the two, as the
+    // week screen has its «שבוע קודם».
+    const nav = el('div', 'wcard-cal-nav');
+    const back = button(WORKER_CARD_TEXT.prevMonth, 'btn-secondary wcard-cal-step', () => workerCardStepMonth(-1));
+    back.dataset.wcardKey = 'month-back';
+    nav.appendChild(back);
+    const label = el('strong', 'wcard-cal-label', calendar.label);
+    label.setAttribute('aria-live', 'polite');
+    nav.appendChild(label);
+    const forward = button(WORKER_CARD_TEXT.nextMonth, 'btn-secondary wcard-cal-step', () => workerCardStepMonth(1));
+    forward.dataset.wcardKey = 'month-forward';
+    nav.appendChild(forward);
+    block.appendChild(nav);
+    if (!calendar.current) {
+        const home = button(WORKER_CARD_TEXT.thisMonth, 'btn-secondary wcard-cal-home', () => workerCardStepMonth(0));
+        home.dataset.wcardKey = 'month-home';
+        block.appendChild(home);
+    }
+
+    const grid = el('div', `wcard-cal-grid wcard-cal-cols-${calendar.columns.length}`);
+    calendar.columns.forEach(letter => grid.appendChild(el('span', 'wcard-cal-head', letter)));
+    calendar.weeks.forEach(week => week.forEach(cell => {
+        if (!cell) { grid.appendChild(el('span', 'wcard-cal-gap')); return; }
+        const day = workerCardDayButton(cell, 'wcard-cal-day');
+        day.appendChild(el('span', 'wcard-cal-number', String(cell.number)));
+        day.appendChild(workerCardDayMarks(cell));
+        grid.appendChild(day);
+    }));
+    block.appendChild(grid);
+
+    if (calendar.saturdays.length > 0) {
+        block.appendChild(el('h5', 'wcard-sub', WORKER_CARD_TEXT.saturdays));
+        const list = el('div', 'wcard-cal-saturdays');
+        calendar.saturdays.forEach(cell => {
+            const day = workerCardDayButton(cell, 'btn-secondary wcard-cal-saturday');
+            day.appendChild(el('span', 'wcard-cal-number', formatShortDate(parseLocalDate(cell.date))));
+            day.appendChild(workerCardDayMarks(cell));
+            list.appendChild(day);
+        });
+        block.appendChild(list);
+    }
+
+    block.appendChild(el('p', 'wcard-cal-note', WORKER_CARD_REUSED.marks));
+    block.appendChild(el('p', 'hint wcard-cal-hint', WORKER_CARD_TEXT.openDay));
+    return block;
+}
+
+// A step of the calendar: one month back, one forward, or (0) home to the month today
+// is in. Only the month in memory moves; the card is drawn again and nothing else is.
+function workerCardStepMonth(months) {
+    const today = todayStr();
+    WORKER_CARD_MONTH = months === 0 ? null : workerCardMonthStep(workerCardMonthKey(today), months);
+    if (WORKER_CARD_MONTH === today.slice(0, 7)) WORKER_CARD_MONTH = null;
+    const stepped = document.activeElement;
+    const key = stepped && stepped.dataset ? stepped.dataset.wcardKey : '';
+    drawWorkerCard();
+    // «חזרה לחודש הנוכחי» is not drawn on the month it goes to: the focus it held goes to
+    // the first of the two steps rather than to nowhere.
+    if (key === 'month-home') {
+        const back = [...document.querySelectorAll('#workerCardBody .wcard-cal-step')][0];
+        if (back && back.focus) back.focus({ preventScroll: true });
+    }
+}
+
+// A day of the calendar NAVIGATES: the card closes and the day screen opens on that
+// date - what a cell of the week screen does, in the week screen's own two steps. The
+// date on screen is a choice in memory; nothing is recorded by looking at a day.
+function workerCardGoDay(date) {
+    if (!isRealDate(date)) return;
+    closeWorkerCard();
+    State.date = date;
+    showView('day');
 }
 
 // ---------------------------------------------------------------- the frame
@@ -484,6 +843,7 @@ function openWorkerCard(workerId) {
     const modal = document.getElementById('workerCardModal');
     if (!worker || !modal) return;
     WORKER_CARD_ID = String(worker.id);
+    WORKER_CARD_MONTH = null;
 
     // The two ways out, named after the screens they open - the sheet's own heading and
     // the advances tab's own word - so the button and the screen it lands on agree.
@@ -503,6 +863,7 @@ function openWorkerCard(workerId) {
 
 function closeWorkerCard() {
     WORKER_CARD_ID = null;
+    WORKER_CARD_MONTH = null;
     const modal = document.getElementById('workerCardModal');
     if (modal) modal.style.display = 'none';
 }

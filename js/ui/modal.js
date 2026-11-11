@@ -22,9 +22,13 @@ const MODAL_CLOSERS = {
     workerDaysModal: () => closeWorkerDays(),
     // The worker's card (js/ui/workercard.js): closing it forgets whose it was.
     workerCardModal: () => closeWorkerCard(),
+    // The finder (js/ui/find.js): closing it empties what was typed.
+    findModal: () => closeFind(),
     shareModal: () => closeShareModal(),
     // Closing it on purpose is what stops a reload bringing it back (js/ui/seder.js).
     sederModal: () => closeSederList(),
+    // «תלוש לכל עובד» (js/ui/payslips.js): closed on purpose, so a reload does not reopen it.
+    payslipsModal: () => closePayslips(),
     // The summary of the day's rides (v179, js/ui/transport.js).
     transportSummaryModal: () => closeTransportSummary(),
     // The day's check (js/ui/daycheck.js). Nothing to clear behind it: it holds no state.
@@ -33,6 +37,8 @@ const MODAL_CLOSERS = {
     transportReportModal: () => closeTransportReport(),
     // The month's summary (js/ui/monthsummary.js): closing it forgets which month it was.
     monthSummaryModal: () => closeMonthSummary(),
+    // «מה חדש» (js/ui/whatsnew.js): closing it, by any road, is having seen it.
+    whatsNewModal: () => closeWhatsNew(),
     migrationModal: () => closeMigrationModal(),
     // The one .modal that had no entry here, so Escape fell through to the bare
     // `display = 'none'` below and never reached closeSignInModal - which exists, and

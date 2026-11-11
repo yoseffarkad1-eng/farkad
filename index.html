@@ -19,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v187">
+<meta name="farkad-build" content="v188">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -77,6 +77,10 @@
     <div class="banner banner-warn" id="offlineBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-warn" id="migrationBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-info" id="installBanner" role="status" aria-live="polite" style="display:none"></div>
+    <!-- «מה חדש» (js/ui/whatsnew.js): one quiet line after an update that has something to
+         tell, never on a first install and never put up while somebody is typing. Last of
+         the banners: it is the least urgent thing this area ever says. -->
+    <div class="banner banner-info" id="whatsNewBanner" role="status" aria-live="polite" style="display:none"></div>
 
     <main>
         <section id="dayView" role="tabpanel" aria-labelledby="tab-day"></section>
@@ -316,6 +320,10 @@
                     <div class="settings-fold-body">
                         <div class="app-version"><span id="appVersion"></span>
                             <button type="button" class="btn-secondary" onclick="checkForUpdate()">🔄 בדוק עדכון</button></div>
+                        <!-- «מה חדש» (js/ui/whatsnew.js): everything the last builds added and
+                             where it is, whenever he wants it again. Its word is written by
+                             that file - it is one of the words pinned there. -->
+                        <button type="button" class="btn-secondary whatsnew-row" id="whatsNewRow" onclick="openWhatsNew('all')"></button>
                     </div>
                 </details>
                 <details class="settings-group settings-fold" id="settingsFoldDevice">
@@ -666,6 +674,25 @@
     </div>
 </div>
 
+<!-- חיפוש עובד: the finder, opened from the foot of the day's list. A READING - one field
+     to type a name into (never kept), and for each man found the doors to his card, his
+     day's sheet and his advances. Drawn and worded by js/ui/find.js. Three parts, and only
+     the list scrolls, so the field stays in sight above the keyboard. -->
+<div class="modal" id="findModal">
+    <div class="modal-content find-content">
+        <div class="find-head">
+            <h3 id="findTitle" tabindex="-1"></h3>
+            <button type="button" class="btn-secondary" id="findClose" onclick="closeFind()"></button>
+        </div>
+        <div class="find-field">
+            <input type="search" id="findInput" aria-labelledby="findTitle" autocomplete="off" oninput="renderFind()">
+            <button type="button" class="btn-secondary" id="findClear" onclick="clearFind()" hidden></button>
+        </div>
+        <p class="hint find-status" id="findStatus" role="status" aria-live="polite" hidden></p>
+        <div id="findList"></div>
+    </div>
+</div>
+
 <div class="modal" id="shareModal">
     <div class="modal-content">
         <h3 id="shareTitle" tabindex="-1">הודעה לוואטסאפ</h3>
@@ -710,6 +737,28 @@
     </div>
 </div>
 
+<!-- «תלוש לכל עובד» (js/ui/payslips.js): the men with a row on the pay sheet for their own
+     period, each with his «נותר לתשלום» and his own WhatsApp door carrying the statement
+     the sheet already sends. Entered from «הפקת דוח» on the reports screen. Every word is in
+     that file or borrowed from its owner; this is only the frame. The two status lines live
+     outside the rows on purpose: the rows are rebuilt, and a live region that is rebuilt
+     announces nothing. -->
+<div class="modal" id="payslipsModal">
+    <div class="modal-content">
+        <h3 id="payslipsTitle" tabindex="-1"></h3>
+        <div id="payslipsWhich" class="payslips-which"></div>
+        <div id="payslipsContext" class="payslips-context"></div>
+        <p id="payslipsLead" class="payslips-lead"></p>
+        <p id="payslipsNote" class="seder-note" role="status" hidden></p>
+        <div id="payslipsList" class="payslips-list"></div>
+        <div class="payslips-foot">
+            <p id="payslipsStatus" class="payslips-status" role="status" aria-live="polite"></p>
+            <p id="payslipsSaid" class="payslips-status" role="status" aria-live="polite"></p>
+            <button type="button" class="btn-secondary" id="payslipsClose" onclick="closePayslips()"></button>
+        </div>
+    </div>
+</div>
+
 <!-- «בדיקת היום»: what may have been forgotten on the day on screen, read off the record
      and compared with the working day before it. Entered from the one button at the foot
      of the day's list. It only shows: nothing in it writes, and a name or a site in it
@@ -750,6 +799,21 @@
             <button type="button" class="btn-secondary" id="monthSummaryCopy" onclick="monthSummaryCopy()"></button>
             <button type="button" class="btn-secondary" id="monthSummaryClose" onclick="closeMonthSummary()"></button>
             <span class="share-status" id="monthSummaryStatus" role="status" aria-live="polite"></span>
+        </div>
+    </div>
+</div>
+
+<!-- «מה חדש» (js/ui/whatsnew.js): what the last builds added, each with one sentence and
+     where it is. Opened from the quiet line after an update, or from ⋯ ← עדכון וגרסה. It
+     only shows, and «הראה לי» only navigates. Every word is in js/ui/whatsnew.js; this is
+     the frame. -->
+<div class="modal" id="whatsNewModal">
+    <div class="modal-content">
+        <h3 id="whatsNewTitle" tabindex="-1"></h3>
+        <p id="whatsNewContext" class="picker-context"></p>
+        <div id="whatsNewList" class="whatsnew-list"></div>
+        <div class="whatsnew-foot">
+            <button type="button" class="btn-secondary" id="whatsNewClose" onclick="closeWhatsNew()"></button>
         </div>
     </div>
 </div>
@@ -877,6 +941,10 @@
 <!-- After share.js (its dialog is the way in) and day.js (its drawn speech bubble);
      everything else it reads is above both. -->
 <script src="js/ui/seder.js"></script>
+<!-- «תלוש לכל עובד». After reports.js (it asks the pay sheet's own functions and sends the
+     statement that file writes), share.js (its copier) and seder.js (the phone rule, the
+     link, the fingerprint and the seder's own words). Reads nothing at load. -->
+<script src="js/ui/payslips.js"></script>
 <!-- «בדיקת היום». Runs nothing at load and reads nothing: everything it calls - the model's
      readers, the dates, day.js and sheet.js - is above it, and day.js asks for it by name
      only when the day is drawn. -->
@@ -900,12 +968,19 @@
      constants) and share.js (the two doors its text leaves by). It runs nothing at load;
      reports.js asks for its entry by name, through typeof, when the menu is drawn. -->
 <script src="js/ui/monthsummary.js"></script>
+<!-- «חיפוש עובד», the finder at the foot of the day. Runs nothing at load: it calls the
+     card, the sheet and the advances screen - all above it - only when a door is pressed,
+     and day.js asks for its entry by name when the day is drawn. -->
+<script src="js/ui/find.js"></script>
 <script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>
 <script src="js/ui/migration.js"></script>
 <script src="js/ui/offline.js"></script>
 <script src="js/ui/install.js"></script>
 <script src="js/ui/settings.js"></script>
+<!-- «מה חדש»: after offline.js (midEdit) and settings.js (the sheet it sends to); it calls
+     the screens it shows only when «הראה לי» is pressed. -->
+<script src="js/ui/whatsnew.js"></script>
 <script src="js/ui/reminders.js"></script>
 <script src="js/app.js"></script>
 

@@ -569,6 +569,10 @@ function renderReportActions() {
     // «סיכום חודש» (js/ui/monthsummary.js), when that file is on this build: its one way
     // in, a row of this menu. It reads a month of its own and never this screen's range.
     if (typeof monthSummaryEntry === 'function') actions.appendChild(monthSummaryEntry());
+    // «תלוש לכל עובד» (js/ui/payslips.js): each man's own statement, one WhatsApp door per
+    // man. A row of this menu on «לפי עובד» and nothing under «לפי אתר» - that file decides.
+    const slips = typeof payslipsEntryButton === 'function' ? payslipsEntryButton() : null;
+    if (slips) actions.appendChild(slips);
     menu.appendChild(actions);
     return menu;
 }
