@@ -293,14 +293,14 @@ exact text was also handed over beside the commit as `firebase-rules-v187.txt`, 
 byte the same file.
 
 Every difference from the file believed live today (`docs/firestore.rules.before-paybook`:
-main's `firestore.rules` at v186, 366 lines, the shared rides' block in it) — and there is
+main's `firestore.rules` at v186, 396 lines, the shared rides' block in it) — and there is
 no difference of any other kind: **not one line of today's rules is removed or changed; 380
-lines are added** (pinned, `tests/activation.test.mjs`, V12; and `diff` of the two files
-shows 380 lines added and none removed or changed). One of today's blocks stands in another
-PLACE: the rides' `match /transport/{name}` comes after the pay book's three kinds of
-document instead of right after the receipts - a sibling among siblings under the same
-`match /schedules/{docId}`, where order decides nothing. It is word for word the live block
-(V12, and `tests/transport.emulator.test.mjs`, ADD).
+lines are added**, and the file is 776 lines (pinned, `tests/activation.test.mjs`, V12; and
+`diff` of the two files is five insertions - 290, 3, 16, 69 and 2 lines - and nothing
+else). The pay book's three kinds of document (`closed/`, `months/`, `probe/`) are inserted
+between the receipts block and the rides' `match /transport/{name}` - siblings under the
+same `match /schedules/{docId}`, where order decides nothing. The rides' block is word for
+word the live one (V12, and `tests/transport.emulator.test.mjs`, ADD).
 
 | added | what it enforces | binds only when |
 |---|---|---|

@@ -44,9 +44,10 @@ and `js/ui/transport.js` are main's files byte for byte.
 ### The rules - what must be live before the BUTTON, not before the build
 
 `firestore.rules` is main's file at v186 with **380 lines added and not one removed or
-changed** (`tests/activation.test.mjs`, V12). The shared rides' block is in it word for
-word, standing after the pay book's three kinds of document instead of right after the
-receipts. The file was built by `tools/combine-rules.py`, not typed.
+changed** (`tests/activation.test.mjs`, V12; `diff` of the two files is five insertions and
+nothing else). The shared rides' block is in it word for word; the pay book's three kinds
+of document are inserted between the receipts block and it. The file was built by
+`tools/combine-rules.py`, not typed.
 `docs/firestore.rules.before-paybook` is now main's file at v186 - what is BELIEVED live:
 the owner reported pasting it on 2026-11-10 and nobody has read the console since.
 

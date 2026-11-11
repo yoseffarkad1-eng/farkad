@@ -68,7 +68,7 @@ adapter, five hooks in `js/ui/transport.js`, and `match /transport/{name}` in
 
 `docs/firestore.rules.before-paybook` was the rules of v184. The owner reported pasting
 main's file - with the rides' block - on 2026-11-10, so **that file is what is believed
-live, and the artifact is now it** (366 lines). Wherever a phase below says "the published
+live, and the artifact is now it** (396 lines). Wherever a phase below says "the published
 rules" or "the rollback artifact", it is this file. The shared rides' own suites keep their
 own "rules of before" - the file from before the block, out of Git (`d3103d6`) - because
 their question is a phone that meets rules with no block.

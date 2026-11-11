@@ -384,6 +384,42 @@ for (const [name, sha] of OLDER) {
         same('IT RECORDS A DAY AND RESTORES AS EVER: publishing these rules first stops no phone', [cell.dayBefore, cell.restoreBefore, old.Sync.status], [true, true, 'synced']);
     }
 
+    suite(`O / ${name} beside this build, under the NEW rules, on a record nobody has turned on - the days while the phones update one by one`);
+    {
+        // This build writes at protocol 2 from its first day, on a record that is not on;
+        // the older phone beside it writes at 1. The phones do not update together, so both
+        // must go on recording, whoever wrote last.
+        await reseed(envNew);
+        const first = phone(`d_m_new_${name}`, envNew);
+        const old = oldPhone(name, sources, `d_m_${name}`, envNew);
+        await reached(() => quiet(first) && quiet(old));
+        const seen = [];
+        const look = async label => { const held = await server(envNew); seen.push([label, held.revision, held.protocol, held.updatedBy, JSON.stringify(held.pay === undefined ? null : held.pay)]); return held; };
+        day(first, 'w_salim', '2026-10-17');
+        await reached(() => quiet(first) && quiet(old));
+        const afterNew = await look('this build');
+        day(old, 'w_nasser', '2026-10-18');
+        await reached(() => quiet(old) && quiet(first));
+        await settle(800);
+        const afterOld = await look('the older build');
+        day(first, 'w_ahmad', '2026-10-19');
+        await reached(() => quiet(first) && quiet(old));
+        await settle(800);
+        const afterBoth = await look('this build again');
+        day(old, 'w_salim', '2026-10-20');
+        await reached(() => quiet(old) && quiet(first));
+        await settle(800);
+        const atEnd = await look('the older build again');
+        const days = ['2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20'].map((date, at) => [date, ['w_salim', 'w_nasser', 'w_ahmad', 'w_salim'][at]]);
+        cell.mixed = afterNew.protocol === 2 && days.every(([date, worker]) => dayOn(atEnd, date, worker) && dayOn(S(old), date, worker) && dayOn(S(first), date, worker))
+            && Object.keys(atEnd.pay || {}).length === 0 && on(first) === false;
+        same('A MIXED FLEET: this build writes a day (protocol 2), the older phone one after it, and again each - all four days on the server and on both phones, no pay entry, nobody on',
+            [cell.mixed, old.Sync.status, first.Sync.status, old.Sync.pendingCount(), first.Sync.pendingCount()], [true, 'synced', 'synced', 0, 0]);
+        console.log('  measured, after each write [who, revision, protocol, updatedBy, pay]: ' + JSON.stringify(seen));
+        first.Sync.disconnect();
+        old.Sync.disconnect();
+    }
+
     suite(`O / ${name} under the rules LIVE TODAY, on the record as it is today - the cell every phone is in now`);
     {
         await envOld.clearFirestore();
@@ -550,8 +586,8 @@ for (const [name, sha] of OLDER) {
 
     const olds = OLDER.map(([name]) => found[name]);
     same('every older build answers every question the same way',
-        olds.map(cell => [cell.liveDay, cell.dayBefore, cell.restoreBefore, cell.dayRefused, cell.closeRefused, cell.restoreRefused, cell.oldRulesErase]),
-        OLDER.map(() => [true, true, true, true, true, true, true]));
+        olds.map(cell => [cell.liveDay, cell.mixed, cell.dayBefore, cell.restoreBefore, cell.dayRefused, cell.closeRefused, cell.restoreRefused, cell.oldRulesErase]),
+        OLDER.map(() => [true, true, true, true, true, true, true, true]));
     check('1. the new rules can be published while every phone is still on an older build: nobody working is refused',
         olds.every(cell => cell.dayBefore && cell.restoreBefore));
     same('2. the record cannot be turned on before the rules are published: the step asks and is told `rules`, and sent anyway it is refused whole',
