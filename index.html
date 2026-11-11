@@ -19,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v186">
+<meta name="farkad-build" content="v187">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -726,6 +726,34 @@
     </div>
 </div>
 
+<!-- «סיכום חודש»: one calendar month on one screen - the work per site, the two counts,
+     the men, the money, and the step from the month before. Entered from the reports
+     screen's «הפקת דוח» menu. A READING: nothing in it writes, the two arrows only change
+     which month is read, and the text under it leaves by the day message's own two doors.
+     Every word is set by js/ui/monthsummary.js from that file's blocks; this is the frame,
+     and the arrows and buttons are in it (not in the body) so a redraw leaves the focus. -->
+<div class="modal" id="monthSummaryModal">
+    <div class="modal-content modal-wide">
+        <h3 id="monthSummaryTitle" tabindex="-1"></h3>
+        <div class="msum-nav">
+            <button type="button" class="btn-secondary" id="monthSummaryPrev" onclick="monthSummaryStep(-1)"></button>
+            <strong id="monthSummaryMonth" class="msum-month" role="status" aria-live="polite"></strong>
+            <button type="button" class="btn-secondary" id="monthSummaryNext" onclick="monthSummaryStep(1)"></button>
+        </div>
+        <div id="monthSummaryBody"></div>
+        <div class="msum-fold">
+            <button type="button" class="btn-secondary" id="monthSummaryFoldLabel" aria-expanded="false" aria-controls="monthSummaryText" onclick="monthSummaryToggleText()"></button>
+            <textarea id="monthSummaryText" rows="12" readonly hidden></textarea>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="btn-success" id="monthSummarySend" onclick="monthSummarySend()"></button>
+            <button type="button" class="btn-secondary" id="monthSummaryCopy" onclick="monthSummaryCopy()"></button>
+            <button type="button" class="btn-secondary" id="monthSummaryClose" onclick="closeMonthSummary()"></button>
+            <span class="share-status" id="monthSummaryStatus" role="status" aria-live="polite"></span>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="migrationModal">
     <div class="modal-content modal-wide">
         <h3>רישומים שדורשים החלטה</h3>
@@ -868,6 +896,10 @@
      dialog, the seder and הסעות - because its entry is put AFTER theirs in that dialog. It
      calls them only when it is used, and each of them asks for it through typeof. -->
 <script src="js/ui/journey.js"></script>
+<!-- «סיכום חודש». After reports.js (it asks the pay sheet's own functions and reads its
+     constants) and share.js (the two doors its text leaves by). It runs nothing at load;
+     reports.js asks for its entry by name, through typeof, when the menu is drawn. -->
+<script src="js/ui/monthsummary.js"></script>
 <script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>
 <script src="js/ui/migration.js"></script>

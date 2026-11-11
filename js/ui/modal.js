@@ -31,6 +31,8 @@ const MODAL_CLOSERS = {
     dayCheckModal: () => closeDayCheck(),
     // The report of a period's rides (js/ui/transport.js).
     transportReportModal: () => closeTransportReport(),
+    // The month's summary (js/ui/monthsummary.js): closing it forgets which month it was.
+    monthSummaryModal: () => closeMonthSummary(),
     migrationModal: () => closeMigrationModal(),
     // The one .modal that had no entry here, so Escape fell through to the bare
     // `display = 'none'` below and never reached closeSignInModal - which exists, and
