@@ -57,7 +57,7 @@ const SINCE = 'מה שנוסף מאז העדכון האחרון שראית, מה
 const ALL = 'כל מה שנוסף לאחרונה, מהחדש לישן.';
 const SHOW = 'הראה לי';
 // The builds that have news, newest first (tests/whatsnew.test.mjs pins the block).
-const NEWS = [188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
+const NEWS = [189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
 
 // SYNTHETIC. Fourteen invented men on three invented sites.
 const NAMES = ['אחמד', 'מוחמד', 'יוסי', 'סמיר', 'עלי', 'Ali Hassan', 'ראמי', 'דוד', 'עבד אל-רחמן', 'מחמוד', 'חאלד', 'נביל', 'זיאד', 'כרים'];
@@ -421,7 +421,7 @@ for (const rides of [false, true]) {
     if (rides) await page.evaluate(() => transportSetEnabled(true));
     given(`הסעות is ${rides ? 'on' : 'off'}`, await page.evaluate(() => transportEnabled()) === rides);
     const ways = await page.evaluate(() => Object.keys(WHATSNEW_GO).sort());
-    same('the ways there are', ways, ['advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'find', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
+    same('the ways there are', ways, ['advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
     const reset = () => page.evaluate(() => {
         [...document.querySelectorAll('.modal')].filter(node => node.style.display === 'flex').forEach(node => {
             const close = MODAL_CLOSERS[node.id];
