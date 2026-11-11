@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v186';
+const APP_VERSION = 'v187';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -154,6 +154,8 @@ function render() {
     // And for a worker's card (js/ui/workercard.js): every figure on it is read off this
     // record, and a card left showing what the record said a minute ago is a wrong number.
     if (typeof renderWorkerCardIfOpen === 'function') renderWorkerCardIfOpen();
+    // And for the month's summary (js/ui/monthsummary.js), for the same reason.
+    if (typeof renderMonthSummaryIfOpen === 'function') renderMonthSummaryIfOpen();
 
     // Last, because the two bars it measures have just been shown or hidden by the lines
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not

@@ -960,4 +960,64 @@ body.journey-on #sederModal { z-index: 60; }
 #workerCardModal .modal-actions button { min-height: 44px; min-width: 44px; font-size: 16px; overflow-wrap: anywhere; }
 #workerCardModal .modal-actions button:last-child { grid-column: 1 / -1; }
 
+/* סיכום חודש (js/ui/monthsummary.js): one month on one screen, and nothing on it to edit.
+   An ordinary dialog, so the height it may take, the safe area under it and the scroll
+   inside it are .modal-content's (css/app.css) and are not said again here. It is read by
+   a far-sighted man on a dark phone in the sun: nothing under 16px, labels 17-18px, the
+   numbers larger and heavy, every row free to wrap and no box with a fixed height - so
+   doubled text makes it longer, never clipped. A site keeps its own colour on its swatch
+   and its bar and nowhere else; the step from last month is words and digits, and its
+   colour only repeats what the words say. The only tap targets are the two arrows, the
+   fold's button and the three buttons of the frame, each 48px or more. THE WAY IN is a row
+   of the reports screen's «הפקת דוח» menu and takes that menu's own button rule. */
+#monthSummaryModal .modal-content > h3 { line-height: 1.3; margin: 0 0 8px; overflow-wrap: anywhere; }
+.msum-nav { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
+.msum-nav button { flex: 0 1 auto; min-height: 48px; min-width: 48px; padding: 8px 14px; font-size: 17px; font-weight: 650; }
+.msum-month { flex: 1 1 8ch; min-width: 0; text-align: center; font-size: 22px; font-weight: 800; overflow-wrap: anywhere; }
+.msum-range { margin: 0 0 10px; color: var(--ink-2); font-size: 16px; text-align: center; }
+.msum-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.msum-pair { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; min-width: 0; }
+.msum-tile { flex-direction: column; align-items: stretch; justify-content: flex-start; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.msum-label { min-width: 0; color: var(--ink-2); font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+.msum-value { min-width: 0; color: var(--ink); font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.msum-tile .msum-value { font-size: 30px; line-height: 1.15; }
+.msum-delta { color: var(--ink); font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
+.msum-delta.msum-up { color: var(--ok); }
+.msum-delta.msum-down { color: var(--warn); }
+.msum-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.msum-head { margin: 0 0 10px; font-size: 19px; font-weight: 800; overflow-wrap: anywhere; }
+.msum-sub { margin: 12px 0 4px; color: var(--ink-2); font-size: 17px; font-weight: 700; }
+.msum-site { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+.msum-swatch { flex: none; width: 18px; height: 18px; border-radius: 5px; }
+.msum-bar-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; min-width: 0; }
+.msum-bar-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.msum-bar-track { flex: 1 1 auto; display: flex; min-width: 0; height: 18px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
+.msum-bar-fill { display: block; height: 100%; border-radius: 6px; }
+.msum-count { flex: 0 0 auto; color: var(--ink); font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.msum-bar-count { min-width: 3ch; font-size: 28px; line-height: 1; text-align: end; }
+.msum-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+.msum-man { min-width: 0; font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+.msum-total { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.msum-bar-row + .msum-total { margin-top: 0; }
+.msum-total .msum-label { color: var(--ink); font-weight: 700; }
+.msum-total .msum-value { font-size: 24px; }
+.msum-own { margin-top: 2px; padding-top: 2px; border-top: 0; }
+.msum-line { padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.msum-line:last-child, .msum-row:last-child { border-bottom: 0; }
+.msum-lead .msum-value { font-size: 24px; }
+.msum-note { margin: 8px 0 0; color: var(--ink-2); font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
+.msum-progress, .msum-compare { margin: 0 0 10px; color: var(--ink); font-weight: 600; }
+.msum-compare { margin: 10px 0 0; }
+.msum-warn { margin: 8px 0 0 !important; font-size: 16px !important; overflow-wrap: anywhere; }
+#monthSummaryBody .empty-hint { font-size: 18px; }
+.msum-fold { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.msum-fold > button { min-height: 48px; font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
+.msum-fold textarea { width: 100%; box-sizing: border-box; font-size: 16px; }
+.msum-fold textarea[hidden] { display: none; }
+#monthSummaryModal .modal-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+#monthSummaryModal .modal-actions button { min-height: 48px; min-width: 48px; font-size: 17px; overflow-wrap: anywhere; }
+#monthSummaryModal .modal-actions .btn-success, #monthSummaryStatus { grid-column: 1 / -1; }
+#monthSummaryStatus { font-size: 16px; }
+#monthSummaryStatus:empty { display: none; }
+
 }

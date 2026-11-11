@@ -1,6 +1,48 @@
-## v186 — הסעות, one shared plan: the gate opens (candidate, not served)
+## v187 — «סיכום חודש»: one month on one screen (candidate, not served)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `9846d7f` (v186). The owner asked (2026-11-11) for the app to be pushed as far as it will
+go before the next evening, with things that ease his work; this is the first of that batch. A
+READING: it writes no key. Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`,
+`js/recovery.js` or the rules.
+
+**What it is** (`js/ui/monthsummary.js`). One row in the reports screen's «הפקת דוח» menu - the
+menu is shut until tapped, so no measured row gains a control - opens one calendar month: four
+figures (ימי נוכחות, ימי עבודה, נצבר, עובדי רימא), each with its step from the month before in
+words and digits, never colour alone; ימי עובד־אתר per site as a bar in the site's own colour;
+רישום לרימא and עובדי יוסף גבס each apart with its note; the men (how many worked, the longest
+three, double days, extra hours); the money in the sheet's own words (נצבר, מקדמות, and - only on
+a record that may be read the new way - הוחזר במזומן). «חודש קודם» / «חודש הבא» walk the months;
+a month with no record says so; a month not over says so.
+
+**It prices nothing itself.** Every figure is `payrollRows` / `payrollBandTotals` /
+`invoiceByDate` / `invoiceWithoutRima` / `rimaReport` / `yosefGevesReport` /
+`advanceRepaymentsFor` pointed at the month, each with its own gate; the suite greps the file for
+a multiplied rate. It leaves as text by `shareTextOut` / `copyTextOut`. THE RIMA COUNT IS IN THAT
+TEXT, deliberately: the no-Rima rule is for the day message sent to the crew, and this is the
+owner's own reading, which does not add up without it.
+
+**Rules.** A month is the 1st to the last by the phone's calendar; a day is in exactly one month;
+a working day is a date one of his men was on a site (a Rima-only day is billed and is not one);
+the wage counts an unpriced man as unknown and names him; there is no «לתשלום» - a month is not a
+payday; cash handed back is not shown before the carry migration is approved.
+
+**Moved expectation (one).** `tests/reports.browser.mjs`: «all three existing outputs are
+available» counted three rows in that menu; it now names the four (הדפסה, שיתוף כתמונה, יצוא,
+סיכום חודש). That row is the point of the release.
+
+**Hebrew - PROPOSED, not read by the owner**, one block, pinned word for word in
+`tests/monthsummary.test.mjs`; the Rima / יוסף גבס titles, totals and notes and the ledger labels
+are the reports' own constants. No existing string changed.
+
+**Known not covered.** Not tried on a real phone. Text only - no picture. The step from last month
+compares a month in progress with a whole month (said on the screen). The bars include Rima's men
+(the billing count, as the reports' own bars); «בלי עובדי רימא» is a total only. Not measured
+under the «תצוגה גדולה» mode being built in parallel.
+
+## v186 — הסעות, one shared plan: the gate opens (served)
+
+**Served.** Merged as `9846d7f` (PR #68) on 2026-11-10 after both gates exited 0 on `f012301`; the Pages deployment succeeded at 22:38 UTC. The owner reported that he pasted the rules file of v185 into the Firebase console the same day and has not changed it since.
 Built on `0b754a6` (v185). ONE line of code changes (and one CSS rule, below): `TRANSPORT_SHARE = true` in
 `js/ui/transport-share.js` (with the comment above it, and one comment in `js/ui/transport.js`). `firestore.rules`,
 `firebase.json` and `.github/workflows/rules.yml` are NOT changed by this build. Nothing in
