@@ -215,6 +215,12 @@ input, select, textarea { border-radius: 12px; }
    every man on that site on a 64px row and took the twelfth name off the screen. */
 .wrow-name { color: var(--ink); }
 .wrow .btn-icon, .assign-row .btn-icon { color: var(--ink-3) !important; }
+/* v191, FOR EVERYBODY: the ✕ that puts the undo bar away. The bar is the one inverse strip
+   of the app - paper words on the ink (css/app.css) - and the ✕ on it took .btn-icon's
+   --ink-2 from the rule above, which is the colour of the bar itself give or take: 1.6:1
+   in the dark scheme, 1.9:1 in the light one (measured; tests/largetext.browser.mjs). It is
+   the bar's own word colour again, as app.css meant it: 21:1 and 17:1. */
+.undo-bar .btn-icon { color: var(--paper) !important; }
 
 .site-card { border: 0 !important; background: var(--surface) !important; border-radius: 14px !important; box-shadow: none !important; overflow: hidden; }
 .site-head-btn { background: rgba(255, 255, 255, .16) !important; border-color: transparent !important; color: #fff !important; }
@@ -236,6 +242,10 @@ input, select, textarea { border-radius: 12px; }
 .week-table, .week-table th, .week-table td { border-color: var(--line-soft) !important; }
 .week-table thead th { background: var(--surface) !important; color: var(--ink-2) !important; }
 .week-table .name-cell { background: var(--paper) !important; color: var(--ink) !important; font-weight: 700; }
+/* v191, FOR EVERYBODY: the chosen day of «ימים» was white on the accent - which in the
+   dark scheme is a light blue, 2.2:1 (measured; tests/largetext.browser.mjs). The ink that
+   goes on the accent is the token made for it. */
+.week-phone-date[aria-pressed="true"] { color: var(--on-accent) !important; }
 
 /* ---- THE CREW -----------------------------------------------------------------------
    A man was a 116px card with a green block on it that said the same word fourteen
@@ -339,6 +349,10 @@ input, select, textarea { border-radius: 12px; }
 /* Laid side by side on a wide screen by app.css, for the card this was; inside a row it
    is one line under the title like everything else. */
 .settings-fold-body > .app-version { flex: none !important; justify-content: space-between !important; }
+
+/* v191, FOR EVERYBODY: «עוד פרטים» in a man's form was 39px tall on the wide phone, where
+   its words fit one line - under the 44px a finger needs (law 9). */
+.form-more > summary { padding-block: 11px; }
 
 /* ---- DIALOGS ------------------------------------------------------------------------
    The filled button is the way forward and there is one of it. */

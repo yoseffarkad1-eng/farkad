@@ -23,7 +23,28 @@ function renderMigration() {
 
 function openMigrationModal() {
     renderMigrationList();
-    document.getElementById('migrationModal').style.display = 'flex';
+    const modal = document.getElementById('migrationModal');
+    modal.style.display = 'flex';
+    migrationEnterAtTitle(modal);
+}
+
+// WITH «תצוגה גדולה» ON (js/ui/display.js) the dialog is entered at its title, at its
+// top, the way the cards are (js/ui/modal.js, focusFirst: a heading with tabindex="-1" is
+// focused without scrolling). At those sizes the first decision's button sits below the
+// edge of a 568px phone, and focusing it scrolled the dialog until only «החלטה» of its
+// title was left (v191's review); a second opening began wherever the last one had been
+// read to. With the mode off nothing here changes: the dialog opens as it always has.
+// Called once the dialog is shown - a box that is not displayed has no scroll to set, and
+// keeps the one it had - and before js/ui/modal.js enters it (its observer runs when the
+// call that showed the dialog has returned).
+function migrationEnterAtTitle(modal) {
+    if (!modal) return;
+    const large = document.documentElement.classList.contains('display-large');
+    const title = modal.querySelector('.modal-content > h3');
+    if (title && large) title.setAttribute('tabindex', '-1');
+    else if (title) title.removeAttribute('tabindex');
+    const content = modal.querySelector('.modal-content');
+    if (content && large) content.scrollTop = 0;
 }
 
 function closeMigrationModal() {

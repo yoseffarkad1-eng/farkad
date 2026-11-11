@@ -11,6 +11,40 @@
 <link rel="stylesheet" href="css/readability.css" onerror="this.dataset.loadFailed='true'">
 <!-- v169: the one look. Last, because it is a layer over the two above - see its header. -->
 <link rel="stylesheet" href="css/design.css" onerror="this.dataset.loadFailed='true'">
+<!-- v191: «תצוגה גדולה». After the three above and over all of them. EVERY rule in it is
+     written under html.display-large, a class only js/ui/display.js puts there, on a phone
+     that turned the mode on: without the class this sheet matches nothing. -->
+<link rel="stylesheet" href="css/large.css" onerror="this.dataset.loadFailed='true'">
+<!-- v191: THE TWO SCRIPTS OF THE HEAD, and the ear before them. «תצוגה גדולה» is one class
+     on <html>, put there by js/ui/display.js from one per-phone preference that it reads
+     through js/store.js. Loaded at the end of <body> they ran after the page's own markup
+     had been parsed, and a browser may paint what it has: the top bar and the tab bar were
+     drawn small for a frame and then jumped (v191's review, measured on every reload from
+     the service worker). Here, after the four sheets and before <body>, they run before a
+     single element of the body exists, so nothing is ever drawn at the wrong size. Store
+     first, then the display; js/recovery.js and everything else stay where they were, after
+     the boot sentinel.
+
+     THE EAR. The boot sentinel below is installed before every script of the body; these
+     two run before it exists. What goes wrong with them - a file that did not arrive, a
+     file that would not parse - is heard here, in the order it happened, and kept for the
+     sentinel, which says the first of it in its banner exactly as it says everything else.
+     Like the sentinel this depends on nothing and never touches the disk; once the sentinel
+     has taken what it heard, it hears nothing more. -->
+<script>
+(function () {
+    var heard = [];
+    window.farkadBootEar = heard;
+    window.addEventListener('error', function (event) {
+        if (heard.closed) return;
+        var target = event && event.target;
+        if (target && target !== window && (target.src || target.href)) heard.push((target.src || target.href) + ' - לא נטען');
+        else if (event && event.message) heard.push(event.message);
+    }, true);
+})();
+</script>
+<script src="js/store.js"></script>
+<script src="js/ui/display.js"></script>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1f4b7a">
 <!-- Which build this PAGE belongs to. app.js carries the same string, and the two are
@@ -19,7 +53,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v190">
+<meta name="farkad-build" content="v191">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -860,7 +894,8 @@
 </div>
 
 <!-- The boot sentinel. FIRST, before a single line of the application, and deliberately
-     tiny.
+     tiny. (Since v191 two scripts load in the head, before it: js/store.js and
+     js/ui/display.js. Their failures are heard by the ear beside them and said here.)
 
      Everything else that reports a failure on this page is part of the application:
      watchForCrashes needs app.js, the banner it draws needs el() and clear() from
@@ -921,6 +956,11 @@
     for (var i = 0; i < styles.length; i++) {
         if (styles[i].dataset.loadFailed === 'true') show(styles[i].href + ' - לא נטען');
     }
+    // And the two scripts of the head (v191): what the ear heard before this existed.
+    // From here on this listens, and the ear does not.
+    var heard = window.farkadBootEar || [];
+    heard.closed = true;
+    for (var j = 0; j < heard.length; j++) show(heard[j]);
 
     window.farkadBootSentinel = {
         // Called by the app the moment its own crash handler is installed. From there on
@@ -933,7 +973,8 @@
 })();
 </script>
 <div id="pushReminderPending" class="push-reminder-pending" hidden role="status"><span>סיים את העריכה, ואז פתח את רישום היום.</span><button type="button" class="btn-secondary" onclick="FarkadReminders.openToday()">פתיחת היום</button><button type="button" class="btn-secondary" onclick="document.getElementById('pushReminderPending').hidden=true">סגירה</button></div>
-<script src="js/store.js"></script>
+<!-- js/store.js and js/ui/display.js load in the head (v191, beside the ear there).
+     store.js and recovery.js still precede the sync group. -->
 <script src="js/recovery.js"></script>
 <script src="js/dates.js"></script>
 <script src="js/model/schema.js"></script>

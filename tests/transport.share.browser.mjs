@@ -13,7 +13,9 @@
 //     two buttons, «להשתמש בשיבוץ שלי» through the app's own question, «להשאיר את המשותף»;
 //   - the same under the rules of today: «עדיין לא משותף»;
 //   - and the floors: every new control 44px both ways, every new word 16px, nothing
-//     wider than the phone, at 440 and 375, in both schemes; no native dialog, no error.
+//     wider than the phone, at 440 and 375, in both schemes; no native dialog, no error;
+//   - v191: the first meeting on a 320x568 phone with «תצוגה גדולה» on - under the two
+//     notices the cars still have room for a whole seat.
 //
 // THE CLOUD is the harness's fake (makeTransportCloud), living in THIS process and bridged
 // into each page: a page's adapter calls out through an exposed function, and the cloud's
@@ -80,8 +82,10 @@ async function block(name, body) {
 // the fake transport cloud this phone's adapter is bridged to (or none: a phone that is
 // not signed in).
 async function phone(options) {
-    const { width, height, scheme, gate, cloud } = options;
+    const { width, height, scheme, gate, cloud, large } = options;
     const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, hasTouch: true, isMobile: true });
+    // «תצוגה גדולה» (v191, js/ui/display.js): the one per-phone key, there before the app reads it.
+    if (large) await context.addInitScript(() => { try { localStorage.setItem('farkadDisplay:large', '1'); } catch (error) { /* no disk */ } });
     const page = await context.newPage();
     const errors = [];
     const dialogs = [];
@@ -425,6 +429,53 @@ await block('the first meeting, on the glass: a phone with its own list and plan
     await owner.context.close();
     await second.context.close();
     await third.context.close();
+});
+
+// THE FIRST MEETING ON THE SMALLEST PHONE, WITH «תצוגה גדולה» ON (v191's review). The two
+// notices and the line take at most two fifths of the screen and scroll inside it; at the
+// mode's sizes on a 568px phone that left the cars 67px under the waiting men - no seat
+// (84px and up) whole, the whole window inside a drag's two edge strips. With the mode on
+// a short screen gives them a quarter (css/large.css). Held: under the tray there is room
+// for the tallest seat on the screen, the notices still scroll inside their own box, and
+// every one of their buttons can be reached there.
+await block('the first meeting on a 320x568 phone with the large display on: the cars keep room for a whole seat', async () => {
+    const cloud = makeTransportCloud();
+    const owner = await phone({ width: 375, height: 667, scheme: 'dark', gate: true, cloud });
+    await owner.page.evaluate(day => { transportRenameVehicle('tv_02', 'קורולה לבנה'); transportPlace(day, 'w_01', 'tv_01', 1); }, DAY);
+    await owner.openPanel();
+    await owner.connect();
+    given('the owner\'s phone made the shared list and day', await waitLine(owner.page, W.shared), [...cloud.docs.keys()].join(','));
+    const small = await phone({ width: 320, height: 568, scheme: 'dark', gate: true, cloud, large: true });
+    await small.page.evaluate(day => { transportRenameVehicle('tv_03', 'ביוואידי אפור'); transportPlace(day, 'w_04', 'tv_03', 1); }, DAY);
+    await small.openPanel();
+    await small.connect();
+    await small.page.waitForFunction(() => document.querySelectorAll('#transportShare .transport-share-notice').length === 2, null, { timeout: 8000 }).catch(() => {});
+    await small.page.waitForTimeout(200);
+    const room = await small.page.evaluate(() => {
+        const body = document.getElementById('transportBody').getBoundingClientRect();
+        const tray = document.getElementById('transportTray').getBoundingClientRect();
+        const share = document.getElementById('transportShare');
+        const box = share.getBoundingClientRect();
+        const seats = [...document.querySelectorAll('#transportBody .transport-seat')].map(seat => seat.getBoundingClientRect().height);
+        // Each button of the notices, scrolled to inside the box: on the glass there.
+        const reached = [...share.querySelectorAll('button')].map(node => {
+            node.scrollIntoView({ block: 'nearest' });
+            const at = node.getBoundingClientRect();
+            const now = share.getBoundingClientRect();
+            return at.top >= now.top - 1 && at.bottom <= now.bottom + 1;
+        });
+        share.scrollTop = 0;
+        return { large: document.documentElement.classList.contains('display-large'), notices: share.querySelectorAll('.transport-share-notice').length,
+            window: Math.round(body.bottom - tray.bottom), tallest: Math.round(Math.max(...seats)), share: Math.round(box.height),
+            scrolls: share.scrollHeight > share.clientHeight + 1, reached, height: window.innerHeight };
+    });
+    given('the mode is on, and both notices are up', room.large && room.notices === 2, JSON.stringify(room));
+    check('under the waiting men there is room for the tallest seat on the screen', room.window >= room.tallest, JSON.stringify(room));
+    check('the notices take a quarter of the screen at most, and scroll inside it', room.share <= Math.ceil(room.height / 4) + 1 && room.scrolls, JSON.stringify(room));
+    check('and each of their four buttons can be reached there', room.reached.length === 4 && room.reached.every(Boolean), JSON.stringify(room.reached));
+    same('no error, no dialog', [owner.errors, owner.dialogs, small.errors, small.dialogs], [[], [], [], []]);
+    await owner.context.close();
+    await small.context.close();
 });
 
 // THE SEDER'S JOURNEY (js/ui/journey.js) reads the rides at two of its stations: the bar

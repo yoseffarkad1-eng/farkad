@@ -1,3 +1,427 @@
+## v191 — «תצוגה גדולה»: a large display, per phone, for the one of the three who is far-sighted (candidate, not served)
+
+**Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `182ba97` (v190, the repair of five faults the review of v189 found). It was first
+built and measured on `9846d7f` (v186) and moved, whole, onto v187, v188, v189 and v190 as
+each was merged - the numbers it carried on the way went to builds main took first - and
+every screen v187 to v189 added is in its walk, their sizes restated like every other rule.
+The numbers below were measured on v189 (`0790d3f`); v190 changes no stylesheet and adds no
+word to a screen, and the suites measured every screen of the walk again on this base. It
+touches no line
+of `js/ui/reports.js`, `js/ui/usual.js`, `js/ui/sitecard.js`, `js/ui/monthsummary.js`,
+`js/ui/payslips.js`, `js/ui/find.js`, `js/ui/workercard.js` or `js/ui/journey.js`; in
+`js/ui/whatsnew.js` it adds this build's own item and the one way its «הראה לי» goes, which
+that file's guard requires of every release; in `js/ui/migration.js`, one function that does
+anything only with the mode on (the review, below). Nothing in `js/sync`, `js/model`,
+`js/state.js`, `js/store.js`, `js/recovery.js`, `firestore.rules` or `functions` -
+`js/store.js` loads from the head now, unchanged.
+
+### What the owner said
+
+2026-11-11: "Take into account that one of the app's users is a 62-year-old man who suffers
+from far-sightedness." He holds the phone at arm's length and cannot read small text there.
+Three people share the app on three phones; the other two see well, and one screen
+deliberately holds eleven names (`tests/design.browser.mjs`). Since v169 a great deal was
+added quickly - the rides drawn from above, the summary, the letter in the week, the day's
+check, the second count, the journey, the worker's card, the shared rides, the month, the
+payslips, the finder, «מה חדש», the account per man, the usual site, the site's card - and
+nobody had looked at any of it with his eyes.
+
+### The audit (measured; `tests/readability.audit.mjs`, `tests/screens.mjs`)
+
+One walker opens EVERY screen and dialog of the app on a seeded record - 54 of them, each by
+the app's own function: the day by site and by worker (with the usual site's chip and its
+sentence in «לא נרשמו»), the account banner, the day drawer, the assign sheet and both
+pickers, the day's check, the WhatsApp dialog, the seder list, the week in both views, the
+crew, the worker's card and form, the site's card and its client's text, paste-a-list,
+reorder, the advances list, one man's page and the advance, repayment and correction forms,
+the reports by worker as they open (each group under its own dated heading, the cards that
+tell the account, a week left open named under its group) and with that week shown, the
+detailed table, by site, the «הפקת דוח» menu, the month on one screen, the payslips and one
+man's text opened, one man's days (an ordinary man, a man with extra hours, a weekly man -
+each with its «סיכום התקופה»), ⋯ with every row open, the finder, «מה חדש» and its quiet line,
+sign-in, the four ask dialogs, the banners and the undo bar, the rides (cars and tray, the
+vehicle list, the summary, the report of a period) and the journey's five stations - on
+375x667 and 440x956, dark and light. It reads off every visible text node, every word drawn
+by `::before`/`::after` and every field: the computed font-size, the weight, the
+line-height, and the contrast against the ground really painted under it (every ancestor's
+colour and opacity composed). On v189 itself (`git archive 0790d3f`), mode off:
+
+| phone | scheme | text nodes | under 16px | under 18px | under 4.5:1 | under 7:1 | lighter than 500 | targets under 44px | targets under 52px | fields under 16px |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 375x667 | dark | 4,050 | 1,059 | 2,879 | 3 | 97 | 838 | 0 | 732 | 0 |
+| 375x667 | light | 4,050 | 1,059 | 2,879 | 1 | 233 | 838 | 0 | 732 | 0 |
+| 440x956 | dark | 4,050 | 1,059 | 2,879 | 3 | 97 | 838 | 1 | 764 | 0 |
+| 440x956 | light | 4,050 | 1,059 | 2,879 | 1 | 233 | 838 | 1 | 764 | 0 |
+
+The same walk with the mode ON, on this build (4,067 text nodes - the row and the news
+item it adds): **0 in every one of those columns, on all four.** (Since the review, below,
+the walk has a third phone, 320x568, a longer name and two more screens; with the mode on
+it holds the same zeros on all six, but for the month's days on the 320px phone - 45px
+wide, the one exception, said below.)
+
+The worst, by screen (under 16px, of the screen's text nodes): the week's grid 146 of 154
+(the smallest thing in the app, the 8px mark in a cell, is there), the detailed report 117
+of 262, reorder 81 of 113, the vehicle list 67 of 126, the journey's first station 59 of
+103, its rides 57 of 84, the day by site 54 of 95, the cars and the tray 53 of 76 (a 9px
+dot), the worker's card 49 of 141. v189's own screens were written for this reader and it
+shows: the pay sheet as it opens 19 of 284 (130 under 18), with a week left open shown 19
+of 275, one man's days 6 to 12 of 61-110, the site's card 1 of 84 (47 under 18); v188's
+payslips, finder and «מה חדש» 0 under 16 (54, 30 and 85 under 18). The full table, by
+screen, the smallest first, was written to the session's scratchpad (`readability/AUDIT.md`,
+and `AUDIT-large.md` for the mode on); it is reproduced by
+`node tests/readability.audit.mjs out.md --tree <a v189 tree>`.
+
+Three things in it are FAULTS by the app's own floors, and are repaired for everybody
+(below). The rest is the app as designed for eyes that focus at 30cm: 14px hints, 15px tab
+words, a 13px letter in an 8px mark.
+
+### «תצוגה גדולה» — what it is
+
+- **One switch, per phone, OFF until somebody turns it on.** A row of «כללי» in ⋯, straight
+  before «הסעות» - the other thing a phone turns on for itself, which stays the last row
+  of its section, where `tests/transport.browser.mjs` pins it - and built the way that row
+  is: a `<details>` shut at every opening of the sheet, a picture, a title, one line, a
+  state and one button. `js/ui/display.js`.
+- **A preference of the phone and nothing else.** One key through `Store`,
+  `farkadDisplay:large`; exactly the byte `1` is ON, and absent, empty, damaged, `true`,
+  `0`, a disk that throws - every one of them - is OFF, with nothing written and nothing
+  said. Never the record, the outbox, the journal, the write counter, the cloud, a backup,
+  a restore point or the rescue file (`tests/largetext.test.mjs`: byte for byte, through a
+  real export of each). A lost phone loses the choice; the choice is one tap.
+- **Applied before anything is drawn.** The app had no earlier place where a phone's own
+  state is applied - no theme switch, and every touch of the disk is `Store`'s - so
+  `js/store.js` and `js/ui/display.js` load in the HEAD, after the four stylesheets: the
+  file reads the one key and puts one class, `display-large`, on `<html>` before a single
+  element of the body exists - the top bar, the tab bar, the day. (Loaded at the end of
+  `<body>`, as this build first had them, the top bar and the tab bar were painted small
+  for a frame and then jumped: the review, below.) The boot sentinel is installed before
+  every other script, as it was; before these two, a smaller listener beside them - the
+  ear - keeps what goes wrong with them (a file that did not arrive, a file that would
+  not parse) and the sentinel says it in its banner like everything else
+  (`tests/startup.blank.test.mjs` withholds and breaks `js/store.js`, unchanged, and
+  passes). Measured in Chromium at a quarter of the CPU: the class is on `<html>` in the
+  first frame painted with the tab bar in it, and in every one after.
+- **One phone, every window of it.** The app can be open twice on one phone - the
+  installed app and a tab, on one disk. A window hears the other turn the mode on or off
+  (the browser's `storage` event) and follows it at the first moment nobody is typing in
+  it and no dialog is open there - never under a finger - and its row then says what the
+  phone holds.
+- **A fourth stylesheet, `css/large.css`, loaded last - and why it is not a block in
+  `css/design.css`.** The three sheets are layers every phone gets, and their order is the
+  mechanism. This is not a look and not a mechanism: it is the same app said again, larger,
+  on one phone. EVERY rule in it is written under `:root.display-large` and inside
+  `@media screen` (`tests/largetext.test.mjs` reads the file as text: no selector that does
+  not begin under the class), so without the class it matches nothing - and a mistake in
+  it can only reach a phone that asked for the mode, never the rules that hold eleven
+  names. It stays the last sheet the page loads. (The «last block» that three neighbour
+  suites pin - payslips, usual, sitecard - is a statement about `css/design.css`, where this
+  build adds no block: its three rules for everybody stand inside the sections they mend,
+  so those scopes did not move and their suites pass unchanged.)
+- **«מה חדש» tells about it, and does not turn it on.** One item for v191, its «הראה לי»
+  a new way, `display`, that opens ⋯ with the row open and on the glass - and presses
+  nothing (`tests/whatsnew.browser.mjs`: no class, no key, the switch shown).
+
+### What the mode does
+
+By raising each size WHERE THAT SIZE IS SET - every rule of the three sheets that sets a
+font-size, a line-height or a weight is said again under the class, one rule for one rule,
+in the order and behind the media query it stands in, WITH ITS OWN IMPORTANCE (625 rules) -
+so the copies compete exactly as their originals do and the base's winner wins again,
+larger. Never `zoom`, never `transform: scale`, never a larger root font-size, and no
+height of a bar (law 8: the bars are simply taller, and `js/ui/bars.js` measures them).
+
+- **Nothing on any screen under 18px** (it was 8px to 17px on 2,879 of 4,050 text
+  nodes). Under 16px becomes 18; 16 becomes 20; 17 → 21; 18-19 → 22; 20 → 23; larger +3.
+  Running text is 20px. A man's name on the day is 22px, a site's name 22, a button's words
+  20-21, a field 20.
+- **Money and counts larger and heavier than the words beside them:** a debt on the
+  advances list 26px/800 (20), what is left on an advance 24/800, a figure on the worker's
+  card 26/800 (20), the two counts on a site card 24/800 (16), «נרשמו 10 מתוך 14» 22/800
+  (14).
+- **The reports' card (v189).** Every size is raised once, at its own rule in v189's block:
+  the man's name 24px (21), his counts 27 (24) over labels of 20 (16), the lines' labels 22
+  (18) and values 24 (21), the currency 20 (16), «נותר לתשלום» 35/800 (32) - still the
+  largest thing on the card. Nothing doubles up: no figure is enlarged by two rules, the
+  card stays one column, and nothing on it is clipped or runs off the side on either phone
+  in either scheme (measured; `tests/largetext.browser.mjs`). The four count tiles keep
+  v189's own `auto-fit` grid: one row of four at 440px, three and one at 375px. The days'
+  «סיכום התקופה» is the same card's figures and reads the same.
+- **No text lighter than 500; no wrapped text tighter than 1.4.**
+- **Every word at 7:1 or better, in both schemes.** design.css holds its three inks to 7:1
+  and lets the coloured words stand at the 4.5 everybody quotes; measured on the base they
+  were 5.4-6.8 in the light scheme (a warning on its tint 6.0, «פעיל» on its green 5.6, the
+  sync chip's red 5.4, the accent on its soft ground 6.5) and 6.7 for the accent in the dark
+  one. In the mode each of those tokens is moved until it clears 7:1 on its own tint and on
+  a surface; the second and third inks are each raised a step; the browser's own grey under
+  a `<select>` is replaced by the field's ground. The grounds, the first ink and the ten
+  site colours are not touched.
+- **Everything a finger lands on is 52px both ways** (44), a seat in a car 84 (64), a
+  waiting man's chip 56 (48), the usual site's chip 52 (48) - and a floor is a floor: where
+  a sheet already asks more of a control (the message box 120px, a day of the month 62
+  tall, the crew's card buttons 64 wide) that stands. One exception, held to exactly what
+  it is: a day of the month on the worker's and the site's card is its share of the
+  card - 45px wide on the 320px phone (52 and more from 375), and 62px and taller.
+- **Rows further apart, and edges drawn:** the day's row 70px (56), a settings row 74 (60),
+  an advances row 76 (58), a cell of the week 64 (48); the tab bar is 65px (63) and the
+  strip above the day 60 (52), each measured; the line under a row 2px in a colour about
+  3:1 on its ground (it was 1px at 1.3:1); the tab's picture, the ✕ at the end of a row and
+  the glyph beside a button drawn larger, heavier and in a stronger ink; a disabled button
+  at .62 instead of .4 (it was 2.3:1).
+
+**The price, and it is paid only in the mode:** fewer names on a screen. On the audit's own
+fixture (a fourteen-man crew, some of whose sites have long names and take a second line)
+the day by worker shows 7 whole rows at 440x956 with the mode on and 10 without it; at
+375x667, 3 and 5; at 320x568, 2 and 3. (The eleven of `tests/design.browser.mjs` is its own
+one-line fixture with the mode off, and still holds.)
+
+### The screens that changed shape
+
+- **The week.** The grid is the one screen that could not simply be made larger: on the
+  375px phone a name had 66px and every second one was cut to «מוחמ…». In the mode the name
+  column is 112-150px and a name WRAPS - first name, family name under it, never an
+  ellipsis; a day is 64px wide and tall (48), the letter in the colour block 18px in a 30px
+  block (13 in 20). The grid is then wider than the phone and scrolls INSIDE ITS OWN BOX,
+  names pinned to the edge (the box and the pinning are app.css's); the page itself never
+  moves sideways. «ימים» is a list and needed only its sizes.
+- **הסעות.** The picture holds: a seat is a share of the car's width, so the driver is still
+  on the LEFT, two seats still side by side and a back row of three still three. Seats are
+  84px and up, so a car is taller and fewer are on the glass at once. Two ceilings written
+  for the smaller letters were lifted: a waiting man's chip stopped at 240px (it cut
+  «איברהים עודה» to a third), a seat's name at two lines (three now). The drag reads the
+  seats' rectangles off the document as they are, so it follows; `tests/transport.browser.mjs`
+  is unchanged and is NOT run with the mode on - see below.
+- **The reports.** v189 rebuilt the phone's card to tell the account in one column with every
+  box free to wrap, so it needed its sizes and nothing else (above); the wide table of the
+  detailed view scrolls inside its own box as it did. No line of `js/ui/reports.js` changed.
+- **The site's card (v189).** Its month is a grid of six or seven days that reaches into the
+  dialog's own padding by design (`margin: 0 -18px`); at 20px numbers and 27px counts it
+  still fits the dialog at 375px and nothing in it scrolls sideways.
+- **The tight day.** When fewer than two rows of the crew fit between the header and the
+  dock the app already has a smaller, MEASURED shape (`body.day-tight`, `js/ui/bars.js`):
+  the tab words leave the eyes and the dock's phrases go to an ellipsis. On the small phone
+  the mode reaches that shape sooner - on the seder's first station at 320x568 from the
+  start. The pictures-only tab bar is kept (it is what gives the list its room); the
+  ellipsis is not - the phrases wrap, and the dock is as tall as its words.
+- **The day's header on a phone.** The count «נרשמו 8 מתוך 14» keeps its place beside
+  undo, redo and «היום»; where it no longer fits beside them at its size (320px) its words
+  go to two lines there rather than the count taking a line of its own.
+- **The seder's first station on the 320px phone.** The journey's five marks are the size
+  design.css draws them (26px, the 18px digit inside) so that the five and the station's
+  name keep one line, and «יציאה» takes the width of its word.
+- **The 320px phone's tab bar** gives its side gaps and its seams to the five tabs, and
+  their words are 500 there: «מקדמות» in bold is wider than a fifth of the phone.
+- **Words that wrap rather than run out.** A man's name on the day wraps (app.css cuts it
+  to one line and an ellipsis); the day drawer's «היום» badge goes under the day's name;
+  on the 320px phone the assign sheet's three rates take what their words ask; the reports'
+  two cycles («שבועי», «דו־שבועי») take a line of their own; a seat's name in a car has no
+  line limit (three cut «מוחמד אבו ראס חוסיין» at 320).
+- **«כל העובדים» in the reports**: a man's row and its tick box are 52px.
+- **The shared plan's notices** (`js/ui/transport-share.js`) take a quarter of a short
+  screen (640px and under) instead of two fifths, and scroll inside it as before, so the
+  cars keep room for a whole seat under them.
+- **A site's name on a man's row, and a sum on the advances list,** were each one
+  unbreakable line; both may now break (measured with the phone's own large text doubled
+  on top of the mode: the badge ran 95px past a 440px screen).
+
+### With the mode OFF the app is what v190 is
+
+- Every screen of the list read twice with the mode off - `css/large.css` served, and
+  answered by an empty file - is the same reading, node for node: size, weight,
+  line-height, ink, ground, every target's rectangle (`tests/largetext.browser.mjs`).
+- A sample of the base's own sizes, read off `git archive 0790d3f` (v189) and written into
+  the suite, still reads as written. (It is v186's to the last figure but the reports'
+  card, which v189 rebuilt.)
+- v190 (`git archive 182ba97`) against this tree, mode off, every screen of the walk - 56
+  of them, on all three phones, both walked by this tree's `tests/screens.mjs` (a scratch
+  tool, not a suite): in the dark scheme 153 of the 168 readings identical (each text
+  node's words, place, size, weight, line-height, ink and ground; each target's
+  rectangle) and 156 of the 168 screenshots the same PNG; in the light scheme 156 of 168
+  and 159 of 168. The readings that differ are, on each phone, the three repairs below (in
+  the light scheme two: the chosen day of «ימים» was already right there), the new row in ⋯
+  and this build's item in «מה חדש» - nothing else. The pinned sample reads the same on
+  both trees. (Measured after the review's repairs, on their tree; with the mode off they
+  change nothing, by construction and by this reading.)
+
+### Changed for everybody (each one a fault by the app's own floors)
+
+1. **The chosen day of the week's «ימים» strip was white on the accent** - which in the
+   dark scheme is a light blue: **2.2:1** (the palette's own 4.5 floor). It is
+   `--on-accent` now, the ink made for that ground (8.6:1). One rule in `css/design.css`.
+   The light scheme is unchanged to the eye (white on dark blue both ways).
+2. **The ✕ that puts the undo bar away was nearly invisible** - **1.6:1** in the dark
+   scheme and **1.9:1** in the light one. The bar is the app's one inverse strip (paper
+   words on the ink, `css/app.css`), and since v169 its ✕ took `.btn-icon`'s `--ink-2`,
+   which is the bar's own colour give or take. It is the bar's word colour again, as
+   app.css meant it: 21:1 and 17:1. One rule in `css/design.css`. (Found because the walk
+   now puts the real bar up - the day's own ✕ through `editWithUndo` - where the first
+   audit only wrote a day.)
+3. **«עוד פרטים (טלפון, תעודת זהות…)» in a man's form was 39px tall** on the 440px phone,
+   where its words fit one line - under the 44px floor (law 9). 6px of padding; 45px. One
+   rule in `css/design.css`.
+
+Nothing else was found under a floor: no field under 16px on any screen, no other target
+under 44px, no other text under 4.5:1. Default sizes are otherwise not changed. All three
+are held from now on: with the mode off, on every screen of the walk, on every phone of it
+and in both schemes, `tests/largetext.browser.mjs` holds every text to 4.5:1 (a disabled control
+excepted), every target to 44px both ways and every field to 16px.
+
+### Paper, the picture, the files
+
+`css/large.css` is `@media screen` from its first brace to its last. Held:
+`tests/print.test.mjs`, unchanged, passes; the week laid out for print with the mode on is
+box for box the week without it; the shared picture of the week, of both reports and of
+the rides' summary is the SAME PNG, byte for byte, with the mode on and off (the picture is
+drawn on its own canvas in its own sizes from the words it reads). The xlsx, the CSV, the
+backup and the rescue file are built from the record and never from the screen.
+
+### With the phone's own text size
+
+`tests/mobile.test.mjs`'s "200% text" doubles every font-size rule of every sheet, and so
+doubles this one's too - under a class that is not there, so those cases are unchanged and
+pass. Measured the other way round as well: the mode ON and the cascade doubled on top of
+it (40px words on a 375px phone), the day in both views, the week, the crew, the advances
+list and the reports still do not scroll sideways and nothing leaves the side of the glass,
+on the 375 and the 440 phone. NOT on the 320 one: there 36-44px words leave the day's date
+and the tab bar up to 17px wider than the phone (measured, not held). It is not comfortable
+and it is not iOS Dynamic Type (`tests/mobile.test.mjs` says what Chromium cannot model).
+
+### Hebrew - PROPOSED, not read by the owner
+
+| where | words |
+|---|---|
+| the row's title | «תצוגה גדולה» |
+| the line under it | «אותיות וכפתורים גדולים יותר» |
+| inside the row | «מגדיל את האותיות, המספרים והכפתורים בכל המסכים. פועל במכשיר הזה בלבד.» |
+| the state | «מופעל במכשיר הזה» / «כבוי» (the words «הסעות» uses) |
+| the button | «הפעלת תצוגה גדולה במכשיר הזה» / «כיבוי תצוגה גדולה במכשיר הזה» |
+| «מה חדש», v191's item | «תצוגה גדולה» · «מי שקשה לו לקרוא אותיות קטנות מפעיל תצוגה גדולה: האותיות, המספרים והכפתורים גדלים בכל המסכים, רק בטלפון שלו.» · איפה: «הגדרות ← כללי ← תצוגה גדולה» (the path spelled the way every other item spells ⋯) |
+
+The row's words are pinned in `tests/largetext.test.mjs`, the news item in
+`tests/whatsnew.test.mjs`. No existing string changed.
+
+### The review (2026-11-11, before it was served)
+
+This build was reviewed through three lenses - the boot, the stylesheet's cascade, the
+screens in use - by probes in a real Chromium, most of them on a 320x568 phone (an iPhone
+SE, or a 375px one with Display Zoom, which is what a far-sighted man is likely to have set)
+that the walk did not have. Ten faults were confirmed, one was split, two were refuted (the
+same in v190, not this build's). Every confirmed one is repaired in this build, each with
+the check that would have caught it; the walk itself (`tests/screens.mjs`) gained what it
+was missing - the 320x568 phone, a twenty-letter name in the crew («מוחמד אבו ראס חוסיין»),
+the two screens it never opened («כל העובדים» in the reports, the migration's questions),
+and two readings: two controls lying over each other, and a control's words drawn past its
+own edge.
+
+| | what was found | what was done | held by |
+|---|---|---|---|
+| boot0 | The top bar and the tab bar painted small for a frame on every reload from the service worker, then the jump: the two scripts ran at the end of `<body>`, after the markup. | `js/store.js` and `js/ui/display.js` in the head, the ear beside them (above). | `tests/largetext.test.mjs` (both in the head); `tests/largetext.browser.mjs` (every frame painted with the tab bar carries the class, on a reload at a quarter of the CPU); `tests/build.test.mjs` (moved, below); `tests/startup.blank.test.mjs`, unchanged. |
+| boot1 | A second window of the phone kept its size and its row said the opposite of what the phone held. | The window follows the phone through the `storage` event, when nobody is typing in it. | two windows of one context: on in one, the other follows; off while the other has a dialog open with words in it - not moved; shut - it follows. |
+| css0 | Every absent man's cell on the week read «—נעדר»: the copy of `.week-cell`'s size beat app.css's `font-size: 0`, which had no copy. | A value that is not a size - `font-size: 0`, `font: inherit` - is said again unchanged (block 3: 625 rules). | Node: every `font-size: 0` of the three sheets restated; browser: the absent cell 0px, its dash 18. |
+| css1 | «כל העובדים»: each man's row with its tick box 45px. | 52px, the box too. | the walk opens the list. |
+| use0 | «מוחמד אבו ראס» cut to «מוחמד אבו…» on the day at 320. | The name wraps. | the walk at 320 with the long name: nothing cut. |
+| use1 | The tap that turned the mode on took the switch out from under the finger - at 320 from y 434 to 852 through «מה חדש»; a second tap opened the reminders. | The sheet is scrolled by what the switch moved, then onto the glass. | 320 and 375, from ⋯ and through «הראה לי»: both taps, the switch under the finger and on the glass with its state. |
+| use2 | The seder's first station at 320: the dock 29px over the header, the count cut in half, nothing of the day on the glass. | The count beside undo and redo on two lines; the five marks 26px under 360px; «יציאה» at its word's width. | the station at every phone: header and dock apart, the count whole, the day started; from 375 a site and its first man whole. |
+| use3 | «דו־שבועי · 9» drawn under «תצוגה מפורטת» at 320. | The two cycles take a line of their own. | words past a control's edge, every screen. |
+| use4 | The month's days on the two cards forced to 52px in a 45px column at 320: each lay 3.8px over its neighbour, and a tap on the seam opened the other date. | The days keep their column; the one exception to 52 (above). | no two controls over each other, every screen; a day at least 44x62. |
+| use5 | At 320 with the shared plan's two notices up, the cars had 67px under the waiting men - no seat whole. | A quarter of a short screen for the notices. | `tests/transport.share.browser.mjs`: the first meeting on a 320x568 phone with the mode on - room under the waiting men for the tallest seat on the screen, the notices scrolling in their box, all four buttons reached there. (On the walk's own crew, with the twenty-letter name in a seat: 153px for a 132px seat.) |
+| use6 (split) | At 320 the migration's questions opened scrolled to their first button, the title cut to «החלטה». | With the mode on the dialog is entered at its title, at its top (`js/ui/migration.js`). | the walk: every dialog opens with its title on the glass; the migration's questions opened twice at 320. |
+
+**What was not done, and why.**
+- **use6's older half.** Opened a SECOND time in a session, the migration's questions begin
+  where the last opening was read to - in v190 too, with the mode off (at 320, the title
+  142px above the glass): `js/ui/modal.js` focuses the first button, the title has no
+  `tabindex`, and the box keeps its scroll while hidden. The cure the other dialogs have is
+  one line each (`tabindex="-1"` on the title and `scrollTop = 0` at opening); here it runs
+  only with the mode on, because with the mode off this build is v190 to the pixel. For
+  everybody it is the owner's to decide, in a build of its own.
+- **use2 at 320x568: a whole site and a man at the top of the station** - the review's own
+  "should". The header (173px), the dock with the journey's row (205), the top bar and the
+  tab bar leave the day 65px there: the count is whole and the first site's name shows; a
+  short scroll folds the header and gives the day 200px and more. Getting a man on the glass
+  at the top would take a control off the header or the dock; neither was.
+
+**Found while repairing, and repaired** (not in the review):
+- **A floor that lowered.** Block 2's `min-height` and `min-width` of 52 are `!important`,
+  and so beat every control's own larger value: the message box from 120px to 52 (held up
+  by its rows), an empty day of the worker's month from 62 to 52, of the site's from 72, the
+  crew's card buttons and the finder's two from 64 and 56 wide. Each is said again (block 2);
+  the suite toggles the class on every screen and finds no control smaller with it.
+- On the 320px phone: «מקדמות» 2.6px past its tab; the day drawer's today 14px past its
+  button; «שעות נוספות» in the assign sheet 3px; a seat's name cut at three lines
+  («מוחמד אבו ראס חוסיין» is four there). Each is in «The screens that changed shape».
+
+### Moved expectations
+
+- `tests/whatsnew.test.mjs`: v191's item at the top of `EXPECTED`; the ways «הראה לי» can go
+  gain `display`; and the check that the file never turns a per-phone switch on names
+  `displaySetLarge` beside `transportSetEnabled` (a strengthening).
+- `tests/whatsnew.browser.mjs`: 190 at the head of the builds that have news; the ways there
+  are gain `display`, which lands on ⋯ with the row open - and the mode NOT on (no class, no
+  key, the switch on the glass).
+- `tests/smoke.mjs`: the sheet's list of groups is ten, «תצוגה גדולה» third.
+- `tests/settings-order.browser.mjs`: «כללי» has four cards (the sheet is 4-3-3, ten cards);
+  ORDER, POSTURE and FOLD gain the row; the inventory gains its one button
+  (`displayLargeSwitch`) and five runs of words (a second «כבוי»); "nine cards" → "ten",
+  eight rows → nine. Every other control and sentence of the v171 inventory is as it was.
+- `tests/gate.integrity.test.mjs`: two helpers named (`screens.mjs`, `readability.audit.mjs`).
+- `package.json`: `test:largetext` in `npm test`, `test:largetext-browser` in `test:all`.
+- `tests/build.test.mjs`: "the sentinel is installed before the first script the page
+  loads" became: before the sentinel the page loads exactly two scripts, `js/store.js` then
+  `js/ui/display.js`, with the ear installed in the head before the first of them; the
+  sentinel before every other script; the ear held to the sentinel's own rules (it calls
+  nothing the app defines and never touches the disk); and the sentinel says what the ear
+  heard. The new sheet and the new script are in the shell, and it holds them there.
+- `tests/transport.share.browser.mjs`: its phones can be opened with the mode on, and one
+  block more - the first meeting on a 320x568 phone with it on (the review's use5).
+- `tests/screens.mjs` (the walk, not a suite): a third phone, 320x568; the third man of the
+  crew is «מוחמד אבו ראס חוסיין» (was «מוחמד אבו ראס»); «כל העובדים» and the migration's
+  questions are opened; two readings more - controls over each other, words past their
+  control. The pinned sample of the base's sizes did not move with them.
+- Not moved, and said so: the waits for `farkad:openBuilds` this build had put into
+  `tests/settings-order.browser.mjs` and `tests/daycheck.browser.mjs` are gone - v189 solved
+  the same race by name (`tests/census.mjs`), and `tests/largetext.browser.mjs` reads the
+  disk the same way: that one key left out by its name, and `censusOnly()` called once.
+
+### Known not covered
+
+- **Nobody far-sighted has looked at it.** Every number here is a computed style in a
+  headless Chromium. Whether 18px is enough for this man at his arm's length, whether 22px
+  names are, whether the dark scheme or the light one is the one he reads - nobody knows
+  until he says. The sizes are in one file and are his to correct.
+- **Not tried on a real iPhone.** Not the row in ⋯ under a thumb, not the tab bar's height
+  above the home indicator at the larger size, not `<details>` in a home-screen WebKit, not
+  the first paint of an installed app. iOS's own Larger Text and Bold Text are not
+  modelled by anything here.
+- **The rides' drag was not driven with the mode on.** `tests/transport.browser.mjs` drags
+  by coordinates it reads off the document, with the mode off, and passes unchanged; the
+  mode changes no line of `js/ui/transport.js`, and the seats' rectangles are read at drag
+  time. But no test lifts a man and drops him on a seat at the large size, and the drag has
+  still never been tried on a real phone at ANY size (v174).
+- **The small phone is tight.** At 320x568 with the mode on, the seder's first station
+  shows the day's header, the journey's dock and 65px of the day between them (the first
+  site's name) until the page is scrolled and the header folds; the tab bar there is
+  pictures only (the app's own tight shape), and the day by worker shows two whole rows
+  (three without the mode). At 375x667 the station shows its first site and that site's
+  first man. It is measured, not hidden; a larger phone has room.
+- **The month's days on the 320px phone are 45px wide**, the one target under 52 in the
+  mode (above).
+- **The mode and the phone's own text doubled, on the 320px phone**, is not held: the
+  day's date and the tab bar run up to 17px past the side (above).
+- **Line-height is held where text wraps.** A single line set at 1.0-1.3 inside a fixed
+  mark (a site's letter, a station's number, a dot) is left as it is.
+- **Block 3 of `css/large.css` is kept by hand.** A size, weight or line-height added to one
+  of the three sheets later must be said again there in the same commit; the suite catches
+  the screens it walks (under 18px, under 500, a weight that went down), not a screen it
+  does not open.
+- **A screen not in `tests/screens.mjs` is not measured**: the held-records list in ⋯,
+  the storage and recovery banners, a restore in progress, the payslips mid-run and the
+  site card's other months (their sizes are restated like every other rule, but no walk
+  opens them). The shared rides' notices are measured on one phone only, for the room they
+  leave the cars (`tests/transport.share.browser.mjs`).
+- The emulator suites and `test:release` were not run for this build (it touches no rule
+  and no sync file).
+
 ## v190 — five faults the review of v189 found, repaired: a double tap in «לא נרשמו», midnight under an open sheet, «🧹 רוקן אתר» after midnight, and two in the shared rides (candidate - not served)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**

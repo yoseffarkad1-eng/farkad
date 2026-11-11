@@ -259,12 +259,32 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
 
     const bannerAt = page.indexOf('id="bootBanner"');
     const sentinelAt = page.indexOf('window.farkadBootSentinel');
-    const firstScriptAt = page.indexOf('<script src=');
     check('its element is parsed before the sentinel that reveals it',
         bannerAt > -1 && sentinelAt > bannerAt, `banner@${bannerAt} sentinel@${sentinelAt}`);
-    check('and the sentinel is installed before the first script the page loads',
-        firstScriptAt > -1 && sentinelAt < firstScriptAt,
-        `sentinel@${sentinelAt} first <script src>@${firstScriptAt}`);
+    // MOVED in v191: this was "the sentinel is installed before the first script the page
+    // loads". Two scripts now load in the head - js/store.js, then js/ui/display.js, so
+    // that «תצוגה גדולה» is on <html> before a single element of the body can be painted
+    // (v191's review: the top bar and the tabs were drawn small for a frame and jumped).
+    // What still holds, and is held here: something is LISTENING before every script the
+    // page loads. Before the two of the head, the ear beside them (it keeps what it hears
+    // for the sentinel); before every other one, the sentinel itself.
+    const earAt = page.indexOf('window.farkadBootEar');
+    const scripts = [...page.matchAll(/<script src="([^"]+)"/g)].map(match => ({ src: match[1], at: match.index }));
+    const before = scripts.filter(script => script.at < sentinelAt).map(script => script.src);
+    same('before the sentinel, the page loads two scripts and no others: Store, then the display',
+        before, ['js/store.js', 'js/ui/display.js']);
+    check('and the ear is installed before the first of them, in the head',
+        earAt > -1 && scripts.length > 0 && earAt < scripts[0].at && earAt < page.indexOf('</head>'),
+        `ear@${earAt} first <script src>@${scripts.length ? scripts[0].at : -1} </head>@${page.indexOf('</head>')}`);
+    check('the sentinel is installed before every other script the page loads',
+        scripts.filter(script => !before.includes(script.src)).every(script => script.at > sentinelAt),
+        `sentinel@${sentinelAt}`);
+    // The ear is held to the sentinel's own rules: it may call nothing the app defines and
+    // never touches the disk, and the sentinel says what it heard.
+    const ear = earAt > -1 ? page.slice(page.lastIndexOf('<script>', earAt), page.indexOf('</script>', earAt)) : '';
+    check('the ear calls nothing the app defines and never touches the disk',
+        ear.length > 0 && !/\b(el|clear|button|State|Store|Recovery|render|askTell)\s*\(/.test(ear)
+        && !/localStorage|indexedDB|sessionStorage/.test(ear), `${ear.length} chars`);
 
     // The sentinel's own body. It may call getElementById and nothing else this app
     // defines: el, clear, button, State, Store, Recovery and render are every one of them
@@ -283,6 +303,10 @@ const shellPaths = SHELL.map(entry => entry.replace('./', ''));
     // this one is silent, so a person never gets two banners about one failure.
     check('and it stands down when the app takes error reporting over',
         /standDown/.test(sentinel) && /standDown/.test(appCode));
+    // v191: and it says what the ear heard before it existed (tests/startup.blank.test.mjs
+    // withholds js/store.js and breaks it, in a real browser, and reads the banner).
+    check('and it says what the ear heard before it existed',
+        /farkadBootEar/.test(sentinel) && /show\(heard\[/.test(sentinel), `${sentinel.length} chars`);
 
     // NOTHING OFF THIS ORIGIN IS IN FRONT OF THE FIRST RENDER.
     //

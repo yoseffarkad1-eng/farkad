@@ -5132,9 +5132,12 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // (a way to get a record back, so it left the device section); version, device,
   // technical. The same nine titles, none added, none dropped, none reworded.
   // tests/settings-order.browser.mjs holds the sections, what is open, and the inventory.
-  check('the sheet has the nine groups, including the phone reminders and the transport switch, in the board order',
+  // v191: A TENTH, and the list moves because that is the change: «תצוגה גדולה», in the
+  // first section straight before the rides' switch - the other thing a phone turns on
+  // for itself (js/ui/display.js). The nine that were here are in the order they were.
+  check('the sheet has the ten groups, including the phone reminders, the transport switch and the large display, in the board order',
     JSON.stringify(heads) === JSON.stringify(
-      ['ענן וסנכרון', 'תזכורות בטלפון', 'הסעות', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום',
+      ['ענן וסנכרון', 'תזכורות בטלפון', 'תצוגה גדולה', 'הסעות', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום',
                 'עדכון וגרסה', 'מצב המכשיר', 'מידע טכני']),
     JSON.stringify(heads));
 
