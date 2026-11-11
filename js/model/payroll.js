@@ -115,6 +115,30 @@ const PAYBOOK_RULES = Object.freeze({
     unlistedAdvanceMeansZero: false
 });
 
+// THE DAY TRACKING BEGINS, AS THE OWNER DECIDED IT (decision 75, his answer of 2026-11-11:
+// "30/10" - the first day of the fortnight 30/10-12/11, which was current as he answered).
+//
+// It is what the activation screen OFFERS, not something this file writes: the opening is
+// still one entry a person confirms, on the day the field holds. It is here because the
+// screen's own default - "the first day of the fortnight that holds today" - stops being
+// his day the moment the next fortnight begins (13/11), and he may well press after that;
+// a person who pressed without touching the field would then have fixed, for good, a day
+// he did not choose. And the later day is the worse one, measured
+// (tests/activation.test.mjs, V14): a period with work that nobody closed and that ends
+// before tracking begins can no longer be closed at all once the record is on - the
+// review page refuses it (`before-tracking`) and the old dialog is no longer a door.
+//
+// A day that has not come yet cannot be an opening (planOpening, `date`), so before it
+// the offer is what it was: the first day of the fortnight that holds today.
+const PAYBOOK_TRACKING_DAY_DECIDED = '2026-10-30';
+
+function paybookTrackingDefault(today) {
+    const decided = PAYBOOK_TRACKING_DAY_DECIDED;
+    if (typeof today !== 'string' || !isRealDate(today)) return null;
+    if (typeof decided === 'string' && isRealDate(decided) && decided <= today) return decided;
+    return periodRangeFor({}, today).from;
+}
+
 // The statuses, by key. The five labels are the owner's own words and nothing else has a
 // label yet: `review`, `unknown` and `none` are proposed in docs/payroll-closure.md and a
 // Hebrew string is a product decision (iron law 6), not something a model file invents.
@@ -2062,6 +2086,8 @@ function paybookActivationView(schedule, date, stamp) {
 //       archive    planArchive's totals: the record's size, what could leave it
 //       months     planMonths (when that file is loaded): its plan, for monthsPlanLines
 //       carry      the carry approval's state and how many rows it moves
+//       tracking   the day offered (paybookTrackingDefault), whether it is the day the
+//                  owner decided, the day asked, and what the day asked would strand
 //
 // The screen draws this and computes nothing (js/ui/accounts.js, accDrawActivate).
 function planActivation(schedule, date, stamp) {
@@ -2097,7 +2123,15 @@ function planActivation(schedule, date, stamp) {
     const archive = planArchive(view, stamp.today);
     const months = typeof planMonths === 'function' ? planMonths(view, stamp.today) : null;
     const carry = paybookCarryApproval(view);
+    // THE DAY ASKED, beside the day offered. `stranded` are the periods with work that
+    // nobody closed, that begin on or after the day offered and end up BEFORE tracking
+    // under the day asked: once the record is on they cannot be closed by any door.
+    // Empty whenever the day asked is the day offered or earlier.
+    const offeredDay = paybookTrackingDefault(stamp.today);
+    const stranded = migration.unclosed.filter(row => row.tracking === 'before' && offeredDay !== null && row.from >= offeredDay)
+        .map(row => ({ workerId: row.workerId, name: row.name, from: row.from, to: row.to, gross: row.gross }));
     out.report = {
+        tracking: { offered: offeredDay, decided: offeredDay === PAYBOOK_TRACKING_DAY_DECIDED, asked: day, stranded },
         debt,
         debtTotals: { men: debt.length, old: paybookSum(debt.map(row => row.old)), new: paybookSum(debt.map(row => row.new)) },
         legacy: { paymentUnknown: migration.paymentUnknown.length, unclosed: migration.unclosed.length,

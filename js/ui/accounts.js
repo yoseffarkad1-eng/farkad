@@ -280,6 +280,11 @@ const ACC_TEXT = Object.freeze({
     activationSize: 'גודל הרישום בשרת היום',
     activationArchiveNote: 'חשבון שנסגר ושולם במלואו עובר אחרי 14 יום לארכיון בשרת. חודש שנסגר לכל העובדים יכול לעבור לארכיון אחרי חצי שנה, ורק כשמבקשים. שום דבר לא נמחק והכול נשאר במכשיר - אבל יום בחודש שעבר לארכיון כבר אי אפשר לשנות.',
     activationCarry: 'ההפעלה מאשרת גם, פעם אחת, שיתרת מקדמה עוברת לחשבון הבא. שורות שישתנו:',
+    // v190, PROPOSED: the day the owner decided (decision 75, 2026-11-11), what choosing it
+    // means for a fortnight that has already ended, and the warning for a LATER day.
+    activationTrackingDecided: 'יום תחילת המעקב שנקבע:',
+    activationTrackingMeans: 'תקופה מהיום הזה שעוד לא נסגרה נסגרת בעמוד החדש. תקופה שכבר נסגרה בדרך הישנה לא משתנה, ומופיעה ברשימה «סגירות ישנות לבדיקה». אחרי ההפעלה אי אפשר לשנות את היום הזה.',
+    activationTrackingStranded: 'ביום שבחרת, תקופות עם עבודה שעוד לא נסגרו נשארות לפני תחילת המעקב. אחרי ההפעלה אי אפשר יהיה לסגור אותן. מספר התקופות:',
     activationBeforeTitle: 'לפני שמפעילים',
     activationBeforePhones: 'כל הטלפונים מעודכנים לגרסה הזאת.',
     activationBeforeBackup: 'נלקח היום גיבוי מהטלפון הזה (⋯ ← גיבוי).',
@@ -2321,7 +2326,9 @@ function accDrawOpening(node) {
 //   4. THE OPENING, by the server-first door: one transaction, one closed document, or
 //      nothing. This is the entry that turns the record on, on every phone that holds it.
 function accDrawActivate(node) {
-    const form = ACC.activation || (ACC.activation = { date: periodRangeFor({}, todayStr()).from,
+    // THE DAY OFFERED is the model's (paybookTrackingDefault): the day the owner decided,
+    // once it has come; before it, the first day of the fortnight that holds today.
+    const form = ACC.activation || (ACC.activation = { date: paybookTrackingDefault(todayStr()) || periodRangeFor({}, todayStr()).from,
         busy: false, message: '', attempted: false });
     const leave = () => { ACC.activating = false; ACC.activation = null; accGo('list', { flash: '' }); };
     accHead(node, ACC_TEXT.activationTitle, null, leave);
@@ -2339,6 +2346,10 @@ function accDrawActivate(node) {
     node.appendChild(accField(ACC_TEXT.openingDay, date));
     const echo = el('p', 'acc-hint');
     node.appendChild(echo);
+    // v190: what the day means, and - only for a day LATER than the one offered - what it
+    // would leave behind. Both drawn from planActivation's report; nothing computed here.
+    const tracking = el('div', 'acc-activation-tracking');
+    node.appendChild(tracking);
 
     node.appendChild(el('h3', 'acc-h3', ACC_TEXT.activationBeforeTitle));
     const checks = el('ul', 'acc-activation-before');
@@ -2446,6 +2457,20 @@ function accDrawActivate(node) {
                 `${kb(facts.archive.liveBytes)} ${ACC_TEXT.groupOf} ${kb(facts.archive.limitBytes)}`, '', 'size'));
             size.appendChild(el('p', 'acc-hint', ACC_TEXT.activationArchiveNote));
             report.appendChild(size);
+        }
+        clear(tracking);
+        if (drawn.report && drawn.report.tracking) {
+            const facts = drawn.report.tracking;
+            if (facts.decided) {
+                tracking.appendChild(el('p', 'acc-note acc-activation-decided',
+                    `${ACC_TEXT.activationTrackingDecided} ${isolateLtr(accDay(facts.offered))}. ${ACC_TEXT.activationTrackingMeans}`));
+            }
+            if (facts.stranded.length > 0) {
+                const warn = el('p', 'acc-note acc-note-warn acc-activation-stranded',
+                    `${ACC_TEXT.activationTrackingStranded} ${isolateLtr(String(facts.stranded.length))}`);
+                warn.setAttribute('role', 'alert');
+                tracking.appendChild(warn);
+            }
         }
         const other = drawn.reasons.filter(code => code !== 'carry-approval-needed')[0];
         message.textContent = form.message || (form.attempted && other ? accRefusalText(other) : '');

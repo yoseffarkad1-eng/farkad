@@ -847,6 +847,189 @@ let ACTIVATED = null;
 }
 
 // ------------------------------------------------------------------------------------
+// v190. THE TRACKING DAY THE OWNER CHOSE (decision 75, 2026-11-11): 2026-10-30, the first
+// day of the fortnight that was current as he answered - and the day he presses the
+// button is LATER, possibly after that fortnight has ended and pay day has passed. So:
+// some men's accounts for 30/10-12/11 are by then CLOSED THE OLD WAY, one is not, and
+// there are advances inside it. This is that record, walked with its figures.
+//
+//   AHMAD   weekly    300 a day   both weeks closed the old way; 400 taken 2/11, deducted in week 1
+//   OMAR    weekly    250 a day   week 1 closed the old way; week 2 NOT closed; 300 taken 9/11
+//   KHALED  biweekly  350 a day   closed the old way: 4,200, 1,000 taken 3/11 and deducted; 200 more on 13/11
+//   NASSER  biweekly  500 a day   closed the old way: 6,000, 7,000 taken 4/11, 6,000 deducted, 1,000 carried
+//   SALIM   biweekly  400 a day   NOT closed: 4,800, 800 taken 5/11
+{
+    const DAY = '2026-11-14';                                    // the day he presses: a Saturday, the next fortnight's second day
+    const DECIDED = '2026-10-30';
+    const P = { from: '2026-10-30', to: '2026-11-12' };
+    const WK1 = { from: '2026-10-30', to: '2026-11-05' };
+    const WK2 = { from: '2026-11-06', to: '2026-11-12' };
+    const NEXT = { from: '2026-11-13', to: '2026-11-26' };
+    const WORKED = ['2026-10-30', '2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05',
+        '2026-11-06', '2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13'];
+    const MEN = ['w_ahmad', 'w_omar', 'w_khaled', 'w_nasser', 'w_salim'];
+    const now = (device, hour = '10') => stamp(DAY, device.id, hour);
+
+    function record() {
+        const d = phone('d_v14seed', { today: DAY });
+        const schedule = d.State.schedule;
+        schedule.workers = [
+            { id: 'w_ahmad', name: 'אחמד', active: true, dailyRate: 300, hourlyRate: 0, payCycles: '2026-09-11=weekly' },
+            { id: 'w_omar', name: 'עומר', active: true, dailyRate: 250, hourlyRate: 0, payCycles: '2026-09-11=weekly' },
+            { id: 'w_khaled', name: 'חאלד', active: true, dailyRate: 350, hourlyRate: 0 },
+            { id: 'w_nasser', name: 'נאסר', active: true, dailyRate: 500, hourlyRate: 0 },
+            { id: 'w_salim', name: 'סלים', active: true, dailyRate: 400, hourlyRate: 0 }
+        ];
+        schedule.places = SITES();
+        given('the roster is committed', d.State.commitRoster() === true);
+        WORKED.forEach(day => MEN.forEach(man => given(`a day is recorded (${man} ${day})`,
+            d.State.commit(d.call('assignPlace', d.State.schedule, day, man, 'actual', 'p_a', undefined, 0)) === true)));
+        const advance = (man, day, sum) => given(`an advance is recorded (${man} ${sum})`, d.State.commitMany(
+            d.call('recordNewAdvance', d.State.schedule, man, day, sum, 'בדיקה', `${day}T09:00:00.000Z`, d.id, 'cash')) === true);
+        advance('w_ahmad', '2026-11-02', 400);
+        advance('w_omar', '2026-11-09', 300);
+        advance('w_khaled', '2026-11-03', 1000);
+        advance('w_nasser', '2026-11-04', 7000);
+        advance('w_salim', '2026-11-05', 800);
+        given('the carry is approved, long ago', d.State.commitMany([d.call('recordCarryApproval', d.State.schedule,
+            d.call('planCarryMigration', d.State.schedule), '2026-09-01T08:00:00.000Z', d.id)]) === true);
+        // THE OLD DIALOG'S WRITER, on pay day, with the deduction it proposes by itself.
+        const closeOld = (man, period, when) => given(`${man} ${period.from} is closed the old way`, (changes =>
+            changes.length > 0 && d.State.commitMany(changes) === true)(
+            d.call('closePeriodChanges', d.State.schedule, man, period.from, period.to, when, d.id, undefined)));
+        closeOld('w_ahmad', WK1, '2026-11-06T08:00:00.000Z');
+        closeOld('w_ahmad', WK2, '2026-11-13T08:00:00.000Z');
+        closeOld('w_omar', WK1, '2026-11-06T08:00:00.000Z');
+        closeOld('w_khaled', P, '2026-11-13T08:00:00.000Z');
+        closeOld('w_nasser', P, '2026-11-13T08:00:00.000Z');
+        advance('w_khaled', '2026-11-13', 200);
+        return d;
+    }
+    // What each man reads: what he owes going into the fortnight that is open, the figure
+    // on his card, each advance [day, given, deducted, left], and his closures
+    // [from, to, wage, deducted, left over].
+    const reads = device => S(device).workers.map(man => ({
+        man: man.id,
+        carried: device.call('advanceCarryInto', S(device), man.id, NEXT.from),
+        card: (device.call('openAdvanceBalance', S(device), man.id) || { total: 0 }).total || 0,
+        advances: Object.keys(S(device).advances).map(id => S(device).advances[id]).filter(one => one.workerId === man.id)
+            .sort((x, y) => (x.date < y.date ? -1 : 1))
+            .map(one => (left => [one.date, left.given, left.deducted, left.left])(device.call('advanceOutstanding', S(device), one.id))),
+        closed: (closed => Object.keys(closed).sort().map(from => [from, closed[from].periodTo, closed[from].gross, closed[from].deducted]))(
+            device.call('closedPeriods', S(device), man.id) || {})
+    }));
+    const sheets = device => JSON.stringify([device.call('payrollReport', S(device), '2026-10-01', '2026-11-30'),
+        device.call('payrollReport', S(device), P.from, P.to), device.call('payrollReport', S(device), NEXT.from, NEXT.to),
+        device.call('invoiceReport', S(device), '2026-10-01', '2026-11-30'), S(device).days]);
+    const turnedOn = async (id, base, day) => {
+        const cloud = cloudFor(base);
+        const device = join_(id, base, cloud, { today: DAY });
+        await settled([device]);
+        const plan = device.call('planOpening', S(device), day, now(device));
+        given(`the opening on ${day} is allowed, asked on ${DAY}`, plan.ok === true && (await device.Sync.activationRefusal()) === null, JSON.stringify(plan.reasons));
+        given('the record is turned on', (await device.Sync.transactPaybook(plan)).state === 'closed');
+        await settled([device]);
+        return { cloud, device };
+    };
+
+    suite('V14a: the day the screen offers - the day the owner decided, once it has come; and never a day he did not choose');
+
+    const any = phone('d_v14any');
+    same('the decided day is 2026-10-30, a Friday that opens a fortnight for a fortnightly man and a week for a weekly one',
+        [any.global('PAYBOOK_TRACKING_DAY_DECIDED'), (range => [range.from, range.to, range.cycle])(any.call('periodRangeFor', {}, DECIDED)),
+            (range => [range.from, range.to, range.cycle])(any.call('periodRangeFor', { payCycles: '2026-09-11=weekly' }, DECIDED))],
+        [DECIDED, [P.from, P.to, 'biweekly'], [WK1.from, WK1.to, 'weekly']]);
+    same('BEFORE that day has come, the offer is what it was: the first day of the fortnight that holds today',
+        ['2026-10-15', '2026-10-16', '2026-10-29'].map(day => any.call('paybookTrackingDefault', day)), ['2026-10-02', '2026-10-16', '2026-10-16']);
+    same('FROM that day on it is that day - inside its own fortnight, in the next one (where "the fortnight that holds today" would say 13/11), and months later',
+        ['2026-10-30', '2026-11-11', '2026-11-12', '2026-11-13', DAY, '2026-11-27', '2027-01-10'].map(day => any.call('paybookTrackingDefault', day)),
+        [DECIDED, DECIDED, DECIDED, DECIDED, DECIDED, DECIDED, DECIDED]);
+    same('a day that is not a day offers nothing', [any.call('paybookTrackingDefault', 'soon'), any.call('paybookTrackingDefault', null)], [null, null]);
+
+    suite('V14b: activated on 14/11 with the tracking day 30/10 - the fortnight that has ended, closed the old way for some and for one not');
+
+    const base = record();
+    const before = { reads: reads(base), sheets: sheets(base) };
+    same('BEFORE, the old arithmetic: what was closed the old way is on its closures; what was not is assumed to have come off a wage nobody closed (Omar and Salim carry 0 and their cards say 300 and 800)',
+        before.reads, [
+            { man: 'w_ahmad', carried: 0, card: 0, advances: [['2026-11-02', 400, 400, 0]], closed: [[WK1.from, WK1.to, 1800, 400], [WK2.from, WK2.to, 1800, 0]] },
+            { man: 'w_omar', carried: 0, card: 300, advances: [['2026-11-09', 300, 0, 300]], closed: [[WK1.from, WK1.to, 1500, 0]] },
+            { man: 'w_khaled', carried: 0, card: 200, advances: [['2026-11-03', 1000, 1000, 0], ['2026-11-13', 200, 0, 200]], closed: [[P.from, P.to, 4200, 1000]] },
+            { man: 'w_nasser', carried: 1000, card: 1000, advances: [['2026-11-04', 7000, 6000, 1000]], closed: [[P.from, P.to, 6000, 6000]] },
+            { man: 'w_salim', carried: 0, card: 800, advances: [['2026-11-05', 800, 0, 800]], closed: [] }
+        ]);
+    const drawn = base.call('planActivation', S(base), base.call('paybookTrackingDefault', DAY), now(base));
+    same('THE SCREEN, on 14/11: it offers 30/10 as the decided day, the step is allowed, and that day strands nothing',
+        [drawn.state, drawn.ok, drawn.reasons, drawn.opening.changes.map(change => change.value.date), drawn.report.tracking],
+        ['offered', true, [], [DECIDED], { offered: DECIDED, decided: true, asked: DECIDED, stranded: [] }]);
+    same('what it tells him will read differently: the two men nobody closed - Omar 0 to 300, Salim 0 to 800 - and nobody who was closed',
+        drawn.report.debt.map(row => [row.workerId, row.old, row.new]), [['w_omar', 0, 300], ['w_salim', 0, 800]]);
+    same('and the old closures that will wait for an answer: five (Ahmad two, Omar one, Khaled, Nasser); the periods nobody closed: two', [drawn.report.legacy.paymentUnknown, drawn.report.legacy.unclosed], [5, 2]);
+
+    const { device: a } = await turnedOn('d_v14a', base, DECIDED);
+    const after = reads(a);
+    same('AFTER: every closure made the old way is what it was - its wage, its deduction, what it left over - and nothing is taken twice',
+        after.map(row => row.closed), before.reads.map(row => row.closed));
+    same('every advance has the SAME given / deducted / left as before: Khaled\'s 1,000 is not owed again, Nasser owes the same 1,000, Ahmad nothing',
+        after.map(row => row.advances), before.reads.map(row => row.advances));
+    same('the card figures did not move', after.map(row => row.card), before.reads.map(row => row.card));
+    same('THE ONE THING THAT MOVED: what Omar and Salim carry into the open fortnight - 300 and 800, the advances of a period nobody closed, now a debt until somebody deducts it',
+        after.map(row => [row.man, row.carried]), [['w_ahmad', 0], ['w_omar', 300], ['w_khaled', 0], ['w_nasser', 1000], ['w_salim', 800]]);
+    same('no day, no wage, no pay sheet over any range asked and no invoice line moved', sheets(a) === before.sheets, true);
+    same('the sum of what the five owe on advances: 2,300 before by their cards, 2,300 after on the accounts page - nothing lost, nothing doubled',
+        [before.reads.reduce((sum, row) => sum + row.card, 0), a.call('accountsList', S(a), DAY).totals.debt], [2300, 2300]);
+
+    const rows = a.call('accountsList', S(a), DAY).rows.map(row => ({ man: row.workerId, status: row.status, tracking: row.tracking.from, debt: row.debt, wageDue: row.wageDue,
+        pending: row.pending.map(one => [one.from, one.to, one.gross]), before: row.beforeTracking.length,
+        old: row.paymentUnknown.map(one => [one.periodFrom, one.periodTo, one.gross, one.deducted]) }));
+    same('THE ACCOUNTS PAGE: tracking from 30/10 for every man; the old closures on «סגירות ישנות לבדיקה» with their own figures; the two unclosed periods WAITING INSIDE tracking; nothing before it',
+        rows, [
+            { man: 'w_ahmad', status: 'waiting', tracking: DECIDED, debt: 0, wageDue: 0, pending: [], before: 0, old: [[WK1.from, WK1.to, 1800, 400], [WK2.from, WK2.to, 1800, 0]] },
+            { man: 'w_omar', status: 'waiting', tracking: DECIDED, debt: 300, wageDue: 0, pending: [[WK2.from, WK2.to, 1500]], before: 0, old: [[WK1.from, WK1.to, 1500, 0]] },
+            { man: 'w_khaled', status: 'waiting', tracking: DECIDED, debt: 200, wageDue: 0, pending: [], before: 0, old: [[P.from, P.to, 4200, 1000]] },
+            { man: 'w_nasser', status: 'waiting', tracking: DECIDED, debt: 1000, wageDue: 0, pending: [], before: 0, old: [[P.from, P.to, 6000, 6000]] },
+            { man: 'w_salim', status: 'waiting', tracking: DECIDED, debt: 800, wageDue: 0, pending: [[P.from, P.to, 4800]], before: 0, old: [] }
+        ]);
+    same('an account closed the old way cannot be closed a second time through the pay book - refused with `closed`, for a fortnightly man and a weekly one',
+        [a.call('planClosure', S(a), 'w_khaled', P, { method: 'cash', allocations: {} }, now(a)).reasons,
+            a.call('planClosure', S(a), 'w_ahmad', WK1, { method: 'cash', allocations: {} }, now(a)).reasons], [['closed'], ['closed']]);
+    same('and it asks NOTHING of him by force: nobody is «לבדיקה», nothing is held, no closure is blocked by an unanswered old one',
+        [rows.filter(row => row.status === 'review').length, a.call('farkadWritesBlocked'), a.Sync.heldRecords().length], [0, false, 0]);
+
+    // The man nobody closed: his fortnight is closed through the new page, the advance comes off.
+    const offer = a.call('planClosure', S(a), 'w_salim', P, { method: 'cash', allocations: {} }, now(a, '11'));
+    same('SALIM, not closed: the review page offers his fortnight - 4,800, and the 800 on its one advance - and waits for a person to say how much comes off',
+        [offer.reasons, offer.review.gross, offer.review.advances.map(one => [one.date, one.left, one.offered])], [['allocation-missing'], 4800, [['2026-11-05', 800, true]]]);
+    const choice = { method: 'cash', allocations: { [offer.review.advances[0].advanceId]: 800 } };
+    const sized = a.call('planClosure', S(a), 'w_salim', P, choice, now(a, '11'));
+    const closed = await a.Sync.transactPaybook(a.call('planClosure', S(a), 'w_salim', P, Object.assign({ paid: sized.review.netDue, paidOn: DAY }, choice), now(a, '11')));
+    await settled([a]);
+    same('closed through the pay book: 4,800 less 800 is 4,000 paid; he owes nothing, carries nothing, and nothing of his waits',
+        [closed.state, sized.review.netDue, (row => [row.debt, row.wageDue, row.pending.length])(a.call('accountFor', S(a), S(a).workers[4], DAY)),
+            a.call('advanceCarryInto', S(a), 'w_salim', NEXT.from)], ['closed', 4000, [0, 0, 0], 0]);
+    const answered = await a.Sync.transactPaybook(a.call('planLegacy', S(a), 'w_khaled', P.from, { state: 'paid' }, now(a, '12')));
+    await settled([a]);
+    same('an old closure is answered when convenient - «שולם» - and leaves the list; the others stay, blocking nothing',
+        [answered.state, a.call('planPayMigration', S(a), DAY).paymentUnknown.map(row => row.workerId).sort()], ['closed', ['w_ahmad', 'w_ahmad', 'w_nasser', 'w_omar']]);
+
+    suite('V14c: the same record with the LATER day - 13/11, what the screen would have offered by itself - strands the periods nobody closed');
+
+    const later = base.call('planActivation', S(base), NEXT.from, now(base));
+    same('THE SCREEN SAYS SO BEFORE ANYTHING IS WRITTEN: asked 13/11 where 30/10 is offered, two periods would be stranded - Omar\'s week and Salim\'s fortnight',
+        [later.ok, later.report.tracking.offered, later.report.tracking.asked, later.report.tracking.stranded.map(row => [row.workerId, row.from, row.to, row.gross])],
+        [true, DECIDED, NEXT.from, [['w_omar', WK2.from, WK2.to, 1500], ['w_salim', P.from, P.to, 4800]]]);
+    const { device: b } = await turnedOn('d_v14b', base, NEXT.from);
+    same('every figure is the same as under 30/10 - the debts, the old closures, the sheets: the day changes no arithmetic',
+        [canonical(reads(b)) === canonical(after), sheets(b) === before.sheets], [true, true]);
+    same('KNOWN, and why 30/10 is the safer day: Salim\'s fortnight and Omar\'s week are BEFORE tracking, the review page refuses them, and no other door closes an account on a record that is on',
+        [(row => [row.pending.length, row.beforeTracking.map(one => [one.from, one.gross])])(b.call('accountFor', S(b), S(b).workers[4], DAY)),
+            b.call('planClosure', S(b), 'w_salim', P, choice, now(b, '11')).reasons, b.call('planClosure', S(b), 'w_omar', WK2, { method: 'cash', allocations: {} }, now(b, '11')).reasons.indexOf('before-tracking') !== -1],
+        [[0, [[P.from, 4800]]], ['before-tracking'], true]);
+    same('- so his 800 stays a debt that only a «החזר» can settle, and the day cannot be moved afterwards',
+        [b.call('accountFor', S(b), S(b).workers[4], DAY).debt, b.call('planOpening', S(b), DECIDED, now(b)).reasons], [800, ['opened']]);
+}
+
+// ------------------------------------------------------------------------------------
 {
     suite('V11: the one function - no other line reads the three flags');
 
