@@ -95,6 +95,22 @@ export const EXPECTED = {
         fails: []
     },
 
+    // ADDED AT v190, when main moved to v187 («סיכום חודש») under this build - a suite nobody
+    // had read with the pay book on. It is a COUNT OF ITS OWN CORPUS, not a figure: of 100
+    // seeded months, 4 show «cash handed back» with the gates shut and 3 with them open
+    // (and 9 / 10 hide it) - the check asks for more than 3. The one month that moves is a
+    // record whose carry nobody approved: under the one-debt ruling a carry is needed
+    // there, so the reports' own gate (carryReportingEnabled) waits for the approval and the
+    // month hides the line, as the suite's own check beside it then requires («cash handed
+    // back is not shown before the record may be read that way» - which passes). Every
+    // figure the suite compares is the same open and shut.
+    'test:monthsummary': {
+        kind: 'ruling',
+        why: 'a corpus counter: one seeded month of 100 shows «cash handed back» with the gates shut and hides it with them open, because under the one-debt ruling that record needs a carry approval it does not hold - so 3 months show it where the suite asks for more than 3. No figure differs; the hidden case is asserted by the suite itself, and passes',
+        held: 'tests/monthsummary.test.mjs itself, shut (the count) and open (every figure, and «cash handed back is not shown before the record may be read that way»); tests/activation.test.mjs V2, V4 (an activation always writes the carry approval, so a record that is ON never lacks one)',
+        fails: ['cash handed back was shown on approved records']
+    },
+
     // A SUITE THAT READS THE SHUT STATE ITSELF.
     'test:poison': {
         kind: 'reading',
