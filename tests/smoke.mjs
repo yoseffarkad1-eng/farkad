@@ -7862,18 +7862,36 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
 {
   const page = await open();
-  // Inspect a completed installation. A fixed launch delay sometimes read only
-  // part of the shell while cache.add requests were still running.
-  await page.waitForFunction(async () => {
-    const registration = await navigator.serviceWorker.getRegistration();
-    return registration && registration.active && registration.active.state === 'activated';
-  }, null, {timeout: 15000});
+  // Inspect a COMPLETED installation. A fixed launch delay sometimes read only part of
+  // the shell while cache.add requests were still running - and so did the wait that
+  // replaced it: a waitForFunction handed an ASYNC predicate is satisfied by the promise
+  // itself, which is truthy before it has an answer, so it returned at once. Measured on
+  // v188 under load, thirty runs of thirty: the worker still `installing`, 21 to 55 of
+  // the shell's files on the shelf, and install.js not yet among them. On a quiet machine
+  // the 400ms of open() had hidden that since the day the wait was written.
+  //
+  // Asked inside the page instead, where the waiting is real: `ready` resolves only once
+  // the registration HAS an active worker, and install is all of the shell or none of it
+  // (sw.js), so an active worker is a whole shelf.
   const cached = await page.evaluate(async () => {
+    const registration = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise(resolve => setTimeout(() => resolve(null), 60000))
+    ]);
+    if (!registration || !registration.active) return ['no active worker after 60s'];
+    const worker = registration.active;
+    if (worker.state !== 'activated') {
+      await new Promise(resolve => {
+        worker.addEventListener('statechange', () => { if (worker.state === 'activated') resolve(); });
+        setTimeout(resolve, 15000);
+      });
+    }
     const names = (await caches.keys())
       .filter(key => key !== 'farkad-clients' && key !== 'farkad-shelves');
     const cache = await caches.open(names[0]);
     return (await cache.keys()).map(r => new URL(r.url).pathname);
   });
+  check('the worker was active before its shelf was read', cached[0] !== 'no active worker after 60s');
   check('the install prompt is part of the offline shell',
     cached.some(p => p.endsWith('/js/ui/install.js')), String(cached.length));
   await page.context().close();
