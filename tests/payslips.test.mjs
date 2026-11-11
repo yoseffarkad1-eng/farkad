@@ -1383,13 +1383,25 @@ const press = (node, type) => {
     check('nothing in it is written under 16px, and the figure is the largest thing on a row',
         sizes.length > 10 && Math.min(...sizes) >= 16 && Math.max(...sizes) === 30
         && /\.payslips-value \{ font-size: 30px;/.test(mine), JSON.stringify(sizes));
-    check('and it stands at the end of the layer but for the build\'s last two blocks, with no fixed height in it',
+    // MOVED ON PURPOSE (the usual site, js/ui/usual.js): a look added after v188 is one more
+    // block at the END of the layer, where the brief of every feature puts it, so what
+    // stands after this block is the build's two AND whatever came later - counted as "two
+    // or more" instead of "two". What it guards is unchanged: this block is whole, has no
+    // media query and no fixed height, and the build's two are still behind it.
+    check('and it stands at the end of the layer but for the build\'s last two blocks and the ones added since, with no fixed height in it',
         look.trim().endsWith('}') && mine.length > 1000 && mine.indexOf('@media') === -1
         && !/[^-]height: \d/.test(mine.replace(/min-height/g, 'min-h').replace(/line-height/g, 'line-h'))
-        && (after.match(/^\/\* ---- /gm) || []).length === 2 && after.indexOf('«מה חדש» (js/ui/whatsnew.js)') !== -1);
+        && (after.match(/^\/\* ---- /gm) || []).length >= 2 && after.indexOf('«מה חדש» (js/ui/whatsnew.js)') !== -1);
+    // MOVED ON PURPOSE (the reports say the account, js/ui/reports.js): that block stands
+    // last in the layer and needs one phone-width query of its own - the band's cells are
+    // table cells above 700px and must not be made flex there. "One media query between
+    // them" is a statement about the build's two blocks, so it is counted up to where the
+    // reports' block begins; the no-fixed-height half still reads to the end of the file.
+    const theirs = after.indexOf('/* ---- the reports say the account') === -1
+        ? after : after.slice(0, after.indexOf('/* ---- the reports say the account'));
     check('and those two have no fixed height either, and one media query between them',
         !/[^-]height: \d/.test(after.replace(/min-height/g, 'min-h').replace(/max-height/g, 'max-h').replace(/line-height/g, 'line-h'))
-        && (after.match(/@media/g) || []).length === 1 && after.indexOf('@media (max-height: 580px) { .journey-day-row { display: none; } }') !== -1);
+        && (theirs.match(/@media/g) || []).length === 1 && after.indexOf('@media (max-height: 580px) { .journey-day-row { display: none; } }') !== -1);
 }
 
 await settle(1);

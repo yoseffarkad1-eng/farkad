@@ -22,6 +22,7 @@ import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { censusOnly } from './census.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const server = await serve(root);
@@ -132,7 +133,9 @@ async function open(width, height, scheme = 'dark', mode = 'findings', device = 
 
 const disk = page => page.evaluate(() => {
     const out = {};
-    Object.keys(localStorage).sort().forEach(key => { out[key] = localStorage.getItem(key); });
+    // Without the service worker's census of open builds (tests/census.mjs says why).
+    Object.keys(localStorage).sort().filter(key => key !== 'farkad:openBuilds')
+        .forEach(key => { out[key] = localStorage.getItem(key); });
     return JSON.stringify(out);
 });
 const entryOf = page => page.locator('#dayView').getByRole('button', { name: ENTRY, exact: true });
@@ -194,6 +197,7 @@ async function stop(...contexts) {
 
 const { page, errors, context } = await open(440, 956);
 const diskBefore = await disk(page);
+await censusOnly(check, page, diskBefore);
 const queuedBefore = await page.evaluate(() => JSON.stringify(FarkadSync.pendingPaths()));
 const recordBefore = await page.evaluate(() => JSON.stringify(State.schedule));
 

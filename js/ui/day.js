@@ -1373,8 +1373,12 @@ function renderUnassignedTray(unrecorded) {
         chip.appendChild(button('נעדר', 'chip-side', () => {
             State.commit(markAbsent(State.schedule, State.date, worker.id, State.layer));
         }, `סמן את ${isolate(worker.name)} כנעדר`));
+        // Where he usually works, as one chip after the two that were here (js/ui/usual.js):
+        // a suggestion read off the record at this render, written by nobody until tapped.
+        if (typeof usualChipInto === 'function') usualChipInto(chip, worker);
         chips.appendChild(chip);
     });
+    if (typeof usualNoteInto === 'function') usualNoteInto(tray, chips);
     tray.appendChild(chips);
     return tray;
 }

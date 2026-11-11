@@ -56,6 +56,7 @@ import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { censusOnly } from './census.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const server = await serve(root);
@@ -359,13 +360,15 @@ const summaryFromScreen = page => page.evaluate(() => {
 const summaryField = page => page.evaluate(() => document.getElementById('transportSummaryText').value);
 const summaryOpen = page => visible(page, '#transportSummaryModal');
 // Every key on the disk by name, and the bytes of everything this feature keeps.
-const diskOf = page => page.evaluate(() => JSON.stringify([Object.keys(localStorage).sort(),
+// The names without the service worker's census of open builds (tests/census.mjs says why).
+const diskOf = page => page.evaluate(() => JSON.stringify([Object.keys(localStorage).sort().filter(key => key !== 'farkad:openBuilds'),
     Object.keys(localStorage).filter(key => /transport/i.test(key)).sort().map(key => [key, localStorage.getItem(key)])]));
 
 async function summary(page, where) {
     suite(`${where}: the summary of the day - one button, the app's own dialog, three ways out, nothing written`);
     const record = await recordBytes(page);
     const disk = await diskOf(page);
+    await censusOnly(check, page, JSON.parse(disk)[0]);
     const marks = await page.evaluate(() => [...document.querySelectorAll('#transportBody [data-car]')].map(card => card.dataset.mark || '-').join());
 
     same('one button on the screen, by its words', await page.locator('#transportPanel button', { hasText: SUMMARY }).evaluateAll(nodes => nodes.map(node => node.id)),
@@ -620,6 +623,7 @@ async function periodReport(page, where, small) {
     }, STAGED);
     const record = await recordBytes(page);
     const disk = await diskOf(page);
+    await censusOnly(check, page, JSON.parse(disk)[0]);
     given('three days of plans are on the disk for the week', (await page.evaluate(() =>
         Object.keys(localStorage).filter(key => key.startsWith('farkadTransport:day:')).sort().join())) ===
         'farkadTransport:day:2026-11-08,farkadTransport:day:2026-11-09,farkadTransport:day:2026-11-10');

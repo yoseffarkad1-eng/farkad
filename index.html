@@ -19,7 +19,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v188">
+<meta name="farkad-build" content="v189">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -803,6 +803,37 @@
     </div>
 </div>
 
+<!-- כרטיס אתר: one site on one screen, opened from its row on the crew screen. A READING -
+     the only field on it is read-only. Drawn and worded by js/ui/sitecard.js; the arrows,
+     the client's text and its two doors are in the frame (not in the body) so a redraw
+     under an open card leaves the focus where it was. The doors are inside the fold: the
+     text is on the screen before it can leave. -->
+<div class="modal" id="siteCardModal">
+    <div class="modal-content modal-wide">
+        <h3 id="siteCardTitle" tabindex="-1"></h3>
+        <div id="siteCardWho" class="scard-who"></div>
+        <div class="scard-nav">
+            <button type="button" class="btn-secondary" id="siteCardPrev" onclick="siteCardStep(-1)"></button>
+            <strong id="siteCardMonth" class="scard-month" role="status" aria-live="polite"></strong>
+            <button type="button" class="btn-secondary" id="siteCardNext" onclick="siteCardStep(1)"></button>
+            <button type="button" class="btn-secondary" id="siteCardHome" onclick="siteCardStep(0)" hidden></button>
+        </div>
+        <div id="siteCardBody"></div>
+        <div class="scard-client">
+            <button type="button" class="btn-add" id="siteCardClientOpen" aria-expanded="false" aria-controls="siteCardClient" onclick="siteCardToggleClient()"></button>
+            <div id="siteCardClient" class="scard-client-fold" hidden>
+                <textarea id="siteCardText" rows="12" readonly></textarea>
+                <button type="button" class="btn-success" id="siteCardSend" onclick="siteCardSend()"></button>
+                <button type="button" class="btn-secondary" id="siteCardCopy" onclick="siteCardCopy()"></button>
+                <span class="share-status" id="siteCardStatus" role="status" aria-live="polite"></span>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="siteCardClose" onclick="closeSiteCard()"></button>
+        </div>
+    </div>
+</div>
+
 <!-- «מה חדש» (js/ui/whatsnew.js): what the last builds added, each with one sentence and
      where it is. Opened from the quiet line after an update, or from ⋯ ← עדכון וגרסה. It
      only shows, and «הראה לי» only navigates. Every word is in js/ui/whatsnew.js; this is
@@ -968,6 +999,10 @@
      constants) and share.js (the two doors its text leaves by). It runs nothing at load;
      reports.js asks for its entry by name, through typeof, when the menu is drawn. -->
 <script src="js/ui/monthsummary.js"></script>
+<!-- «כרטיס אתר». After reports.js (its constants), workercard.js (the calendar's helpers and
+     words), monthsummary.js (three of its words) and share.js (the two doors). It runs
+     nothing at load; roster.js asks for its entry by name, through typeof, per site row. -->
+<script src="js/ui/sitecard.js"></script>
 <!-- «חיפוש עובד», the finder at the foot of the day. Runs nothing at load: it calls the
      card, the sheet and the advances screen - all above it - only when a door is pressed,
      and day.js asks for its entry by name when the day is drawn. -->
@@ -981,6 +1016,9 @@
 <!-- «מה חדש»: after offline.js (midEdit) and settings.js (the sheet it sends to); it calls
      the screens it shows only when «הראה לי» is pressed. -->
 <script src="js/ui/whatsnew.js"></script>
+<!-- The usual site: after day.js (the tray that calls it, the double-tap guard) and
+     sheet.js (sheetPickPlace, the one write it borrows); called at render and at a tap. -->
+<script src="js/ui/usual.js"></script>
 <script src="js/ui/reminders.js"></script>
 <script src="js/app.js"></script>
 

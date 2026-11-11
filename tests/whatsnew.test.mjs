@@ -87,6 +87,20 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    { build: 'v189', items: [
+        { title: 'דוחות: כל קבוצה בתקופה שלה',
+            text: 'הדוח נפתח כשהעובדים השבועיים בשבוע הנוכחי והדו־שבועיים בשבועיים שלהם, ושבוע קודם שעדיין פתוח כתוב מתחת לקבוצה.',
+            where: 'דוחות ← לפי עובד', go: 'payReport' },
+        { title: 'דוחות: שעות נוספות על הכרטיס',
+            text: 'בכרטיס של כל עובד רואים את ימי העבודה, השעות הנוספות והחופש, ואחריהם מה נצבר וכמה נותר לתשלום.',
+            where: 'דוחות ← לפי עובד', go: 'payReport' },
+        { title: 'האתר הקבוע ליד השם',
+            text: 'ליד עובד שעוד לא נרשם מופיע האתר שבו עבד בימים האחרונים, ונגיעה אחת משבצת אותו שם ליום רגיל.',
+            where: 'היום ← לא נרשמו, ליד שם העובד', go: 'day' },
+        { title: 'כרטיס אתר',
+            text: 'אתר אחד במסך אחד, לקריאה בלבד: לוח החודש, כמה עובדים היו בו בכל יום, מי עבד בו, וסיכום החודש ללקוח.',
+            where: 'צוות ← כרטיס אתר, ליד שם האתר', go: 'roster' }
+    ] },
     { build: 'v188', items: [
         { title: 'בניית סידור ישר ממסך היום',
             text: 'בתחתית רשימת היום יש כפתור שפותח את בניית הסידור ליום הבא, או ממשיך מהשלב שבו עצרת.',
@@ -362,7 +376,7 @@ await block('the news itself: every build, every item, every word', async () => 
 
     const items = builds.flatMap(entry => entry.items.map(item => ({ build: entry.build, ...item })));
     const ways = Object.keys(device.global('WHATSNEW_GO')).sort();
-    same('the ways «הראה לי» can go', ways, ['advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'find', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
+    same('the ways «הראה לי» can go', ways, ['advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
     check('every item is a title, a sentence and a place, and nothing else',
         items.every(item => Object.keys(item).every(key => ['build', 'title', 'text', 'where', 'go'].includes(key))
             && [item.title, item.text, item.where].every(value => typeof value === 'string' && value.trim() === value && value.length > 0)));

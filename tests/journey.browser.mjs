@@ -51,6 +51,7 @@ import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { censusOnly } from './census.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const server = await serve(root);
@@ -169,8 +170,9 @@ const recordBytes = page => page.evaluate(() => {
     return JSON.stringify(out);
 });
 // Every key on the disk but the journey's own.
+// And without the service worker's census of open builds (tests/census.mjs says why).
 const diskBut = (page, ...skip) => page.evaluate(keys => JSON.stringify(Object.keys(localStorage).sort()
-    .filter(key => !keys.includes(key)).map(key => [key, localStorage.getItem(key)])), skip);
+    .filter(key => !keys.includes(key) && key !== 'farkad:openBuilds').map(key => [key, localStorage.getItem(key)])), skip);
 
 async function start(page) {
     await page.locator(WA_BUTTON).tap();
@@ -652,6 +654,7 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     // ------------------------------------------------------------ station 4
     suite(`${where}: station 4 - the last look says what was built`);
     const diskBefore = await diskBut(page, KEY);
+    await censusOnly(check, page, diskBefore, [KEY]);
     await page.locator('#journeyNext').tap();
     await page.waitForTimeout(250);
     same('the panel, at the last look, the הסעות screen shut behind it',

@@ -1198,4 +1198,208 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .whatsnew-foot { position: sticky; bottom: 0; z-index: 1; display: flex; margin-top: 14px; padding: 12px 0 18px; border-top: 1px solid var(--line); background: var(--surface); }
 .whatsnew-foot button { flex: 1 1 auto; min-height: 48px; font-size: 17px; font-weight: 700; }
 
+/* ---- the usual site (js/ui/usual.js) --------------------------------------------------
+   ONE chip beside a man in «לא נרשמו»: the site he is most likely at. A man who has one
+   takes a whole line of the tray - his name at the start, «נעדר» where it was, the
+   suggestion last - and where the three do not fit (a 375px phone with a long name,
+   doubled text) the suggestion alone goes UNDER the name, the full width of the row. It
+   is the site's own colour, handed in as --usual-site because the rule above repaints
+   every button of the tray, and it is DASHED: a filled, solid colour on this screen is a
+   man who is recorded, and this one is not until it is tapped. 48px and 18px - it is the
+   evening's most tapped button, read at arm's length. No height anywhere: it wraps. */
+.tray .chip.chip-has-usual { flex: 1 1 100%; flex-wrap: wrap; align-items: center; overflow: visible; }
+.tray .chip.chip-has-usual .chip-main { flex: 1 1 auto; text-align: start; }
+.tray .chip button.chip-usual {
+    flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 48px; min-width: 48px; max-width: 100%; margin: 4px; padding: 6px 16px;
+    border: 2px dashed rgba(255, 255, 255, .85) !important; border-radius: 12px;
+    background: var(--usual-site, var(--accent)) !important; color: #fff !important;
+    font-size: 18px; font-weight: 800; line-height: 1.25; overflow-wrap: anywhere;
+}
+.chip-usual-arrow { flex: none; font-weight: 800; }
+.usual-note { margin: 0 0 10px; color: var(--ink-2); font-size: 16px; font-weight: 600; line-height: 1.4; }
+
+/* כרטיס אתר (js/ui/sitecard.js).
+   One site on one screen, and nothing on it to type in. An ordinary dialog: its height,
+   its safe area and its scroll are .modal-content's (css/app.css). Read by a far-sighted
+   man on a dark phone in the sun: nothing under 16px, labels 17-18px, the counts larger
+   and heavy, every row free to wrap and no box with a fixed height - doubled text makes it
+   longer, never clipped. The site's colour is on its name and on the block that holds a
+   day's count of men, through paintSite, and nowhere else. Tap targets: the arrows, a
+   day, a man, the client's button and its two doors, the close - each 48px or more.
+   THE WAY IN is one worded button on the site's row of the crew screen: one line, 44px -
+   the height «עוד ⋯» already gives that row, so the row is no taller for it. */
+#rosterView .roster-details.site-details { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 6px; }
+#rosterView .site-details > .tag { flex: 0 1 auto; min-width: 0; }
+.site-card-open { flex: none; min-inline-size: 64px; min-height: 44px !important; margin: 0 !important; margin-inline-start: auto !important; padding: 6px 6px !important; font-size: 16px !important; font-weight: 600; line-height: 1.25 !important; white-space: nowrap !important; }
+#siteCardModal .modal-content > h3 { line-height: 1.3; margin: 0 0 6px; color: var(--ink-2); font-size: 17px; overflow-wrap: anywhere; }
+.scard-who { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; }
+.scard-who .scard-name { display: inline-flex; gap: 6px; min-width: 0; max-width: 100%; padding: 6px 14px; border: 1px solid; border-radius: 10px; font-size: 24px; font-weight: 800; line-height: 1.25; }
+.scard-name .site-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.scard-who .scard-status { color: var(--ink-2); font-size: 16px; font-weight: 700; }
+.scard-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 10px; }
+.scard-nav button { min-height: 48px; min-width: 48px; padding: 8px 10px; font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
+.scard-nav button[hidden] { display: none; }
+#siteCardHome { grid-column: 1 / -1; }
+.scard-month { grid-column: 1 / -1; order: -1; min-width: 0; text-align: center; font-size: 24px; font-weight: 800; overflow-wrap: anywhere; }
+.scard-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.scard-head { margin: 0 0 10px; font-size: 19px; font-weight: 800; overflow-wrap: anywhere; }
+.scard-sub { margin: 12px 0 6px; color: var(--ink-2); font-size: 17px; font-weight: 700; }
+.scard-note { margin: 8px 0 0; color: var(--ink-2); font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
+.scard-progress { margin: 0 0 4px; color: var(--ink); font-weight: 600; }
+.scard-cal-grid { display: grid; gap: 3px; margin: 0 -18px; }
+.scard-cal-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.scard-cal-cols-7 { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.scard-cal-head { padding: 2px 0; color: var(--ink-2); font-size: 16px; font-weight: 700; text-align: center; }
+#siteCardBody .scard-cal-day { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px; min-width: 0; min-height: 72px; padding: 4px 2px; border: 2px solid transparent; border-radius: 10px; background: var(--surface-2); color: var(--ink); font-weight: 600; }
+#siteCardBody .scard-cal-day[aria-current="date"], #siteCardBody .scard-cal-saturday[aria-current="date"] { border-color: var(--accent); }
+.scard-cal-number { color: var(--ink-2); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.scard-cal-marks { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; min-width: 0; }
+.scard-cal-men { display: block; min-width: 0; padding: 1px 0; border-radius: 7px; font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.25; text-align: center; }
+.scard-cal-count { display: block; color: var(--ink); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; text-align: center; overflow-wrap: anywhere; }
+.scard-cal-saturdays { display: flex; flex-wrap: wrap; gap: 8px; }
+#siteCardBody .scard-cal-saturday { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 96px; min-height: 48px; border: 2px solid transparent; font-size: 16px; }
+.scard-cal-saturday .scard-cal-marks { flex-direction: row; align-items: center; gap: 8px; width: auto; }
+.scard-cal-saturday .scard-cal-men { padding: 1px 12px; }
+.scard-pair { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; min-width: 0; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.scard-pair:last-child { border-bottom: 0; }
+.scard-label { min-width: 0; color: var(--ink); font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
+.scard-value { min-width: 0; color: var(--ink); font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.scard-pair-note { flex: 1 1 100%; margin: 2px 0 0; }
+.scard-apart { margin-top: 10px; padding: 10px 12px; border: 0; border-radius: 12px; background: var(--surface-2); }
+#siteCardBody .scard-man { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 52px; margin: 0 0 6px; padding: 8px 14px; text-align: start; }
+.scard-man-name { min-width: 0; font-size: 19px; font-weight: 700; overflow-wrap: anywhere; }
+.scard-man-days { flex: 0 0 auto; font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.scard-client { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.scard-client > button { min-height: 52px; font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+.scard-client-fold { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.scard-client-fold[hidden] { display: none; }
+.scard-client-fold textarea { grid-column: 1 / -1; width: 100%; box-sizing: border-box; min-height: 140px; height: clamp(140px, 38dvh, 420px); padding: 12px; background: var(--surface-2); font-family: inherit; font-size: 17px; line-height: 1.65; white-space: pre-wrap; }
+.scard-client-fold button { min-height: 48px; min-width: 48px; font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+#siteCardStatus { grid-column: 1 / -1; font-size: 16px; }
+#siteCardStatus:empty { display: none; }
+#siteCardModal .modal-actions { display: flex; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+#siteCardModal .modal-actions button { flex: 1 1 auto; min-height: 48px; font-size: 17px; }
+
+/* ---- the reports say the account (js/ui/reports.js) -------------------------------------
+   The owner, 2026-11-11: make the reports organised, clear and understandable, and the
+   extra hours clear too.
+   One block, look only: js/ui/reports.js decides what is on a card, this decides
+   how it reads. Sizes are floors for a far-sighted reader - nothing here under
+   16px, counts 24px, the amount to pay the largest thing on a card - and every
+   box wraps instead of clipping, so doubled text and the large-type mode fit.
+   Paper is not this layer's business (the whole file is @media screen). */
+
+/* One card per man, the whole width: label and value on one line need the room. */
+#reportsView .report-worker-cards { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+#reportsView .report-worker-tile { gap: 10px; padding: 14px 14px 6px; text-align: start; }
+#reportsView .report-tile-name { min-height: 0; justify-content: flex-start; font-size: 21px; font-weight: 800; line-height: 1.3; }
+.report-tile-facts { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+/* What he did: a number over its word, the extra hours in the accent so they are found. */
+.report-tile-facts .report-tile-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(4.4em, 1fr)); gap: 6px; }
+.report-tile-facts .report-tile-metric,
+.report-tile-facts .report-tile-metrics > span + span { display: flex; flex-direction: column; justify-content: flex-start; min-width: 0; padding: 6px 8px; border: 0; border-radius: 10px; background: var(--surface-2); }
+.report-tile-facts .report-tile-metric strong { display: block; color: var(--ink); font-size: 24px; font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.report-tile-facts .report-tile-metric .report-tile-label { color: var(--ink); font-size: 16px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.report-tile-facts .report-tile-metric-hours:not(.report-tile-zero) { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+.report-tile-facts .report-tile-zero strong,
+.report-tile-facts .report-tile-zero .report-tile-label { color: var(--ink-3); font-weight: 600; }
+
+/* What it is worth, what comes off: label and value, one pattern. */
+.report-tile-lines { display: flex; flex-direction: column; min-width: 0; }
+.report-tile-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 12px; min-width: 0; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+.report-tile-line-label { min-width: 0; color: var(--ink); font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
+.report-tile-line-value { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; color: var(--ink); font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.report-tile-line-number { overflow-wrap: anywhere; }
+.report-tile-facts .report-tile-currency,
+.report-tile-line-currency { color: var(--ink-2); font-size: 16px; font-weight: 600; }
+
+/* His own notes; a warning is the same box everywhere on this screen. */
+.report-tile-notes { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.report-tile-note { color: var(--ink-2); font-size: 16px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.report-tile-note.report-tile-warn,
+#reportsView .report-payroll .hint-warn,
+#reportsView .report-payroll > .hint-warn,
+#workerDaysModal .hint-warn { margin-inline: 0; padding: 8px 12px; border-inline-start: 4px solid var(--warn); border-radius: 8px; background: var(--warn-bg); color: var(--ink); font-size: 16px; font-weight: 700; line-height: 1.5; }
+
+/* What is left: last, the largest number on the card. */
+.report-tile-facts .report-tile-amount { flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 12px; padding: 10px 12px; border: 0; border-radius: 12px; background: var(--accent-soft); }
+.report-tile-facts .report-tile-amount .report-tile-label { color: var(--ink); font-size: 18px; font-weight: 700; }
+.report-tile-facts .report-tile-figure { direction: rtl; align-items: baseline; gap: 4px; }
+.report-tile-facts .report-tile-value { color: var(--ink) !important; font-size: 32px; font-weight: 800; line-height: 1.15; letter-spacing: 0; }
+#reportsView .report-tile-open { min-height: 40px; border-top: 0; padding-top: 0; font-size: 16px; font-weight: 700; }
+
+/* The band of a group on a phone: the hours, what was earned and what came off stand with
+   the payable, each under its own heading - not the payable alone. */
+@media (max-width: 700px) {
+    .report-card-grid #reportsView .report-payroll .report-table tfoot td[data-label="שעות נוספות"]:not(:empty),
+    .report-card-grid #reportsView .report-payroll .report-table tfoot td[data-label="נצבר"]:not(:empty),
+    .report-card-grid #reportsView .report-payroll .report-table tfoot td[data-label="מקדמות"]:not(:empty),
+    .report-card-grid #reportsView .report-payroll .report-table tfoot td[data-label="נוכה מהשכר"]:not(:empty),
+    .report-card-grid #reportsView .report-payroll .report-table tfoot td[data-label="מקדמות / ניכוי"]:not(:empty) { display: flex; }
+    #reportsView .report-payroll .report-table tfoot td { font-size: 18px; font-weight: 700; color: var(--ink); }
+    #reportsView .report-payroll .report-table tfoot td::before { color: var(--ink); font-weight: 600; }
+    #reportsView .report-payroll .report-table tfoot td:last-child { color: var(--ink); font-size: 28px; }
+    /* «תצוגה מפורטת»: the extra hours are a figure, not the sixth small line of nine. */
+    #reportsView .report-payroll .report-table tbody td[data-label="שעות נוספות"]:not(:empty) { margin-block: 4px; padding: 6px 10px; border-radius: 10px; background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); color: var(--ink); font-size: 18px; font-weight: 800; }
+    #reportsView .report-payroll .report-table tbody td[data-label="שעות נוספות"]:not(:empty)::before { color: var(--ink); font-weight: 700; }
+}
+
+/* Everything said under the sheet, at a size that is read: the notes, the fold, the weeks. */
+#reportsView .report-payroll .hint,
+#reportsView .report-invoice .hint,
+#reportsView .report-explanation,
+#reportsView .report-explanation > summary,
+#reportsView .report-finance-line,
+#reportsView .report-weekly-breakdown > summary,
+#reportsView .report-weekly-name,
+#reportsView .report-weekly-line,
+#reportsView .report-rima-note,
+#reportsView .report-yosefgeves-note,
+#reportsView .invoice-picker-label { font-size: 16px; line-height: 1.55; }
+#reportsView .report-weekly-name { font-size: 18px; font-weight: 800; }
+#reportsView .report-weekly-fact { color: var(--ink); }
+#reportsView .report-group { font-size: 20px; font-weight: 800; }
+#reportsView .report-group::after { color: var(--ink); font-size: 16px; }
+
+/* «לפי אתר»: each site's worker-site days large, the total largest; then the three lists,
+   each plainly its own. */
+#reportsView .invoice-bars-head { color: var(--ink); font-size: 18px; font-weight: 800; }
+#reportsView .invoice-bar-name { font-size: 18px; font-weight: 700; }
+#reportsView .invoice-bar-count { min-width: 36px; font-size: 24px; font-weight: 800; }
+#reportsView .invoice-bars-total { color: var(--ink); font-size: 18px; font-weight: 700; flex-wrap: wrap; }
+#reportsView .invoice-bars-total strong { color: var(--ink); font-size: 32px; }
+#reportsView .report-norima,
+#reportsView .report-rima,
+#reportsView .report-yosefgeves { margin-top: 26px; padding-top: 4px; border-top: 3px solid var(--line); }
+
+/* The days of one man: the hours in words, every line readable, and the card's own summary
+   at the foot of the days. */
+#workerDaysModal .wday-extra { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 8px; background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); color: var(--ink); font-size: 17px; font-weight: 800; line-height: 1.3; }
+#workerDaysModal .tag-rate,
+#workerDaysModal .wday-chip,
+#workerDaysModal .wday-chip-x2,
+#workerDaysModal .wday-date span,
+#workerDaysModal .wday-note,
+#workerDaysModal .wday-rate,
+#workerDaysModal .wday-derive,
+#workerDaysModal .wday-advances-head,
+#workerDaysModal .wday-total .wday-what { font-size: 16px; }
+#workerDaysModal .wday-date span,
+#workerDaysModal .wday-note,
+#workerDaysModal .wday-rate,
+#workerDaysModal .wday-derive { color: var(--ink-2); }
+#workerDaysModal .wday-money { font-size: 19px; }
+.wday-summary { margin-top: 18px; padding: 12px 14px; border: 2px solid var(--line); border-radius: 14px; background: var(--surface); }
+.wday-summary-head { margin-bottom: 8px; color: var(--ink); font-size: 20px; font-weight: 800; }
+/* Doubled text: the money column takes what its number needs and the words wrap beside it. */
+#workerDaysModal .wday { grid-template-columns: minmax(0, 1fr) auto; }
+#workerDaysModal .wday-what,
+#workerDaysModal .wday-date,
+#workerDaysModal .wday-money { min-width: 0; overflow-wrap: anywhere; }
+#workerDaysModal .wday-extra,
+#workerDaysModal .wday .tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+#reportsView .invoice-picker button { font-size: 16px; }
+
 }

@@ -36,6 +36,7 @@ import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { censusOnly } from './census.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const server = await serve(root);
@@ -57,7 +58,7 @@ const SINCE = 'מה שנוסף מאז העדכון האחרון שראית, מה
 const ALL = 'כל מה שנוסף לאחרונה, מהחדש לישן.';
 const SHOW = 'הראה לי';
 // The builds that have news, newest first (tests/whatsnew.test.mjs pins the block).
-const NEWS = [188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
+const NEWS = [189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
 
 // SYNTHETIC. Fourteen invented men on three invented sites.
 const NAMES = ['אחמד', 'מוחמד', 'יוסי', 'סמיר', 'עלי', 'Ali Hassan', 'ראמי', 'דוד', 'עבד אל-רחמן', 'מחמוד', 'חאלד', 'נביל', 'זיאד', 'כרים'];
@@ -114,8 +115,9 @@ const seenNote = build => JSON.stringify({ version: 1, build: `v${build}` });
 const owedOn = (build, seen) => NEWS.filter(n => n <= build && n > (seen || 0)).map(n => `v${n}`);
 const listed = page => page.evaluate(() => [...document.querySelectorAll('#whatsNewList .whatsnew-build')].map(node => node.dataset.build));
 // Every key on the disk but the note, as bytes.
+// And without the service worker's census of open builds (tests/census.mjs says why).
 const diskBut = (page, ...skip) => page.evaluate(keys => JSON.stringify(Object.keys(localStorage).sort()
-    .filter(key => !keys.includes(key)).map(key => [key, localStorage.getItem(key)])), skip);
+    .filter(key => !keys.includes(key) && key !== 'farkad:openBuilds').map(key => [key, localStorage.getItem(key)])), skip);
 const shot = async (page, name) => {
     if (!SHOTS) return;
     await page.waitForTimeout(200);
@@ -234,6 +236,7 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
 
     suite(`${where}: the card - what is owed, newest first`);
     const diskBefore = await diskBut(page, KEY);
+    await censusOnly(check, page, diskBefore, [KEY]);
     await page.locator('#whatsNewOpen').tap();
     await page.waitForTimeout(200);
     same('the card, titled, and saying what it lists', [await visible(page, '#whatsNewModal'), await text(page, '#whatsNewTitle'), await text(page, '#whatsNewContext')],
@@ -421,7 +424,7 @@ for (const rides of [false, true]) {
     if (rides) await page.evaluate(() => transportSetEnabled(true));
     given(`הסעות is ${rides ? 'on' : 'off'}`, await page.evaluate(() => transportEnabled()) === rides);
     const ways = await page.evaluate(() => Object.keys(WHATSNEW_GO).sort());
-    same('the ways there are', ways, ['advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'find', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
+    same('the ways there are', ways, ['advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
     const reset = () => page.evaluate(() => {
         [...document.querySelectorAll('.modal')].filter(node => node.style.display === 'flex').forEach(node => {
             const close = MODAL_CLOSERS[node.id];
@@ -451,6 +454,8 @@ for (const rides of [false, true]) {
         roster: s => s.view === 'roster' && s.modals.length === 0 && !s.settings,
         // The menu open with the row on the glass - and the row NOT pressed: no dialog.
         reportsMenu: s => s.view === 'reports' && s.menu && s.menuRows.includes('monthSummaryOpen') && s.modals.length === 0,
+        // The pay sheet as it opens: on «לפי עובד», its menu shut, nothing pressed.
+        payReport: s => s.view === 'reports' && s.section === 'workers' && !s.menu && s.modals.length === 0 && !s.settings,
         payslipsMenu: s => s.view === 'reports' && s.section === 'workers' && s.menu && s.menuRows.includes('payslipsEntry') && s.modals.length === 0,
         find: s => s.view === 'day' && s.modals.join() === 'findModal' && s.focus === 'findInput',
         advances: s => s.view === 'advances' && s.modals.length === 0 && !s.settings,

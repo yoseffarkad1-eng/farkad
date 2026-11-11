@@ -763,6 +763,20 @@ function renderPlaceList() {
         paintSite(tag, place.id);
         details.appendChild(tag);
         if (place.active === false) details.appendChild(el('span', 'badge', 'לא פעיל'));
+        // כרטיס אתר: the one way into the site's card (js/ui/sitecard.js), worded - the
+        // twin of «כרטיס עובד» on a man's row. At the far end of the site's own line, one
+        // line and 44px, which is the height «עוד ⋯» already gives the row: the row is no
+        // taller for it, and «עוד ⋯» is where it was. On a hidden site too - last month's
+        // bill is the usual reason to look one up. Feature-detected: a build where that
+        // file did not load still has a sites list, drawn exactly as it was.
+        if (typeof openSiteCard === 'function') {
+            details.classList.add('site-details');
+            const card = button(SITE_CARD_TEXT.title, 'btn-secondary site-card-open',
+                () => openSiteCard(place.id),
+                `${SITE_CARD_TEXT.openFor} ${isolate(place.name)}`);
+            card.setAttribute('aria-haspopup', 'dialog');
+            details.appendChild(card);
+        }
         row.appendChild(details);
 
         const actions = el('div', 'roster-actions');

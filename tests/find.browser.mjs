@@ -21,6 +21,7 @@ import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { censusOnly } from './census.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const server = await serve(root);
@@ -67,8 +68,9 @@ async function phone(width, height, scheme) {
     return page;
 }
 
+// Without the service worker's census of open builds (tests/census.mjs says why).
 const disk = page => page.evaluate(() => JSON.stringify(Object.keys(localStorage).sort()
-    .map(key => [key, localStorage.getItem(key)])));
+    .filter(key => key !== 'farkad:openBuilds').map(key => [key, localStorage.getItem(key)])));
 const isOpen = page => page.evaluate(() => document.getElementById('findModal').style.display === 'flex');
 const rowIds = page => page.evaluate(() => [...document.querySelectorAll('#findList .find-row')]
     .map(row => row.dataset.workerId));
@@ -77,6 +79,7 @@ const bare = text => String(text).replace(/[⁦-⁩‎]/g, '');
 try {
     const page = await phone(390, 844, 'light');
     const before = await disk(page);
+    await censusOnly(check, page, before);
     const record = await page.evaluate(() => JSON.stringify(State.schedule));
 
     suite('the way in is one button at the foot of the day, and nothing measured moved');
@@ -128,7 +131,7 @@ try {
         showView('day'); return seen; }), []);
     check('none of which wrote a preference: the disk is as it was but for the day\'s own view choice',
         await page.evaluate(before => {
-            const now = Object.keys(localStorage).sort().filter(key => key !== 'farkadDayMode')
+            const now = Object.keys(localStorage).sort().filter(key => key !== 'farkadDayMode' && key !== 'farkad:openBuilds')
                 .map(key => [key, localStorage.getItem(key)]);
             return JSON.stringify(now) === JSON.stringify(JSON.parse(before).filter(pair => pair[0] !== 'farkadDayMode'));
         }, before));

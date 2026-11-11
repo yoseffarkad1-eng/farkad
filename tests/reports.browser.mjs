@@ -166,7 +166,12 @@ try {
     check('compact amounts exactly match the prepared full report', amounts);
     const pair = page.locator('.report-worker-cards').last().locator('.report-worker-tile');
     const positions=await pair.evaluateAll(nodes=>nodes.map(n=>({x:n.offsetLeft,y:n.offsetTop})));
-    check('two workers share a row on an ordinary phone', positions.length===2 && positions[0].y===positions[1].y && positions[0].x!==positions[1].x,JSON.stringify(positions));
+    // MOVED ON PURPOSE (the card that tells the account, 2026-11-11): two cards shared a row
+    // while a card was a name, one amount and two counts. It now carries the working - the
+    // counts, the rate, what was earned, what came off, the man's own notes - as label and
+    // value on one line at 18px and more, which half a phone's width cannot hold. One man
+    // per row, on every phone.
+    check('each worker\'s card takes the whole row on an ordinary phone', positions.length===2 && positions[0].y!==positions[1].y && positions[0].x===positions[1].x,JSON.stringify(positions));
     await page.locator('.report-worker-tile').first().click();
     check('tapping the card opens worker details', await page.locator('#workerDaysModal').isVisible());
     await page.evaluate(()=>closeWorkerDays());
@@ -210,8 +215,11 @@ try {
         REPORT_WORKERS=null; REPORT_PICKER_OPEN=false; REPORT_RANGE_OPEN=false; REPORT_CARD_GRID=true; render();
     });
     const simple = page.locator('[data-report-worker-id="w_simple"]');
-    same('only plain work and holiday labels appear on the card',await simple.locator('.report-tile-metrics .report-tile-label').allTextContents(),['ימי עבודה','חופש']);
-    same('normal day, double day and overtime day are four payable units',await simple.locator('.report-tile-metrics strong').allTextContents(),['4','1']);
+    // MOVED ON PURPOSE (2026-11-11, the owner: "the extra hours do not show clearly"): the
+    // card said work days and holiday and nothing else. It now also says the double days
+    // and the extra hours, under the table's own headings, between the two it always had.
+    same('work days, double days, extra hours and holiday are named on the card',await simple.locator('.report-tile-metrics .report-tile-label').allTextContents(),['ימי עבודה','כפולים','שעות נוספות','חופש']);
+    same('normal day, double day and overtime day are four payable units; one double, three hours, one day off',await simple.locator('.report-tile-metrics strong').allTextContents(),['4','1','3','1']);
     same('the original attendance count stays three',await page.locator('.report-payroll tbody [data-label="נוכחות"]').textContent(),'3');
     same('the original pay count stays four',await page.locator('.report-payroll tbody [data-label="ימי שכר"]').textContent(),'4');
     same('no deduction line crowds the outer card',await simple.locator('.report-tile-deduction').count(),0);
@@ -222,7 +230,9 @@ try {
     check('card opens the complete dated details',await page.locator('#workerDaysModal').isVisible());
     check('double-day note remains in details',(await page.locator('#workerDaysBody').innerText()).includes('כפול'));
     check('holiday date remains in details',await page.locator('#workerDaysBody .wday-absent').isVisible());
-    check('overtime note remains in details',(await page.locator('#workerDaysBody').innerText()).includes('+3'));
+    // MOVED ON PURPOSE: the day's hours were a bare «+3» inside the site's tag; they are
+    // said in words beside it now.
+    same('overtime is said in words in the details',await page.locator('#workerDaysBody .wday-extra').allTextContents(),['3 שעות נוספות']);
     await page.waitForTimeout(250);
     const detailRect = await page.locator('#workerDaysModal .modal-content').evaluate(n=>{const r=n.getBoundingClientRect();return {width:r.width,height:r.height,viewportWidth:innerWidth,viewportHeight:innerHeight};});
     check('phone worker details use the full readable screen',Math.abs(detailRect.width-detailRect.viewportWidth)<=1&&Math.abs(detailRect.height-detailRect.viewportHeight)<=1,JSON.stringify(detailRect));
@@ -269,6 +279,7 @@ try {
     });
     check('unpriced compact footer does not expose the old pay-units label',!(await page.locator('.report-payroll tfoot [data-label="ימי שכר"]').isVisible()));
     same('unpriced card still has plain work and holiday counts',await page.locator('.report-tile-metrics strong').allTextContents(),['1','0']);
+    same('and says on the card itself why there is no amount',await page.locator('.report-worker-tile .report-tile-warn').allTextContents(),['בלי שכר יומי - הנצבר לא חושב']);
     check('no uncaught browser errors', errors.length === 0, JSON.stringify(errors));
 } finally { await browser.close(); await server.close(); }
 report();

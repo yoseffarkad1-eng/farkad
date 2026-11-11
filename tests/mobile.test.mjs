@@ -2032,8 +2032,16 @@ for (const [width, scale] of [[320, '100%'], [390, '100%'], [430, '100%'], [320,
         REPORT_CARD_GRID = false;
         REPORT_RANGE.from = start;
         REPORT_RANGE.to = day(start, 13);
+        // MOVED IN v189: the range is chosen BY HAND here, and says so. These fourteen
+        // days are also the fortnight the page opens on, and since v189 the page on its
+        // default reads a weekly man over his own week (tests/account-view.test.mjs), where
+        // there is nothing to fold. The fold is for a weekly man inside a LONGER range
+        // somebody picked - which is what this section has always been about - so the
+        // range is an explicit one for the drawing and the chip is put back after it.
+        REPORT_PRESET = 'custom';
         showView('reports');
         render();
+        REPORT_PRESET = 'fortnight';
 
         const box = document.querySelector('.report-weekly-breakdown');
         if (!box) return { present: false };
