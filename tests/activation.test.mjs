@@ -24,7 +24,7 @@
 //   V8  a phone that had not heard closes an account the old way: it is not lost, not
 //       silent, and not a second arithmetic
 //   V9  a build from before the pay book, on an activated record: its writes are refused
-//   V9b the same with the REAL BYTES of v180, v183 and v184, out of Git, on the fake rules
+//   V9b the same with the REAL BYTES of v180, v183, v184 and v186, out of Git, on the fake rules
 //   V10 the months and the cold store follow the same switch - the whole of Phases 5 to 7
 //       on a build with every flag false
 //   V11 the one function: no other line reads the three flags
@@ -523,8 +523,9 @@ let ACTIVATED = null;
 }
 
 // ------------------------------------------------------------------------------------
-// The builds a phone may still be on when the owner presses the button: v180 and v183 were
-// served on 2026-11-10; v184 is what this branch was merged with. Their own files, out of
+// The builds a phone may still be on when the owner presses the button: v180, v183, v184
+// and v186 were all served on 2026-11-10, and v186 (9846d7f, the shared rides) is the build
+// v187 is made on top of. Their own files, out of
 // Git, in this build's load order less the six files only this branch has. (The same
 // builds meet the REAL rules, through their own adapter, in the emulator suite.)
 {
@@ -533,7 +534,7 @@ let ACTIVATED = null;
         'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
     const order = loadOrder().filter(file => NOT_ON_MAIN.indexOf(file) === -1);
     const answers = {};
-    for (const [name, sha] of [['v180', 'd3103d6'], ['v183', '1af6729'], ['v184', '990f5b4']]) {
+    for (const [name, sha] of [['v180', 'd3103d6'], ['v183', '1af6729'], ['v184', '990f5b4'], ['v186', '9846d7f']]) {
         suite(`V9b: ${name}, its real bytes out of Git, on a record that is turned on beside it`);
 
         let present = false;
@@ -599,9 +600,9 @@ let ACTIVATED = null;
         same('and this build, beside it, goes on recording', (put(mine, '2026-10-19', 'w_nasser'), await settled([mine]), Boolean(cloud.doc.days['2026-10-19'])), true);
     }
     suite('V9b: every one of them answers the same way');
-    same('v180, v183 and v184: a day before, yes; a day, an old-style closure and a restore after, refused',
+    same('v180, v183, v184 and v186: a day before, yes; a day, an old-style closure and a restore after, refused',
         Object.keys(answers).map(name => [name, answers[name].dayBefore, answers[name].dayRefused, answers[name].closeRefused, answers[name].restoreRefused]),
-        [['v180', true, true, true, true], ['v183', true, true, true, true], ['v184', true, true, true, true]]);
+        [['v180', true, true, true, true], ['v183', true, true, true, true], ['v184', true, true, true, true], ['v186', true, true, true, true]]);
     console.log('  measured, what each older phone says of itself after its write is refused: ' + JSON.stringify(Object.keys(answers).map(name => [name, answers[name].says])));
 }
 
@@ -743,11 +744,27 @@ let ACTIVATED = null;
             .filter(name => added.includes(name) && !published.join('\n').includes(name)).length, 13);
     same('who may read and write is the same list, to the letter', (text => (/function allowed\(\) \{[\s\S]*?\n    \}/.exec(text) || [''])[0])(added)
         === (text => (/function allowed\(\) \{[\s\S]*?\n    \}/.exec(text) || [''])[0])(published.join('\n')), true);
-    // Where another pending addition goes (docs/payroll-activation.md, «one file»): the
-    // probe block is the LAST block inside match /schedules/{docId}, so a block of
-    // sibling documents is added after it and before the brace that closes the schedule.
-    check('the place another block of documents under the schedule is added: after probe/, before the schedule\'s closing brace',
-        /      match \/probe\/\{generation\} \{\n        allow get: if allowed\(\) && generation == 'paybook-8';\n        allow list, create, update, delete: if false;\n      \}\n    \}\n/.test(added));
+    // v187 MOVED: «the place another block of documents under the schedule is added: after
+    // probe/, before the schedule's closing brace» pinned an EMPTY place. The other block
+    // has arrived - the shared rides' match /transport/{name}, live since v185 - and it is
+    // in that place, so the pin is now of what stands there: the probe block, then the
+    // transport block WORD FOR WORD as the live file holds it, then the brace that closes
+    // the schedule. (tools/combine-rules.py put it there; nothing of it was retyped.)
+    const probeBlock = "      match /probe/{generation} {\n        allow get: if allowed() && generation == 'paybook-8';\n        allow list, create, update, delete: if false;\n      }\n";
+    const blockOf = text => {
+        const from = text.indexOf('\n\n      // הסעות, shared: who rides to work in which vehicle.');
+        const to = from === -1 ? -1 : text.indexOf('\n    }\n', from);       // the brace that closes the schedule
+        return to > from ? text.slice(from, to) : null;
+    };
+    const liveBlock = blockOf(published.join('\n'));
+    given('the live rules hold the shared rides\' block', liveBlock !== null && liveBlock.includes('match /transport/{name} {'));
+    same('the shared rides\' block is in the pasted file word for word as it is live today',
+        blockOf(added) === liveBlock, true);
+    check('and it stands after probe/, the last of the pay book\'s blocks, and before the schedule\'s closing brace',
+        added.includes(probeBlock + liveBlock.slice(1) + '\n    }\n'));
+    same('the pay book\'s rules do not name the shared rides, and the rides\' block does not name the pay book',
+        [/transport/i.test(added.replace(liveBlock, '').replace(/\/\/.*$/gm, '')), /\bpay\b|payIndex|monthIndex|closed\/|probe/.test(liveBlock.replace(/\/\/.*$/gm, ''))],
+        [false, false]);
     same('the app asks for the generation the rules answer to', [/RULES_GENERATION: 'paybook-8'/.test(readFileSync(join(ROOT, 'js/sync/transact.js'), 'utf8')),
         (added.match(/paybook-8/g) || []).length >= 2], [true, true]);
 }

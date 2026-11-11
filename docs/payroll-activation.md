@@ -3,8 +3,8 @@
 **Nothing in this file has been done.** No rules were published, no build was served, the
 real project was not touched. This is the order in which it is done, by whom, what each
 person checks, and what to do when a check fails. The design it follows is in
-[`docs/payroll-closure.md`](payroll-closure.md) (Phase 8 at the top; Phases 1 to 7 under
-it). Everything stated as "measured" names the suite that measures it.
+[`docs/payroll-closure.md`](payroll-closure.md) (the release candidate and Phase 8 at the top;
+Phases 1 to 7 under it). The build is **v187**, one commit on top of main at v186 (`9846d7f`). Everything stated as "measured" names the suite that measures it.
 
 Two people act here:
 
@@ -27,8 +27,11 @@ Two people act here:
    together** and none can be half on (`tests/activation.test.mjs`, V4).
 5. From that moment a phone on a build from before the pay book **cannot write at all** —
    it shows a sync error and keeps its work until it is updated (`tests/activation.test.mjs`,
-   V9b, on the real bytes of v180, v183 and v184 against the fake rules;
-   `tests/activation.emulator.test.mjs`, O, against the real ones).
+   V9b, on the real bytes of v180, v183, v184 and v186 against the fake rules;
+   `tests/activation.emulator.test.mjs`, O, against the real ones). **One thing such a phone
+   can still do, if it is on v186 and shares rides: seat a man.** The ride plans are documents
+   of their own and the rule that stops its days does not look at them (measured, the same
+   suite, R) - see [A phone on v186 that has not updated](#a-phone-on-v186-that-has-not-updated).
 
 ## The point of no return
 
@@ -65,9 +68,61 @@ an advance in a period nobody closed (the one-debt ruling of 2026-11-10).
 |---|---|---|---|
 | A1 | On the exact commit to be served, from one clean detached worktree: `npm ci`, `npm test`, `npm run test:release`. **`test:release` includes the emulator suites - the only place the REAL rules are run**, among them `test:activation-emulator`. | Every check passes. Say which commit. | Stop. Nothing is served. An emulator suite that was "not run" is a stop, not a note. |
 | A2 | On the same commit: `npm run test:gate-open`. | It ends with «what differs is exactly tests/gate-open.expected.mjs». | A NEW difference is a guarantee nobody has read with the pay book on. Read it, fix it or add it to the list with its reason. Do not serve until it is the list. |
-| A3 | Prepare the ONE rules file to paste: see [The rules file](#the-rules-file). | `diff` against the file the gates ran with shows only the other feature's block, if any. | Rebuild the file; run `npm run test:emulator` against it. |
+| A3 | The ONE rules file to paste is `firestore.rules` at the commit that is served - the file every emulator suite of A1 ran with. See [The rules file](#the-rules-file). | `cmp` of the text handed to the owner against `git show <commit>:firestore.rules` says nothing. | Hand over the file again. Nothing typed, nothing merged by hand. |
 | A4 | Firestore console → Indexes → Single field → exemptions. | There are exemptions for `days`, `ledger`, `pay`, `payIndex`, `monthIndex`, `roster`, `advances` — or the owner adds them. (Firestore also limits a document to 40,000 index entries; the emulator does not enforce it and no suite here can see it. Phase 6, open risk.) | Add them before step 5. Not adding them does not block activation today; it brings a wall closer that nobody can measure from here. |
-| A5 | Serve the build (merge, Pages). | The Pages deployment for that commit succeeded. | Do not ask the owner to do anything. |
+| A5 | Serve the build (merge, Pages). **The merge also starts `.github/workflows/rules.yml`** - read [Merging starts the rules workflow](#merging-starts-the-rules-workflow) BEFORE merging. | The Pages deployment for that commit succeeded. The `rules` run is RED with «firestore.rules was NOT published» (no secret - expected), or green with a summary naming the commit and the file's sha256 (a secret was set: the rules ARE live, and step 2 below becomes a comparison only). | Do not ask the owner to do anything. A `rules` run that is green with no such summary, or red for any other reason, is read before anything else happens. |
+
+## Merging starts the rules workflow
+
+This commit changes `firestore.rules`. `.github/workflows/rules.yml` runs on every push to
+main that changes that file, and tries to PUBLISH it to the real project with the secret
+`FIREBASE_SERVICE_ACCOUNT`. The workflow is not changed by this build.
+
+| the secret | what the merge does | then |
+|---|---|---|
+| **not set** (the state today: the v185 run went red at the key step and published nothing) | the run is **red**, «firestore.rules was NOT published», the live rules are whatever they were | the owner pastes the file by hand - step 2 of Part B |
+| **set** (if the owner ever sets it) | **the merge itself publishes the new rules**, within minutes, at about the moment Pages starts serving the build; nothing orders the two | step 2 of Part B is only the comparison: what the console shows must be this commit's `firestore.rules` |
+
+**Both are safe, and so is either order of "rules live" and "build on a phone" - while
+nobody has pressed the button.** Measured, cell by cell
+(`tests/activation.emulator.test.mjs`, on the emulator, each build's own bytes and adapter):
+
+| the phone's build | the rules | the record | what happens |
+|---|---|---|---|
+| v180, v183, v184, v186 | live today | not on | records a day, synced - today's state (O, «under the rules LIVE TODAY») |
+| v180, v183, v184, v186 | **new** | not on | records a day, restores a file, synced: every new rule is vacuous without a pay book (O, «BEFORE the record is on») |
+| **v187** | live today | not on | records a day, shares rides, as v186 does. The button asks the server, is told the rules are the old ones, says so and writes nothing; sent anyway, the opening is refused whole (T) |
+| **v187** | **new** | not on | as v186, plus the row in ⋯; the button works (N) |
+| v180, v183, v184, v186 | **new** | **on** | every write to the record refused: a day, an old-style closure, a restore. The phone shows a sync error and keeps its work. v186's ride plans are still accepted (O, «AFTER»; R) |
+| v180, v183, v184, v186 | live today | **on** | **the hazard**: its restore is accepted and the pay book is gone from the server (O, «the hazard») - cannot arise unless the new rules are taken back after the button |
+
+So, of "the new rules live BEFORE this build reaches a phone":
+
+- **it is not required** for anything a phone does before the button - a v187 phone under
+  the rules of today is a v186 phone with one more row in ⋯;
+- **it is required before the button**, and that is enforced twice without anybody
+  remembering it: the app asks by reading and refuses with a sentence, and the rules of
+  today refuse the opening whole if it were sent anyway;
+- **it is preferred** only for tidiness: the owner then never meets the sentence «השרת
+  עדיין עובד עם הכללים הישנים».
+
+The order below - rules, then phones, then the button - is the one that needs no judgement.
+
+### A phone on v186 that has not updated
+
+After the button, on the new rules (measured, R, with v186's own adapter out of Git):
+
+| it tries to | |
+|---|---|
+| record a day, clear one, change the roster, give an advance, close an account the old way, restore a file | **REFUSED.** Not on the server; the phone shows a sync error, not «מסונכרן», and keeps what was typed until it updates |
+| seat a man, move him, change the list of vehicles (shared rides) | **ACCEPTED**, and the other phones draw it. A ride plan is a document of its own (`schedules/<doc>/transport/…`), carries no protocol, and is judged by its own block: who writes, its shape, the next revision |
+| read the record | yes - it adopts what the others write, and still shows the OLD arithmetic for what a man owes |
+
+This was not designed; it is what the two sets of rules do side by side, and it is left as
+it is: a ride plan is not the record and no money is in it. What it means on the day: such a
+phone seats men **from its own copy of the day**, which may hold days nobody else has
+received. A plan that looks wrong on the others' phones after the button is the sign of a
+phone that has not updated. Update it; its days go up by themselves.
 
 ## Part B — the owner
 
@@ -91,20 +146,32 @@ correction.
 Firebase console → Firestore Database → Rules.
 
 1. **Copy what is there now into a file and keep it.** The maintainer compares it with
-   `docs/firestore.rules.before-paybook`. They must be identical. (They were, byte for
-   byte, on 2026-11-10.)
+   `docs/firestore.rules.before-paybook`, which is main's `firestore.rules` at v186: the
+   rules of v184 plus the shared rides' block. They must be identical. **This is believed
+   and has not been checked:** the owner reported pasting that file on 2026-11-10; nobody
+   has read the console since. (The file of before the rides, v184's, WAS compared with the
+   console, byte for byte, earlier that day.)
    - **If they differ: stop.** The file in this repository is not what is live, and
-     nothing here was measured against what is live.
+     nothing here was measured against what is live. The one difference with a known
+     answer: the console still shows the rules WITHOUT the rides' block (`git show
+     990f5b4:firestore.rules`) - then the paste of 2026-11-10 did not happen, the phones
+     have been saying «עדיין לא משותף» under הסעות, and the file to paste is still the same
+     one: it holds that block too.
+   - If the `rules` workflow published at the merge (a secret was set), the console already
+     shows the NEW file: compare it with `firestore.rules` of the served commit instead,
+     keep it, and paste nothing.
 2. Select everything in the editor, paste the new file, **Publish**.
 
 - **Check, on any phone, still on the build it had:** the status line says «מסונכרן»;
   record a day and remove it again — both go through.
   Why it must: with no pay book on the record every new rule is vacuous. Asked of the real
-  bytes of v180, v183 and v184: each records a day (`tests/activation.test.mjs`, V9b) and,
+  bytes of v180, v183, v184 and v186: each records a day (`tests/activation.test.mjs`, V9b) and,
   on the real rules, records a day and restores a file exactly as before
   (`tests/activation.emulator.test.mjs`, O, "BEFORE the record is on"). The same was
   measured for the rules of Phases 3 to 6 on v167, v171 and v172
-  (`tests/months.emulator.test.mjs`, Y5).
+  (`tests/months.emulator.test.mjs`, Y5). And הסעות goes on being shared: the rides' block is
+  in the new file word for word (`tests/transport.emulator.test.mjs`, the whole suite, runs
+  on the new file).
 - **If a phone shows a sync error after publishing:** paste the saved text back and
   Publish. At this step that is completely safe — nothing has been written that the old
   rules do not know. Tell the maintainer what the phone said.
@@ -123,7 +190,8 @@ On each: open the app, accept the update when it offers it (or ⋯ → עדכו�
   Nothing has changed yet.
 - **If a phone cannot be updated today:** do not go on. From step 5 that phone cannot
   write a day until it is updated (it keeps what is typed on it, shows a sync error and
-  sends it after the update) — and what it SHOWS a man owes is the old figure.
+  sends it after the update) — and what it SHOWS a man owes is the old figure. It can
+  still seat men in הסעות ([above](#a-phone-on-v186-that-has-not-updated)).
 - No window of an older build stays open beside an updated one on the same phone.
 
 ### 4. Read the screen — the owner's main phone
@@ -212,7 +280,7 @@ read the page, «שולם הכול» or what was really paid, «אישור סג�
 | closing an account | the old dialog («סגור את החשבון») | the review page only: per-advance deduction, extra deductions, what was paid. **Needs signal** — a closure or payment with no connection is refused, in a sentence, and nothing is written |
 | giving an advance, a repayment, «תיקון טעות» | as today | **the same forms**, with or without signal |
 | ⋯ | one new line and button under כללי | the line says it is on, since which day; no button |
-| a phone that was not updated | works | **every write is refused**: sync error, not «מסונכרן», the work stays on the phone until it updates |
+| a phone that was not updated | works | **every write to the record is refused**: sync error, not «מסונכרן», the work stays on the phone until it updates. Its shared ride plans still go through |
 
 All three accounts may close and pay (the owner's rule 8). All three may press the button
 of step 5 — it is in ⋯, behind a screen and a confirmation that says it cannot be turned
@@ -220,74 +288,69 @@ off. If only the owner should be able to, that is decision 72.
 
 ## The rules file
 
-**One paste.** The file is `firestore.rules` at the commit that is served.
+**One paste.** The file is `firestore.rules` at the commit that is served. For v187 the
+exact text was also handed over beside the commit as `firebase-rules-v187.txt`, byte for
+byte the same file.
 
-Every difference from the file that is live today (`docs/firestore.rules.before-paybook`,
-which is main's `firestore.rules` and was the live text on 2026-11-10) — and there is no
-difference of any other kind: **not one line of today's rules is removed or changed; 380
-lines are added** (pinned, `tests/activation.test.mjs`, V12):
+Every difference from the file believed live today (`docs/firestore.rules.before-paybook`:
+main's `firestore.rules` at v186, 366 lines, the shared rides' block in it) — and there is
+no difference of any other kind: **not one line of today's rules is removed or changed; 380
+lines are added** (pinned, `tests/activation.test.mjs`, V12; and `diff` of the two files
+shows 380 lines added and none removed or changed). One of today's blocks stands in another
+PLACE: the rides' `match /transport/{name}` comes after the pay book's three kinds of
+document instead of right after the receipts - a sibling among siblings under the same
+`match /schedules/{docId}`, where order decides nothing. It is word for word the live block
+(V12, and `tests/transport.emulator.test.mjs`, ADD).
 
 | added | what it enforces | binds only when |
 |---|---|---|
 | `payGuard` (`touchesPay`, `speaksPaybook`, `payOnlyGrows`, `carriesClosed`) | the pay map only grows, only at protocol 2, only with its create-once closed copy in the same commit | a write changes `pay` |
 | `indexGuard`, `archivesOne`, `payOnlyLeaves`, `indexedNeedsPaybook` | the index of archived closures only grows, one row a write, its closed document must exist; once there is an index only protocol 2 writes | a closure has been archived |
 | `daysGuard`, `monthGuard`, `archivesMonth`, `monthsNeedPaybook` | no write of any shape touches a date of an archived month; the month index only grows, against an existing month document | a month has been archived |
-| **`activatedNeedsPaybook`** (Phase 8) | once the document holds a pay book at all, a writer below protocol 2 may not write | the record is on |
+| **`activatedNeedsPaybook`** (Phase 8) | once the document holds a pay book at all, a writer below protocol 2 may not write **the schedule document** | the record is on |
 | `payGuardOnCreate`, `indexGuardOnCreate`, `monthGuardOnCreate` | a new project may not begin with a pay book without its closed copy, an index, or a month index | a document is created |
 | `match /closed/{entryId}` | create-once, never updated or deleted, only in the commit that takes the schedule to the revision it names | — |
 | `match /months/{monthId}` | the same, named by month and digest | — |
 | **`match /probe/{generation}`** (Phase 8) | nothing is stored here: `get` of `probe/paybook-8` is allowed, which is how the app asks "are these the new rules" by reading | — |
 
 Unchanged, to the letter: who may read and write (`allowed()`), the protocol envelope, the
-receipts, the bootstrap, `history/`, and "everything else is denied".
+receipts, the bootstrap, `history/`, the shared rides' block, and "everything else is
+denied".
 
-### One file for two additions
+### How the one file was made
 
-A parallel branch adds shared rides — `match /transport/{name}` under
-`match /schedules/{docId}`, with four functions of its own (`transportStamped`,
-`transportSettingsOk`, `transportDayOk`, `transportOk`). It is a pure insertion into main's
-file, right after the receipts block. **The owner pastes ONE file holding both.**
+Main's file and the pay book's file each added to the rules of v184, in different places.
+The file in this commit was **built, not typed**: `python3 tools/combine-rules.py <the pay
+book's file> <the common base, 990f5b4> <main's file> <out>` takes the other side's change
+only if it is ONE insertion right after the receipts block holding one `match` block and
+declaring no function the pay book's file declares, inserts those lines after `probe/` and
+before the brace that closes `match /schedules/{docId}`, and checks that every line of both
+is in the result. It produced, on the merge, byte for byte the working file that was handed
+over with Phase 8 (41,260 bytes).
 
-- **Where it goes:** in this branch's file the blocks under the schedule are, in order,
-  `receipts/`, `closed/`, `months/`, `probe/`. The transport block is added **after
-  `probe/` and before the brace that closes `match /schedules/{docId}`** — a sibling of
-  the four, sharing no function and no field with them (`tests/activation.test.mjs`, V12,
-  pins that place).
-- **How it is built, not typed:** `python3 tools/combine-rules.py <this branch's
-  firestore.rules> <main's firestore.rules> <the transport branch's firestore.rules>
-  <out>`. It does not merge text. It takes the other branch's change only if it is ONE
-  insertion into main's file right after the receipts block, holding one `match` block
-  and declaring no function this branch's file declares; inserts those lines at the place
-  above; and checks that every line of both is in the result. Anything else and it stops.
-- **The file as built on 2026-11-10** (a working file handed over with the branch, not
-  committed - it belongs to whichever branch is merged second): this branch's rules plus
-  the 67 lines of the transport block, 41,260 bytes. **Every emulator suite of this
-  branch is run with it in place of `firestore.rules` before it is pasted**, and that
-  proves ONE thing: the pay book's rules are not disturbed by the block beside them.
-  Nothing on this branch exercises the transport block itself - its own suites are on
-  its own branch, and they are run against the same one file too.
-- **Whichever branch is merged second** carries the combined file as its
-  `firestore.rules`, so that the file in the repository is again exactly what is live.
-  The probe's name does **not** move for the transport block: no client refuses to run
-  without it.
-- **If the rides rules are published first, alone:** then "what is live" is no longer
-  `docs/firestore.rules.before-paybook`, step 2's comparison is made against the transport
-  branch's file instead, and the file to paste is still the combined one.
+**Both features were run on that one file**, on the emulator: the pay book's thirteen
+suites and the shared rides' own (`test:transport-emulator`) - see the hand-over report of
+the commit for the counts; a result belongs to a commit. The probe's name did not move for
+the rides' block: no client refuses to run without it.
 
 ## Rolling back
 
 | when | the build | the rules | what is lost |
 |---|---|---|---|
-| after step 2, before step 5 | nothing to do | paste the saved text back. Safe. | nothing |
+| after step 2, before step 5 | nothing to do | paste the saved text back (the file WITH the rides' block - not an older one, or הסעות stops being shared). Safe. | nothing |
 | after step 5, **before the first closure** | serve this build with `paybookActivation: false`. Every phone updates. | **leave the new rules.** | nothing: every figure reads as before the button; three inert entries stay in the record |
 | after the first closure | — | **never.** | there is no way back; fix forward |
 
 Why the rules are never rolled back once the record is on: under the rules published
 today an older build's restore is **accepted and the pay book is gone from the server**.
 Measured at Phase 3 on v167, v171 and v172 (`tests/paybook.split.emulator.test.mjs`, «the
-hazard, on the real rules»), and asked again of v180, v183 and v184
+hazard, on the real rules»), and asked again of v180, v183, v184 and v186
 (`tests/activation.emulator.test.mjs`, O, the last section of each). Under the new rules the same restore is refused and nothing moves. And the
 closed documents become unreadable to the app under rules that have no `closed/`.
+
+**And the workflow can do it without anybody pasting:** if `FIREBASE_SERVICE_ACCOUNT` is
+ever set, a later push to main that changes `firestore.rules` publishes that file. After
+step 5 no commit that takes a line of the pay book's rules out may reach main.
 
 If the new rules were ever replaced by mistake after step 5: paste the new file back at
 once. Nothing is lost by the mistake itself unless an older build restored in between.
@@ -308,11 +371,14 @@ once. Nothing is lost by the mistake itself unless an older build restored in be
 
 ## What was NOT verified, and stays open on the day
 
+- **What is live in the console.** Believed to be main's file at v186 on the owner's
+  report of 2026-11-10; step 2 is where it is read.
 - **Whether the emulator suites - the only place the REAL rules are run - had been run on
-  the served commit, and against the ONE file that is pasted.** That is step A1 and A3,
-  not an assumption. `tests/activation.emulator.test.mjs` was written in the session that
-  built the activation, when the emulator was held by another job; the hand-over report of
-  that session says whether it was run.
+  the served commit.** That is step A1, not an assumption; the hand-over report of the
+  commit says which were run and what they said.
+- **The `rules` workflow with a secret.** It has never published anything (both recorded
+  green runs skipped the publish; the v185 run was red at the key step). What it does with
+  a key is read from its text, not seen.
 
 - **No real phone.** Every screen here was driven in Chromium with emulated touch. The
   keyboard over the review page, the date control in the iPhone's own locale, and a slow

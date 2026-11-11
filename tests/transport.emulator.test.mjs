@@ -152,12 +152,35 @@ const refused = async promise => {
 
 await block('ADD: the new rules are the rules of before plus one block', async () => {
     given('the rules in the field could be read out of Git', OLD_RULES !== null, String(oldRulesFrom));
-    const from = NEW_RULES.indexOf('\n\n      // הסעות, shared: who rides to work in which vehicle.');
-    const to = NEW_RULES.indexOf('\n    }\n\n    // One copy of the schedule per day');
-    given('the block is where it is expected', from !== -1 && to > from);
-    same('with that one block taken out, the file is today\'s file byte for byte',
-        NEW_RULES.slice(0, from) + NEW_RULES.slice(to), OLD_RULES);
-    const added = NEW_RULES.slice(from, to);
+    // v187 MOVED. Until v186 firestore.rules WAS the rules of before plus this one block,
+    // and that equation was asked of it. v187's file also carries the pay book's rules, so
+    // the equation is asked of the file it is still true of - the rules live since v185,
+    // kept as docs/firestore.rules.before-paybook (main's firestore.rules at v186) - and
+    // of this build's file what is asked is that the block in it is THAT block, word for
+    // word, and that not a line of the rules of before is gone from around it.
+    const cut = text => {
+        const from = text.indexOf('\n\n      // הסעות, shared: who rides to work in which vehicle.');
+        const to = from === -1 ? -1 : text.indexOf('\n    }\n', from);     // the brace that closes the schedule
+        return to > from ? { block: text.slice(from, to), rest: text.slice(0, from) + text.slice(to) } : null;
+    };
+    const LIVE = read('../docs/firestore.rules.before-paybook');
+    const live = cut(LIVE);
+    const mine = cut(NEW_RULES);
+    given('the block is where it is expected, in the live file and in this build\'s', live !== null && mine !== null);
+    same('with that one block taken out, the file live since v185 is the file of before byte for byte',
+        live.rest === OLD_RULES, true);
+    same('and the block in this build\'s file is that block, word for word', mine.block === live.block, true);
+    let at = 0;
+    const pasted = mine.rest.split('\n');
+    const gone = OLD_RULES.split('\n').filter(line => {
+        const found = pasted.indexOf(line, at);
+        if (found === -1) return true;
+        at = found + 1;
+        return false;
+    });
+    same('around it, not one line of the rules of before is removed or changed (what was added is the pay book\'s: tests/activation.test.mjs, V12)',
+        gone, []);
+    const added = mine.block;
     check('the block allows nothing outside schedules/<doc>/transport', (added.match(/\n\s+match \//g) || []).length === 1
         && added.includes('match /transport/{name} {'));
     check('and never allows a delete', /allow delete: if false;/.test(added) && !/allow (write|delete)[^;]*allowed\(\)/.test(added));
@@ -581,7 +604,11 @@ await block('NEW RULES, OLDER BUILDS: they record as before and never touch the 
         const plansBefore = JSON.stringify([await readRaw(env, ...PATH, 'transport', DOC), await readRaw(env, ...PATH, 'transport', 'settings')]);
         const stampOf = (/const APP_VERSION = '([^']+)'/.exec(show('js/app.js')) || [])[1];
         const device = makeDevice({ deviceId: `d_${name}`, storage: { 'farkadTransport:enabled': '1' }, appVersion: stampOf,
-            sources: loadOrder().map(file => ({ file, code: show(file) })) });
+            // (less the six files the pay book added to the load order in v187, which no
+            // older tree has - named, as tests/transport.share.test.mjs names them)
+            sources: loadOrder().filter(file => ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
+                'js/model/months.js', 'js/sync/months.js', 'js/cold.js'].indexOf(file) === -1)
+                .map(file => ({ file, code: show(file) })) });
         device.Sync.pushDelayMs = 5;
         device.setToday(DAY);
         device.ctx.askTell = () => Promise.resolve();

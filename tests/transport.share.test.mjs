@@ -31,6 +31,14 @@ import { readFileSync } from 'node:fs';
 import { makeDevice, makeCloud, sharedStore, settle, settleUntil, loadOrder, sourceRoot } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
+// THE FILES THE PAY BOOK ADDED TO THE LOAD ORDER (v187) AND NO BUILD BEFORE IT EVER HAD.
+// NAMED, the way tests/yosefgeves.test.mjs names them: a list that quietly shrinks is how
+// a suite stops testing. An older tree is asked for everything else this build loads, and
+// `git show` still stops the block if one of those is not in it.
+const NOT_BEFORE_PAYBOOK = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
+    'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
+const olderOrder = () => loadOrder().filter(file => NOT_BEFORE_PAYBOOK.indexOf(file) === -1);
+
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const SEDER = read('../js/ui/seder.js');
 const ENGINE = read('../js/model/transport.js');
@@ -748,7 +756,7 @@ await block('an older build that drops the off field on a shared disk: it goes u
 
     // v180 on A's disk.
     const old = makeDevice({ deviceId: 'd_a', storage: a.dump(), appVersion: 'v180',
-        sources: loadOrder().map(file => ({ file, code: show(file) })) });
+        sources: olderOrder().map(file => ({ file, code: show(file) })) });
     old.setToday(DAY);
     old.ctx.askTell = () => Promise.resolve();
     ['js/ui/seder.js', 'js/model/transport.js', 'js/ui/transport.js'].forEach(file =>
@@ -935,7 +943,7 @@ await block('builds without sharing, out of Git: they cannot reach the shared do
         cloud.transport.put('settings', stamp({ vehicles: [{ id: 'tv_01', name: 'רכב משותף', seats: 5, active: true }] }, 1));
         const held = JSON.stringify([...cloud.transport.docs.entries()]);
         const device = makeDevice({ deviceId: `d_${name}`, storage: { [ENABLED]: '1' }, appVersion: stampOf,
-            sources: loadOrder().map(file => ({ file, code: show(file) })) });
+            sources: olderOrder().map(file => ({ file, code: show(file) })) });
         device.Sync.pushDelayMs = TICK;
         device.setToday(DAY);
         device.ctx.askTell = () => Promise.resolve();

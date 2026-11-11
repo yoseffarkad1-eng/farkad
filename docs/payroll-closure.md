@@ -20,9 +20,13 @@ The three flags are still `false` and stay false - but they are no longer how th
 is turned on. It is turned on for ONE RECORD, by a person, from the app: an entry in the
 shared record (the opening) written by a server transaction only the new rules accept.
 Wherever a phase below says "the gate may not be opened" or "the commit that opens the
-gate", read it against [Phase 8](#phase-8--the-activation-candidate-v186): there is no
+gate", read it against [Phase 8](#phase-8--the-activation-candidate-stamped-v186-on-its-branch-v187-as-a-candidate): there is no
 such commit any more, and the order in which it is done is
 [`docs/payroll-activation.md`](payroll-activation.md).
+
+**And the release candidate, v187, comes before Phase 8:** that phase merged with main at
+v186 (the shared rides), as one commit, with the rules of both in one file and the rollout
+table measured again.
 
 Phases 0 and 1 were built on `bd59a68` (v169); Phase 2 on `0acaceb` (v171); Phase 3 on
 Phase 2 merged with main at v172 (`8c943fa`); Phase 4 on Phase 3 merged with main at
@@ -38,7 +42,90 @@ wrong](#where-the-audit-and-the-design-were-wrong).
     node tests/activation.test.mjs          # Phase 8: turning it on for one record, on the build as it ships
     npm run -s test:paybook-emulator        # the PUBLISHED rules and the production adapter (needs Java)
 
-## Phase 8 — the activation candidate (v186)
+## The release candidate — v187 (Phase 8 on top of main at v186)
+
+**Candidate. Not served, not merged, on no phone; no rules published; no real record
+read.** One commit on `9846d7f`. It waits for the owner's decisions 71, 75 and 76 and his
+explicit approval. The release entry is `docs/releases.md`, v187; the order is
+[`docs/payroll-activation.md`](payroll-activation.md). Nothing was built in this step: it
+is Phase 8 merged with what main gained, re-measured.
+
+### Main at v186 merged in
+
+Main gained v185/v186, the shared rides: `js/ui/transport-share.js`, `transportOps` in the
+adapter, five hooks in `js/ui/transport.js`, and `match /transport/{name}` in
+`firestore.rules`.
+
+| conflict | resolved as |
+|---|---|
+| `firestore.rules` | the file `tools/combine-rules.py` builds: the pay book's file with main's 67-line block inserted after `probe/`. Byte for byte the working file handed over with Phase 8 (41,260 bytes). Against main's file: 380 lines added, none removed or changed |
+| `package.json` | the union of both chains and both sets of scripts |
+| `CLAUDE.md` | main's file; the pay book's per-phase paragraphs replaced by one paragraph and grouped file lines |
+| `docs/releases.md` | main's file, whole; the branch's entries above it, under a v187 entry |
+| merged by Git, read | `js/sync/firebase-adapter.js` (the pay book's operations inside `firestoreOps`; `transportOps` and its hand-over untouched), `index.html` and `sw.js` (both script lists), `css/design.css`, `tests/harness.mjs` |
+
+### "The rules of before" are now main's rules at v186
+
+`docs/firestore.rules.before-paybook` was the rules of v184. The owner reported pasting
+main's file - with the rides' block - on 2026-11-10, so **that file is what is believed
+live, and the artifact is now it** (366 lines). Wherever a phase below says "the published
+rules" or "the rollback artifact", it is this file. The shared rides' own suites keep their
+own "rules of before" - the file from before the block, out of Git (`d3103d6`) - because
+their question is a phone that meets rules with no block.
+
+### The rollout table, re-derived
+
+`tests/activation.emulator.test.mjs`, O, T, N and R: v180, v183, v184 **and v186**, each
+build's real bytes and its own adapter, on the emulator.
+
+| the build | the rules | the record | |
+|---|---|---|---|
+| older | live today | not on | records a day, synced |
+| older | new | not on | records a day, restores, synced |
+| older | new | on | a day, an old-style closure and a restore each REFUSED; sync error; the work kept |
+| older | live today | on | its restore is accepted and **the pay book is gone** - why the new rules never go back |
+| v187 | live today | not on | records a day, shares rides; the step refused by asking (`rules`); sent anyway, refused whole |
+| v187 | new | not on / on | turned on; both phones on with one arithmetic |
+
+Every older build answers every question the same way. So: the new rules may be live
+before or after v187 reaches a phone; they must be live before the button, and the app and
+the rules each enforce that.
+
+### The shared rides beside a record that is on
+
+`activatedNeedsPaybook` is a condition of the schedule document's update. A ride plan is
+`schedules/<doc>/transport/<name>`, matched by its own block, which asks who writes, the
+shape and the next revision - never the protocol, which a transport write does not carry.
+Measured (R, v186's own `transportOps` out of Git, the real rules), on a record that is on:
+
+- the v186 phone's **day is refused**, the record's revision does not move, the phone does
+  not say synced;
+- the same phone **seats a man and the plan is accepted**; so is its change to the list of
+  vehicles; v187 beside it reads that plan and writes the next;
+- the rides' own compare-and-set is what it was (a late write is told `conflict`), a
+  stranger is refused, and none of it moves the record's revision, pay book or closed
+  document.
+
+Not designed; left as it is - a ride plan is not the record and holds no money - and
+written in the runbook («A phone on v186 that has not updated»).
+
+### Pinned expectations this step moved
+
+None was weakened; each moved with its reason beside the check.
+
+| suite | was | is | why |
+|---|---|---|---|
+| `docs/firestore.rules.before-paybook` | the rules of v184 | main's rules at v186 | what is live moved (above) |
+| `tests/activation.test.mjs`, V12 | «the place another block of documents under the schedule is added: after probe/, before the schedule's closing brace» - an empty place | the rides' block stands in that place, word for word as the live file holds it; and neither side's rules name the other | the block arrived |
+| `tests/activation.test.mjs`, V9b | v180, v183, v184 | + v186 | the build every phone should be on today |
+| `tests/activation.emulator.test.mjs` | the artifact asked of `990f5b4`; three older builds; six cells each | asked of `9846d7f`; four builds; seven cells (+ the live rules on a record not on); + section R; + one rides check in T | the same, and the question nobody had asked |
+| `tests/months.emulator.test.mjs`, `tests/paybook.archive.emulator.test.mjs`, `tests/paybook.split.emulator.test.mjs` | the artifact asked of `8c943fa` (v172) | asked of `9846d7f` | the same |
+| `tests/transport.emulator.test.mjs`, ADD | «with that one block taken out, the file is today's file byte for byte», asked of `firestore.rules` | asked of the file it is still true of (the live one); and of this build's file: the block is that block word for word, and no line of the rules of before is gone around it | this build's file also carries the pay book's rules |
+| `tests/transport.share.test.mjs`, `tests/transport.emulator.test.mjs` | an older tree is asked for every file this build loads | less the six only the pay book has (named) | the same rule `tests/yosefgeves.test.mjs` follows |
+| `tests/accounts.test.mjs` | «reports.js without its five hooks is main's file», «index.html gained no element» - asked of `990f5b4` | asked of `9846d7f` | v187 is built on v186; main's own new element (the rides' line) is not the pay book's |
+| `tests/gate-open.expected.mjs` | `test:build`, `test:gate-integrity` on the list | off it | the stamps moved in this commit, as the list said they would |
+
+## Phase 8 — the activation candidate (stamped v186 on its branch; v187 as a candidate)
 
 **Development branch. Not served, not merged, on no phone; no real record was read and no
 rules were published. `paybook`, `months` and `cold` are `false` in everything committed,
@@ -321,7 +408,7 @@ commit: these are from the runs recorded in the hand-over report of this phase;
 | `polish-browser` | stops at the quiet zero | **replaced** | v181's quiet zero is measured on the advances list. Held: `tests/accounts.browser.mjs` (a quiet row; a debt figure only above zero). **Not measured with the gates open:** what that suite holds after that point - the empty screens, the week's letter, the backup's age. None is drawn by anything the pay book touches. |
 | `settings-order-browser` | 3 checks | reading | The pay book's row in ⋯ is drawn for a record that is not on, or on; under the seam the record is neither and no row is drawn. Held: `tests/activation.browser.mjs`, before and after. |
 | `nonassertions` | 1 check | **A DEFECT, fixed** | A literal `check(true)` in this phase's new emulator suite. It failed shut as well; it is a real comparison now and is not on the list. |
-| `build`, `gate-integrity` | 1 check each | (not the gate) | The stamp checks - red with the gates shut too on this branch of many commits. Both leave the list in the commit that moves the stamps. |
+| `build`, `gate-integrity` | - | (not the gate) | Were on the list while the branch had many commits (the stamp checks). **Off it since v187**, the commit that moves the stamps. |
 
 **The 108 that say the same**, among them every suite the brief named: `daycheck`,
 `journey`, `workercard`, `yosefgeves`, `polish` (node), and in Chromium `daycheck-browser`,

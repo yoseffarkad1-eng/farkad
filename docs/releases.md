@@ -1,4 +1,155 @@
-## v186 — the pay book's activation candidate: main at v184 merged in; the record turns it on, by a person (development branch, NOT served)
+## v187 — the pay book: worker accounts, closure and payment, turned on for a record by a person (CANDIDATE - NOT SERVED - WAITS FOR THE OWNER'S DECISIONS 71, 75, 76 AND HIS EXPLICIT APPROVAL)
+
+**Not served. Not merged. On no phone. No rules were published, the real project was not
+touched, and no real record was read.** One commit on top of main at v186 (`9846d7f`). No
+gate result is written here: validation is recorded against the exact clean commit, and no
+count is carried over.
+
+**It waits for three decisions and one sentence from the owner** (`docs/payroll-closure.md`,
+«Decisions for the owner»): **71** - that the build may OFFER the step at all (one row in ⋯
+on all three phones); **75** - the day tracking begins; **76** - what he does about men
+whose advance was in fact settled by hand in a period nobody closed. And his explicit
+approval to serve it.
+
+### What ships
+
+- **Visible to all three, at once, on a record nobody has turned on: ONE ROW in ⋯ → כללי** -
+  «פנקס שכר (סגירת חשבון, תשלומים וארכיון): עוד לא הופעל ברישום הזה.» and the button «פנקס שכר -
+  הכנה והפעלה». The button opens a screen of dry runs on the real record - whose debt will
+  read differently and by how much, how many old closures have no payment record, the
+  record's size - and reading it writes nothing and asks the server nothing.
+- **Everything else is dormant until somebody presses «הפעל את פנקס השכר» on that screen and
+  confirms.** `paybook`, `months` and `cold` are `false`, as in every build before; the day
+  screen, the week, the reports, the advances tab, הסעות, the seder and every file that
+  leaves the phone are v186's. This is not argued: every suite of the gates that is not
+  about the pay book runs on the build as it ships and says what it said.
+- **Behind the button** (`docs/payroll-closure.md`, Phases 1 to 8): worker accounts on the
+  «מקדמות» tab; closing an account on a review page with per-advance deductions, extra
+  deductions and what was paid; later payments; history and statements; the owner's
+  one-debt ruling of 2026-11-10 (an advance from a period nobody closed stays a full debt
+  until a person deducts it); a settled closure leaving the server's document 14 days on;
+  a month closed and paid for everybody leaving it six months on, when a person asks; the
+  phone keeping what left in IndexedDB.
+
+New shipped files: `js/model/payroll.js`, `js/model/months.js`, `js/sync/transact.js`,
+`js/sync/closed.js`, `js/sync/months.js`, `js/cold.js`, `js/ui/accounts.js`. Changed:
+`firestore.rules` (below), the adapter (the pay book's operations beside the record's and
+the rides'), and `js/app.js`, `js/state.js`, `js/recovery.js`, `js/model/schema.js`,
+`js/model/ledger.js`, `js/sync/sync.js`, `receive.js`, `restore.js`, `send.js`, `status.js`,
+`js/ui/reports.js` (five guarded hooks), `js/ui/settings.js` (one guarded line),
+`js/ui/backup.js`, `css/design.css` (the `acc-` classes). `js/model/money.js` is not
+touched. v186's shared rides are untouched: `js/ui/transport-share.js`
+and `js/ui/transport.js` are main's files byte for byte.
+
+### The rules - what must be live before the BUTTON, not before the build
+
+`firestore.rules` is main's file at v186 with **380 lines added and not one removed or
+changed** (`tests/activation.test.mjs`, V12). The shared rides' block is in it word for
+word, standing after the pay book's three kinds of document instead of right after the
+receipts. The file was built by `tools/combine-rules.py`, not typed.
+`docs/firestore.rules.before-paybook` is now main's file at v186 - what is BELIEVED live:
+the owner reported pasting it on 2026-11-10 and nobody has read the console since.
+
+Measured on the emulator, each build's own bytes and adapter
+(`tests/activation.emulator.test.mjs`; the table is in `docs/payroll-activation.md`):
+
+- **v180, v183, v184 and v186 under the new rules, record not on:** record a day, restore a
+  file, synced. Publishing the rules first stops nobody.
+- **v187 under the rules live today, record not on:** records a day and shares rides as
+  v186 does. The button asks the server by a read, is told, says «השרת עדיין עובד עם הכללים
+  הישנים…» and writes nothing; sent anyway, the opening is refused whole.
+- So **"new rules live before this build reaches a phone" is NOT REQUIRED** while nobody has
+  pressed the button; it is **REQUIRED BEFORE THE BUTTON**, and that is enforced by the app
+  and again by the rules, not by anybody's memory.
+
+### Merging this commit starts the rules workflow
+
+The commit changes `firestore.rules`, so **merging it to main starts
+`.github/workflows/rules.yml`**, which tries to publish that file to the real project with
+the secret `FIREBASE_SERVICE_ACCOUNT`. The workflow is not changed by this build.
+
+- **With no secret (today):** the run goes RED at the key step, «firestore.rules was NOT
+  published», and nothing is published - as on the v185 merge. The owner pastes the file by
+  hand (the exact text was handed over as `firebase-rules-v187.txt`, byte for byte this
+  commit's `firestore.rules`).
+- **If the owner ever sets the secret:** the merge itself publishes the new rules, at about
+  the moment Pages starts serving the build. By the measurements above that is safe too.
+  From then on ANY later push to main that changes `firestore.rules` publishes it - and
+  once a record is on, the pay book's rules must never leave that file.
+
+### THE ROLLOUT ORDER
+
+`docs/payroll-activation.md` is the runbook; this is its spine.
+
+1. The gates, on this exact commit: `npm test`, `npm run test:release` (the emulator suites
+   are the only place the real rules run), `npm run test:gate-open`.
+2. The owner takes a backup.
+3. **The rules**: the owner copies what the console shows and keeps it; it is compared with
+   `docs/firestore.rules.before-paybook`; then the new file is pasted and published. Every
+   phone goes on working, on whatever build it has.
+4. **Every phone updates to v187** - the owner's two, then the other two people's - and
+   each is LOOKED AT: the version, and the new row in ⋯.
+5. The owner reads the screen on the real record (decisions 75 and 76 are made here).
+6. **The button**, on the owner's phone, with signal.
+7. The other phones are looked at: the «מקדמות» tab is «חשבונות עובדים».
+8. **Before the first closure - stop and look.** The last moment a way back exists.
+
+(Step 3 may come after step 4 - measured - but never after step 6, which cannot happen
+without it.)
+
+**From the button on, a phone that has not updated can record nothing**: a day, an advance,
+an old-style closure and a restore are each refused; it shows a sync error instead of
+«מסונכרן» and keeps its work until it updates. It still SHOWS the old arithmetic. **A v186
+phone can still seat a man in הסעות** - the ride plans are documents of their own and the
+rule that stops its days does not read them (measured, R). Left as it is; written in the
+runbook.
+
+### The point of no return
+
+**Not the button. The first closure, payment or answer about an old closure recorded
+through the pay book.** Between the two the record has gained `pay.po_open`, the carry
+approval `cm_carry` if it had none, and one closed document; no day, wage, advance, ledger
+entry, invoice line or count is changed (`tests/activation.test.mjs`, V5, field for field).
+
+### Rollback
+
+| when | the build | the rules | lost |
+|---|---|---|---|
+| rules pasted, button not pressed | nothing | paste the saved text back (the file WITH the rides' block). Safe | nothing |
+| button pressed, **no closure yet** | serve this build with `paybookActivation: false`; every phone updates | **leave the new rules** | nothing: every figure reads as before the button (V6; on the emulator, W) |
+| after the first closure | - | **never** | no way back; fix forward |
+
+The new rules are never taken back once a record is on: under the rules live today an
+older build's restore is accepted and the pay book is gone from the server (measured on
+v180, v183, v184 and v186).
+
+### Known NOT covered
+
+- **No real phone and no real record.** Every screen was driven in Chromium with emulated
+  touch; every dry run was read on synthetic records. Step 5 is the first reading on the
+  real one.
+- **What is live in the console** was not read from here.
+- **The rules workflow with a secret** has never published anything; what it does with a
+  key is read from its text.
+- **Settling a disagreement between two bodies of one pay entry** (decision 49) is
+  designed, not built. It cannot arise through the screens - only through a file restored
+  from another state of the record.
+- **No second calculator for the one-debt ruling**: `tests/oracle.mjs` is main's documented
+  rule and parts from the app by design once a record is on.
+- **Firestore's 40,000 index entries per document** are not enforced by the emulator; the
+  runbook's step A4 (index exemptions) is the answer and cannot be measured from here.
+- **A real eviction of the phone's cold store by iOS**, and the first move of a large
+  archive - neither arises before something has been archived (14 days after the first
+  paid closure at the earliest).
+- **The shared rides beside the pay book** were measured on the rules (emulator) and in
+  Node; no browser suite drives both features on one page at once.
+- Every Hebrew string of the pay book is PROPOSED (decision 78), except the owner's own
+  labels (`ACC_OWNER`).
+
+The development history of this build follows, as it was written on its branch; the
+numbers in those headings are the branch's own stamps.
+
+## the pay book's branch at Phase 8 (stamped v186 there; NOT main's v186) — main at v184 merged in; the record turns it on, by a person (development branch, NOT served)
 
 **Not served. Not merged. On no phone. No real record was read and no rules were
 published.** `paybook`, `months` and `cold` are `false`. No gate result is written here:
@@ -397,9 +548,9 @@ one document.
 - **The capacity figures are for assumed crews** (14 and 30 men, six days a week). The
   real document's size and the real crew are not known from here.
 
-## v186 — הסעות, one shared plan: the gate opens (candidate, not served)
+## v186 — הסעות, one shared plan: the gate opens (served 2026-11-10)
 
-**Not served until the merge and the Pages deployment are recorded here by the next release.**
+**Served.** Merged as `9846d7f` (PR #68) on 2026-11-10; the Pages deployment succeeded at 22:38 UTC. The owner reported pasting the rules (main's `firestore.rules`, the transport block in it) into the Firebase console the same day - reported, not read off the console from here.
 Built on `0b754a6` (v185). ONE line of code changes (and one CSS rule, below): `TRANSPORT_SHARE = true` in
 `js/ui/transport-share.js` (with the comment above it, and one comment in `js/ui/transport.js`). `firestore.rules`,
 `firebase.json` and `.github/workflows/rules.yml` are NOT changed by this build. Nothing in

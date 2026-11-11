@@ -290,9 +290,9 @@ deliberately, and this file describes what will happen when someone does. No rul
 published from the session that wrote this paragraph, and none can be: every rules suite
 runs through `firebase emulators:exec` against a local emulator.
 
-## Which rules are live, and a record that is on (v186, Phase 8)
+## Which rules are live, and a record that is on (v187, Phase 8)
 
-Two additions to the rules of the pay book's branch, neither published:
+Two additions to the pay book's rules, neither published:
 
 - **`schedules/{doc}/probe/{generation}`** - nothing is ever stored there. `get` of
   `probe/paybook-8` is allowed to the people on the list and every other operation on the
@@ -307,7 +307,9 @@ Two additions to the rules of the pay book's branch, neither published:
   that is on (its first pay entry is the opening); a build from before the pay book
   speaks protocol 1, reads the old arithmetic and could close an account the old way with
   no signal. Its writes are stopped; nothing is erased; it does not say synced. With no
-  pay book on the document the rule is vacuous. Measured on v180, v183 and v184 in
-  `tests/activation.emulator.test.mjs`.
+  pay book on the document the rule is vacuous. Measured on v180, v183, v184 and v186 in
+  `tests/activation.emulator.test.mjs`. It binds the schedule document only: the shared
+  rides' documents (`transport/…`) carry no protocol and are judged by their own block, so
+  a v186 phone refused its days can still write a ride plan (the same suite, R).
 
 Protocol 2 itself did not change.

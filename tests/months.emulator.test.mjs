@@ -53,6 +53,10 @@ const fourLines = (before, after) => {
 
 const source = readFileSync(ADAPTER, 'utf8');
 const MAIN = '8c943fa';
+// THE RULES LIVE TODAY are main's firestore.rules at v186 (9846d7f): the rules of v184 plus
+// the shared rides' block, which the owner reported pasting on 2026-11-10 (reported - not
+// read off the console from here). docs/firestore.rules.before-paybook is that file.
+const RULES_LIVE = '9846d7f';
 const OLDER = [['v167', 'a25566f'], ['v171', '0acaceb'], ['v172', MAIN]];
 const NEW_HERE = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
     'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
@@ -82,8 +86,10 @@ function sourcesOf(name, sha) {
         /function payGuard\(docId\)/.test(NEW_RULES) && /function archivesOne\(docId\)/.test(NEW_RULES)
         && /function archivesMonth\(docId\)/.test(NEW_RULES) && /function daysGuard\(\)/.test(NEW_RULES)
         && /function monthsNeedPaybook\(\)/.test(NEW_RULES) && /match \/months\/\{monthId\}/.test(NEW_RULES));
-    same('docs/firestore.rules.before-paybook is, byte for byte, the rules main carries - the rollback artifact',
-        OLD_RULES === git(['show', `${MAIN}:firestore.rules`]).toString('utf8'), true);
+    // v187 MOVED: asked of 8c943fa (v172) until the shared rides' block went live; the
+    // file is now main's at v186, and it is asked of that commit.
+    same('docs/firestore.rules.before-paybook is, byte for byte, the rules main carries at v186 - what is live today',
+        OLD_RULES === git(['show', `${RULES_LIVE}:firestore.rules`]).toString('utf8'), true);
     given('the emulator is a local one', /^(127\.0\.0\.1|localhost)$/.test(EMULATOR.host), EMULATOR.host);
 }
 

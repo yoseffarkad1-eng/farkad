@@ -1,6 +1,11 @@
 // Turning the pay book on for one record, against a REAL Firestore: the rules of this
 // branch, the rules as published today, the PRODUCTION adapter, and three builds that
-// have not updated - v180, v183 and v184, their real bytes out of Git. (Phase 8)
+// have not updated - v180, v183, v184 and v186, their real bytes out of Git. (Phase 8)
+//
+// v187: the rules live today carry the shared rides' block (v185), and v186 - the build
+// every phone is on, or should be - shares rides. So the table is asked of v186 too,
+// against the live file WITH that block, and section R asks what nothing else here did:
+// what the rides' documents may do beside a record that is on.
 //
 //   firebase emulators:exec --project demo-farkad --only firestore "node tests/activation.emulator.test.mjs"
 //
@@ -58,10 +63,13 @@ const fourLines = (before, after) => {
 };
 
 const source = readFileSync(ADAPTER, 'utf8');
-const MAIN = '990f5b4';
-// The builds a phone may still be on when the owner presses the button: v180 and v183 were
-// served on 2026-11-10; v184 is what this branch was merged with.
-const OLDER = [['v180', 'd3103d6'], ['v183', '1af6729'], ['v184', MAIN]];
+// THE RULES LIVE TODAY are main's firestore.rules at v186 (9846d7f): the rules of v184 plus
+// the shared rides' block, which the owner reported pasting on 2026-11-10 (reported - not
+// read off the console from here). docs/firestore.rules.before-paybook is that file.
+const RULES_LIVE = '9846d7f';
+// The builds a phone may still be on when the owner presses the button: all four were
+// served on 2026-11-10, and v186 is the build v187 is made on top of.
+const OLDER = [['v180', 'd3103d6'], ['v183', '1af6729'], ['v184', '990f5b4'], ['v186', RULES_LIVE]];
 const NOT_ON_MAIN = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
     'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
 
@@ -83,9 +91,12 @@ function sourcesOf(name, sha) {
     check('the new rules stop a protocol-1 writer once a pay book exists, and say which rules they are',
         /function activatedNeedsPaybook\(\)/.test(NEW_RULES) && /&& activatedNeedsPaybook\(\)/.test(NEW_RULES)
         && /match \/probe\/\{generation\}/.test(NEW_RULES) && /generation == 'paybook-8'/.test(NEW_RULES));
-    same('docs/firestore.rules.before-paybook is, byte for byte, the rules main carries at v184 - the rollback artifact',
-        OLD_RULES === git(['show', `${MAIN}:firestore.rules`]).toString('utf8'), true);
+    // v187 MOVED: asked of 990f5b4 (v184) until the shared rides' block went live.
+    same('docs/firestore.rules.before-paybook is, byte for byte, the rules main carries at v186 - what is live today',
+        OLD_RULES === git(['show', `${RULES_LIVE}:firestore.rules`]).toString('utf8'), true);
     check('and those rules have no probe and no closed documents', !/probe|closed\//.test(OLD_RULES.replace(/\/\/.*$/gm, '')));
+    check('they DO have the shared rides\' block, and so do the new ones', /match \/transport\/\{name\} \{/.test(OLD_RULES)
+        && /match \/transport\/\{name\} \{/.test(NEW_RULES));
     given('the emulator is a local one', /^(127\.0\.0\.1|localhost)$/.test(EMULATOR.host), EMULATOR.host);
 }
 
@@ -256,6 +267,14 @@ function pathWrite(db, fields, protocol) {
     });
 }
 
+// The shared rides' documents, by the adapter's own transportOps (section R; and one
+// question in T).
+const rideOps = (module, db) => module.transportOps(db, () => collection(db, ...PATH, 'transport'), name => doc(db, ...PATH, 'transport', name));
+const rideStamp = (data, revision, by) => Object.assign({ v: 1, revision, updatedAt: '2026-10-16T05:00:00.000Z', updatedBy: by }, data);
+const rideDay = (trips, revision, by) => rideStamp({ date: TODAY, unavailable: {}, status: {}, trips }, revision, by);
+const rideList = (revision, by) => rideStamp({ vehicles: [{ id: 'tv_01', name: 'רכב', seats: 5, active: true }] }, revision, by);
+const tried = async promise => { try { await promise; return 'accepted'; } catch (error) { return error.code || String(error); } };
+
 // ================================================================ P
 {
     suite('P: which rules are these - a read the new rules allow and the published ones refuse');
@@ -300,6 +319,11 @@ const BEFORE_RULES = {};
     day(t, 'w_salim', '2026-10-19');
     await reached(() => quiet(t));
     same('and the phone goes on recording', dayOn(await server(envOld), '2026-10-19', 'w_salim'), true);
+    // The rules live today carry the shared rides' block: this build under them shares
+    // rides as v186 does, whatever the pay book was told.
+    same('and its ride plan is accepted under those rules, as v186\'s is',
+        await tried(rideOps(opsOf.new, as(envOld, ALLOWED)).write(`day_${TODAY}`, 0, rideDay({ tv_01: { driver: 'w_ahmad', passengers: [], seats: {} } }, 1, 'd_t'))),
+        'accepted');
 }
 
 // ================================================================ N
@@ -358,6 +382,19 @@ for (const [name, sha] of OLDER) {
         await reached(() => quiet(old));
         cell.restoreBefore = result.ok === true && (await server(envNew)).updatedBy === old.id;
         same('IT RECORDS A DAY AND RESTORES AS EVER: publishing these rules first stops no phone', [cell.dayBefore, cell.restoreBefore, old.Sync.status], [true, true, 'synced']);
+    }
+
+    suite(`O / ${name} under the rules LIVE TODAY, on the record as it is today - the cell every phone is in now`);
+    {
+        await envOld.clearFirestore();
+        await envOld.withSecurityRulesDisabled(async ctx => { await setDoc(doc(ctx.firestore(), ...PATH), clone(BASE.wire)); });
+        const old = oldPhone(name, sources, `d_o0_${name}`, envOld);
+        await reached(() => quiet(old));
+        day(old, 'w_nasser', '2026-10-18');
+        await reached(() => old.Sync.pendingCount() === 0);
+        cell.liveDay = dayOn(await server(envOld), '2026-10-18', 'w_nasser') && old.Sync.status === 'synced';
+        same('it records a day and says synced', cell.liveDay, true);
+        old.Sync.disconnect();
     }
 
     suite(`O / ${name} - AFTER the record is on`);
@@ -426,6 +463,60 @@ for (const [name, sha] of OLDER) {
     }
 }
 
+// ================================================================ R: the shared rides beside a record that is on
+//
+// `activatedNeedsPaybook` is a condition of the SCHEDULE document's update. The rides'
+// documents are schedules/<doc>/transport/<name>, matched by a block of their own that
+// asks who is writing, the shape and the next revision - and never the protocol, which a
+// transport write does not carry. So a phone on v186 that has not updated is refused its
+// DAYS on a record that is on, and is NOT refused its ride plans. Measured here with
+// v186's own transportOps, out of Git, on the real rules - not argued from the text.
+{
+    suite('R: the shared rides\' documents on a record that is on - v186\'s own adapter, the real rules');
+
+    given('v186\'s adapter, out of Git, has the rides\' operations', typeof opsOf.v186.transportOps === 'function');
+
+    await reseed(envNew);
+    const n = phone('d_r_new', envNew);
+    const old = oldPhone('v186', sourcesOf('v186', RULES_LIVE), 'd_r_v186', envNew);
+    await reached(() => quiet(n) && quiet(old));
+    const oldRides = rideOps(opsOf.v186, as(envNew, SECOND));
+    const newRides = rideOps(opsOf.new, as(envNew, ALLOWED));
+    same('BEFORE the record is on, under the new rules: a v186 phone writes the list of vehicles and a day\'s plan',
+        [await tried(oldRides.write('settings', 0, rideList(1, 'd_r_v186'))),
+            await tried(oldRides.write(`day_${TODAY}`, 0, rideDay({ tv_01: { driver: 'w_ahmad', passengers: [], seats: {} } }, 1, 'd_r_v186')))],
+        ['accepted', 'accepted']);
+
+    given('this build turns the record on', (await activate(n)).state === 'closed');
+    await reached(() => quiet(n));
+    await settle(800);
+    const stood = await server(envNew);
+    day(old, 'w_nasser', '2026-10-18');
+    await settle(3500);
+    const afterDay = await server(envNew);
+    check('AFTER: the v186 phone\'s DAY is refused - not on the server, the record\'s revision where it was, the phone not saying synced',
+        !dayOn(afterDay, '2026-10-18', 'w_nasser') && afterDay.revision === stood.revision && old.Sync.status !== 'synced' && old.Sync.pendingCount() > 0,
+        `${old.Sync.status} / ${old.Sync.pendingCount()}`);
+    same('AFTER, MEASURED: the same phone SEATS A MAN and the plan is ACCEPTED - the rides\' documents are not caught by the rule that stops its days',
+        await tried(oldRides.write(`day_${TODAY}`, 1, rideDay({ tv_01: { driver: 'w_ahmad', passengers: ['w_khaled'], seats: { w_khaled: 2 } } }, 2, 'd_r_v186'))),
+        'accepted');
+    same('and its change to the list of vehicles too', await tried(oldRides.write('settings', 1, rideList(2, 'd_r_v186'))), 'accepted');
+    same('this build reads that plan and writes the next one over it', [((await server(envNew, 'transport', `day_${TODAY}`)) || {}).revision,
+        await tried(newRides.write(`day_${TODAY}`, 2, rideDay({ tv_01: { driver: 'w_khaled', passengers: [], seats: {} } }, 3, 'd_r_new')))], [2, 'accepted']);
+    same('the compare-and-set of the rides is what it was: a write built on a revision that has moved is told `conflict`',
+        await tried(oldRides.write(`day_${TODAY}`, 2, rideDay({}, 3, 'd_r_v186'))), 'conflict');
+    same('a stranger is refused the rides as before', await tried(rideOps(opsOf.new, as(envNew, 'somebody.else@gmail.com'))
+        .write(`day_${TODAY}`, 3, rideDay({}, 4, 'd_x'))), 'permission-denied');
+    const after = await server(envNew);
+    same('not one of those writes moved the record: its revision, its pay book and its closed document are where they were',
+        [after.revision, canonical(after.pay) === canonical(stood.pay), await names(envNew, 'closed'), /transport|tv_0/.test(JSON.stringify(after))],
+        [stood.revision, true, ['po_open'], false]);
+    same('and the rides\' documents are the two that were written', await names(envNew, 'transport'), [`day_${TODAY}`, 'settings']);
+    found.v186.ridesAfter = true;
+    old.Sync.disconnect();
+    n.Sync.disconnect();
+}
+
 // ================================================================ W, and the hand-written writes
 {
     suite('W: the way back - this build with the step not offered, on the activated record; and protocol 1 by hand');
@@ -459,8 +550,8 @@ for (const [name, sha] of OLDER) {
 
     const olds = OLDER.map(([name]) => found[name]);
     same('every older build answers every question the same way',
-        olds.map(cell => [cell.dayBefore, cell.restoreBefore, cell.dayRefused, cell.closeRefused, cell.restoreRefused, cell.oldRulesErase]),
-        OLDER.map(() => [true, true, true, true, true, true]));
+        olds.map(cell => [cell.liveDay, cell.dayBefore, cell.restoreBefore, cell.dayRefused, cell.closeRefused, cell.restoreRefused, cell.oldRulesErase]),
+        OLDER.map(() => [true, true, true, true, true, true, true]));
     check('1. the new rules can be published while every phone is still on an older build: nobody working is refused',
         olds.every(cell => cell.dayBefore && cell.restoreBefore));
     same('2. the record cannot be turned on before the rules are published: the step asks and is told `rules`, and sent anyway it is refused whole',

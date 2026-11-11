@@ -109,22 +109,6 @@ export const EXPECTED = {
         fails: ['nor does the rescue file']
     },
 
-    // RED WITH THE GATES SHUT TOO, on a branch of many commits: the three stamps moved at
-    // the merge and cached files changed after it. Not a difference of the gate. BOTH
-    // LEAVE THIS LIST in the commit that moves the stamps (the squash).
-    'test:build': {
-        kind: 'reading',
-        why: 'the stamp check - red shut as well on this multi-commit branch; nothing to do with a gate',
-        held: 'the squash commit moves the stamps',
-        fails: ['and nothing in the shell has changed since']
-    },
-    'test:gate-integrity': {
-        kind: 'reading',
-        why: 'the same stamp check, asked a second way',
-        held: 'the squash commit moves the stamps',
-        fails: ['no cached file has changed since the three stamps last moved']
-    },
-
     // ------------------------------------------------------------------ browser suites
 
     // THE «מקדמות» TAB IS THE ACCOUNTS HOME. Two suites tap things on the advances list
