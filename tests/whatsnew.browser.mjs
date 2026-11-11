@@ -451,6 +451,8 @@ for (const rides of [false, true]) {
         roster: s => s.view === 'roster' && s.modals.length === 0 && !s.settings,
         // The menu open with the row on the glass - and the row NOT pressed: no dialog.
         reportsMenu: s => s.view === 'reports' && s.menu && s.menuRows.includes('monthSummaryOpen') && s.modals.length === 0,
+        // The pay sheet as it opens: on «לפי עובד», its menu shut, nothing pressed.
+        payReport: s => s.view === 'reports' && s.section === 'workers' && !s.menu && s.modals.length === 0 && !s.settings,
         payslipsMenu: s => s.view === 'reports' && s.section === 'workers' && s.menu && s.menuRows.includes('payslipsEntry') && s.modals.length === 0,
         find: s => s.view === 'day' && s.modals.join() === 'findModal' && s.focus === 'findInput',
         advances: s => s.view === 'advances' && s.modals.length === 0 && !s.settings,

@@ -5,6 +5,14 @@
 // Neither report shows an ID number or a phone. Those are in the app so the manager can
 // reach someone, not so they can travel out in a spreadsheet.
 
+// TWO SENTENCES SAID IN MORE THAN ONE PLACE, written once (the card that tells the
+// account). Both are existing words, not new ones: the first has always stood under the
+// pay sheet and in the man's statement, the second in the workbook's «הערה». The clarity
+// work adds NO Hebrew string of its own - every label on the new card is the heading the
+// table already prints over the same cell.
+const HOURS_UNPRICED_NOTE = '* שעות נוספות בלי שכר שעה - לא נכללו בסכום.';
+const NO_DAILY_RATE_NOTE = 'בלי שכר יומי - הנצבר לא חושב';
+
 const REPORT_RANGE = { from: null, to: null };
 // null means all workers; an empty set deliberately means nobody. This is a report
 // filter only and never changes a worker's active status or anything in shared data.
@@ -287,12 +295,63 @@ function renderSimpleAdvance(item) {
 function reportWorkerChosen(id) {
     return REPORT_WORKERS === null || REPORT_WORKERS.has(String(id));
 }
-function reportDeductionKey(id, from = REPORT_RANGE.from, to = REPORT_RANGE.to) {
-    return JSON.stringify([String(id), from, to]);
+// ---------------------------------------------------- the account view (v189)
+//
+// THE DEFAULT RANGE IS AN ACCOUNT, AND AN ACCOUNT IS A FACT ABOUT A MAN.
+//
+// The report opens on «תקופת החשבון», the fortnight containing today, and until v189 it
+// read every man over those fourteen days. For a man paid every Thursday that is two of
+// his periods on one row: the sheet knew it - it said so in amber, refused him his carry
+// and his closing button - and opened on it all the same. The owner, 2026-11-11, from his
+// phone: the weekly men show a two-week account - why? He had already ruled it in writing:
+// a weekly man is shown his current week, a fortnightly man his fortnight.
+//
+// So while the page is on that default - the chip «תקופת החשבון» lit AND the range still
+// the fortnight containing today - every question about a man is asked over HIS period
+// containing today: periodRangeFor's own answer, the same function the closure, the carry
+// and the worker's card ask. Nothing is worked out a new way; a weekly man's row is the
+// row this page has always drawn when his week was picked by hand.
+//
+// IT IS DERIVED, NEVER STORED. There is no second range to fall out of step with the
+// first: the moment REPORT_RANGE is anything else - another chip, two typed dates, the
+// worker's card pointing the sheet at one man, a suite assigning it - this answers false
+// and every reader below reads REPORT_RANGE exactly as it did. An explicit range is a
+// way of LOOKING at days and keeps the amber sentence that says so.
+function reportAccountView() {
+    if (REPORT_PRESET !== 'fortnight' || !REPORT_RANGE.from) return false;
+    const range = defaultPayrollRange();
+    return REPORT_RANGE.from === range.from && REPORT_RANGE.to === range.to;
+}
+
+// THE RANGE ONE MAN IS READ OVER. Every reader that has a man in hand asks this instead of
+// REPORT_RANGE - the row, his days, his statement, his closing button, the deduction
+// somebody chose for him - so the card, the dialog it opens and the account that dialog
+// closes are one period by construction. Somebody the roster does not know is read over
+// the range itself, which is also what periodRangeFor answers for nobody.
+function reportSpanFor(workerId) {
+    if (!reportAccountView()) return { from: REPORT_RANGE.from, to: REPORT_RANGE.to };
+    const worker = ((State.schedule && State.schedule.workers) || [])
+        .filter(item => item && String(item.id) === String(workerId))[0] || null;
+    const period = periodRangeFor(worker, todayStr());
+    return { from: period.from, to: period.to };
+}
+
+// A row carries the range it was worked out over (payrollRowsOver); a row built by hand
+// is asked about its man.
+function reportRowSpan(row) {
+    return row && row.spanFrom && row.spanTo
+        ? { from: row.spanFrom, to: row.spanTo }
+        : reportSpanFor(row && row.workerId);
+}
+
+function reportDeductionKey(id, from, to) {
+    const span = from === undefined || to === undefined ? reportSpanFor(id) : { from, to };
+    return JSON.stringify([String(id), span.from, span.to]);
 }
 function reportAccount(workerId) {
-    return advanceAccount(State.schedule, workerId, REPORT_RANGE.from, REPORT_RANGE.to,
-        REPORT_DEDUCTIONS.get(reportDeductionKey(workerId)));
+    const span = reportSpanFor(workerId);
+    return advanceAccount(State.schedule, workerId, span.from, span.to,
+        REPORT_DEDUCTIONS.get(reportDeductionKey(workerId, span.from, span.to)));
 }
 
 function renderReportWorkerPicker() {
@@ -589,10 +648,16 @@ function presetChip(key, label, apply) {
     return chip;
 }
 
+// The Friday that opens the week holding `date` - the arithmetic the two weekly chips have
+// always done, named so that showOtherAccount asks the same question they do.
+function snapWeekOf(date) {
+    const friday = parseLocalDate(date);
+    friday.setDate(friday.getDate() - ((friday.getDay() + 2) % 7));
+    return toLocalDateStr(friday);
+}
+
 function setWeeklyReportRange(offset) {
-    const friday = parseLocalDate(todayStr());
-    friday.setDate(friday.getDate() - ((friday.getDay() + 2) % 7) + offset * 7);
-    REPORT_RANGE.from = toLocalDateStr(friday);
+    REPORT_RANGE.from = shiftDate(snapWeekOf(todayStr()), offset * 7);
     REPORT_RANGE.to = shiftDate(REPORT_RANGE.from, 6);
 }
 
@@ -653,13 +718,17 @@ function dateInput(key) {
 // day recorded outside the range is simply not in the count, and with no dates on screen
 // there was nothing to explain why. A page of numbers with no period on it is unusable a
 // month later too - nobody can tell which fortnight it was.
-function reportPeriod() {
-    const from = parseLocalDate(REPORT_RANGE.from);
-    const to = parseLocalDate(REPORT_RANGE.to);
+function reportPeriod(span = REPORT_RANGE) {
+    const from = parseLocalDate(span.from);
+    const to = parseLocalDate(span.to);
     const days = Math.round((to - from) / 86400000) + 1;
     // A whole account period is named as the thing the owner actually runs - שישי–חמישי
     // - and any other window is measured in days instead, so a short one is obvious.
-    const length = wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to)
+    // The page's own range is asked the old question - one fourteen-day account. A line
+    // that names the one period every man on the page shares (v189: a crew paid weekly,
+    // on the default) is a whole period too when it is exactly a Friday's week.
+    const length = wholeAccountRange(span.from, span.to)
+        || (span !== REPORT_RANGE && days === 7 && isWeekStart(span.from))
         ? 'שישי–חמישי'
         : `${days} ימים`;
     // The range is one left-to-right run (dateRange, js/ui/dom.js) and the length after
@@ -730,30 +799,69 @@ function payrollRows() {
     // periods for the men paid weekly - so it is asked of each row against that man's own
     // cycle. The flag half is unchanged and still governs the whole sheet.
     const carryAllowed = carryReportingEnabled(State.schedule);
+
+    // ONE RANGE, as it always was - unless the page is on its default account (v189), and
+    // then each man's row is worked out over his own period by the same lines below. The
+    // rows come back in the roster's order either way: payrollReport answers one row per
+    // man in that order, so stitching two readings together by it moves nobody.
+    if (!reportAccountView()) {
+        return payrollRowsOver(REPORT_RANGE.from, REPORT_RANGE.to, carryAllowed, null);
+    }
+    const order = {};
+    const spans = [];
+    ((State.schedule && State.schedule.workers) || []).forEach((worker, index) => {
+        // Whatever is in the roster has a row in payrollReport and so has a reading
+        // here - a record with a damaged id is read over the range, as it was, and is
+        // never left without one.
+        if (!worker) return;
+        if (!(String(worker.id) in order)) order[String(worker.id)] = index;
+        const span = reportSpanFor(worker.id);
+        let held = spans.filter(item => item.from === span.from && item.to === span.to)[0];
+        if (!held) { held = { from: span.from, to: span.to, ids: new Set() }; spans.push(held); }
+        held.ids.add(String(worker.id));
+    });
+    // EVERY MAN IN EXACTLY ONE READING: the sets are disjoint and cover the roster, so no
+    // row is drawn twice and none is lost between two ranges.
+    return spans
+        .reduce((rows, span) => rows.concat(payrollRowsOver(span.from, span.to, carryAllowed,
+            id => span.ids.has(String(id)))), [])
+        .sort((a, b) => order[String(a.workerId)] - order[String(b.workerId)]);
+}
+
+// The pay sheet's rows over ONE range - the body payrollRows has always had, with the
+// range handed in rather than read off the picker. `mine` narrows it to the men whose
+// period this range is (the account view); null is everybody.
+function payrollRowsOver(from, to, carryAllowed, mine) {
     const workerById = {};
     ((State.schedule && State.schedule.workers) || []).forEach(worker => {
         if (worker && worker.id) workerById[String(worker.id)] = worker;
     });
 
-    return payrollReport(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to)
+    return payrollReport(State.schedule, from, to)
         .filter(row => reportWorkerChosen(row.workerId))
+        .filter(row => !mine || mine(row.workerId))
         // The carry is worked out BEFORE the filter, because it is one of the things that
         // keeps a row alive - see the next comment.
         .map(row => {
             const worker = workerById[String(row.workerId)] || null;
-            const period = periodRangeFor(worker, parseLocalDate(REPORT_RANGE.from));
+            const period = periodRangeFor(worker, parseLocalDate(from));
             const withCycle = Object.assign({}, row, {
                 payCycle: period.cycle,
                 periodFrom: period.from,
                 periodTo: period.to,
-                periodIsTransition: period.transition
+                periodIsTransition: period.transition,
+                // The range this row was worked out over, carried on the row so that
+                // every reader of it asks about the same days.
+                spanFrom: from,
+                spanTo: to
             });
             if (!carryAllowed
-                || !wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to, worker)) {
+                || !wholeAccountRange(from, to, worker)) {
                 return withCycle;
             }
             return Object.assign(withCycle, {
-                carry: reportAccount(row.workerId)
+                carry: advanceAccount(State.schedule, row.workerId, from, to,
+                    REPORT_DEDUCTIONS.get(reportDeductionKey(row.workerId, from, to)))
             });
         })
         // WHAT KEEPS A ROW ALIVE IS A RECORD OF THE PERIOD - and an advance IS one.
@@ -862,7 +970,8 @@ function payrollBandTotals(rows) {
 // cycle whose only men are financial still gets its own heading and its own period note,
 // and it is handed back per group rather than mixed in - a weekly payday added to a
 // fortnightly one in a cell called לתשלום would be a new wrong number.
-function payrollGroups(rows, extra = []) {
+function payrollGroups(rows, extra = [], others = []) {
+    if (reportAccountView()) return payrollAccountGroups(rows, extra, others);
     const all = rows.concat(extra);
     const weekly = all.filter(row => row.payCycle === 'weekly');
     if (weekly.length === 0 || weekly.length === all.length) {
@@ -880,6 +989,156 @@ function payrollGroups(rows, extra = []) {
     }));
 }
 
+// THE GROUPS OF THE ACCOUNT VIEW (v189): one per PERIOD, not one per cycle.
+//
+// On the default every man is read over his own period, so a group is the men who share
+// one - ordinarily two groups, the week and the fortnight, and they are the same two the
+// cycle split made. A man a boundary cut short has a period of his own (see
+// periodRangeFor's `transition`) and gets a group of his own under the same title and
+// his own dates, because a table whose rows cover different days has a footer that adds
+// up nothing anybody is paid.
+//
+// `others` is what keeps a period from vanishing: the open accounts of the same men that
+// lie inside the page's fortnight and are not the one shown (reportOtherOpenAccounts). A
+// group exists for them even when nobody has a row in it yet - the first morning of a
+// weekly man's new week, when everything he is owed is in the week just ended.
+function payrollAccountGroups(rows, extra, others) {
+    const groups = [];
+    const groupFor = (cycle, from, to) => {
+        const key = cycle === 'weekly' ? 'weekly' : 'biweekly';
+        let group = groups.filter(item => item.cycle === key
+            && item.span.from === from && item.span.to === to)[0];
+        if (!group) {
+            group = { cycle: key, title: PAY_CYCLE_LABELS[key], rows: [], finance: [],
+                others: [], span: { from, to } };
+            groups.push(group);
+        }
+        return group;
+    };
+    rows.forEach(row => groupFor(row.payCycle, row.spanFrom, row.spanTo).rows.push(row));
+    extra.forEach(row => groupFor(row.payCycle, row.spanFrom, row.spanTo).finance.push(row));
+    others.forEach(item => groupFor(item.cycle, item.current.from, item.current.to)
+        .others.push(item));
+    // Weekly first, as the cycle split has always had it; then by date. Array.sort is
+    // stable, so men keep the roster's order inside a group.
+    return groups.sort((a, b) => (a.cycle === b.cycle
+        ? (a.span.from < b.span.from ? -1 : a.span.from > b.span.from ? 1 : 0)
+        : (a.cycle === 'weekly' ? -1 : 1)));
+}
+
+// AN OPEN ACCOUNT THE DEFAULT DOES NOT SHOW, found so that it can be said.
+//
+// Until v189 the default laid a weekly man's two weeks on one row, so whatever he worked
+// in the first of them was at least on the page. Read over his current week it is not -
+// and a week that was worked, never closed, and no longer on the screen he is paid from
+// is the quiet loss this record exists to prevent. So every OTHER period of a chosen man
+// that lies inside the page's fortnight is asked two things: was anything recorded in it
+// (a day, an absence, an advance - the same facts that keep a row alive, read off
+// payrollReport and nothing else), and has it been closed (frozenPeriodFor, the closure's
+// own reader). Recorded and not closed is named under his group with its dates and one
+// press that opens it. Closed is settled and is not named. Periods outside the fortnight
+// were never on this page and are not looked for.
+//
+// Nothing is added up here: no figure of that other period is shown on this one.
+function reportOtherOpenAccounts() {
+    if (!reportAccountView()) return [];
+    const reports = {};
+    const rowIn = (worker, from, to) => {
+        const key = `${from}..${to}`;
+        if (!reports[key]) reports[key] = payrollReport(State.schedule, from, to);
+        return reports[key].filter(row => String(row.workerId) === String(worker.id))[0] || null;
+    };
+    const found = [];
+    ((State.schedule && State.schedule.workers) || []).forEach(worker => {
+        if (!worker || !worker.id || !reportWorkerChosen(worker.id)) return;
+        const current = periodRangeFor(worker, todayStr());
+        let at = REPORT_RANGE.from;
+        // A fortnight holds two weeks, or three pieces with a boundary inside it; the
+        // guard is a ceiling for a loop, not a rule.
+        for (let guard = 0; guard < 6 && at <= REPORT_RANGE.to; guard += 1) {
+            const period = periodRangeFor(worker, at);
+            if (period.from !== current.from || period.to !== current.to) {
+                const row = rowIn(worker, period.from, period.to);
+                const recorded = row && (row.attendanceDays > 0 || row.absent > 0
+                    || Number(row.advances) > 0
+                    || (vehiclesEnabled() && row.vehicleDays > 0));
+                const closed = typeof frozenPeriodFor === 'function'
+                    && frozenPeriodFor(State.schedule, worker.id, period.from, period.to) !== undefined;
+                if (recorded && !closed) {
+                    found.push({ workerId: worker.id, name: worker.name,
+                        cycle: current.cycle, current: { from: current.from, to: current.to },
+                        from: period.from, to: period.to });
+                }
+            }
+            if (period.to < at) break;
+            const after = parseLocalDate(period.to);
+            after.setDate(after.getDate() + 1);
+            at = toLocalDateStr(after);
+        }
+    });
+    return found;
+}
+
+// PROPOSED WORDS (v189), pinned in tests/account-view.test.mjs. The sentence is money -
+// .hint-money - so it reaches the paper and the picture with the table it is about; the
+// button is the screen's.
+const OTHER_ACCOUNT_OPEN = 'חשבון פתוח נוסף, שאינו כלול בסכומים כאן';
+const OTHER_ACCOUNT_SHOW = 'הצג את החשבון';
+
+function otherAccountSpans(others) {
+    const spans = [];
+    others.forEach(item => {
+        let span = spans.filter(held => held.from === item.from && held.to === item.to)[0];
+        if (!span) { span = { from: item.from, to: item.to, names: [] }; spans.push(span); }
+        span.names.push(item.name);
+    });
+    return spans.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+}
+
+// The sentence in three pieces, because of where a phone breaks a line: the two dates are
+// one inline block (.report-dates, css/app.css), so they go to the next line TOGETHER
+// when they do not fit - broken after the dash, a right-to-left line showed «- 30/10/2026»
+// with the other date underneath, a range nobody reads as one - and wrap inside the block
+// only when the screen cannot hold them at all (320px at doubled text). Its textContent
+// is still one sentence, which is what the paper and the picture read.
+function otherAccountParts(span) {
+    return [
+        `${OTHER_ACCOUNT_OPEN}: `,
+        dateRange(formatFullDate(parseLocalDate(span.from)), formatFullDate(parseLocalDate(span.to))),
+        ` · ${span.names.map(name => isolate(name)).join(', ')}.`
+    ];
+}
+
+// Pointing the page at that account is an explicit range from then on, like any chip:
+// «שבוע קודם» is lit when that is the week it is, and the two date fields otherwise.
+function showOtherAccount(span) {
+    const lastWeek = shiftDate(snapWeekOf(todayStr()), -7) === span.from
+        && shiftDate(span.from, 6) === span.to;
+    REPORT_PRESET = lastWeek ? 'lastweek' : 'custom';
+    REPORT_RANGE_OPEN = !lastWeek;
+    REPORT_RANGE.from = span.from;
+    REPORT_RANGE.to = span.to;
+    render();
+    const heading = document.querySelector('#reportsView .report-payroll .report-group');
+    if (heading && typeof heading.focus === 'function') heading.focus({ preventScroll: true });
+}
+
+function renderOtherAccounts(group) {
+    return otherAccountSpans(group.others || []).map(span => {
+        const box = el('div', 'report-other-account');
+        const parts = otherAccountParts(span);
+        const sentence = el('p', 'hint hint-money', parts[0]);
+        sentence.appendChild(el('span', 'report-dates', parts[1]));
+        sentence.appendChild(el('span', null, parts[2]));
+        box.appendChild(sentence);
+        const short = dateRange(formatShortDate(parseLocalDate(span.from)),
+            formatShortDate(parseLocalDate(span.to)));
+        box.appendChild(button(`${OTHER_ACCOUNT_SHOW} ${short}`, 'btn-secondary',
+            () => showOtherAccount(span)));
+        return box;
+    });
+}
+
 // The period a group is settled over, said in that group's own dates rather than the
 // picker's. A weekly man shown inside a fortnight is being LOOKED at, not settled, and
 // the line says which - because the number beside his name is the same either way and
@@ -892,8 +1151,11 @@ function groupPeriodNote(group) {
     if (!rows.length || !group.cycle) return null;
     const spans = rows.map(row => `${row.periodFrom}..${row.periodTo}`);
     const one = spans.every(span => span === spans[0]);
-    const settled = one && rows[0].periodFrom === REPORT_RANGE.from
-        && rows[0].periodTo === REPORT_RANGE.to;
+    // Against the range the rows were read over - the picker's, or on the default account
+    // (v189) each man's own period, which is why this sentence is then the first one.
+    const read = reportRowSpan(rows[0]);
+    const settled = one && rows[0].periodFrom === read.from
+        && rows[0].periodTo === read.to;
     if (settled) {
         return el('p', 'hint', rows[0].periodIsTransition
             ? 'תקופת מעבר: הימים שנשארו מהמחזור הקודם, לפני המעבר לתשלום שבועי.'
@@ -953,6 +1215,9 @@ function weeklyBreakdownFor(workerId, from, to) {
             attendanceDays: row ? row.attendanceDays : 0,
             payUnits: row ? row.payUnits : 0,
             doubleDays: row ? row.doubleDays : 0,
+            // The week's extra hours, the pay report's own count - shown by the fold only
+            // for a man who has any in the range (renderWeeklyBreakdown).
+            extraHours: row ? row.extraHours : 0,
             amount: row ? row.amount : null
         });
     });
@@ -1001,7 +1266,9 @@ function weeklyLine(when, facts, extra) {
 
 function renderWeeklyBreakdown(rows) {
     const withWeeks = rows
-        .map(row => ({ row, weeks: weeklyBreakdownFor(row.workerId, REPORT_RANGE.from, REPORT_RANGE.to) }))
+        .map(row => ({ row, span: reportRowSpan(row) }))
+        .map(item => ({ row: item.row,
+            weeks: weeklyBreakdownFor(item.row.workerId, item.span.from, item.span.to) }))
         .filter(item => item.weeks.length > 1);
     if (withWeeks.length === 0) return null;
 
@@ -1018,12 +1285,18 @@ function renderWeeklyBreakdown(rows) {
         + 'מקדמות וניכויים שייכים לתקופת התשלום ולא לשבוע בתוכה, ולכן אינם כאן.'));
     withWeeks.forEach(item => {
         fold.appendChild(el('h4', 'report-weekly-name', isolate(item.row.name)));
+        // «שעות נוספות» on every line of a man who has any in the range, and on none of a
+        // man who has not - the table's rule for a column, kept per man here because the
+        // fold is per man. Their money is inside נצבר, as it is everywhere.
+        const anyHours = item.weeks.some(week => Number(week.extraHours) > 0);
+        const hoursFact = hours => (anyHours ? [['שעות נוספות', String(hours)]] : []);
         const facts = week => [
             ['נוכחות', String(week.attendanceDays)],
             ['ימי שכר', String(week.payUnits)],
-            ['כפולים', String(week.doubleDays)],
+            ['כפולים', String(week.doubleDays)]
+        ].concat(hoursFact(Number(week.extraHours) || 0), [
             ['נצבר', week.amount === null ? '—' : `${moneyText(week.amount)} ₪`]
-        ];
+        ]);
         item.weeks.forEach(week => fold.appendChild(weeklyLine(
             dateRange(formatShortDate(parseLocalDate(week.from)),
                 formatShortDate(parseLocalDate(week.to))),
@@ -1065,10 +1338,11 @@ function renderWeeklyBreakdown(rows) {
             : `סה״כ ${WEEKLY_SLICE_CEILING} השבועות שמוצגים`, [
             ['נוכחות', String(sum(w => w.attendanceDays))],
             ['ימי שכר', String(sum(w => w.payUnits))],
-            ['כפולים', String(sum(w => w.doubleDays))],
+            ['כפולים', String(sum(w => w.doubleDays))]
+        ].concat(hoursFact(sum(w => w.extraHours)), [
             [partial && anyPriced ? 'נצבר - ידוע בלבד' : 'נצבר',
                 anyPriced ? `${moneyText(knownAmount)} ₪` : '—']
-        ], 'report-weekly-total'));
+        ]), 'report-weekly-total'));
         // AND WHAT IS MISSING IS NAMED, beside the number it is missing from: the ceiling,
         // the last week this fold reached, and that the sum belongs to those weeks alone.
         //
@@ -1115,11 +1389,24 @@ function renderWeeklyBreakdown(rows) {
 function renderPayrollTable() {
     const section = el('section', 'report report-payroll');
     section.appendChild(el('h2', null, 'שכר - לפי עובד'));
-    section.appendChild(reportPeriod());
+    const allRows = payrollRows();
+    const others = reportOtherOpenAccounts();
+    // WHICH PERIOD THE PAGE NAMES AT ITS HEAD. The picker's range, as ever - except on the
+    // default account when every man on the page shares one period that is not it (a crew
+    // paid weekly): then that period, because the line is the paper's and the picture's
+    // only date. Where the periods differ the range stays here as the span that holds
+    // them, and each group says its own dates in its own heading.
+    const spansOnPage = allRows.map(reportRowSpan)
+        .concat(others.map(item => item.current))
+        .filter((span, index, list) => list.findIndex(item =>
+            item.from === span.from && item.to === span.to) === index);
+    const ownDates = reportAccountView() && spansOnPage.some(span =>
+        span.from !== REPORT_RANGE.from || span.to !== REPORT_RANGE.to);
+    section.appendChild(ownDates && spansOnPage.length === 1
+        ? reportPeriod(spansOnPage[0]) : reportPeriod());
     if (REPORT_WORKERS !== null) section.appendChild(el('p', 'report-selection-note',
         `דוח לעובדים שנבחרו בלבד · ${State.schedule.workers.filter(w => reportWorkerChosen(w.id)).length} עובדים`));
 
-    const allRows = payrollRows();
     if (allRows.some(row => row.carry && !row.carry.closed)) {
         const help = el('details', 'report-explanation');
         help.appendChild(el('summary', null, 'חשבון פתוח · תצוגה מקדימה'));
@@ -1128,7 +1415,7 @@ function renderPayrollTable() {
         section.appendChild(help);
     }
 
-    if (allRows.length === 0) {
+    if (allRows.length === 0 && others.length === 0) {
         section.appendChild(emptyHint('אין רישומים בטווח הזה.'));
         return section;
     }
@@ -1144,16 +1431,22 @@ function renderPayrollTable() {
     section.appendChild(browse);
     // THE ONE PLACE THE HIDING HAPPENS. Above payrollRows(), never inside it.
     const split = payrollDisplaySplit(allRows);
-    const groups = payrollGroups(split.work, split.finance);
+    const groups = payrollGroups(split.work, split.finance, others);
     // The crew of a group is everybody in it, on both sides of the split: a count that
     // dropped the financial men would say the fortnight had fewer people in it than it did.
     const crewOf = group => group.rows.length + group.finance.length;
+    // One anchor per group. A cycle has one group except on the default account, where a
+    // man a boundary cut short stands in a period of his own; the first keeps the id the
+    // page has always used.
+    const groupAnchor = group => (groups.filter(item => item.cycle === group.cycle)[0] === group
+        ? `report-cycle-${group.cycle}`
+        : `report-cycle-${group.cycle}-${group.span.from}`);
     if (groups.length > 1) {
         const jump = el('nav', 'report-cycle-nav');
         jump.setAttribute('aria-label', 'מעבר בין קבוצות התשלום');
         groups.forEach(group => jump.appendChild(button(
             `${group.title} · ${crewOf(group)}`, 'btn-secondary', () => {
-                const target = document.getElementById(`report-cycle-${group.cycle}`);
+                const target = document.getElementById(groupAnchor(group));
                 if (target) {
                     target.scrollIntoView({ block: 'start' });
                     target.focus({ preventScroll: true });
@@ -1163,8 +1456,21 @@ function renderPayrollTable() {
     }
     groups.forEach(group => {
         if (group.title) {
-            const heading = el('h3', 'report-group', group.title);
-            heading.id = `report-cycle-${group.cycle}`;
+            // ITS OWN DATES, in the heading itself (v189) - the heading is what the paper
+            // repeats and what the picture titles a table with (js/ui/printout.js), so a
+            // page holding two periods says which is which on every surface. Only where
+            // some group is NOT the range at the head of the page: a crew paid fortnightly
+            // has one period, the page already names it, and its heading is what it was.
+            // The dates are a piece of their own for the same reason the sentence's are
+            // (otherAccountParts): on a narrow phone they go under the title whole.
+            const heading = el('h3', ownDates ? 'report-group report-group-dated' : 'report-group',
+                ownDates ? `${group.title} · ` : group.title);
+            if (ownDates) {
+                heading.appendChild(el('span', 'report-dates',
+                    dateRange(formatFullDate(parseLocalDate(group.span.from)),
+                        formatFullDate(parseLocalDate(group.span.to)))));
+            }
+            heading.id = groupAnchor(group);
             heading.setAttribute('tabindex', '-1');
             heading.setAttribute('data-workers', countedIn(crewOf(group), 'עובד אחד', 'עובדים'));
             section.appendChild(heading);
@@ -1195,6 +1501,9 @@ function renderPayrollTable() {
             const weeks = renderWeeklyBreakdown(group.rows);
             if (weeks) section.appendChild(weeks);
         }
+        // The account this group does NOT show, said under the one it does - before the
+        // financial lines, which are about this period's money and nobody else's.
+        renderOtherAccounts(group).forEach(node => section.appendChild(node));
         if (financial) {
             renderFinanceBlock(group).forEach(node => section.appendChild(node));
             renderReconcileBand(group).forEach(node => section.appendChild(node));
@@ -1339,13 +1648,58 @@ function renderReconcileBand(group) {
     ]);
 }
 
-// The compact phone cards read the cells already prepared for the full report,
-// so a formatted amount, missing rate or deduction cannot diverge between views.
-function renderReportCards(table, rows, headers) {
+// ------------------------------------------------------------ the card tells the account
+//
+// The owner, 2026-11-11: "make the reports more organised, clear and understandable - and
+// the extra hours do not show clearly; I want them clear too." His card said «נותר לתשלום»,
+// two counts and «פירוט»: the answer with none of its working, and no extra hours at all.
+//
+// So the card reads top to bottom the way a paymaster thinks: WHO - WHAT HE DID (work days,
+// double days, EXTRA HOURS, days off) - WHAT IT IS WORTH (the daily rate, «נצבר») - WHAT
+// COMES OFF (the deduction, and his own notes: carried in, credit, review) - WHAT IS LEFT,
+// last and largest.
+//
+// NOTHING IS WORKED OUT HERE. Every figure is the text of the cell the full table already
+// prepared for the same man (`value(label)` below) - the same string the paper, the picture
+// and «תצוגה מפורטת» show - under the heading the table prints over it, and every note is one
+// of moneyNoteParts' sentences, the ones the workbook's «הערה» has always carried.
+// tests/reportsclarity.test.mjs holds each card to its row, cell for cell.
+//
+// A FIGURE IS ON EVERY CARD OF A GROUP OR ON NONE - the table's own rule (payrollGroupTable):
+// «שעות נוספות» is drawn when somebody in the group has any, with a quiet 0 for the man who
+// has none, and is absent when nobody has, so a card without it never means "not recorded".
+// Nought is said as 0 and never as «—»: on this page «—» means UNKNOWN.
+//
+// WHAT THE EXTRA HOURS ARE WORTH IS NOT HERE, because the record's arithmetic does not hold
+// it as a figure of its own: js/model/money.js adds each day's hours, at that day's own
+// stamped hourly rate, straight into the day. Multiplying hours by a rate on this screen
+// would be a second calculation of pay. The hours are said in words and in number; their
+// money is inside «נצבר»; and where there is no hourly rate the starred sentence is on the
+// card itself, beside the starred amount, instead of a screen away under the group.
+function reportTileLine(label, text, withCurrency) {
+    const line = el('span', 'report-tile-line');
+    line.appendChild(el('span', 'report-tile-line-label', label));
+    const figure = el('span', 'report-tile-line-value');
+    figure.appendChild(el('span', 'report-tile-line-number', text));
+    if (withCurrency) figure.appendChild(el('span', 'report-tile-line-currency', '₪'));
+    line.appendChild(figure);
+    return line;
+}
+
+// The notes of one card, as data, so a suite can hold them to moneyNotes without a browser.
+function reportTileNotes(row, parts = moneyNoteParts(row)) {
+    const said = parts.account.map(text => ({ text, warn: text.indexOf('⚠️') === 0 }));
+    if (row.amount === null) said.push({ text: NO_DAILY_RATE_NOTE, warn: true });
+    if (row.hoursUnpriced) said.push({ text: HOURS_UNPRICED_NOTE, warn: true });
+    return said;
+}
+
+function renderReportCards(table, rows, headers, deductionLabel) {
     const grid = el('div', 'report-worker-cards');
     const source = [...table.querySelectorAll('tbody tr')];
     rows.forEach((row, index) => {
         const cells = source[index] ? [...source[index].children] : [];
+        const has = label => headers.indexOf(label) >= 0;
         const value = label => {
             const at = headers.indexOf(label);
             return at < 0 || !cells[at] ? null : cells[at].textContent;
@@ -1353,6 +1707,53 @@ function renderReportCards(table, rows, headers) {
         const card = button('', 'report-worker-tile', () => openWorkerDays(row.workerId));
         card.setAttribute('data-report-worker-id', row.workerId);
         card.appendChild(el('strong', 'report-tile-name', row.name));
+        // Everything between the name and «פירוט», in one box: the days dialog shows this
+        // same box again under the days (workerSummaryFromSheet), so the two cannot differ.
+        const facts = el('span', 'report-tile-facts');
+
+        // WHAT HE DID. The owner's compact vocabulary: work means payable day units, not
+        // dates on site. A double day is still two units; holiday means recorded absence.
+        const metrics = el('span', 'report-tile-metrics');
+        const counts = [['ימי עבודה', value('ימי שכר') || '0', 'work']];
+        if (has('כפולים')) counts.push(['כפולים', value('כפולים') || '0', 'double']);
+        if (has('שעות נוספות')) counts.push(['שעות נוספות', value('שעות נוספות') || '0', 'hours']);
+        counts.push(['חופש', value('נעדר') || '0', 'off']);
+        counts.forEach(([label, count, kind]) => {
+            const metric = el('span', `report-tile-metric report-tile-metric-${kind}`);
+            if (count === '0') metric.classList.add('report-tile-zero');
+            metric.appendChild(el('strong', null, count));
+            metric.appendChild(el('span', 'report-tile-label', label));
+            metrics.appendChild(metric);
+        });
+        facts.appendChild(metrics);
+
+        // WHAT IT IS WORTH, then WHAT COMES OFF: the table's own cells under the table's
+        // own headings. An unknown figure stays «—» and takes no currency sign; a daily
+        // rate nobody entered is unknown, not nought.
+        const lines = el('span', 'report-tile-lines');
+        // Counted here, not read back off the node: the Node suites' elements keep no list
+        // of their children.
+        let lineCount = 0;
+        const money = (label, blank) => {
+            const text = value(label) || blank;
+            lines.appendChild(reportTileLine(label, text, text !== '—'));
+            lineCount += 1;
+        };
+        if (has('שכר יומי')) money('שכר יומי', '—');
+        if (has('נצבר')) money('נצבר', '0');
+        if (deductionLabel && has(deductionLabel)) money(deductionLabel, '0');
+        if (lineCount > 0) facts.appendChild(lines);
+
+        // HIS OWN NOTES, on his own card: the account's sentences as the workbook writes
+        // them, then what the figures could not include, as warnings.
+        const parts = moneyNoteParts(row);
+        const notes = el('span', 'report-tile-notes');
+        const said = reportTileNotes(row, parts);
+        said.forEach(note => notes.appendChild(el('span',
+            note.warn ? 'report-tile-note report-tile-warn' : 'report-tile-note', note.text)));
+        if (said.length > 0) facts.appendChild(notes);
+
+        // WHAT IS LEFT: last, and the largest number on the card.
         const amount = el('span', 'report-tile-amount');
         amount.appendChild(el('span', 'report-tile-label', 'נותר לתשלום'));
         const payable = value('לתשלום') || '—';
@@ -1361,17 +1762,9 @@ function renderReportCards(table, rows, headers) {
         // The symbol labels the prepared amount; an unknown wage remains unknown.
         if (payable !== '—') figure.appendChild(el('span', 'report-tile-currency', '₪'));
         amount.appendChild(figure);
-        card.appendChild(amount);
-        const metrics = el('span', 'report-tile-metrics');
-        // The owner's compact vocabulary: work means payable day units, not dates
-        // on site. A double day is still two units; holiday means recorded absence.
-        [['ימי עבודה', value('ימי שכר') || '0'], ['חופש', value('נעדר') || '0']].forEach(([label, count]) => {
-            const metric = el('span');
-            metric.appendChild(el('strong', null, count));
-            metric.appendChild(el('span', 'report-tile-label', label));
-            metrics.appendChild(metric);
-        });
-        card.appendChild(metrics);
+        facts.appendChild(amount);
+
+        card.appendChild(facts);
         card.appendChild(el('span', 'report-tile-open', 'פירוט'));
         grid.appendChild(card);
     });
@@ -1535,7 +1928,8 @@ function payrollGroupTable(rows, options = {}) {
             `פירוט הימים של ${rows[index].name}`));
     });
 
-    section.appendChild(renderReportCards(table, rows, headers));
+    section.appendChild(renderReportCards(table, rows, headers,
+        anyAdvance ? deductionColumnName(options.nameRows || rows) : null));
     section.appendChild(scrollWrap(table));
 
     if (!anyRate) {
@@ -1553,7 +1947,7 @@ function payrollGroupTable(rows, options = {}) {
 
     if (rows.some(row => row.hoursUnpriced)) {
         section.appendChild(el('p', 'hint hint-warn',
-            '* שעות נוספות בלי שכר שעה - לא נכללו בסכום.'));
+            HOURS_UNPRICED_NOTE));
     }
 
     // WHAT THE מקדמות COLUMN NO LONGER SHOWS, said in shekels and named to a person.
@@ -1987,6 +2381,29 @@ function renderInvoicePicker(places) {
 
 // ---------------------------------------------------------------- one worker's days
 
+// THE DAYS END IN THE TOTALS THE CARD SHOWED - the same box, not a second one.
+//
+// The dialog is opened from a man's card to ask "why is it this number", and it used to end
+// in its own wording of the totals (ימי נוכחות, ימי שכר, נצבר) while the card he had just
+// tapped said ימי עבודה and חופש - two vocabularies for one account, one tap apart. So the
+// last thing under the days is the card's own facts, COPIED off the sheet that is drawn
+// behind this dialog: a copy cannot disagree with its original, and nothing is counted or
+// priced here. Under the reconcile band's own heading, «סיכום התקופה».
+//
+// Null - and then the dialog is what it always was - when the sheet behind holds no card
+// for this man: the dialog opened from another screen, or he is filtered out of the report.
+function workerSummaryFromSheet(workerId) {
+    if (typeof document.querySelectorAll !== 'function') return null;
+    const tile = [...document.querySelectorAll('#reportsView .report-worker-tile')]
+        .filter(node => node.getAttribute('data-report-worker-id') === String(workerId))[0];
+    const facts = tile && tile.querySelector('.report-tile-facts');
+    if (!facts) return null;
+    const box = el('div', 'wday-summary');
+    box.appendChild(el('div', 'wday-summary-head', 'סיכום התקופה'));
+    box.appendChild(facts.cloneNode(true));
+    return box;
+}
+
 // The pay sheet says a worker is owed 4,150. This says which days that is: the sites, the
 // doubled days, the hours, and what each day came to. It is read out to the person asking,
 // so it runs the same arithmetic as the total rather than re-deriving it a second way.
@@ -1994,12 +2411,15 @@ function openWorkerDays(workerId) {
     const worker = State.worker(workerId);
     if (!worker) return;
 
-    const days = workerDaysReport(State.schedule, worker, REPORT_RANGE.from, REPORT_RANGE.to);
-    const advances = advancesFor(State.schedule, worker.id, REPORT_RANGE.from, REPORT_RANGE.to);
+    // HIS range: the picker's, or on the default account his own period (v189) - the
+    // days under the card are the days the card counted.
+    const span = reportSpanFor(worker.id);
+    const days = workerDaysReport(State.schedule, worker, span.from, span.to);
+    const advances = advancesFor(State.schedule, worker.id, span.from, span.to);
 
     document.getElementById('workerDaysTitle').textContent = worker.name;
     document.getElementById('workerDaysMeta').textContent =
-        `${formatFullDate(parseLocalDate(REPORT_RANGE.from))} - ${formatFullDate(parseLocalDate(REPORT_RANGE.to))}`;
+        `${formatFullDate(parseLocalDate(span.from))} - ${formatFullDate(parseLocalDate(span.to))}`;
 
     const body = document.getElementById('workerDaysBody');
     clear(body);
@@ -2012,6 +2432,13 @@ function openWorkerDays(workerId) {
         if (strip) body.appendChild(strip);
         days.forEach(day => body.appendChild(renderWorkerDayRow(day, worker)));
         body.appendChild(renderWorkerDaysTotal(days, worker));
+        // The star on a day's amount, explained where the stars are: the sentence stood
+        // under the pay sheet and in the man's statement and nowhere in this dialog. The
+        // condition is the star's own (renderWorkerDayRow).
+        if (days.some(day => !day.absent && day.amount !== null && day.extraHours > 0)
+            && !(Number(worker.hourlyRate) > 0)) {
+            body.appendChild(el('p', 'hint hint-warn wday-unpriced', HOURS_UNPRICED_NOTE));
+        }
         // Named before the rows begin: money that went the other way is its own block,
         // not three more days at the end of the list.
         if (advances.length > 0) {
@@ -2027,6 +2454,10 @@ function openWorkerDays(workerId) {
             // were already looking at, and naming a build number to do it.
         }
     }
+
+    // THE CARD'S OWN SUMMARY, under the days it summarises - see workerSummaryFromSheet.
+    const summary = workerSummaryFromSheet(worker.id);
+    if (summary) body.appendChild(summary);
 
     // Closing the account is a deliberate act with its own button, and it is the ONLY
     // thing in this app that writes a closure - see renderPeriodClosure.
@@ -2052,9 +2483,13 @@ function openWorkerDays(workerId) {
 function openWorkerSettlement(workerId) {
     const worker = State.worker(workerId);
     if (!worker) return;
-    let period = wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to, worker)
-        ? { from: REPORT_RANGE.from, to: REPORT_RANGE.to } : periodRangeFor(worker, todayStr());
-    REPORT_RANGE.from = period.from; REPORT_RANGE.to = period.to;
+    const span = reportSpanFor(worker.id);
+    let period = wholeAccountRange(span.from, span.to, worker)
+        ? { from: span.from, to: span.to } : periodRangeFor(worker, todayStr());
+    // On the default account (v189) the page already reads this man over this period, so
+    // there is nothing to point it at - and writing his week into the picker would take
+    // every other man on the page off his own.
+    if (!reportAccountView()) { REPORT_RANGE.from = period.from; REPORT_RANGE.to = period.to; }
     document.getElementById('workerDaysTitle').textContent = `חשבון · ${worker.name}`;
     document.getElementById('workerDaysMeta').textContent = dateRange(
         formatFullDate(parseLocalDate(period.from)), formatFullDate(parseLocalDate(period.to)));
@@ -2064,7 +2499,10 @@ function openWorkerSettlement(workerId) {
         choices.appendChild(button(label, 'btn-secondary', () => {
             const current = periodRangeFor(worker, todayStr());
             const chosen = offset ? periodRangeFor(worker, shiftDate(current.from, -1)) : current;
-            REPORT_RANGE.from = chosen.from; REPORT_RANGE.to = chosen.to;
+            // The current period on the default account is where the page already is.
+            if (offset || !reportAccountView()) {
+                REPORT_RANGE.from = chosen.from; REPORT_RANGE.to = chosen.to;
+            }
             render(); openWorkerSettlement(workerId);
         }));
     });
@@ -2100,12 +2538,15 @@ function renderPeriodClosure(worker) {
     // HIS period, not the sheet's. A man settled every Thursday is closable on his week;
     // asked the fortnight's question he would never be offered a close at all, and the
     // one screen that can settle him would be silent about why.
-    if (!wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to, worker)) return null;
+    // And the period he is SHOWN in: reportSpanFor is the range his card and his days were
+    // read over, so what the button closes is exactly what the screen showed (v189).
+    const span = reportSpanFor(worker.id);
+    if (!wholeAccountRange(span.from, span.to, worker)) return null;
 
     // Planned at the moment this screen is drawn, and re-planned at the moment the button
     // is pressed - the clock reason below is a question about NOW, not about the record.
     const plan = planPeriodClosure(State.schedule, worker.id,
-        REPORT_RANGE.from, REPORT_RANGE.to, new Date().toISOString());
+        span.from, span.to, new Date().toISOString());
 
     const box = el('div', 'period-closure');
     if (plan.reasons.indexOf('closed') !== -1) {
@@ -2150,7 +2591,7 @@ function renderPeriodClosure(worker) {
     amount.type = 'text'; amount.inputMode = 'decimal'; amount.dir = 'ltr';
     amount.setAttribute('aria-label', 'כמה לקזז מהשכר הפעם?');
     amount.placeholder = 'הכנס סכום, גם 0 אפשרי';
-    const chosen = REPORT_DEDUCTIONS.get(reportDeductionKey(worker.id));
+    const chosen = REPORT_DEDUCTIONS.get(reportDeductionKey(worker.id, plan.from, plan.to));
     amount.value = chosen === undefined ? '' : String(chosen);
     label.appendChild(amount); box.appendChild(label);
     const preview = el('p', 'finance-preview');
@@ -2228,8 +2669,10 @@ async function closeAccountFor(worker, plan) {
         // already closed, or this phone's clock is behind something on the record - and
         // «נסגר כבר» told a person the fortnight was done when it was not. The plan is
         // asked, at the same moment, which one it was.
+        // Asked of the period that was being closed - plan.from and plan.to, which is the
+        // range this used to read off the picker and now cannot differ from.
         const why = planPeriodClosure(State.schedule, worker.id,
-            REPORT_RANGE.from, REPORT_RANGE.to, at);
+            plan.from, plan.to, at);
         if (typeof askTell === 'function') {
             await askTell(why.reasons.indexOf('clock') !== -1
                 ? CLOSURE_CLOCK_BEHIND
@@ -2640,7 +3083,8 @@ function workerAccountFor(workerId) {
     // the statement and the sheet cannot disagree about whether he has an account here.
     const worker = ((State.schedule && State.schedule.workers) || [])
         .filter(item => item && String(item.id) === String(workerId))[0] || null;
-    if (!wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to, worker)) return null;
+    const span = reportSpanFor(workerId);
+    if (!wholeAccountRange(span.from, span.to, worker)) return null;
     if (typeof advanceAccount !== 'function') return null;
     return reportAccount(workerId);
 }
@@ -2900,8 +3344,10 @@ function correctionLine(entry) {
 // over the same number.
 function deductionColumnName(rows = payrollRows()) {
     if (!carryReportingEnabled(State.schedule)) return 'מקדמות';
-    const complete = rows.map(row => wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to,
-        State.worker(row.workerId)));
+    const complete = rows.map(row => {
+        const span = reportRowSpan(row);
+        return wholeAccountRange(span.from, span.to, State.worker(row.workerId));
+    });
     if (complete.length && complete.every(Boolean)) return LEDGER_KIND_LABELS.deducted;
     if (complete.some(Boolean)) return 'מקדמות / ניכוי';
     return 'מקדמות';
@@ -3141,8 +3587,10 @@ function workerStatementText(workerId) {
     const worker = State.worker(workerId);
     if (!worker) return '';
 
-    const days = workerDaysReport(State.schedule, worker, REPORT_RANGE.from, REPORT_RANGE.to);
-    const advances = advancesFor(State.schedule, worker.id, REPORT_RANGE.from, REPORT_RANGE.to);
+    // The same range his card and his days were read over (v189) - see reportSpanFor.
+    const span = reportSpanFor(worker.id);
+    const days = workerDaysReport(State.schedule, worker, span.from, span.to);
+    const advances = advancesFor(State.schedule, worker.id, span.from, span.to);
     const worked = days.filter(day => !day.absent);
     const earned = worked.reduce((sum, day) => sum + (day.amount || 0), 0);
     // THE SAME ACCOUNT THE SCREEN AND THE SHEET READ. This summed the advances dated in
@@ -3156,7 +3604,7 @@ function workerStatementText(workerId) {
     const priced = Number(worker.dailyRate) > 0;
 
     const lines = [
-        `📄 ${isolate(worker.name)} - ${formatFullDate(parseLocalDate(REPORT_RANGE.from))} עד ${formatFullDate(parseLocalDate(REPORT_RANGE.to))}`,
+        `📄 ${isolate(worker.name)} - ${formatFullDate(parseLocalDate(span.from))} עד ${formatFullDate(parseLocalDate(span.to))}`,
         ''
     ];
 
@@ -3194,7 +3642,7 @@ function workerStatementText(workerId) {
     if (priced && days.some(day => !day.absent && day.extraHours > 0)
         && !(Number(worker.hourlyRate) > 0)) {
         lines.push('');
-        lines.push('* שעות נוספות בלי שכר שעה - לא נכללו בסכום.');
+        lines.push(HOURS_UNPRICED_NOTE);
     }
 
     // WHAT HE OWED BEFORE THIS FORTNIGHT BEGAN. Without it the deduction below looks
@@ -3241,7 +3689,7 @@ function workerStatementText(workerId) {
         // message a man cannot check: it says money moved and does not say what it
         // undid. Each correction names the transaction it corrects - its kind, its date
         // and its amount - and the reason somebody typed when they wrote it.
-        correctionsIn(worker.id, REPORT_RANGE.from, REPORT_RANGE.to).forEach(entry => {
+        correctionsIn(worker.id, span.from, span.to).forEach(entry => {
             lines.push(`  · ${correctionLine(entry)}`);
         });
     }
@@ -3275,7 +3723,7 @@ function workerStatementText(workerId) {
         // there is one reading and nothing to distinguish it from.
         if (typeof carryReportingEnabled === 'function'
             && carryReportingEnabled(State.schedule)
-            && !wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to, worker)) {
+            && !wholeAccountRange(span.from, span.to, worker)) {
             lines.push('');
             lines.push('ℹ️ הטווח שנבחר אינו תקופת חשבון של העובד (שישי עד חמישי).');
             lines.push('החישוב כאן הוא לפי התאריכים שנבחרו בלבד: המקדמות נוכו במלואן, '
@@ -3355,12 +3803,20 @@ function renderWorkerDayRow(day, worker) {
             paintSite(tag, entry.placeId);
 
             const rate = entryRate(entry);
+            let extra = null;
             if (rate === RATE_DOUBLE) tag.appendChild(el('span', 'tag-rate', 'כפול'));
             else if (rate === RATE_EXTRA) {
                 const hours = entryExtraHours(entry);
-                tag.appendChild(el('span', 'tag-rate', hours ? plusAmount(hours) : 'נוספות'));
+                // THE HOURS IN WORDS, beside the site they were worked at. This was a bare
+                // «+2» at 11px inside the site's own tag - a mark only somebody who already
+                // knew could read. The words are the ones the total under the days and the
+                // man's statement use (workUnitsLine), so one thing has one name here.
+                if (hours) extra = el('span', 'wday-extra',
+                    countedIn(hours, 'שעה נוספת אחת', 'שעות נוספות'));
+                else tag.appendChild(el('span', 'tag-rate', 'נוספות'));
             }
             what.appendChild(tag);
+            if (extra) what.appendChild(extra);
         });
 
         // Spelled out, because this is the line that gets queried: two sites is one day.
@@ -3481,7 +3937,16 @@ function countedIn(count, one, many) {
 }
 
 function closeWorkerDays() {
-    document.getElementById('workerDaysModal').style.display = 'none';
+    const modal = document.getElementById('workerDaysModal');
+    modal.style.display = 'none';
+    // The summary under the days is a COPY of a card (workerSummaryFromSheet). A copy left
+    // in a shut dialog is a second card in the document for anything that looks cards up
+    // by class, so it leaves with the dialog. (The Node suites' elements cannot be asked.)
+    if (typeof modal.querySelectorAll === 'function') {
+        [...modal.querySelectorAll('.wday-summary')].forEach(node => {
+            if (node.parentNode) node.parentNode.removeChild(node);
+        });
+    }
 }
 
 function buildTable(headers, bodyRows) {
@@ -3597,13 +4062,54 @@ function payrollSheetRows() {
         .concat(withVehicles ? ['ימי רכב', 'שכר רכב'] : [])
         .concat(['שכר יומי', 'נצבר', deductionColumnName(), 'לתשלום', 'הערה', 'מחזור תשלום']);
 
-    return [headers].concat(payrollRows().map(row => [
-        row.name, row.attendanceDays, row.payUnits, row.doubleDays,
-        row.extraHours, row.absent
-    ].concat(withVehicles
-        ? [row.vehicleDays || 0, agora(row.vehicleAmount || 0)]
-        : []
-    ).concat(moneyCells(row)).concat([PAY_CYCLE_LABELS[row.payCycle] || PAY_CYCLE_LABELS.biweekly])));
+    // WHOSE DAYS A ROW IS, where it is not the file's own range (v189).
+    //
+    // The file is stamped with the page's range. On the default account a weekly man's row
+    // is his week, so his row says its dates in the cell that already says how he is paid
+    // - «שבועי · 06/11/2026 עד 12/11/2026» - and a row read over the file's range says
+    // what it always said. No column is added: this file is laid beside last month's.
+    const cycleCell = row => {
+        const label = PAY_CYCLE_LABELS[row.payCycle] || PAY_CYCLE_LABELS.biweekly;
+        const span = reportRowSpan(row);
+        return span.from === REPORT_RANGE.from && span.to === REPORT_RANGE.to
+            ? label
+            : `${label} · ${formatFullDate(parseLocalDate(span.from))} עד ${formatFullDate(parseLocalDate(span.to))}`;
+    };
+    // AND THE ACCOUNT THE FILE DOES NOT HOLD, in the note of the man it belongs to - the
+    // sentence the screen says under his group. A man with an open account and no row
+    // here (nothing recorded in his current period yet) gets a row that carries his name,
+    // the note and no figure, after everybody else: blank is not nought.
+    const others = reportOtherOpenAccounts();
+    const otherNote = id => others
+        .filter(item => String(item.workerId) === String(id))
+        .map(item => `${OTHER_ACCOUNT_OPEN}: ${formatFullDate(parseLocalDate(item.from))} עד ${formatFullDate(parseLocalDate(item.to))}`);
+    const noteAt = headers.indexOf('הערה');
+    const rows = payrollRows();
+    const body = rows.map(row => {
+        const cells = [
+            row.name, row.attendanceDays, row.payUnits, row.doubleDays,
+            row.extraHours, row.absent
+        ].concat(withVehicles
+            ? [row.vehicleDays || 0, agora(row.vehicleAmount || 0)]
+            : []
+        ).concat(moneyCells(row)).concat([cycleCell(row)]);
+        const extra = otherNote(row.workerId);
+        if (extra.length) cells[noteAt] = [cells[noteAt]].concat(extra).filter(Boolean).join(' · ');
+        return cells;
+    });
+    const rowless = [];
+    others.forEach(item => {
+        if (rows.some(row => String(row.workerId) === String(item.workerId))) return;
+        if (rowless.some(cells => cells.workerId === item.workerId)) return;
+        const cells = headers.map(() => '');
+        cells[0] = item.name;
+        cells[noteAt] = otherNote(item.workerId).join(' · ');
+        cells[headers.length - 1] = `${PAY_CYCLE_LABELS[item.cycle] || PAY_CYCLE_LABELS.biweekly} · `
+            + `${formatFullDate(parseLocalDate(item.current.from))} עד ${formatFullDate(parseLocalDate(item.current.to))}`;
+        cells.workerId = item.workerId;
+        rowless.push(cells);
+    });
+    return [headers].concat(body).concat(rowless.map(cells => cells.slice()));
 }
 
 // נצבר, מקדמות and לתשלום - the three columns a bookkeeper adds up, and the one
@@ -3703,8 +4209,9 @@ function overpaymentWarning(account) {
 // empty, and moneyCells and the sheet's own hint say why. A number that does not multiply
 // out is worse than a missing one.
 function rateOf(row) {
+    const span = reportRowSpan(row);
     const frozen = typeof frozenPeriodFor === 'function'
-        ? frozenPeriodFor(State.schedule, row.workerId, REPORT_RANGE.from, REPORT_RANGE.to)
+        ? frozenPeriodFor(State.schedule, row.workerId, span.from, span.to)
         : undefined;
     if (frozen === undefined) return row.dailyRate;
     const rate = Number(frozen.basis && frozen.basis.dailyRate);
@@ -3783,12 +4290,28 @@ function moneyCells(row) {
 // what it was - so a man's account cannot be explained one way in the workbook and
 // another way on the sheet he is paid from.
 function moneyNotes(row) {
+    const parts = moneyNoteParts(row);
+    return parts.range.concat(parts.account, parts.gaps);
+}
+
+// THE SAME SENTENCES, IN THE THREE PARTS THEY ALWAYS CAME IN, so that the phone's card can
+// say a man's own notes on his own card without repeating what its group already says
+// once (the range sentence) and without saying the unpriced-hours fact in two wordings
+// (the card carries the screen's starred sentence beside the starred amount). moneyNotes
+// above joins them back in the order they were always written in: the exported «הערה»
+// cell and the financial line are byte for byte what they were (tests/reportsclarity.test.mjs).
+//   range   - which arithmetic was done, when the range is not the man's period
+//   account - what his balance did: closed, the rate, carried in and out, credit, review
+//   gaps    - what the figures could not include: no daily rate, hours with no hourly rate
+function moneyNoteParts(row) {
     const money = moneyOf(row);
     const advances = money.netted;
     const priced = row.amount !== null;
     const rate = rateOf(row);
 
-    const notes = [];
+    const range = [];
+    const gaps = [];
+    let notes = range;
     // WHICH ARITHMETIC THIS FILE DID, before any figure it produced.
     //
     // payrollRows attaches the account - the opening balance, the deduction, the balance
@@ -3805,13 +4328,15 @@ function moneyNotes(row) {
     // there is no second reading to name.
     if (typeof carryReportingEnabled === 'function'
         && carryReportingEnabled(State.schedule)
-        && !wholeAccountRange(REPORT_RANGE.from, REPORT_RANGE.to, State.worker(row.workerId))) {
+        && !wholeAccountRange(reportRowSpan(row).from, reportRowSpan(row).to,
+            State.worker(row.workerId))) {
         notes.push('הטווח אינו תקופת חשבון - החישוב לפי התאריכים שנבחרו בלבד, '
             + 'בלי יתרה מחשבון קודם ובלי יתרה שעוברת לחשבון הבא');
     }
     // Said in shekels, not in a word like "partial": the man asking is asking how much.
     // A closed period says so, in the design's words, before it says anything else: the
     // figures beside that sentence are a record and not a reckoning.
+    notes = [];
     if (row.carry && row.carry.closed) {
         notes.push('החשבון נסגר ולא ישתנה');
     }
@@ -3893,7 +4418,7 @@ function moneyNotes(row) {
         // With the reason, in the file the argument about the money happens over. A
         // workbook that says 500 was corrected and does not say why sends the reader
         // back to a phone.
-        correctionsIn(row.workerId, REPORT_RANGE.from, REPORT_RANGE.to)
+        correctionsIn(row.workerId, reportRowSpan(row).from, reportRowSpan(row).to)
             .forEach(entry => notes.push(correctionLine(entry)));
     }
     // THE ACCOUNT DOES NOT ADD UP, and the sheet says so where the number would have been.
@@ -3904,9 +4429,9 @@ function moneyNotes(row) {
     // net somebody would pay out and a net with a reason to stop and ask.
     const overpayment = overpaymentWarning(row.carry);
     if (overpayment) notes.push(overpayment);
-    if (!priced && advances !== 0) notes.push('בלי שכר יומי - הנצבר לא חושב');
-    if (row.hoursUnpriced) notes.push('שעות נוספות בלי שכר שעה - לא נכללו');
-    return notes;
+    if (!priced && advances !== 0) gaps.push(NO_DAILY_RATE_NOTE);
+    if (row.hoursUnpriced) gaps.push('שעות נוספות בלי שכר שעה - לא נכללו');
+    return { range, account: notes, gaps };
 }
 
 function invoiceSheetRows() {
@@ -4043,7 +4568,11 @@ function detailRows() {
         const worker = State.worker(row.workerId);
         if (!worker) return;
 
-        workerDaysReport(State.schedule, worker, REPORT_RANGE.from, REPORT_RANGE.to)
+        // The days of the row beside it: the range that row was worked out over, which on
+        // the default account is the man's own period (v189) - so this sheet lists
+        // exactly the days the pay sheet counted, and no others.
+        const span = reportRowSpan(row);
+        workerDaysReport(State.schedule, worker, span.from, span.to)
             .forEach(day => {
                 const parsed = parseLocalDate(day.date);
                 if (day.absent) {

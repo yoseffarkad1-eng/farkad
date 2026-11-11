@@ -1978,6 +1978,18 @@ a[href]:focus-visible,
    the weeks on paper is a decision for the owner, not a side effect of a fold. */
 @media print { .report-weekly-breakdown { display: none !important; } }
 
+/* v189: the open account the default does not show (js/ui/reports.js, renderOtherAccounts).
+   The sentence is .hint-money and goes to the paper with the table it is about; the button
+   points the SCREEN at that account and is nothing a sheet of paper can do. 44px, because a
+   finger presses it. */
+.report-dates { display: inline-block; max-width: 100%; }
+#reportsView .report-group-dated { flex-wrap: wrap; row-gap: 2px; }
+#reportsView .report-group-dated .report-dates { min-width: 0; }
+.report-other-account { margin: 6px 0 14px; }
+.report-other-account .hint { margin: 0 0 8px; }
+.report-other-account button { min-height: 44px; font-size: 16px; padding: 8px 14px; }
+@media print { .report-other-account button { display: none !important; } }
+
 /* THE FINANCIAL SECTION (renderFinanceBlock): the men whose money moved in this period
    and who worked no day in it. One line each, inside the pay sheet's own section so the
    paper carries it, and NOT a table - a <tbody><tr> inside .report-payroll is a worker row
@@ -4836,3 +4848,8 @@ body.day-tight .topbar { margin-bottom: 2px; }
     #weekView .week-table .name-cell .badge { display: inline; font-size: 8pt; }
     #weekView .week-legend, #weekView .week-legend-note { display: none; }
 }
+
+/* The usual site (js/ui/usual.js) is a SUGGESTION, and paper cannot say so: a site's name
+   printed beside a man reads as where he worked. Its look is in css/design.css, which is
+   screen only; this is the one thing about it that is not a look. */
+@media print { .chip-usual, .usual-note { display: none !important; } }

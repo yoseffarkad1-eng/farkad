@@ -42,7 +42,15 @@ const REPORTS = readFileSync(join(ROOT, 'js/ui/reports.js'), 'utf8');
 const FROM = '2026-08-07';
 const TO = '2026-08-20';
 const WORKED = '2026-08-10';
-const TODAY = '2026-08-20';
+// MOVED IN v189, from the 20th to the 13th - and nothing else in this suite moved with it.
+// The range below is the fortnight the page opens on, and since v189 the page reads a
+// weekly man over HIS week on that default (tests/account-view.test.mjs). On the 20th
+// כרם's week was 14-20 August and his one day, the 10th, was no longer on the page at
+// all - which is the new default doing its job, and not what this suite is about. On the
+// 13th his week is 7-13 August and holds that day, so every claim below - the split, the
+// two bands, the sheet as the union - is now held ON the new default, with the same
+// figures it has always expected.
+const TODAY = '2026-08-13';
 
 const SHUT = { carryAdvances: false, ledgerWrites: false };
 const OPEN = { carryAdvances: true, ledgerWrites: true };

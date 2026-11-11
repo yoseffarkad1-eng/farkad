@@ -1,6 +1,306 @@
-## v188 — «מה חדש», the journey from the foot of the day, «תלוש לכל עובד», the card's calendar, «חיפוש עובד» (candidate, not served)
+## v189 — the reports: each group in its own period, and a card that tells the account with the extra hours on it; the usual site beside a man not yet recorded; «כרטיס אתר» (CANDIDATE - NOT SERVED)
 
-**Not served until the merge and the Pages deployment are recorded here by the next release.**
+**Candidate. Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on the v188 candidate (`31f4b8b`). Three things, built apart and brought together here:
+
+1. **The pay sheet's default** - display logic in `js/ui/reports.js` and a few lines of
+   `css/app.css`. The owner saw the before and after pictures and answered **"yes,
+   publish"** (2026-11-11).
+2. **«האתר הקבוע»** - `js/ui/usual.js`: one suggestion chip beside a man in «לא נרשמו».
+3. **«כרטיס אתר»** - `js/ui/sitecard.js`: one site on one screen, a reading.
+
+Nothing in `js/model`, `js/sync`, `js/state.js`, `js/store.js`, `js/recovery.js`,
+`firestore.rules` or `functions`. No new key, no new field path, no new writer: the one
+thing here that writes (the chip) writes by the sheet's own function. «מה חדש» has the
+build's three items (`WHATSNEW_BUILDS`), each with a «הראה לי» that only navigates - one
+new way there, `payReport`: the reports on «לפי עובד», nothing pressed.
+
+(The pay sheet's part was first cut alone as a candidate numbered v187, before main's v187
+became «סיכום חודש»; it was never served under that number and this is its only entry.)
+
+### 1. The pay sheet's default: each man in his own period
+
+#### His words
+
+2026-11-11, from his phone, on v186, with a screenshot: «דוחות» → «לפי עובד», the range as
+the page opens (30/10/2026 - 12/11/2026), «כל העובדים». Under «שבועי» the four weekly men
+each showed «נותר לתשלום» for the whole fortnight (5850 ₪, 9 work days) under the amber
+sentence «הטווח שנבחר אינו תקופת התשלום של העובדים האלה…». He asked (in Arabic): I open the
+reports page and the weekly workers show a two-week account - why? In his written spec for
+the accounts he had already ruled: a weekly worker is shown only his current, unclosed
+week; a fortnightly worker his fortnight.
+
+The page knew the range was wrong for those men - it said so in amber, and gave them no
+carry and no closing button - and opened on it all the same.
+
+#### What changed
+
+While the page is on its default - the chip «תקופת החשבון» lit AND the range still the
+fortnight containing today (`reportAccountView`) - every reader that has a man in hand asks
+`reportSpanFor(workerId)`, which answers HIS period containing today (`periodRangeFor`, the
+function the closure, the carry and the worker's card already ask):
+
+- **The weekly group is the current week, the fortnightly group the fortnight.** Each
+  heading says its own dates («שבועי · 06/11/2026 - 12/11/2026», «דו־שבועי · 30/10/2026 -
+  12/11/2026») wherever some group is not the range at the head of the page. Both groups
+  read «זאת תקופת התשלום המלאה של העובדים האלה.»; the amber sentence is not on the default.
+- **A weekly man's card is his real account for the week**: work days, «נותר לתשלום», the
+  deduction and the carry - exactly the row this page has always drawn when the week was
+  picked by hand. With the money gates open he now HAS an account on the default (carry in,
+  deduction, carry out) and a closing button.
+- **A tap on his card opens his week**; «בחירת קיזוז מהשכר» no longer moves the page's range
+  on the default; «סגור את החשבון» closes exactly the period the card showed.
+- **A man a boundary cut short** (a cycle change inside the fortnight) stands in a group of
+  his own, under his cycle's title and his own dates, with «תקופת מעבר…» as before.
+- **A page with one period on it** (a crew paid weekly, or only weekly men chosen) names
+  that period in the line at its head, which is the paper's and the picture's date.
+
+It is **derived, never stored**. Any other range or chip - «השבוע», «שבוע קודם», a month,
+two typed dates (the same fourteen days included), a past fortnight, the worker's card
+pointing the sheet at one man - is an explicit range and is read exactly as v186 read it,
+amber sentence and all. After the fortnight ends, a page still holding yesterday's range is
+explicit until «תקופת החשבון» is pressed.
+
+#### An earlier week that is still open
+
+Read over his current week, a weekly man's first week of the fortnight is no longer on the
+default. If something was recorded in it (a day, an absence, an advance) and it has not
+been closed (`frozenPeriodFor`), it is **named under his group**:
+
+    חשבון פתוח נוסף, שאינו כלול בסכומים כאן: 30/10/2026 - 05/11/2026 · כרם, זיאד.
+    [הצג את החשבון 30/10 - 05/11]
+
+The sentence is `.hint-money`: it is on the paper and in the picture. The button is the
+screen's; it points the page at that week as an explicit range, with «שבוע קודם» lit when
+that is the week it is. No figure of that week is shown on the default - nothing is added
+up across periods. The same holds for any other period of a man inside the fortnight: days
+already recorded in the week ahead, or the seven days a boundary left behind. A closed
+week is settled and is not named. Periods outside the fortnight were never on this page and
+are not looked for. A man with an open week and NOTHING in his current one (the first
+morning of a new week) keeps his group on the page - heading, «אין ימי עבודה בתקופה הזו.»,
+and the sentence.
+
+#### Print, picture, workbook, CSV, statement
+
+- **Paper and picture** are drawn off the screen: two titled tables, each heading with its
+  own dates, each with its own band; the open-account sentence under the weekly one; the
+  line at the head names the range that holds both.
+- **Workbook / CSV, sheet «שכר»**: no column added or moved. A row read over a period that
+  is not the file's range says so in the cell that already says how the man is paid -
+  «שבועי · 06/11/2026 עד 12/11/2026». The open account is in the «הערה» of the man it
+  belongs to; a man with an open account and no row gets a last row with his name, the note
+  and NO figure (blank, not nought). Sheet «פירוט» lists exactly the days the pay sheet
+  counted for each man. The file's name is still stamped with the page's range.
+- **«חיוב», «בלי עובדי רימא», «רימא», «עובדי יוסף גבס»**: the page's range, untouched.
+- **The worker's statement** (WhatsApp) from the dialog is his period's, word for word what
+  v186 sent with the week picked by hand.
+
+#### What did not change
+
+`payrollReport`, `advanceAccount`, `planPeriodClosure`, `closePeriodChanges` and everything
+else in the model. Explicit ranges. «לפי אתר» and the client invoice. The worker's card.
+The amber sentence's words. A crew paid only fortnightly sees the page it saw, node for
+node (headings without dates, same sheet). The independent calculator
+(`tests/oracle.test.mjs`) is untouched and passes.
+
+#### Why the old default existed, and how each reason is kept
+
+1. **One range drove one table, and the carry is only sound over a man's whole period.**
+   Handed a range that is not an account, the walk once counted an advance inside the range
+   as carried in from before it - the same 500 deducted twice. So a weekly man inside a
+   fortnight got no carry and the plain arithmetic. *Kept:* the rule is unchanged
+   (`wholeAccountRange` per man); the default now hands each man a range that IS his whole
+   period, by `periodRangeFor`, so he gets his account by the old rule rather than around it.
+2. **A week inside a fortnight must not be settled twice.** The closing button was withheld
+   on a range that is not the man's period; the model refuses an overlapping close. *Kept:*
+   the button is offered only over `reportSpanFor`, which is his whole period; the plan and
+   the write use the plan's own dates; the overlap refusal is the model's and untouched.
+3. **Nothing counted twice, nothing dropped.** One row a man, over one range. *Kept:* every
+   man is in exactly one reading (disjoint sets covering the roster, rows in roster order);
+   his other periods inside the fortnight are each closed, or named as open - and week 1 +
+   week 2 equal the fortnight v186 showed, to the day and the shekel (measured).
+4. **`payrollRows()` IS the calculation** - band, file and hiding all read it. *Kept:* the
+   keep-alive filter and the work/finance split are the same lines; `payrollRows()` now
+   stitches per-period readings made by that same body (`payrollRowsOver`).
+5. **A range that is a way of looking must say so** on the screen, the file and the man's
+   statement. *Kept:* all three sentences, word for word, on every explicit range.
+6. **The weekly fold adds up to the row above it.** *Kept:* unchanged on explicit ranges; on
+   the default a week is one period and there is nothing to fold.
+
+#### Expectations moved by this part
+
+Two, and no pinned figure or string. Both fixtures happened to stand on the fortnight the
+page opens on with a weekly man in it, so both were describing the old default itself:
+
+- `tests/finance.test.mjs` - the fixture's «today» moved from 2026-08-20 to 2026-08-13. On
+  the 20th the weekly man's one day (the 10th) was no longer in his current week, so the
+  setup (four rows) could not hold. On the 13th his week holds that day and all 57 checks
+  pass unchanged, now ON the new default.
+- `tests/mobile.test.mjs`, «the weekly fold is lines, and a finger can open it» - the range
+  is now chosen by hand (`REPORT_PRESET = 'custom'` for the drawing, put back after it). The
+  fold is for a weekly man inside a LONGER range somebody picked; on the default he is read
+  over one week and there is nothing to fold. Its checks are unchanged.
+
+No other existing suite needed a change.
+
+#### Strings
+
+New, **PROPOSED**, pinned word for word in `tests/account-view.test.mjs` and
+`tests/account-view.browser.mjs`:
+
+- «חשבון פתוח נוסף, שאינו כלול בסכומים כאן» (the sentence; the file's note uses it with «עד»)
+- «הצג את החשבון» (the button, followed by the short dates)
+
+Composed from existing words: the heading «שבועי · <dates>», the cycle cell «שבועי ·
+<date> עד <date>». Reused unchanged: «זאת תקופת התשלום המלאה של העובדים האלה.», «אין ימי
+עבודה בתקופה הזו.», «תקופת מעבר…», the amber sentence. «ממתין לסגירה» does not exist on main
+and was not introduced.
+
+#### The screens that read the sheet by pointing its range
+
+Three screens assign `REPORT_RANGE` inside one synchronous step and put it back: the
+worker's card (`workerCardScope`), the month's summary (`monthSummaryScope`) and the
+payslips (`payslipsScope`). None of them touches the chip, so on a page still on its
+default they point a range while the chip says «תקופת החשבון». They read what they read
+before, and why is measured rather than assumed (`tests/account-view.test.mjs`, both gate
+readings):
+
+- A month is never the fortnight: the month's summary is always an explicit range.
+- A card and a payslip group point at a man's OWN period. Either that is not the fortnight
+  (explicit), or it IS the fortnight because it is his period - and then `reportSpanFor`
+  answers the same range. The invariant - every man a pointed reading is about is read
+  over exactly the range that was pointed - is checked at `payrollRows`' own door on every
+  call the three screens make.
+- Then their whole answers (`workerCardFacts` for every man, `monthSummaryFacts` and its
+  text for two months, `payslipsFacts` current and previous) are identical, byte for byte,
+  over this pay sheet and over v186's.
+
+**The payslip and the default card are now the same account.** Until this build the list
+read a weekly man over his week while the page under it showed him a fortnight. Both are
+his period now: for every man with a card on the default page, the figure on his slip is
+the figure on his card, the period is the same, and the slip's text is the statement his
+card's dialog sends (measured, man by man).
+
+*Not hardened:* this holds because of WHAT those screens point at, not because they
+declare it. A future screen that points the default fortnight at a weekly man while the
+chip is «תקופת החשבון» would be read over his week. Such a screen should set the chip
+(`REPORT_PRESET`) inside its scope.
+
+### 2. «האתר הקבוע»: the site beside a man not yet recorded
+
+Beside each man in «לא נרשמו», ONE chip: the site he is most likely at, in that site's own
+colour, dashed (a filled chip on this screen is a man who is recorded). One tap puts him
+there for the day on screen. Over the rows, when any man has a chip: «האתר ליד השם הוא
+הצעה לפי הימים האחרונים. נגיעה בו משבצת.»
+
+- **The rule** (`usualSiteFor`, pure; nothing learned, nothing kept - worked out from the
+  record at every draw). His working days among the 14 calendar days before the day on
+  screen, the latest 5 of them. No chip when there are none; when the latest of them was
+  at two sites; when the site is archived or gone. Otherwise the site he worked on LAST,
+  and only if he is settled there: on it alone on 4 of those 5 days, or on it alone on his
+  last two. A man four days on one site and yesterday on another gets no chip. Never a
+  guess: his name still opens every site as before.
+- **The tap is the sheet's pick.** `sheetPickPlace` was lifted out of `js/ui/sheet.js` for
+  it and is the only writer it calls: a REGULAR day at that site - never a double day,
+  never extra hours, whatever his last days were - one field path, through the journal,
+  with ↶. `tests/usual.test.mjs` compares the whole disk of a phone that tapped the chip
+  with one that picked the site in the sheet, byte for byte. A tap on a chip the record no
+  longer agrees with writes nothing; one tap is one man.
+- **There is no «all of them» button**, on purpose: neither existing batch
+  (`copyDayInto`, `bulkAssign`) takes a list of "this man there", and a third would have
+  been a new writer of the day.
+- How often it is right is MEASURED on seeded months and held over floors in that suite
+  (`USUAL_TABLE=1` prints the table) - seeded months, not his.
+- Its three strings are **PROPOSED**, pinned in `tests/usual.test.mjs`.
+- Moved pin: `tests/payslips.test.mjs` - the blocks standing after the payslips' block at
+  the end of `css/design.css` are counted as "two or more" instead of "two"; what it
+  guards is unchanged.
+
+### 3. «כרטיס אתר»: one site on one screen
+
+One worded button on each site's row of the crew screen (hidden sites too), and from
+nowhere else. The card: a calendar month of the site with how many men stood on it each
+day (and the marks «ר»/«י» for Rima's and יוסף גבס's counts), the month's numbers, who
+worked there, and the month's summary for the client, which is on the screen before it can
+leave and leaves by the share sheet, wa.me or the clipboard - never called sent.
+
+- **A reading, and only a reading.** No field, no commit, no Store key; a day goes to that
+  date on the day screen, a man to his own card. The reports' own range is never touched -
+  the counts' functions take their range as arguments.
+- **Counts, and not a shekel.** Every count is the one «לפי אתר» has for that month and
+  that site (`invoiceByDate`, `invoiceWithoutRima`, `rimaReport`, `yosefGevesReport`),
+  held in `tests/sitecard.test.mjs` against the חיוב, «בלי עובדי רימא», רימא and יוסף גבס
+  sheets and the one-client file, on seeded records and on a hand-written month.
+- **«עובדי יוסף גבס» is on the card and NOT in the client's text** (the owner,
+  2026-11-10: "outside any account"); a count typed for that list moves the card and not
+  one byte of the text.
+- The calendar is the worker card's (its helpers, unchanged). `js/ui/roster.js` gains the
+  row's button, `js/ui/modal.js` the dialog, `js/app.js` one redraw line.
+- Its Hebrew is **PROPOSED**, pinned in `tests/sitecard.test.mjs`.
+- Moved selector: `tests/smoke.mjs` finds the site row's «עוד ⋯» by name, now that the row
+  has the card's button before it.
+
+### Known NOT covered
+
+- **Nothing here was tried on a real phone.** Chromium with emulated touch only - the chip
+  under a real thumb, the card on a real screen, the reports on his.
+- **Friday morning.** On the first day of a new week the weekly group is the NEW, empty
+  week and last week is one press away (the button, or «שבוע קודם»). If he pays the weekly
+  men on Friday for the week just ended, he may want the unclosed week to stay the main
+  view until it is closed. His spec says «current, unclosed»; this build reads «current» by
+  the calendar. His to rule.
+- **If accounts are not closed with the button**, every weekly man with work last week is
+  named as an open account for the whole second week of each fortnight. True, and possibly
+  noise.
+- **«תקופת הדוח» in the picker still reads the fortnight** on the default while the weekly
+  group reads a week; the headings carry the dates.
+- **The page is heavier with the gates open**: a weekly man now gets a real account on the
+  default. Measured in Node on a four-man seed: one draw 2.1s on v186, 2.5s here (the gate
+  is asked the same 13 times; the cost is v186's and is the weekly walk).
+- A site missing from the roster is numbered over the page's range in a weekly man's
+  dialog on the default, not over his week (one labelling map per export, as before).
+- The emulator suites were not run for this build (nothing they cover changed).
+- The usual site's hit rate is measured on seeded months only; on his record it is unknown
+  until he uses it.
+- The client's text of the site card and all its Hebrew, the chip's sentence, and the two
+  phrases of the pay sheet are proposed; he has seen the pay sheet's pictures and none of
+  the other two features' words.
+- The three «מה חדש» items are proposed Hebrew.
+
+### Rollout
+
+No rule. Nothing is written differently; phones on different builds read the same record.
+
+
+### «דוחות» - the card tells the account; extra hours shown
+
+The owner, 2026-11-11, after the weekly fix: "focus on the reports - make them more organised,
+clear and understandable; and the EXTRA HOURS do not show clearly, I want them clear too." On a
+phone each man's card now reads top to bottom: work days, double days, extra hours, days off;
+daily rate, «נצבר», the deduction; his own notes (carried in, credit, review, no rate, hours with
+no hourly rate); «נותר לתשלום» last and largest. ONE card per row. Every figure is the full table's
+own cell - nothing is computed on the card (`tests/reportsclarity.test.mjs` holds card and row
+equal cell for cell under both gate readings). The days dialog says a day's hours in words
+(«2 שעות נוספות» where it said «+2»), explains its star, and ends in the card's own summary; it no
+longer scrolls sideways at doubled text. The band on a phone and the weekly fold carry the hours.
+«לפי אתר»: larger counts, the three lists ruled apart. A count is on every card of a group or on
+none; nought is 0 and «—» is unknown. NO NEW STRING: every label already stood on this screen.
+Print, the picture, the workbook, the CSV and the man's statement are byte for byte v186's.
+
+**Moved expectations** (each commented in place): `tests/reports.browser.mjs` - two cards a row
+became one, the card's labels and counts gained «כפולים» and «שעות נוספות», the dialog's «+3»
+became the worded tag; `tests/account-view.test.mjs` leaves the cards' subtree out of its
+node-for-node comparison with v186 and reads a card as v186 said it; three neighbours' "last
+block of the stylesheet" pins were re-scoped to their own block.
+
+**NOT DONE, and why.** The MONEY value of a man's extra hours is not shown as its own line: the
+model adds `hourly * hours` straight into each day's total at that day's stamped rate and keeps
+no separate figure, and a second calculation of pay in the UI is exactly what this codebase
+forbids. It needs a small change in `js/model/money.js`, which is the owner's to approve.
+
+## v188 — «מה חדש», the journey from the foot of the day, «תלוש לכל עובד», the card's calendar, «חיפוש עובד» (served 2026-11-11)
+
+**Served.** Merged as `ecd1ca4` (PR #70) on 2026-11-11 after both gates exited 0 on `31f4b8b`; the Pages deployment succeeded at 14:05 UTC.
 Built on `295ecfd` (v187). Five things, all in `js/ui`; nothing in `js/sync`, `js/model`,
 `js/state.js`, `js/store.js`, `js/recovery.js` or the rules. None of them writes the record by
 any new code. Two per-phone preferences are new (`farkadWhatsNewSeen`, `farkadPayslipsProgress`),

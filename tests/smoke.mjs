@@ -634,7 +634,9 @@ async function seedRoster(page) {
   // The owner moved secondary actions behind More. Follow that real menu before
   // exercising the same rename, archive, history and deletion guarantees.
   const rename = async value => {
-    await page.locator('#placeList .roster-row').first().getByRole('button').first().click();
+    // By name, not by position: since «כרטיס אתר» (js/ui/sitecard.js) the row has a button
+    // before «עוד ⋯» in the document, and this step is about the menu.
+    await page.locator('#placeList .roster-row').first().locator('.crew-edit').click();
     await page.locator('#askChoices').getByRole('button', {name:'שינוי שם האתר',exact:true}).click();
     await page.waitForTimeout(200);
     await page.fill('#askInput', value);

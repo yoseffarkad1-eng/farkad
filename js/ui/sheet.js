@@ -132,6 +132,17 @@ function advanceSheet() {
     content.classList.add('sheet-swap');
 }
 
+// A SITE PICKED FOR A MAN ON THE DAY ON SCREEN: a regular day there, one field path, with
+// the step back on ↶. It was written inline in the tile below until the tray's suggestion
+// (js/ui/usual.js) needed the very same act - and a second copy of a write is how two
+// doors come to record two different things. Both call this, and nothing else does.
+// Returns whether the edit stood (editWithUndo's verdict, State.commit's under it).
+function sheetPickPlace(worker, place) {
+    return editWithUndo(worker.id,
+        `${isolate(worker.name)} נרשם ב${isolate(place.name)}`, () =>
+            assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL));
+}
+
 function renderAssignSheet() {
     const worker = State.worker(sheetWorkerId);
     if (!worker) return;
@@ -173,9 +184,7 @@ function renderAssignSheet() {
                     renderAssignSheet();
                     return;
                 }
-                const stood = editWithUndo(worker.id,
-                    `${isolate(worker.name)} נרשם ב${isolate(place.name)}`, () =>
-                        assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL));
+                const stood = sheetPickPlace(worker, place);
                 // A second site in a day is normal here, so picking one cannot assume the
                 // worker is finished - only move on when this is their first. And only
                 // when the edit STOOD: a refused commit has already rolled back and put

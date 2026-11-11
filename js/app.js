@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v188';
+const APP_VERSION = 'v189';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -156,6 +156,8 @@ function render() {
     if (typeof renderWorkerCardIfOpen === 'function') renderWorkerCardIfOpen();
     // And for the month's summary (js/ui/monthsummary.js), for the same reason.
     if (typeof renderMonthSummaryIfOpen === 'function') renderMonthSummaryIfOpen();
+    // And for a site's card (js/ui/sitecard.js): every count on it is read off this record.
+    if (typeof renderSiteCardIfOpen === 'function') renderSiteCardIfOpen();
     // And for «תלוש לכל עובד» (js/ui/payslips.js): every row is a man's pay and a link that
     // carries his statement, and both must say what the record says now.
     if (typeof renderPayslipsIfOpen === 'function') renderPayslipsIfOpen();

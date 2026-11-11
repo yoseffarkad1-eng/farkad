@@ -73,6 +73,20 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    { build: 'v189', items: [
+        { title: 'דוחות: כל קבוצה בתקופה שלה',
+            text: 'הדוח נפתח כשהעובדים השבועיים בשבוע הנוכחי והדו־שבועיים בשבועיים שלהם, ושבוע קודם שעדיין פתוח כתוב מתחת לקבוצה.',
+            where: 'דוחות ← לפי עובד', go: 'payReport' },
+        { title: 'דוחות: שעות נוספות על הכרטיס',
+            text: 'בכרטיס של כל עובד רואים את ימי העבודה, השעות הנוספות והחופש, ואחריהם מה נצבר וכמה נותר לתשלום.',
+            where: 'דוחות ← לפי עובד', go: 'payReport' },
+        { title: 'האתר הקבוע ליד השם',
+            text: 'ליד עובד שעוד לא נרשם מופיע האתר שבו עבד בימים האחרונים, ונגיעה אחת משבצת אותו שם ליום רגיל.',
+            where: 'היום ← לא נרשמו, ליד שם העובד', go: 'day' },
+        { title: 'כרטיס אתר',
+            text: 'אתר אחד במסך אחד, לקריאה בלבד: לוח החודש, כמה עובדים היו בו בכל יום, מי עבד בו, וסיכום החודש ללקוח.',
+            where: 'צוות ← כרטיס אתר, ליד שם האתר', go: 'roster' }
+    ] },
     { build: 'v188', items: [
         { title: 'בניית סידור ישר ממסך היום',
             text: 'בתחתית רשימת היום יש כפתור שפותח את בניית הסידור ליום הבא, או ממשיך מהשלב שבו עצרת.',
@@ -448,6 +462,13 @@ const WHATSNEW_GO = Object.freeze({
     // row itself is not pressed: «סיכום חודש» and «תלוש לכל עובד» each open a reading of
     // money for a period, and which period is his to choose.
     reportsMenu: () => whatsNewReportsMenu(false),
+    // The pay sheet itself, on «לפי עובד», as it opens - nothing on it pressed, and the range
+    // left wherever he had it (v189: the groups in their own periods are what he is shown).
+    payReport: () => {
+        if (typeof REPORT_SECTION !== 'undefined' && REPORT_SECTION !== 'workers') REPORT_SECTION = 'workers';
+        showView('reports');
+        return true;
+    },
     // The same, on «לפי עובד» - the only side of the reports whose menu has the payslips' row.
     payslipsMenu: () => whatsNewReportsMenu(true),
     // «חיפוש עובד»: its dialog over the day, empty, the field waiting. It finds and writes nothing.
