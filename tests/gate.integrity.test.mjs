@@ -33,7 +33,7 @@ const corpus = readdirSync(HERE).filter(name => name.endsWith('.mjs')).sort();
 // deliberately: a new helper is a decision somebody made, and the alternative - inferring
 // "not a suite" from the filename - would let a real suite named without .test. slip out
 // of the gate unnoticed, which is exactly the failure this file exists for.
-const HELPERS = ['network-guard.mjs', 'emulator-host.mjs', 'exports-proof.lib.mjs', 'harness.mjs', 'moneydom.mjs', 'nodes.mjs',
+const HELPERS = ['network-guard.mjs', 'census.mjs', 'emulator-host.mjs', 'exports-proof.lib.mjs', 'harness.mjs', 'moneydom.mjs', 'nodes.mjs',
     'oracle.mjs', 'pdf.mjs', 'runner.mjs', 'serve.mjs', 'shell.mjs', 'shot.mjs', 'treecheck.mjs'];
 
 // Suites that are RED ON PURPOSE and therefore in no gate: each one proves, on fixtures,

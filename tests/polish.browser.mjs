@@ -23,6 +23,7 @@ import { launchLocalBrowser } from './network-guard.mjs';
 import { serve } from './serve.mjs';
 import { expectedShaFor, verifyServedAssets } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { censusOnly } from './census.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const server = await serve(root);
@@ -454,17 +455,21 @@ for (const scheme of ['dark', 'light']) {
         const fold = document.getElementById('settingsFoldBackup');
         const openedBySheet = fold.open;
         if (shut) fold.open = false;
-        const disk = JSON.stringify(Object.keys(localStorage).sort().map(key => [key, localStorage[key]]));
+        // Without the service worker's census of open builds (tests/census.mjs says why).
+        const diskKeys = Object.keys(localStorage).sort().filter(key => key !== 'farkad:openBuilds');
+        const diskNow = () => JSON.stringify(Object.keys(localStorage).sort()
+            .filter(key => key !== 'farkad:openBuilds').map(key => [key, localStorage[key]]));
+        const disk = diskNow();
         renderBackupAge(); render();
         await new Promise(done => setTimeout(done, 80));
-        const wrote = JSON.stringify(Object.keys(localStorage).sort().map(key => [key, localStorage[key]])) !== disk;
+        const wrote = diskNow() !== disk;
         const on = node => Boolean(node) && node.offsetParent !== null && getComputedStyle(node).display !== 'none' && node.getBoundingClientRect().height > 0;
         const age = document.getElementById('backupAge'), onRow = document.getElementById('backupAgeRow'),
             reminder = document.getElementById('backupReminder');
         const head = fold.querySelector(':scope > summary');
         const style = getComputedStyle(reminder || head), box = (reminder || head).getBoundingClientRect();
         const card = fold.getBoundingClientRect();
-        return { openedBySheet, stillShut: !fold.open, wrote,
+        return { openedBySheet, stillShut: !fold.open, wrote, diskKeys,
             age: age.textContent, ageShown: on(age) && fold.open,
             row: onRow ? onRow.textContent : '', rowShown: on(onRow),
             onHead: [onRow, reminder].every(node => !node || head.contains(node)),
@@ -505,6 +510,7 @@ for (const scheme of ['dark', 'light']) {
     check('and readable: 4.5:1 or better on the row', seen.contrast >= 4.5, String(seen.contrast));
     same('not a dialog, and the sheet is still the sheet', [seen.dialogs, seen.panelOpen], [[], true]);
     same('drawing it wrote nothing to the disk', seen.wrote, false);
+    await censusOnly(check, page, seen.diskKeys);
     check('the row is still a 56px row', seen.summary >= 56, String(seen.summary));
 
     seen = await row(40, true);

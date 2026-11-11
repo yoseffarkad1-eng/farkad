@@ -24,6 +24,7 @@ import {serve} from './serve.mjs';
 import {launchLocalBrowser} from './network-guard.mjs';
 import {verifyServedAssets, expectedShaFor} from './treecheck.mjs';
 import {suite, check, same, report} from './runner.mjs';
+import { censusOnly } from './census.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const server = await serve(root);
@@ -366,9 +367,12 @@ try {
         const quiet = await open();
         await openSheet(quiet);
         await quiet.waitForTimeout(400);
+        // Without the service worker's census of open builds (tests/census.mjs says why).
         const disk = () => quiet.evaluate(() => JSON.stringify([State.schedule,
-            Object.keys(localStorage).sort().map(key => [key, localStorage.getItem(key)])]));
+            Object.keys(localStorage).sort().filter(key => key !== 'farkad:openBuilds')
+                .map(key => [key, localStorage.getItem(key)])]));
         const before = await disk();
+        await censusOnly(check, quiet, JSON.parse(before)[1]);
         for (const title of Object.keys(FOLD)) await row(quiet, title).click();
         for (const title of Object.keys(FOLD)) await row(quiet, title).click();
         same('every row opened and shut again: the disk is byte for byte what it was', await disk(), before);

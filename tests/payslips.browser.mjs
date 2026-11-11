@@ -22,6 +22,7 @@ import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { censusOnly } from './census.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const server = await serve(root);
@@ -173,7 +174,10 @@ const PERIOD_OF = { w_01: FORTNIGHT, w_02: WEEK, w_03: FORTNIGHT, w_04: FORTNIGH
     suite('one way in: a row of «הפקת דוח» on «לפי עובד», and nowhere else');
     const { page, context, errors } = await phone(440, 956, 'dark');
 
-    const disk = await page.evaluate(() => JSON.stringify(Object.keys(localStorage).sort().map(key => [key, localStorage[key]])));
+    // Without the service worker's census of open builds (tests/census.mjs says why).
+    const disk = await page.evaluate(() => JSON.stringify(Object.keys(localStorage).sort()
+        .filter(key => key !== 'farkad:openBuilds').map(key => [key, localStorage[key]])));
+    await censusOnly(check, page, disk);
     const record = await page.evaluate(() => JSON.stringify(State.schedule));
 
     check('the menu is shut and the entry is not on the screen until it is opened',
@@ -281,7 +285,7 @@ const PERIOD_OF = { w_01: FORTNIGHT, w_02: WEEK, w_03: FORTNIGHT, w_04: FORTNIGH
 
     // READING IT WROTE ONE KEY: the list being open, and nothing else anywhere.
     const after = await page.evaluate(() => JSON.stringify(Object.keys(localStorage).sort()
-        .filter(key => key !== 'farkadPayslipsProgress').map(key => [key, localStorage[key]])));
+        .filter(key => key !== 'farkadPayslipsProgress' && key !== 'farkad:openBuilds').map(key => [key, localStorage[key]])));
     same('opening the list left every other key on the disk byte for byte', after, disk);
     same('and the record in memory', await page.evaluate(() => JSON.stringify(State.schedule)), record);
     same('the one key it wrote says the list is open, and holds nobody',

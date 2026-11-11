@@ -20,6 +20,7 @@ import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { censusOnly } from './census.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const server = await serve(root);
@@ -85,7 +86,9 @@ async function phone(width, height, scheme, mode = 'sites') {
 const frames = page => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
 const settle = (page, ms = 80) => page.evaluate(ms => new Promise(done =>
     setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(done)), ms)), ms);
-const disk = page => page.evaluate(() => JSON.stringify(Object.keys(localStorage).sort().map(key => [key, localStorage.getItem(key)])));
+// Without the service worker's census of open builds (tests/census.mjs says why).
+const disk = page => page.evaluate(() => JSON.stringify(Object.keys(localStorage).sort()
+    .filter(key => key !== 'farkad:openBuilds').map(key => [key, localStorage.getItem(key)])));
 const dayOf = (page, id) => page.evaluate(([id, day]) => JSON.stringify(((State.schedule.days[day] || {}).actual || {})[id] || null), [id, DAY]);
 const waiting = page => page.evaluate(() => State.unrecorded().map(worker => worker.name));
 const undoSays = page => page.evaluate(() => { const bar = document.getElementById('undoBar');
@@ -137,6 +140,7 @@ try {
         const { context, page } = await phone(width, height, scheme);
         await bring(page, null, 0.2);
         const before = await disk(page);
+        await censusOnly(check, page, before);
         const drawn = await rows(page);
         const of = name => drawn.find(row => row.name.startsWith(name));
         const offered = drawn.filter(row => row.offer);
@@ -315,6 +319,7 @@ try {
         const { context, page } = await phone(440, 956, 'dark');
         await bring(page, 'אמיר', 0.4);
         const before = await disk(page);
+        await censusOnly(check, page, before);
         await page.evaluate(() => __row('אמיר').querySelector('.chip-main').click());
         check('the name opens every site, as before', await page.evaluate(() =>
             document.getElementById('placePickerModal').style.display === 'flex'

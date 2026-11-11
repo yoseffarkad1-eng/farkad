@@ -26,6 +26,7 @@ import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { censusOnly } from './census.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const server = await serve(root);
@@ -89,8 +90,9 @@ async function phone(width, height, scheme) {
     return page;
 }
 
+// Without the service worker's census of open builds (tests/census.mjs says why).
 const disk = page => page.evaluate(() => JSON.stringify(Object.keys(localStorage).sort()
-    .map(key => [key, localStorage.getItem(key)])));
+    .filter(key => key !== 'farkad:openBuilds').map(key => [key, localStorage.getItem(key)])));
 const cardOpen = page => page.evaluate(() =>
     document.getElementById('workerCardModal').style.display === 'flex');
 const rect = (page, selector) => page.evaluate(sel => {
@@ -101,6 +103,7 @@ const rect = (page, selector) => page.evaluate(sel => {
 try {
     const page = await phone(390, 844, 'light');
     const before = await disk(page);
+    await censusOnly(check, page, before);
     const record = await page.evaluate(() => JSON.stringify(State.schedule));
 
     suite('one worded control on every crew row, and nothing beside it moved');

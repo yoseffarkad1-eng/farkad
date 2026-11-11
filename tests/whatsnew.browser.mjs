@@ -36,6 +36,7 @@ import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import { censusOnly } from './census.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const server = await serve(root);
@@ -114,8 +115,9 @@ const seenNote = build => JSON.stringify({ version: 1, build: `v${build}` });
 const owedOn = (build, seen) => NEWS.filter(n => n <= build && n > (seen || 0)).map(n => `v${n}`);
 const listed = page => page.evaluate(() => [...document.querySelectorAll('#whatsNewList .whatsnew-build')].map(node => node.dataset.build));
 // Every key on the disk but the note, as bytes.
+// And without the service worker's census of open builds (tests/census.mjs says why).
 const diskBut = (page, ...skip) => page.evaluate(keys => JSON.stringify(Object.keys(localStorage).sort()
-    .filter(key => !keys.includes(key)).map(key => [key, localStorage.getItem(key)])), skip);
+    .filter(key => !keys.includes(key) && key !== 'farkad:openBuilds').map(key => [key, localStorage.getItem(key)])), skip);
 const shot = async (page, name) => {
     if (!SHOTS) return;
     await page.waitForTimeout(200);
@@ -234,6 +236,7 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
 
     suite(`${where}: the card - what is owed, newest first`);
     const diskBefore = await diskBut(page, KEY);
+    await censusOnly(check, page, diskBefore, [KEY]);
     await page.locator('#whatsNewOpen').tap();
     await page.waitForTimeout(200);
     same('the card, titled, and saying what it lists', [await visible(page, '#whatsNewModal'), await text(page, '#whatsNewTitle'), await text(page, '#whatsNewContext')],
