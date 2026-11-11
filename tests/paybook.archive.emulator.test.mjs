@@ -93,7 +93,7 @@ const dayOn = raw => Boolean(raw && raw.days && raw.days['2026-10-18'] && raw.da
     check('the new rules speak of the pay book, of closed documents and of the index of what has left',
         /function payGuard\(docId\)/.test(NEW_RULES) && /match \/closed\/\{entryId\}/.test(NEW_RULES)
         && /function archivesOne\(docId\)/.test(NEW_RULES) && /function indexedNeedsPaybook\(\)/.test(NEW_RULES));
-    // v187 MOVED: asked of 8c943fa (v172) until the shared rides' block went live; the
+    // v190 MOVED: asked of 8c943fa (v172) until the shared rides' block went live; the
     // file is now main's at v186, and it is asked of that commit.
     same('docs/firestore.rules.before-paybook is, byte for byte, the rules main carries at v186 - what is live today',
         OLD_RULES === git(['show', `${RULES_LIVE}:firestore.rules`]).toString('utf8'), true);

@@ -252,7 +252,7 @@ control writes.
 deductions (`js/model/payroll.js`). The map itself is stored, merged and sent by every
 v173 phone with the gate off; `docs/payroll-closure.md` has the whole of it.
 
-**And that gate is not how the pay book is turned on (Phase 8; v187).** `paybook`,
+**And that gate is not how the pay book is turned on (Phase 8; v190).** `paybook`,
 `months` and `cold` stay false in every build. The pay book is on for a RECORD that holds
 its opening (`pay.po_open`), written once by a server transaction only the new rules
 accept, from a screen a person reads first. `paybookOn(schedule)` in `js/model/schema.js`

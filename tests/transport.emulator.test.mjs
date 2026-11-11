@@ -152,8 +152,8 @@ const refused = async promise => {
 
 await block('ADD: the new rules are the rules of before plus one block', async () => {
     given('the rules in the field could be read out of Git', OLD_RULES !== null, String(oldRulesFrom));
-    // v187 MOVED. Until v186 firestore.rules WAS the rules of before plus this one block,
-    // and that equation was asked of it. v187's file also carries the pay book's rules, so
+    // v190 MOVED. Until v186 firestore.rules WAS the rules of before plus this one block,
+    // and that equation was asked of it. v190's file also carries the pay book's rules, so
     // the equation is asked of the file it is still true of - the rules live since v185,
     // kept as docs/firestore.rules.before-paybook (main's firestore.rules at v186) - and
     // of this build's file what is asked is that the block in it is THAT block, word for
@@ -604,7 +604,7 @@ await block('NEW RULES, OLDER BUILDS: they record as before and never touch the 
         const plansBefore = JSON.stringify([await readRaw(env, ...PATH, 'transport', DOC), await readRaw(env, ...PATH, 'transport', 'settings')]);
         const stampOf = (/const APP_VERSION = '([^']+)'/.exec(show('js/app.js')) || [])[1];
         const device = makeDevice({ deviceId: `d_${name}`, storage: { 'farkadTransport:enabled': '1' }, appVersion: stampOf,
-            // (less the six files the pay book added to the load order in v187, which no
+            // (less the six files the pay book added to the load order in v190, which no
             // older tree has - named, as tests/transport.share.test.mjs names them)
             sources: loadOrder().filter(file => ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
                 'js/model/months.js', 'js/sync/months.js', 'js/cold.js'].indexOf(file) === -1)

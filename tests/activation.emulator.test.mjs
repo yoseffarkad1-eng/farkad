@@ -2,7 +2,7 @@
 // branch, the rules as published today, the PRODUCTION adapter, and three builds that
 // have not updated - v180, v183, v184 and v186, their real bytes out of Git. (Phase 8)
 //
-// v187: the rules live today carry the shared rides' block (v185), and v186 - the build
+// v190: the rules live today carry the shared rides' block (v185), and v186 - the build
 // every phone is on, or should be - shares rides. So the table is asked of v186 too,
 // against the live file WITH that block, and section R asks what nothing else here did:
 // what the rides' documents may do beside a record that is on.
@@ -68,7 +68,7 @@ const source = readFileSync(ADAPTER, 'utf8');
 // read off the console from here). docs/firestore.rules.before-paybook is that file.
 const RULES_LIVE = '9846d7f';
 // The builds a phone may still be on when the owner presses the button: all four were
-// served on 2026-11-10, and v186 is the build v187 is made on top of.
+// served on 2026-11-10, and v186 is the build v190 is made on top of.
 const OLDER = [['v180', 'd3103d6'], ['v183', '1af6729'], ['v184', '990f5b4'], ['v186', RULES_LIVE]];
 const NOT_ON_MAIN = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
     'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
@@ -91,7 +91,7 @@ function sourcesOf(name, sha) {
     check('the new rules stop a protocol-1 writer once a pay book exists, and say which rules they are',
         /function activatedNeedsPaybook\(\)/.test(NEW_RULES) && /&& activatedNeedsPaybook\(\)/.test(NEW_RULES)
         && /match \/probe\/\{generation\}/.test(NEW_RULES) && /generation == 'paybook-8'/.test(NEW_RULES));
-    // v187 MOVED: asked of 990f5b4 (v184) until the shared rides' block went live.
+    // v190 MOVED: asked of 990f5b4 (v184) until the shared rides' block went live.
     same('docs/firestore.rules.before-paybook is, byte for byte, the rules main carries at v186 - what is live today',
         OLD_RULES === git(['show', `${RULES_LIVE}:firestore.rules`]).toString('utf8'), true);
     check('and those rules have no probe and no closed documents', !/probe|closed\//.test(OLD_RULES.replace(/\/\/.*$/gm, '')));

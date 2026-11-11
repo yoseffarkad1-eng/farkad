@@ -290,7 +290,7 @@ deliberately, and this file describes what will happen when someone does. No rul
 published from the session that wrote this paragraph, and none can be: every rules suite
 runs through `firebase emulators:exec` against a local emulator.
 
-## Which rules are live, and a record that is on (v187, Phase 8)
+## Which rules are live, and a record that is on (v190, Phase 8)
 
 Two additions to the pay book's rules, neither published:
 

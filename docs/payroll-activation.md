@@ -4,7 +4,7 @@
 real project was not touched. This is the order in which it is done, by whom, what each
 person checks, and what to do when a check fails. The design it follows is in
 [`docs/payroll-closure.md`](payroll-closure.md) (the release candidate and Phase 8 at the top;
-Phases 1 to 7 under it). The build is **v187**, one commit on top of main at v186 (`9846d7f`). Everything stated as "measured" names the suite that measures it.
+Phases 1 to 7 under it). The build is **v190**, one commit on top of main at v186 (`9846d7f`). Everything stated as "measured" names the suite that measures it.
 
 Two people act here:
 
@@ -91,15 +91,15 @@ nobody has pressed the button.** Measured, cell by cell
 |---|---|---|---|
 | v180, v183, v184, v186 | live today | not on | records a day, synced - today's state (O, «under the rules LIVE TODAY») |
 | v180, v183, v184, v186 | **new** | not on | records a day, restores a file, synced: every new rule is vacuous without a pay book (O, «BEFORE the record is on») |
-| v187 and an older build side by side | **new** | not on | **the days while the phones update one by one**: v187 writes a day at protocol 2, the older phone one after it at protocol 1, and again each - all on the server and on both phones, both synced, nobody on (O, «beside this build») |
-| **v187** | live today | not on | records a day, shares rides, as v186 does. The button asks the server, is told the rules are the old ones, says so and writes nothing; sent anyway, the opening is refused whole (T) |
-| **v187** | **new** | not on | as v186, plus the row in ⋯; the button works (N) |
+| v190 and an older build side by side | **new** | not on | **the days while the phones update one by one**: v190 writes a day at protocol 2, the older phone one after it at protocol 1, and again each - all on the server and on both phones, both synced, nobody on (O, «beside this build») |
+| **v190** | live today | not on | records a day, shares rides, as v186 does. The button asks the server, is told the rules are the old ones, says so and writes nothing; sent anyway, the opening is refused whole (T) |
+| **v190** | **new** | not on | as v186, plus the row in ⋯; the button works (N) |
 | v180, v183, v184, v186 | **new** | **on** | every write to the record refused: a day, an old-style closure, a restore. The phone shows a sync error and keeps its work. v186's ride plans are still accepted (O, «AFTER»; R) |
 | v180, v183, v184, v186 | live today | **on** | **the hazard**: its restore is accepted and the pay book is gone from the server (O, «the hazard») - cannot arise unless the new rules are taken back after the button |
 
 So, of "the new rules live BEFORE this build reaches a phone":
 
-- **it is not required** for anything a phone does before the button - a v187 phone under
+- **it is not required** for anything a phone does before the button - a v190 phone under
   the rules of today is a v186 phone with one more row in ⋯;
 - **it is required before the button**, and that is enforced twice without anybody
   remembering it: the app asks by reading and refuses with a sentence, and the rules of
@@ -289,8 +289,8 @@ off. If only the owner should be able to, that is decision 72.
 
 ## The rules file
 
-**One paste.** The file is `firestore.rules` at the commit that is served. For v187 the
-exact text was also handed over beside the commit as `firebase-rules-v187.txt`, byte for
+**One paste.** The file is `firestore.rules` at the commit that is served. For v190 the
+exact text was also handed over beside the commit as `firebase-rules-v190.txt`, byte for
 byte the same file.
 
 Every difference from the file believed live today (`docs/firestore.rules.before-paybook`:

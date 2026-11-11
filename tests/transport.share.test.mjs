@@ -31,7 +31,7 @@ import { readFileSync } from 'node:fs';
 import { makeDevice, makeCloud, sharedStore, settle, settleUntil, loadOrder, sourceRoot } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
-// THE FILES THE PAY BOOK ADDED TO THE LOAD ORDER (v187) AND NO BUILD BEFORE IT EVER HAD.
+// THE FILES THE PAY BOOK ADDED TO THE LOAD ORDER (v190) AND NO BUILD BEFORE IT EVER HAD.
 // NAMED, the way tests/yosefgeves.test.mjs names them: a list that quietly shrinks is how
 // a suite stops testing. An older tree is asked for everything else this build loads, and
 // `git show` still stops the block if one of those is not in it.

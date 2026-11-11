@@ -552,7 +552,7 @@ let ACTIVATED = null;
 // ------------------------------------------------------------------------------------
 // The builds a phone may still be on when the owner presses the button: v180, v183, v184
 // and v186 were all served on 2026-11-10, and v186 (9846d7f, the shared rides) is the build
-// v187 is made on top of. Their own files, out of
+// v190 is made on top of. Their own files, out of
 // Git, in this build's load order less the six files only this branch has. (The same
 // builds meet the REAL rules, through their own adapter, in the emulator suite.)
 {
@@ -1104,7 +1104,7 @@ let ACTIVATED = null;
             .filter(name => added.includes(name) && !published.join('\n').includes(name)).length, 13);
     same('who may read and write is the same list, to the letter', (text => (/function allowed\(\) \{[\s\S]*?\n    \}/.exec(text) || [''])[0])(added)
         === (text => (/function allowed\(\) \{[\s\S]*?\n    \}/.exec(text) || [''])[0])(published.join('\n')), true);
-    // v187 MOVED: «the place another block of documents under the schedule is added: after
+    // v190 MOVED: «the place another block of documents under the schedule is added: after
     // probe/, before the schedule's closing brace» pinned an EMPTY place. The other block
     // has arrived - the shared rides' match /transport/{name}, live since v185 - and it is
     // in that place, so the pin is now of what stands there: the probe block, then the

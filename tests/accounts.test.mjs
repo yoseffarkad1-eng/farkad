@@ -450,7 +450,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
     check('the shipped flag is false', /\n\s*paybook: false,/.test(shipped) && !/paybook: true/.test(shipped));
 
     // THE FIVE HOOKS (four at Phase 4, one more at Phase 5), and nothing else, are what js/ui/reports.js gained. Taken out, the
-    // file is byte for byte main's at v186 (9846d7f, the commit v187 is built on; it was
+    // file is byte for byte main's at v186 (9846d7f, the commit v190 is built on; it was
     // 990f5b4, v184, at Phase 8, d3103d6, v180, at Phase 7 and 893def8, v174, before that) - so with the hooks answering false, the
     // «מקדמות» tab, «קיזוז מהשכר» and the old closure dialog are built by the same code.
     const HOOKS = [
