@@ -46,11 +46,11 @@ try {
     check('toolbar precedes type, dates and workers', order);
     check('output choices start collapsed', !(await page.locator('.report-output-actions button').first().isVisible()));
     await page.locator('.report-output-actions > summary').click();
-    // Four rows since «סיכום חודש» (js/ui/monthsummary.js) took the last one: the three
-    // outputs, in their order, and then the summary's way in.
-    same('all three existing outputs are available, and then the month\'s summary',
-        await page.locator('.report-output-actions button:visible').evaluateAll(nodes => nodes.map(node => node.textContent.replace(/^[^\u05d0-\u05ea]*/, ''))),
-        ['הדפסה', 'שיתוף כתמונה', 'יצוא', 'סיכום חודש']);
+    // Five rows: the three outputs in their order, then «סיכום חודש» (js/ui/monthsummary.js,
+    // v187) and «תלוש לכל עובד» (js/ui/payslips.js, on «לפי עובד» only).
+    same('all three existing outputs are available, then the month\'s summary and the payslips row',
+        await page.locator('.report-output-actions button:visible').evaluateAll(nodes => nodes.map(node => node.textContent.replace(/^[^\u05d0-\u05ea]*/, '').trim())),
+        ['הדפסה', 'שיתוף כתמונה', 'יצוא', 'סיכום חודש', 'תלוש לכל עובד']);
     await page.locator('.report-output-actions > summary').press('Escape');
     check('Escape closes output choices', !(await page.locator('.report-output-actions').evaluate(n=>n.open)));
     same('Escape restores trigger focus', await page.evaluate(()=>document.activeElement.parentElement.className), 'report-output-actions');

@@ -1,6 +1,155 @@
-## v187 — «סיכום חודש»: one month on one screen (candidate, not served)
+## v188 — «מה חדש», the journey from the foot of the day, «תלוש לכל עובד», the card's calendar, «חיפוש עובד» (candidate, not served)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `295ecfd` (v187). Five things, all in `js/ui`; nothing in `js/sync`, `js/model`,
+`js/state.js`, `js/store.js`, `js/recovery.js` or the rules. None of them writes the record by
+any new code. Two per-phone preferences are new (`farkadWhatsNewSeen`, `farkadPayslipsProgress`),
+both optional writes through `Store`, neither in the record, the outbox, the cloud, a backup or
+the rescue file.
+
+### «מה חדש» — what changed, told once (`js/ui/whatsnew.js`)
+
+Fifteen builds reached the phones in three days and nobody was told what any of them changed.
+After a phone starts on a build newer than the last one whose news it has seen, ONE quiet line
+appears in the banner area under the top bar («🆕 יש חדש באפליקציה», a button «מה חדש», a ✕) -
+never while a dialog is open or a field is being typed in (`midEdit`); it waits and appears when
+that ends. The button opens a card: everything since the build this phone last saw, newest first,
+each item a title, ONE sentence, where it is in the app's own words, and for most «הראה לי».
+Closing the card - by its button, Escape, the backdrop, or on the way to «הראה לי» - or the
+line's ✕ is "seen"; unread, it is offered again at the next start. ⋯ ← מכשיר ועזרה ← עדכון וגרסה ←
+«מה חדש» lists everything at any time, over the sheet. A FIRST INSTALL (no note, no crew) is
+noted silently and told nothing; a phone with a crew and no note - the three phones of today -
+is offered the whole list once (v174 onward).
+
+«הראה לי» ONLY NAVIGATES, through the screens' own openers (`showView`, `openDayCheck`,
+`showDayMessage`, `openFind`, `openSettings` and its rows, `openTransport`). It never changes the
+record, never starts a journey, and never turns a per-phone switch on: with הסעות off the rides'
+items lead to the row in ⋯ where it is turned on. For «סיכום חודש» and «תלוש לכל עובד» it lands on
+the reports screen with the «הפקת דוח» menu OPEN and presses nothing - a reading of money for a
+period is opened by his own tap.
+
+THE RULE FOR EVERY RELEASE FROM NOW ON: the build's items go at the TOP of `WHATSNEW_BUILDS`
+(and of `EXPECTED` in `tests/whatsnew.test.mjs`) in the commit that moves the three stamps.
+`tests/whatsnew.test.mjs` fails when the build `js/app.js` declares has a heading in this file
+and no entry in the block, and its message says what to add. A build with nothing a foreman would
+notice gets `items: []`.
+
+### «בניית סידור», second pass (`js/ui/journey.js`)
+
+- **A way in on the day screen.** One tonal button the width of the list at the FOOT of the day,
+  in a row of its own above the row that holds «חיפוש עובד» and «בדיקת היום», in both views. It
+  names the day a journey opens on - «בניית סידור ליום רביעי 11/11/2026», never «מחר»: on Friday
+  it is Sunday - or, while a journey he left is still his (three hours), where he is in it:
+  «המשך בניית הסידור · שלב 3 מתוך 5». It is `journeyStart`, the same door as the row in the
+  WhatsApp dialog, which stays. Not drawn while the journey's own row is in the dock.
+  **NOT SHOWN ON A SCREEN UNDER 580px TALL**: there the slit between the header and the bars is
+  one or two rows, and one more row under the last man put him under the header with the list at
+  its end (`tests/mobile.test.mjs` went red at 568x320, 667x375, 844x390 and 320x568 before the
+  rule; green with it).
+- **Station 1's dock is two lines, where it was three.** «שליחה לוואטסאפ» is put away (sending is
+  the fifth station) and «מהיום הקודם» sits between «יציאה» and the way onward. Nothing moves in
+  the document (`display: contents` and `order`); `js/ui/bars.js` measures the dock as it stands:
+  143px at 440 wide, 157px at 375 (v184: 198px).
+- **A driver whose message was opened is named again among the workers at station 5** - his name,
+  «הודעות לנהגים», and the vehicle card's own mark «נפתח בוואטסאפ» - so he is not messaged twice by
+  accident. He stays on the seder's list; which message he gets is the owner's choice.
+- **The rides' summary at station 5 opens its own dialog first** (`openTransportSummary(date)` -
+  the function gained an optional date and is unchanged without one), where it used to go
+  straight to the share sheet.
+- **With nothing left on the rides the journey's bar there says nothing**: the tray's own title
+  already says «כל העובדים משובצים».
+
+### «תלוש לכל עובד» — each man's own statement, one door per man (`js/ui/payslips.js`)
+
+The seder's pattern, for pay. A row in «הפקת דוח» on «לפי עובד» only (never under «לפי אתר», never
+in the day's WhatsApp dialog) opens the list of the men who have a row in the pay sheet for THEIR
+OWN period - a weekly man's week, a fortnightly man's fortnight - each with his «נותר לתשלום»,
+a preview of his message, and one door that opens WhatsApp on HIS number with HIS statement.
+IT WORKS NOTHING OUT AND WORDS NOTHING: the text is `workerStatementText` byte for byte, the
+figure is the pay sheet's own cell, and every gate comes with those functions
+(`tests/approval.test.mjs`'s fixture is run before and after an approval). Where the figure in a
+man's text and the figure in his cell are not the same, his row says so and shows NO door and no
+copy. A man whose account «דורש בדיקה» is shown with the sheet's own warning. What was opened is
+`farkadPayslipsProgress`, per (period, man), a fingerprint only: «נפתח בוואטסאפ», never anything
+stronger, and not believed once his message changed. Twelve periods are kept; a list left open is
+resumed for twenty minutes.
+
+### «כרטיס עובד», second part (`js/ui/workercard.js`)
+
+The card gains the month as a calendar («לוח החודש») - every day drawn by the week screen's own
+reading of that day (absent, each site with its letter and mark), the columns the week's without
+its Saturday, a Saturday that holds a record listed under the grid, the month stepped back and
+forward, a tap on a day going to that date of the day screen and writing nothing - and two doors
+beside his name, «התקשר» (`tel:`) and «וואטסאפ» (`wa.me`), built by the seder's own phone rule:
+a number the seder would not use gets no door.
+
+### «חיפוש עובד» — find a man from the day (`js/ui/find.js`)
+
+One worded button at the foot of the day, FIRST in the same row as «בדיקת היום» - the foot is no
+taller for it. Its dialog hangs from the top, the field takes the keyboard at once, and any part
+of a name (words in any order), a phone number however written, or an identity number finds the
+man; the men turned off are in their own group. Each man found carries three doors, each the
+existing screen's own function: «כרטיס עובד», the day's sheet for the date ON SCREEN (named on the
+button), «מקדמות». It writes nothing - not even what was typed.
+
+### Moved expectations
+
+- `tests/journey.browser.mjs` (each marked MOVED in the file): «nothing of the journey is on the
+  day screen» → exactly one thing, the button at the foot; «the dock's own two buttons are still
+  there» at station 1 → WhatsApp put away, the copy button whole; seated, the journey's bar
+  `כל העובדים משובצים` → empty, and the sentence once on the panel; the summary button → the
+  summary's dialog, then its own send; "is the dock row on the glass" is asked of its first line.
+- `tests/settings-order.browser.mjs`: the sheet's inventory gains one control,
+  `button | whatsNewRow | מה חדש | openWhatsNew('all')`, and one sentence, «מה חדש».
+- `tests/reports.browser.mjs`: the rows of «הפקת דוח» are named with «תלוש לכל עובד» on «לפי עובד».
+- `tests/workercard.test.mjs` / `.browser.mjs`: the card's body is no longer free of controls, Tab
+  no longer walks only the frame, `WORKER_CARD_TEXT` is no longer six strings (said in place).
+- `tests/find.test.mjs`: the source of the day's foot closure is matched with the journey's two
+  lines before the find/check row (the row itself is built exactly as it was).
+- `tests/payslips.test.mjs`: «it is the last block of the layer» read `css/design.css` from the
+  payslips' block to the end of the file; it now stops where the build's last two blocks (the
+  journey's second pass, «מה חדש») begin, and a second check holds those two to no fixed height
+  and exactly the one media query (`max-height: 580px`).
+- `tests/find.browser.mjs`, `tests/daycheck.browser.mjs`, `tests/declutter.browser.mjs` and
+  `tests/mobile.test.mjs` needed NO change for the journey's row above the find/check row: each was
+  run on this tree and is green as written.
+- `tests/journey.browser.mjs`, not an expectation but a wait: before the tap that follows two
+  touch drags, a first touch on the screen's heading. Chromium makes no click out of a tap that
+  lands while the scroll a drag set going is settling; on a loaded machine that outlasted the
+  500ms the suite waited (measured: pointerdown, pointerup, no click).
+
+### Hebrew - PROPOSED, not read by the owner
+
+`WHATSNEW_TEXT` and every item of `WHATSNEW_BUILDS` (`tests/whatsnew.test.mjs`); `JOURNEY_TEXT`'s
+two new strings, `dayEntry` and `dayResume` (`tests/journey.test.mjs`); `PAYSLIPS_TEXT`
+(`tests/payslips.test.mjs`); the card's new words (`tests/workercard.test.mjs`); `FIND_TEXT`
+(`tests/find.test.mjs`). Borrowed words are found at their owners by those suites. No existing
+string changed. Nothing says «נשלח».
+
+### Known not covered
+
+NONE OF THE FIVE WAS TRIED ON A REAL PHONE - emulated touch in Chromium only.
+- «מה חדש»: the line stands in the banner area and costs the day about one row of names until
+  it is opened or put away. A phone whose record would not read at boot looks like a first
+  install and is told nothing. `openTransport` from «הראה לי» prunes plans older than 35 days, as
+  that opener always does. No case of a dialog put up by the boot itself was measured for the
+  line (the wait was measured with the day's check open and with a field being typed in).
+- The journey: `display: contents` in the dock and the stuck-frame path with it are unmeasured on
+  iOS. At 375 wide the copy button's label wraps to two lines. The opened driver is named in the
+  journey's workers group, not inside the seder's own list. On a screen under 580px tall the foot
+  button is absent and only the WhatsApp dialog's row starts a journey.
+- «תלוש לכל עובד»: the doors were followed to a stand-in for wa.me, never to WhatsApp; whether a
+  message was sent is never known. The one known way a statement and the sheet differ (an advance
+  with a negative amount) is held, not repaired.
+- The card: the two links are read, never followed. `tel:` on a desktop does whatever the desktop
+  does.
+- «חיפוש עובד»: no real keyboard was ever raised - the lift is measured through
+  `applyKeyboardInset`. A Latin spelling is not read as a Hebrew name.
+- Not measured under the «תצוגה גדולה» mode being built in parallel.
+
+## v187 — «סיכום חודש»: one month on one screen (served 2026-11-11)
+
+**Served.** Merged as `4454f38` (PR #69) on 2026-11-11 after both gates exited 0 on `295ecfd`; the Pages deployment succeeded at 11:23 UTC.
 Built on `9846d7f` (v186). The owner asked (2026-11-11) for the app to be pushed as far as it will
 go before the next evening, with things that ease his work; this is the first of that batch. A
 READING: it writes no key. Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`,

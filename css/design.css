@@ -1019,5 +1019,183 @@ body.journey-on #sederModal { z-index: 60; }
 #monthSummaryModal .modal-actions .btn-success, #monthSummaryStatus { grid-column: 1 / -1; }
 #monthSummaryStatus { font-size: 16px; }
 #monthSummaryStatus:empty { display: none; }
+/* «תלוש לכל עובד» (js/ui/payslips.js): each man's pay and his own WhatsApp door.
+   THE WAY IN is a fourth row of the «הפקת דוח» menu and takes that menu's look; only its
+   letters are raised to 16px. THE LIST is an ordinary dialog whose foot sticks to its
+   bottom edge, the seder's way (css/app.css): the content drops its own bottom padding so
+   the foot meets that edge. One of its readers is sixty-two and far-sighted, in the sun:
+   nothing here is under 16px, a name is 19px, the figure 28px, every control 52px tall,
+   and the two warnings are ink on a tinted ground, not a tint of ink. Everything wraps:
+   no fixed height anywhere and no text in a fixed box, so doubled text and a mode that
+   raises every size make the rows taller and nothing else. A control breaks between its
+   words (break-word, which leaves its narrowest width a whole word) and goes onto a line
+   of its own when two no longer fit side by side; only a name may break inside a word. The door is an <a>, which the
+   44px floor the buttons get does not reach, so it is held to it here, both ways. */
+.report-output-actions .payslips-entry { font-size: 16px; }
+#payslipsModal .modal-content { padding-bottom: 0; }
+#payslipsModal .modal-content > h3 { line-height: 1.3; margin: 0 0 10px; font-size: 22px; overflow-wrap: anywhere; }
+.payslips-which { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.payslips-which button { flex: 1 1 140px; min-height: 48px; padding: 8px 12px; font-size: 17px; white-space: normal; overflow-wrap: break-word; }
+.payslips-context { display: grid; gap: 6px; margin: 0 0 10px; }
+.payslips-period { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--ink); }
+.payslips-period-range { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.payslips-period-who { font-size: 16px; color: var(--ink-2); overflow-wrap: anywhere; }
+.payslips-lead { margin: 0 0 12px; color: var(--ink); font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; }
+#payslipsNote { font-size: 16px; }
+.payslips-list { display: flex; flex-direction: column; }
+.payslips-nobody { font-size: 18px; }
+.payslips-row { display: grid; gap: 10px; padding: 16px 0; border-bottom: 2px solid var(--line); }
+.payslips-row:last-child { border-bottom: 0; }
+.payslips-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 6px 16px; }
+.payslips-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 210px; }
+.payslips-name { font-size: 20px; font-weight: 750; line-height: 1.3; overflow-wrap: anywhere; }
+.payslips-when { font-size: 17px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.payslips-cycle { font-size: 16px; color: var(--ink-2); }
+.payslips-amount { display: flex; flex-direction: column; align-items: flex-start; gap: 0; min-width: 0; }
+.payslips-amount-label { font-size: 16px; font-weight: 600; color: var(--ink-2); }
+.payslips-figure { display: inline-flex; align-items: baseline; gap: 5px; }
+.payslips-value { font-size: 30px; font-weight: 800; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.payslips-currency { font-size: 20px; font-weight: 700; }
+.payslips-state { margin: 0; color: var(--ok); font-size: 18px; font-weight: 700; }
+.payslips-warn { margin: 0; padding: 10px 12px; border-inline-start: 4px solid var(--warn); border-radius: var(--radius-sm); background: var(--warn-bg); color: var(--ink); font-size: 17px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.payslips-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.payslips-actions .payslips-show,
+.payslips-actions .payslips-copy { flex: 1 1 120px; min-height: 52px; min-width: 48px; max-width: 100%; padding: 8px 12px; font-size: 17px; font-weight: 600; white-space: normal; overflow-wrap: break-word; }
+.payslips-door { flex: 2 1 200px; display: flex; align-items: center; justify-content: center; min-height: 52px; min-width: 48px; box-sizing: border-box; padding: 10px 14px; border-radius: var(--radius-sm); background: var(--ok); color: var(--on-accent); font-size: 18px; font-weight: 750; line-height: 1.3; text-align: center; text-decoration: none; max-width: 100%; overflow-wrap: break-word; }
+.payslips-door:hover { filter: brightness(1.08); }
+.payslips-door:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+#payslipsModal textarea.payslips-text { inline-size: 100%; box-sizing: border-box; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--ink); font-size: 17px; line-height: 1.5; resize: vertical; }
+.payslips-foot { position: sticky; bottom: 0; z-index: 1; display: grid; gap: 8px; margin-top: 8px; padding: 12px 0 18px; border-top: 1px solid var(--line); background: var(--surface); }
+.payslips-status { margin: 0; color: var(--ink); font-size: 17px; font-weight: 600; }
+.payslips-status:empty { display: none; }
+.payslips-foot button { min-height: 52px; font-size: 18px; }
+/* כרטיס עובד, the second part (js/ui/workercard.js), and «חיפוש עובד» (js/ui/find.js).
+   Built for a far-sighted reader: nothing here is under 16px, what is read first is 18px
+   and more, and every target is 48px. No fixed height and no text in a fixed box - a row
+   wraps and a cell grows, so doubled text and a large-display mode make them taller, not
+   cut.
+   THE TWO DOORS under his number are links dressed as the app's buttons, side by side
+   and falling to one column when their words need the room.
+   THE CALENDAR is six columns - the week screen's days, without its Saturday - and it
+   reaches 18px into the dialog's own padding on each side, which is what makes a cell
+   44px wide on a 320px phone and 54px on a 375px one. A day is a button: its number,
+   and under it a block in the site's colour (paintSite, as everywhere) holding the
+   site's letter and the week's mark. Today has the accent's ring. The count under it
+   names every colour in words.
+   THE WAY IN to the finder shares the row «בדיקת היום» stands in; the row wraps, so at
+   doubled text the two buttons stack instead of cutting their words.
+   THE FINDER hangs from the top of the screen and gives the keyboard's measured height
+   (--kb-h, js/ui/bars.js) back from its own, so the field stays put and only the list
+   scrolls, above the keys. */
+.wcard-bad-phone { color: var(--warn); }
+.wcard-contact { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 12px; }
+.wcard-door { display: flex; align-items: center; justify-content: center; box-sizing: border-box; min-height: 52px; padding: 8px 12px; border: 1px solid transparent; border-radius: 12px; font-size: 19px; font-weight: 700; text-align: center; text-decoration: none; overflow-wrap: anywhere; }
+.wcard-cal-nav { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.wcard-cal-label { flex: 1 1 auto; min-width: 0; font-size: 20px; text-align: center; overflow-wrap: anywhere; }
+#workerCardBody .wcard-cal-step, #workerCardBody .wcard-cal-home { min-width: 48px; min-height: 48px; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+#workerCardBody .wcard-cal-home { width: 100%; margin-top: 8px; }
+.wcard-cal-grid { display: grid; gap: 3px; margin: 10px -18px 0; }
+.wcard-cal-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.wcard-cal-cols-7 { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.wcard-cal-head { padding: 2px 0; color: var(--ink-2); font-size: 16px; font-weight: 700; text-align: center; }
+#workerCardBody .wcard-cal-day { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px; min-width: 0; min-height: 62px; padding: 4px 2px; border: 2px solid transparent; border-radius: 10px; background: var(--surface-2); color: var(--ink); font-weight: 600; }
+#workerCardBody .wcard-cal-day[aria-current="date"], #workerCardBody .wcard-cal-saturday[aria-current="date"] { border-color: var(--accent); }
+.wcard-cal-number { color: var(--ink-2); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.wcard-cal-marks { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; min-width: 0; }
+.wcard-cal-site { display: block; min-width: 0; padding: 1px 0; border-radius: 7px; font-size: 19px; font-weight: 800; line-height: 1.3; text-align: center; overflow-wrap: anywhere; }
+.wcard-cal-absent { color: var(--warn); font-size: 22px; font-weight: 800; line-height: 1.2; text-align: center; }
+.wcard-cal-saturdays { display: flex; flex-wrap: wrap; gap: 8px; }
+#workerCardBody .wcard-cal-saturday { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 96px; min-height: 48px; border: 2px solid transparent; font-size: 16px; }
+.wcard-cal-saturday .wcard-cal-marks { flex-direction: row; width: auto; }
+.wcard-cal-saturday .wcard-cal-site { padding: 1px 10px; }
+.wcard-cal-note { margin: 12px 0 0; color: var(--ink-2); font-size: 16px; overflow-wrap: anywhere; }
+.wcard-cal-hint { margin: 4px 0 0 !important; font-size: 16px !important; }
+.wcard-month .wcard-site { font-size: 17px; padding: 3px 10px; }
+.wcard-month-days { font-size: 20px; }
+.wcard-month-totals { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 10px; }
+.wcard-month-totals .wcard-label { font-size: 16px; }
+
+.daycheck-row { flex-wrap: wrap; gap: 8px; }
+.find-entry { flex: 1 1 auto; min-height: 48px; font-size: 16px; font-weight: 600; }
+#findModal { align-items: flex-start; padding-bottom: calc(16px + var(--kb-h, 0px)); }
+#findModal .find-content { display: flex; flex-direction: column; max-height: calc(100dvh - 32px - var(--kb-h, 0px)); padding: 16px; overflow: hidden; }
+.find-head { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 10px; }
+.find-head h3 { min-width: 0; margin: 0; line-height: 1.3; overflow-wrap: anywhere; }
+.find-head button { flex: 0 0 auto; min-width: 64px; min-height: 48px; font-size: 16px; }
+.find-field { display: flex; flex: 0 0 auto; gap: 8px; margin-top: 10px; }
+.find-field input { flex: 1 1 auto; box-sizing: border-box; width: 100%; min-width: 0; min-height: 52px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); color: var(--ink); font-family: inherit; font-size: 18px; }
+.find-field button { flex: 0 0 auto; min-width: 56px; min-height: 48px; font-size: 16px; }
+.find-status { flex: 0 0 auto; margin: 8px 0 0 !important; font-size: 16px !important; }
+#findList { flex: 1 1 auto; min-height: 0; margin-top: 8px; overflow-y: auto; overscroll-behavior: contain; }
+.find-row { padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+.find-row:last-child { border-bottom: 0; }
+.find-who { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.find-name { min-width: 0; font-size: 20px; font-weight: 700; overflow-wrap: anywhere; }
+.find-who .badge { font-size: 16px; }
+.find-doors { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; margin-top: 8px; }
+.find-door { min-width: 0; min-height: 48px; padding: 8px 6px !important; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.find-group { margin: 14px 0 0; color: var(--ink-2); font-size: 17px; }
+
+/* ---- בניית סידור, the second pass (js/ui/journey.js) -------------------------------------
+   THE WAY IN ON THE DAY SCREEN is one tonal button the width of the list at the list's
+   FOOT, above «בדיקת היום» - under the last name, so the header, the dock and the eleven
+   names above it are where they were. Its words wrap; it has no fixed height.
+
+   AT STATION 1 THE DOCK IS TWO LINES, where it was three. «שליחה לוואטסאפ» is put away
+   (sending is the fifth station) and «מהיום הקודם» - how a seder is begun - takes the place
+   between «יציאה» and the way onward. Nothing is moved in the document: the journey's row
+   and its inner row give up their own boxes (display: contents), so their children and
+   the dock's copy button are items of ONE wrapping flex line, and `order` seats the copy
+   button between the two. The dock's height is still whatever these words need, and
+   js/ui/bars.js still measures it as it stands. */
+.journey-day-row { display: flex; margin: 14px 0 0; }
+.journey-day-entry { flex: 1 1 auto; min-width: 0; min-height: 48px; padding: 10px 14px; font-size: 17px; font-weight: 700; white-space: normal; overflow-wrap: anywhere; }
+/* NOT ON A SHORT SCREEN. On a phone turned sideways (320-390px tall), and on a 320x568 one,
+   what is left between the day's header and the bars is one or two rows: a second button
+   under the last man puts HIM under the header when the list is scrolled to its end, and
+   "the last man in the crew is still reachable there" is a measured guarantee
+   (tests/mobile.test.mjs) that outranks a shortcut. There the journey keeps its row in the
+   WhatsApp dialog and nothing else changes. The three phones this is for are 647px tall
+   and more. */
+@media (max-height: 580px) { .journey-day-row { display: none; } }
+body.journey-day .day-actions { align-items: stretch; }
+body.journey-day .day-actions > .btn-success { display: none !important; }
+body.journey-day .journey-dock,
+body.journey-day .journey-dock-row { display: contents; }
+body.journey-day .journey-dock-top,
+body.journey-day .journey-dock .journey-note { flex: 0 0 100%; }
+body.journey-day .journey-dock-row > button { padding-inline: 6px !important; }
+body.journey-day .journey-dock-row > button:first-child { order: 1; flex: 0.9 1 0 !important; }
+body.journey-day .day-actions > #copyDayBtn { order: 2; flex: 2.3 1 0 !important; max-width: none !important; min-width: 0; min-height: 44px !important; padding: 8px 6px !important; font-size: 16px !important; }
+body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !important; }
+.journey-send-driver .transport-badge { flex: none; }
+
+/* ---- «מה חדש» (js/ui/whatsnew.js) -----------------------------------------------------
+   THE LINE is one of the page's own banners (.banner, css/app.css) and takes nothing from
+   here but a floor for its button. THE ROW in ⋯ is a full-width tonal button under the
+   version line. THE CARD is one of the app's own dialogs - its height, its safe area and
+   its scroll are .modal-content's - on the settings sheet's tier, because it is opened
+   from that sheet and an ordinary .modal would open behind it. It is read by a man who
+   holds the phone at arm's length: a title at 19px, the one sentence at 17, where it is
+   at 16, a 48px button the width of the card; everything wraps and nothing has a height. */
+#whatsNewBanner { flex-wrap: nowrap; gap: 6px; font-size: 16px; font-weight: 600; padding: 6px 10px; }
+#whatsNewBanner span { min-width: 0; overflow-wrap: anywhere; }
+#whatsNewBanner button { flex: none; min-height: 44px; min-width: 44px; font-size: 16px; }
+#whatsNewRow { width: 100%; min-height: 48px; margin-top: 10px; font-size: 16px; font-weight: 700; }
+#whatsNewModal { z-index: 60; }
+#whatsNewModal .modal-content { padding-bottom: 0; }
+#whatsNewModal .modal-content > h3 { line-height: 1.3; margin: 0 0 4px; font-size: 22px; overflow-wrap: anywhere; }
+#whatsNewContext { font-size: 16px; }
+.whatsnew-list { display: flex; flex-direction: column; gap: 18px; margin-top: 12px; }
+.whatsnew-build { display: flex; flex-direction: column; gap: 12px; }
+.whatsnew-build-name { margin: 0; color: var(--ink-2); font-size: 16px; font-weight: 700; }
+.whatsnew-item { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); overflow-wrap: anywhere; }
+.whatsnew-item p { margin: 0; }
+.whatsnew-item-title { color: var(--ink); font-size: 19px; font-weight: 800; line-height: 1.3; }
+.whatsnew-item-text { color: var(--ink); font-size: 17px; line-height: 1.45; }
+.whatsnew-item-where { color: var(--ink-2); font-size: 16px; font-weight: 600; line-height: 1.4; }
+.whatsnew-show { align-self: stretch; min-height: 48px; margin-top: 4px; font-size: 17px; font-weight: 700; }
+.whatsnew-foot { position: sticky; bottom: 0; z-index: 1; display: flex; margin-top: 14px; padding: 12px 0 18px; border-top: 1px solid var(--line); background: var(--surface); }
+.whatsnew-foot button { flex: 1 1 auto; min-height: 48px; font-size: 17px; font-weight: 700; }
 
 }

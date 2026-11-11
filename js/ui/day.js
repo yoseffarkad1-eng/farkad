@@ -303,7 +303,23 @@ function buildDay(root) {
     // under the last thing read on the way down and above the dock that sends the day.
     // Not on the header and not on the dock: both are measured to the pixel, and the
     // owner has said the day has enough buttons where the thumb works.
-    const check = () => { if (typeof dayCheckEntry === 'function') root.appendChild(dayCheckEntry()); };
+    // «חיפוש עובד» (js/ui/find.js) stands BESIDE it, in the same row, for the same reason: a
+    // way to one man's card, sheet or advances without leaving the day. Beside and not
+    // above - a row of its own made the foot 62px taller, and on a phone turned sideways
+    // that was enough to leave the last man of the crew under the pinned header with the
+    // page scrolled as far as it goes (tests/mobile.test.mjs).
+    //
+    // «בניית סידור» (js/ui/journey.js) has its button at the same foot, in a row of its own
+    // ABOVE that one - it is the evening's main tool and carries a whole date - and gives
+    // none while its own row is in the dock. That row IS 62px, so the stylesheet does not
+    // show it on a screen too short to afford it (css/design.css, the journey's second pass).
+    const check = () => {
+        const journey = typeof journeyDayEntry === 'function' ? journeyDayEntry() : null;
+        if (journey) root.appendChild(journey);
+        const foot = typeof dayCheckEntry === 'function' ? dayCheckEntry() : el('div', 'daycheck-row');
+        if (typeof findEntry === 'function') foot.insertBefore(findEntry(), foot.firstChild);
+        if (foot.firstChild) root.appendChild(foot);
+    };
 
     if (dayMode === 'workers') {
         root.appendChild(renderDayWorkerList());

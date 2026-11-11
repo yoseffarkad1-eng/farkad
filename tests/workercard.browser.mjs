@@ -12,6 +12,14 @@
 // doubled text, with no sideways scroll and every target 44px both ways; that a site is
 // drawn in the colour that site has everywhere else; and that the phone's disk is byte for
 // byte what it was. NOT a real phone: emulated touch and Chromium's layout.
+//
+// THE SECOND PART (the month as a calendar, call and WhatsApp): that each day of the grid
+// is what the week screen's own cell draws for that man on that date - renderWeekCell is
+// run beside it and the two compared, colour, letter and mark; that a day is a 44px
+// button with an 18px letter on every phone here, and a tap on it lands on that date on
+// the day screen with the disk untouched; that the month steps under a finger and the
+// focus stays on the step; that the two doors are real links to tel: and wa.me, 48px and
+// more, and are not drawn for a number the seder would not use.
 
 import { chromium } from 'playwright';
 import { serve } from './serve.mjs';
@@ -59,6 +67,9 @@ async function phone(width, height, scheme) {
         State.commit(assignPlace(State.schedule, '2026-11-09', 'w_01', 'actual', 'p_02', 'extra', 2));
         State.commit(markAbsent(State.schedule, '2026-11-06', 'w_01', 'actual'));
         State.commit(assignPlace(State.schedule, '2026-11-09', 'w_03', 'actual', 'p_02'));
+        // A Saturday with a record, on the man no pinned figure below is about: the grid
+        // has no Saturday column, and the day must still be on his card.
+        State.commit(assignPlace(State.schedule, '2026-11-07', 'w_03', 'actual', 'p_01', 'double'));
         State.commitMany(recordNewAdvance(State.schedule, 'w_01', '2026-11-02', 1500, '',
             '2026-11-02T08:00:00Z', 'd_test', 'cash'));
         State.commitMany(recordNewAdvance(State.schedule, 'w_01', '2026-11-08', 400, '',
@@ -153,22 +164,39 @@ try {
         await page.evaluate(() => [document.activeElement.id,
             document.querySelector('#workerCardModal .modal-content').scrollTop]),
         ['workerCardTitle', 0]);
-    same('nothing in its body can be pressed, typed into or switched',
-        await page.evaluate(() => document.querySelectorAll('#workerCardBody button, '
-            + '#workerCardBody input, #workerCardBody select, #workerCardBody textarea, '
-            + '#workerCardBody a, #workerCardBody [contenteditable], #workerCardBody [onclick], '
-            + '#workerCardBody summary').length), 0);
+    // MOVED WITH THE CALENDAR AND THE TWO DOORS: this read "nothing in its body can be
+    // pressed, typed into or switched", one count of zero. Still nothing to type into or
+    // switch; what can be pressed is counted exactly and every one of them navigates.
+    same('nothing in its body can be typed into or switched',
+        await page.evaluate(() => document.querySelectorAll('#workerCardBody input, '
+            + '#workerCardBody select, #workerCardBody textarea, #workerCardBody [contenteditable], '
+            + '#workerCardBody [onclick], #workerCardBody summary').length), 0);
+    same('what can be pressed in it: his two doors, the two steps of the month, and its days',
+        await page.evaluate(() => [[...document.querySelectorAll('#workerCardBody a')].map(node => node.textContent),
+            [...document.querySelectorAll('#workerCardBody button:not(.wcard-cal-day)')].map(node => node.textContent),
+            document.querySelectorAll('#workerCardBody button.wcard-cal-day').length]),
+        [['התקשר', 'וואטסאפ'], ['חודש קודם', 'חודש הבא'], 26]);
     same('the frame holds three buttons: the two screens, and the way out',
         await page.locator('#workerCardModal .modal-actions button').allInnerTexts(),
         ['שכר - לפי עובד', 'מקדמות', 'סגור']);
-    // Tab stays inside: three controls, so the fourth Tab is the first again.
+    // MOVED: Tab used to walk the frame's three buttons and come round. The body has
+    // controls now, so from the heading it walks them first, in reading order, and the
+    // frame's three are the last; it still comes round and never leaves the dialog.
     const walked = [];
-    for (let step = 0; step < 4; step += 1) {
+    for (let step = 0; step < 5; step += 1) {
         await page.keyboard.press('Tab');
-        walked.push(await page.evaluate(() => document.activeElement.textContent));
+        walked.push(await page.evaluate(() => document.activeElement.dataset.date || document.activeElement.textContent));
     }
-    same('Tab walks its three buttons and comes round', walked,
-        ['שכר - לפי עובד', 'מקדמות', 'סגור', 'שכר - לפי עובד']);
+    same('Tab walks his two doors, the steps of the month, then the days from the first', walked,
+        ['התקשר', 'וואטסאפ', 'חודש קודם', 'חודש הבא', '2026-11-01']);
+    await page.locator('#workerCardModal .modal-actions button').first().focus();
+    const frame = ['שכר - לפי עובד'];
+    for (let step = 0; step < 3; step += 1) {
+        await page.keyboard.press('Tab');
+        frame.push(await page.evaluate(() => document.activeElement.textContent));
+    }
+    same('the frame\'s three buttons are last, and after them Tab comes round to the first', frame,
+        ['שכר - לפי עובד', 'מקדמות', 'סגור', 'התקשר']);
     await page.keyboard.press('Shift+Tab');
     same('and Shift+Tab goes back round, never out to the page behind',
         await page.evaluate(() => document.activeElement.textContent), 'סגור');
@@ -242,6 +270,154 @@ try {
             return chips.length > 0 && chips.every(chip => getComputedStyle(chip).backgroundColor === want);
         })), [true, true, true]);
 
+    suite('the month as a calendar: the week screen\'s own cell, day for day');
+    const cal = facts.calendar;
+    same('it opens on the month today is in, under the week screen\'s six days',
+        [await page.locator('#workerCardBody .wcard-cal-label').innerText(),
+            await page.locator('#workerCardBody .wcard-cal-head').allInnerTexts()],
+        ['נובמבר 2026', ['ו׳', 'א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳']]);
+    same('and those are the days the week screen draws, in its order',
+        await page.evaluate(() => { setWeekFromDate(todayStr());
+            return weekDates().filter(date => parseLocalDate(date).getDay() !== 6)
+                .map(date => HEBREW_DAY_LETTERS[parseLocalDate(date).getDay()]); }), cal.columns);
+    // THE WEEK'S CELL, BUILT BESIDE IT. renderWeekCell is the function the week grid is
+    // drawn with; for every date of the month its cell for this man is made and read -
+    // absent or not, one block per site with its colour, its letter and its mark - and
+    // held against the button the calendar drew for that date.
+    const sideBySide = await page.evaluate(() => {
+        const worker = State.worker('w_01');
+        const out = [];
+        for (let day = 1; day <= 30; day += 1) {
+            const date = `2026-11-${String(day).padStart(2, '0')}`;
+            const cell = renderWeekCell(worker, date);
+            const week = { absent: cell.classList.contains('cell-absent'),
+                blocks: [...cell.querySelectorAll('.cell-line')].map(line => [line.style.background,
+                    line.dataset.initial || '', line.classList.contains('cell-double') ? '●'
+                        : line.classList.contains('cell-extra') ? '+' : '']) };
+            const mine = document.querySelector(`#workerCardBody [data-date="${date}"]`);
+            const card = mine ? { absent: mine.querySelectorAll('.wcard-cal-absent').length === 1,
+                blocks: [...mine.querySelectorAll('.wcard-cal-site')].map(block => {
+                    const text = block.textContent;
+                    const mark = /[●+]$/.test(text) ? text.slice(-1) : '';
+                    return [block.style.background, mark ? text.slice(0, -1) : text, mark];
+                }) } : null;
+            out.push({ date, saturday: parseLocalDate(date).getDay() === 6, week, card,
+                label: mine ? mine.getAttribute('aria-label') : '',
+                weekLabel: cell.getAttribute('aria-label') });
+        }
+        return out;
+    });
+    same('every working day of the month is one button, and no Saturday is in the grid',
+        [sideBySide.filter(day => !day.saturday && day.card).length, sideBySide.filter(day => day.saturday && day.card).length],
+        [26, 0]);
+    same('each one draws what the week\'s cell draws for him that day: absent, or each site in its colour with its letter and its mark',
+        sideBySide.filter(day => !day.saturday).filter(day => JSON.stringify(day.card) !== JSON.stringify(day.week))
+            .map(day => [day.date, day.card, day.week]), []);
+    same('and is read aloud as the week\'s cell is, after the day: what is on it',
+        sideBySide.filter(day => !day.saturday && (day.week.absent || day.week.blocks.length > 0))
+            .filter(day => day.label.split(' · ').slice(1).join(' · ') !== day.weekLabel.split(' · ').slice(2).join(' · '))
+            .map(day => [day.label, day.weekLabel]), []);
+    given('his month has an absence, a doubled day, extra hours and two sites in one day',
+        sideBySide.some(day => day.week.absent) && sideBySide.some(day => day.week.blocks.length === 2)
+        && sideBySide.some(day => day.week.blocks.some(block => block[2] === '●'))
+        && sideBySide.some(day => day.week.blocks.some(block => block[2] === '+')));
+    same('a day with nothing on it says so to a screen reader, and shows only its number',
+        await page.evaluate(() => { const day = document.querySelector('#workerCardBody [data-date="2026-11-11"]');
+            return [day.getAttribute('aria-label'), day.innerText.trim()]; }),
+        ['יום רביעי 11/11/2026 · ללא רישום', '11']);
+    same('today, and only today, is marked as today',
+        await page.evaluate(() => [...document.querySelectorAll('#workerCardBody [aria-current="date"]')]
+            .map(node => node.dataset.date)), [TODAY]);
+    same('the block in a day is painted in the colour the site has everywhere else',
+        await page.evaluate(() => ['p_01', 'p_02', 'p_03'].map(id => {
+            const probe = document.createElement('span');
+            probe.style.background = siteColorVar(id);
+            document.body.appendChild(probe);
+            const want = getComputedStyle(probe).backgroundColor;
+            probe.remove();
+            const blocks = [...document.querySelectorAll('#workerCardBody .wcard-cal-site')]
+                .filter(block => block.style.background === siteColorVar(id));
+            return blocks.length > 0 && blocks.every(block => getComputedStyle(block).backgroundColor === want);
+        })), [true, true, true]);
+    same('under it every colour is named in words with its days, then the two totals in the sheet\'s words',
+        await page.evaluate(() => [[...document.querySelectorAll('#workerCardBody .wcard-month-row')]
+            .map(row => [row.querySelector('.site-name').textContent, row.querySelector('.wcard-month-days').textContent]).sort(),
+        [...document.querySelectorAll('#workerCardBody .wcard-month-totals .wcard-pair')].map(pair => pair.textContent)]),
+        [[['אתר דרום', '3'], ['אתר צפון', '3'], ['מגדל המרכז עם שם ארוך', '3']].sort(), ['נוכחות8', 'נעדר1']]);
+    check('the marks are explained in the week screen\'s own line, and the tap in one sentence',
+        text.indexOf('● = יום כפול · + = שעות נוספות · — = נעדר') !== -1
+        && text.indexOf('לחיצה על יום פותחת אותו במסך היום.') !== -1);
+
+    suite('the month steps under a finger, and the focus stays on the step');
+    await page.locator('#workerCardBody .wcard-cal-step').first().tap();
+    await page.waitForTimeout(150);
+    same('one tap back is October, with the way home and the count headed for that month',
+        [await page.locator('#workerCardBody .wcard-cal-label').innerText(),
+            await page.locator('#workerCardBody .wcard-cal-home').allInnerTexts(),
+            await page.evaluate(() => [...document.querySelectorAll('#workerCardBody .wcard-head')]
+                .map(node => node.textContent).filter(said => said.indexOf('ימים בכל אתר') === 0))],
+        ['אוקטובר 2026', ['חזרה לחודש הנוכחי'], ['ימים בכל אתראוקטובר 2026']]);
+    same('October has his two days of it, and thirty-one days less five Saturdays',
+        await page.evaluate(() => [document.querySelectorAll('#workerCardBody .wcard-cal-day').length,
+            [...document.querySelectorAll('#workerCardBody .wcard-cal-day')].filter(day => day.querySelector('.wcard-cal-site'))
+                .map(day => day.dataset.date)]), [26, ['2026-10-29', '2026-10-30']]);
+    await page.locator('#workerCardBody .wcard-cal-step').first().focus();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(120);
+    same('by keyboard too, and the keyboard is still on «חודש קודם» after the month was drawn again',
+        [await page.locator('#workerCardBody .wcard-cal-label').innerText(),
+            await page.evaluate(() => document.activeElement.textContent)], ['ספטמבר 2026', 'חודש קודם']);
+    await page.locator('#workerCardBody .wcard-cal-home').focus();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(120);
+    same('«חזרה לחודש הנוכחי» comes home, is gone, and leaves the keyboard on the first step',
+        [await page.locator('#workerCardBody .wcard-cal-label').innerText(),
+            await page.locator('#workerCardBody .wcard-cal-home').count(),
+            await page.evaluate(() => document.activeElement.textContent)], ['נובמבר 2026', 0, 'חודש קודם']);
+    // A snapshot from another phone under a day that has the keyboard.
+    await page.locator('#workerCardBody [data-date="2026-11-12"]').focus();
+    const daysAsTheyWere = await page.evaluate(() => JSON.stringify(State.schedule.days));
+    await page.evaluate(() => { assignPlace(State.schedule, '2026-11-12', 'w_01', 'actual', 'p_03'); render(); });
+    same('a day recorded on another phone appears in its cell, and the keyboard is still on that day',
+        await page.evaluate(() => [document.activeElement.dataset.date, document.activeElement.isConnected,
+            document.querySelector('#workerCardBody [data-date="2026-11-12"] .wcard-cal-site').textContent]),
+        ['2026-11-12', true, 'מ']);
+    // The other phone's edit was made in memory only, and is taken back whole.
+    await page.evaluate(days => { State.schedule.days = JSON.parse(days); render(); }, daysAsTheyWere);
+    check('and with that edit taken back the record is the record it was',
+        await page.evaluate(() => JSON.stringify(State.schedule)) === record);
+
+    suite('his two doors: a call and a chat, the seder\'s number in both');
+    same('«התקשר» dials him and «וואטסאפ» opens his chat with no text - real links, followed by his own tap',
+        await page.evaluate(() => [...document.querySelectorAll('#workerCardBody .wcard-contact a')].map(node =>
+            [node.textContent, node.getAttribute('href'), node.getAttribute('target'), node.getAttribute('rel'),
+                node.getAttribute('aria-label').replace(/[⁨⁩]/g, '')])),
+        [['התקשר', 'tel:+972500000001', null, null, 'התקשר אל דוגמה אלף'],
+            ['וואטסאפ', 'https://wa.me/972500000001', '_blank', 'noopener noreferrer', 'וואטסאפ אל דוגמה אלף']]);
+    same('the number the seder would hand WhatsApp for him is that number',
+        await page.evaluate(() => sederWaNumber(State.worker('w_01').phone)), '972500000001');
+    same('side by side, 48px and more both ways, their words at 18px and more',
+        await page.evaluate(() => [...document.querySelectorAll('#workerCardBody .wcard-contact a')].map(node => {
+            const box = node.getBoundingClientRect();
+            return [box.width >= 48 && box.height >= 48, parseFloat(getComputedStyle(node).fontSize) >= 18, Math.round(box.top)];
+        }).reduce((all, one) => [all[0] && one[0], all[1] && one[1], all[2] === null || all[2] === one[2] ? one[2] : -1],
+            [true, true, null]).slice(0, 2)), [true, true]);
+
+    suite('a day of the calendar goes to that day, and writes nothing');
+    await page.locator('#workerCardBody [data-date="2026-11-04"]').tap();
+    await page.waitForTimeout(300);
+    same('the card is gone and the day screen is on that date',
+        [await cardOpen(page), await page.locator('#dayView').isVisible(), await page.locator('#rosterView').isVisible(),
+            await page.evaluate(() => State.date)], [false, true, false, '2026-11-04']);
+    check('the day on screen says so', (await page.locator('#dayView .day-header').innerText()).indexOf('04/11') !== -1,
+        (await page.locator('#dayView .day-header').innerText()).slice(0, 80));
+    check('every key on the disk holds the bytes it held, and the record is the record it was',
+        await disk(page) === before && await page.evaluate(() => JSON.stringify(State.schedule)) === record);
+    await page.locator('#tab-roster').click();
+    await page.waitForTimeout(200);
+    await opener.click();
+    await page.waitForTimeout(200);
+
     suite('its two buttons go where they say, and the figures are there');
     const cells = facts.pay.map(cell => [cell.label, cell.value]);
     await page.locator('#workerCardReport').click();
@@ -296,6 +472,25 @@ try {
             const said = document.querySelector('#workerCardBody .wcard-who').textContent;
             closeWorkerCard(); return [said.indexOf('בלי טלפון') !== -1, said.indexOf('שכר יומי: —') !== -1]; }),
         [true, true]);
+    same('a man with no number has no door, and a Saturday he worked is under his calendar with its mark',
+        await page.evaluate(() => { openWorkerCard('w_03');
+            const said = [document.querySelectorAll('#workerCardBody a').length,
+                [...document.querySelectorAll('#workerCardBody .wcard-sub')].map(node => node.textContent)
+                    .filter(text => text.indexOf('שבת') !== -1),
+                [...document.querySelectorAll('#workerCardBody .wcard-cal-saturday')].map(node =>
+                    [node.dataset.date, node.textContent, node.getAttribute('aria-label').replace(/[⁨⁩]/g, '')]),
+                document.querySelector('#workerCardBody .wcard-month-totals').textContent];
+            closeWorkerCard(); return said; }),
+        [0, ['ימי שבת עם רישום'], [['2026-11-07', '07/11א●', 'יום שבת 07/11/2026 · אתר צפון כפול']], 'נוכחות2נעדר0']);
+    same('a number the seder would not use is written out, said to be unusable in the seder\'s words, and has no door',
+        await page.evaluate(() => { const worker = State.worker('w_02'); const had = worker.phone;
+            worker.phone = '03-1234567'; openWorkerCard('w_02');
+            const said = [document.querySelectorAll('#workerCardBody a').length,
+                document.querySelector('#workerCardBody .wcard-who').textContent.replace(/[⁦-⁩]/g, '')];
+            closeWorkerCard(); if (had === undefined) delete worker.phone; else worker.phone = had;
+            return [said[0], said[1].indexOf('03-1234567') !== -1, said[1].indexOf('אין מספר טלפון תקין') !== -1]; }),
+        [0, true, true]);
+    check('none of which wrote anything', await disk(page) === before);
     suite('a record that changes under an open card changes the card');
     await page.locator('#tab-roster').click();
     await page.locator('[data-worker-id="w_02"] .worker-card-open').click();
@@ -352,8 +547,13 @@ try {
                 const at = node.getBoundingClientRect();
                 return at.width > 0 && (at.left < box.left - 1 || at.right > box.right + 1);
             }).map(node => node.className || node.tagName);
-            const buttons = [...content.querySelectorAll('button')].map(node => node.getBoundingClientRect());
+            // Every target: the frame's buttons, the days, the steps - and the two links.
+            const buttons = [...content.querySelectorAll('button, a')].map(node => node.getBoundingClientRect());
+            const frame = content.querySelectorAll('.modal-actions button').length;
             const fields = [...content.querySelectorAll('input, select, textarea')].length;
+            const sizeOf = selector => [...content.querySelectorAll(selector)]
+                .map(node => parseFloat(getComputedStyle(node).fontSize));
+            const days = [...content.querySelectorAll('.wcard-cal-day')].map(node => node.getBoundingClientRect());
             return {
                 page: document.documentElement.scrollWidth <= innerWidth + 1,
                 sideways: content.scrollWidth <= content.clientWidth + 1,
@@ -361,7 +561,16 @@ try {
                     && box.bottom <= innerHeight + 1,
                 spill, fields,
                 small: buttons.filter(at => at.width < 44 || at.height < 44).length,
-                buttons: buttons.length,
+                buttons: frame,
+                targets: buttons.length,
+                day: days.length ? [Math.floor(Math.min(...days.map(at => at.width))),
+                    Math.floor(Math.min(...days.map(at => at.height)))] : [0, 0],
+                letter: Math.min(...sizeOf('.wcard-cal-site'), ...sizeOf('.wcard-cal-absent')),
+                // What this part added, and nothing of it under 16px.
+                added: [...content.querySelectorAll('.wcard-contact *, .wcard-contact, .wcard-cal *, .wcard-month-totals *, '
+                    + '.wcard-month .wcard-site *, .wcard-month-days, .wcard-bad-phone')]
+                    .filter(node => node.children.length === 0 && node.textContent.trim() !== ''
+                        && parseFloat(getComputedStyle(node).fontSize) < 16).map(node => node.className),
                 last: buttons.length ? buttons[buttons.length - 1].bottom <= innerHeight + 1 : false,
                 rtl: getComputedStyle(content).direction,
                 tiny: [...content.querySelectorAll('*')].filter(node => node.children.length === 0
@@ -375,6 +584,12 @@ try {
             JSON.stringify(top.spill.slice(0, 5)));
         same(`${tag}: it reads right to left`, top.rtl, 'rtl');
         check(`${tag}: no text on it is under 14px`, top.tiny.length === 0, JSON.stringify(top.tiny));
+        check(`${tag}: and nothing the calendar, the doors or the totals added is under 16px`, top.added.length === 0,
+            JSON.stringify(top.added));
+        check(`${tag}: a day of the calendar is 44px both ways, its letter 18px and more`,
+            top.day[0] >= 44 && top.day[1] >= 44 && top.letter >= 18, JSON.stringify([top.day, top.letter]));
+        check(`${tag}: every target on the card - the days, the steps, the two doors - is 44px both ways`,
+            top.small === 0 && top.targets === 3 + 2 + 2 + 26, JSON.stringify([top.small, top.targets]));
         await glass.evaluate(() => { const content = document.querySelector('#workerCardModal .modal-content');
             content.scrollTop = content.scrollHeight; });
         await glass.waitForTimeout(150);
@@ -389,6 +604,17 @@ try {
             await glass.evaluate(() => { const content = document.querySelector('#workerCardModal .modal-content');
                 content.scrollTop = content.scrollHeight; });
             await glass.screenshot({ path: `${process.env.WORKERCARD_SCREENSHOT_DIR}/card-${width}x${height}-${scheme}-foot.jpg`,
+                type: 'jpeg', quality: 82 });
+            await glass.evaluate(() => document.querySelector('#workerCardBody .wcard-cal').scrollIntoView({ block: 'start' }));
+            await glass.screenshot({ path: `${process.env.WORKERCARD_SCREENSHOT_DIR}/card-${width}x${height}-${scheme}-calendar.jpg`,
+                type: 'jpeg', quality: 82 });
+            await glass.evaluate(() => workerCardStepMonth(-1));
+            await glass.evaluate(() => document.querySelector('#workerCardBody .wcard-cal').scrollIntoView({ block: 'start' }));
+            await glass.screenshot({ path: `${process.env.WORKERCARD_SCREENSHOT_DIR}/card-${width}x${height}-${scheme}-calendar-october.jpg`,
+                type: 'jpeg', quality: 82 });
+            await glass.evaluate(() => { openWorkerCard('w_03');
+                document.querySelector('#workerCardBody .wcard-cal').scrollIntoView({ block: 'start' }); });
+            await glass.screenshot({ path: `${process.env.WORKERCARD_SCREENSHOT_DIR}/card-${width}x${height}-${scheme}-saturday.jpg`,
                 type: 'jpeg', quality: 82 });
             await glass.evaluate(() => closeWorkerCard());
             await glass.screenshot({ path: `${process.env.WORKERCARD_SCREENSHOT_DIR}/crew-${width}x${height}-${scheme}.jpg`,

@@ -24,6 +24,15 @@
 //      recorder on the disk that is then shown to notice a real write.
 //   4. THE WORDS. Each new string, word for word; each borrowed one, found where its
 //      owner keeps it.
+//   5. THE MONTH IS THE WEEK SCREEN STACKED. The calendar's columns are the week screen's
+//      own, and every day of two months, for every man of six seeded records, is the
+//      reading the week's cell makes of that day - absent, each site with its letter, the
+//      mark for a doubled day or extra hours - with no day of the month drawn twice or
+//      left out, a Saturday with a record included. Its count per site and its two totals
+//      are what this suite itself recorded. A day NAVIGATES and writes nothing.
+//   6. THE TWO DOORS ARE THE SEDER'S NUMBER. Over the seder suite's own phone cases:
+//      tel: and wa.me carry exactly sederWaNumber's digits, and a number it refuses has
+//      no door at all.
 //
 // Both money gates are opened and shut through the harness's seam, because the two
 // readings of a record differ in different places and a suite that measured one would
@@ -88,6 +97,10 @@ function withCard(device) {
     device.run = code => vm.runInContext(code, device.ctx, { filename: 'harness:workercard' });
     device.run(source('js/ui/sitecolor.js'));
     device.run(source('js/ui/reports.js'));
+    // The week screen, whose columns and whose reading of a day the calendar is held to,
+    // and the seder, whose reading of a phone number the two doors are built from.
+    device.run(source('js/ui/week.js'));
+    device.run(source('js/ui/seder.js'));
     device.run(CARD);
     device.views = [];
     device.ctx.showView = view => { device.views.push(view); };
@@ -728,6 +741,10 @@ const cellOf = (facts, label) => ((facts.pay || []).filter(one => one.label === 
             openWorkerCard(id);
             renderWorkerCardIfOpen();
             closeWorkerCard();
+            openWorkerCard(id);
+            workerCardStepMonth(-1); workerCardStepMonth(-1); workerCardStepMonth(1);
+            workerCardStepMonth(0); workerCardStepMonth(1);
+            workerCardGoDay('2026-10-15');
             openWorkerCard(id); workerCardGo('advances');
             openWorkerCard(id); workerCardGo('report');
         })(${JSON.stringify(id)})`);
@@ -791,9 +808,20 @@ const cellOf = (facts, label) => ((facts.pay || []).filter(one => one.label === 
     const missing = expected.filter(piece => text.indexOf(piece) === -1);
     check('every figure and every heading of the reading is on it', missing.length === 0
         && expected.length > 30, missing.join(' | '));
-    same('there is no button, field, link or switch in its body',
-        ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'A', 'DETAILS']
-            .map(tag => body.querySelectorAll(tag).length), [0, 0, 0, 0, 0, 0]);
+    // MOVED WITH THE CALENDAR AND THE TWO DOORS (this used to read "no button, field,
+    // link or switch in its body", all six at zero). What may be pressed in the body now
+    // is counted exactly, and everything pressable NAVIGATES: the two steps of the month,
+    // one button per day of the grid and per Saturday with a record, and the two links
+    // of a man whose number the seder would use. Still no field and no switch.
+    same('there is no field and no switch in its body',
+        ['INPUT', 'SELECT', 'TEXTAREA', 'DETAILS']
+            .map(tag => body.querySelectorAll(tag).length), [0, 0, 0, 0]);
+    same('its buttons are the two steps of the month and one per day drawn, and nothing else',
+        body.querySelectorAll('BUTTON').length,
+        2 + facts.calendar.weeks.reduce((sum, week) => sum + week.filter(Boolean).length, 0)
+            + facts.calendar.saturdays.length);
+    same('and its links are his two doors, or none',
+        body.querySelectorAll('A').length, facts.contact ? 2 : 0);
     same('its two ways out are named after the screens they open',
         [device.dom.getElementById('workerCardReport').textContent,
             device.dom.getElementById('workerCardAdvances').textContent],
@@ -876,14 +904,33 @@ const cellOf = (facts, label) => ((facts.pay || []).filter(one => one.label === 
     suite('every new word, word for word - proposed, for the owner to approve');
 
     const device = seededPhone(34, SHUT);
-    same('the six strings this feature adds', JSON.parse(device.run('JSON.stringify(WORKER_CARD_TEXT)')), {
+    // MOVED: six strings became these. The first six are word for word what they were;
+    // the rest came with the two doors and the calendar, and are as proposed as they are.
+    same('the strings this feature adds', JSON.parse(device.run('JSON.stringify(WORKER_CARD_TEXT)')), {
         title: 'כרטיס עובד',
         openFor: 'כרטיס עובד של',
         moves: 'תנועות אחרונות',
         noMoves: 'אין תנועות רשומות.',
         strip: '14 הימים האחרונים',
-        month: 'ימים בכל אתר החודש'
+        month: 'ימים בכל אתר החודש',
+        call: 'התקשר',
+        whatsapp: 'וואטסאפ',
+        callFor: 'התקשר אל',
+        whatsappFor: 'וואטסאפ אל',
+        calendar: 'לוח החודש',
+        months: ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+            'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'],
+        prevMonth: 'חודש קודם',
+        nextMonth: 'חודש הבא',
+        thisMonth: 'חזרה לחודש הנוכחי',
+        monthOther: 'ימים בכל אתר',
+        saturdays: 'ימי שבת עם רישום',
+        openDay: 'לחיצה על יום פותחת אותו במסך היום.'
     });
+    same('the three marks in a day are the week screen\'s own three',
+        JSON.parse(device.run('JSON.stringify(WORKER_CARD_MARKS)')), { double: '●', extra: '+', absent: '—' });
+    check('nothing the card opens in WhatsApp is ever called sent',
+        CARD.split('\n').filter(line => line.trim().indexOf('//') !== 0).join('\n').indexOf('נשלח') === -1);
 
     // The borrowed words, each found in the file that owns it - so a word changed there
     // and left here fails by name, and none of them is a new coinage in disguise.
@@ -901,14 +948,23 @@ const cellOf = (facts, label) => ((facts.pay || []).filter(one => one.label === 
         advances: ['js/ui/reports.js', "el('h2', null, 'מקדמות')"],
         left: ['js/ui/reports.js', "'נשאר להחזיר'"],
         absent: ['js/ui/reports.js', "{ header: 'נעדר'"],
-        report: ['js/ui/reports.js', "el('h2', null, 'שכר - לפי עובד')"]
+        report: ['js/ui/reports.js', "el('h2', null, 'שכר - לפי עובד')"],
+        badPhone: ['js/ui/seder.js', "noPhone: 'אין מספר טלפון תקין'"],
+        attended: ['js/ui/reports.js', "{ header: 'נוכחות'"],
+        double: ['js/ui/week.js', "word = 'כפול';"],
+        extra: ['js/ui/week.js', "word = hours ? plusAmount(hours) : 'נוספות';"],
+        blank: ['js/ui/week.js', "[blank.length,'ללא רישום']"],
+        marks: ['js/ui/week.js', "'\\u25CF = יום כפול \\u00B7 + = שעות נוספות \\u00B7 \\u2014 = נעדר'"]
     };
     const reused = JSON.parse(device.run('JSON.stringify(WORKER_CARD_REUSED)'));
     same('the borrowed words are exactly the ones this suite knows the owners of',
         Object.keys(reused).sort(), Object.keys(owners).sort());
+    // (The week's line of marks is kept as escapes in both files; it is compared as the
+    // text a person reads.)
+    const read = text => text.replace(/\\u([0-9A-F]{4})/g, (all, hex) => String.fromCharCode(parseInt(hex, 16)));
     const strangers = Object.keys(owners).filter(key =>
         source(owners[key][0]).indexOf(owners[key][1]) === -1
-        || owners[key][1].indexOf(reused[key]) === -1);
+        || read(owners[key][1]).indexOf(reused[key]) === -1);
     same('and each is in its owner\'s source, as that screen says it', strangers, []);
 
     // No Hebrew anywhere else in the code: a sentence composed in passing is a string
@@ -926,6 +982,316 @@ const cellOf = (facts, label) => ((facts.pay || []).filter(one => one.label === 
     check('and no existing string was changed to make room: the crew row still says its own',
         source('js/ui/roster.js').indexOf("button('עוד ⋯', 'btn-icon crew-edit'") !== -1
         && source('js/ui/roster.js').indexOf("button(enabled ? 'פעיל' : 'כבוי',") !== -1);
+}
+
+// ---------------------------------------------------------------- 5. the month as a calendar
+{
+    suite('the month is the week screen stacked: its columns, and its reading of every day');
+
+    const tally = { cells: 0, absent: 0, double: 0, extra: 0, two: 0, saturday: 0, blank: 0, cards: 0 };
+    const wrong = [];
+    const weekStartOf = date => addDays(date, -((new Date(`${date}T12:00:00`).getDay() + 2) % 7));
+    const LETTERS = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
+    const NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+
+    [41, 42, 43, 44, 45, 46].forEach(seed => {
+        const device = seededPhone(seed, seed % 2 === 0 ? OPEN : SHUT);
+        const schedule = device.State.schedule;
+        const fail = (id, what, detail) => wrong.push(`${seed}/${id} ${what}: ${detail}`);
+        // THE WEEK SCREEN'S OWN COLUMNS: the dates it draws for a week, by its own filter.
+        const weekColumns = JSON.parse(device.run(`(function () {
+            setWeekFromDate(todayStr());
+            return JSON.stringify(weekDates().filter(date => parseLocalDate(date).getDay() !== 6)
+                .map(date => HEBREW_DAY_LETTERS[parseLocalDate(date).getDay()]));
+        })()`));
+        given('the week screen draws six days, the Friday first', weekColumns.length === 6
+            && weekColumns[0] === 'ו׳' && weekColumns[1] === 'א׳', JSON.stringify(weekColumns));
+        given('the layer the week screen reads is the one the card reads', device.State.layer === 'actual');
+
+        [['2026-11', '2026-11-30', 'נובמבר 2026'], ['2026-10', '2026-10-31', 'אוקטובר 2026']].forEach(([month, last, label]) => {
+            // The current month is the card as it opens; the other is one step back.
+            device.run(`WORKER_CARD_MONTH = ${JSON.stringify(month === '2026-11' ? null : month)}`);
+            schedule.workers.forEach(worker => {
+                const id = worker.id;
+                const facts = device.facts(id);
+                const cal = facts.calendar;
+                tally.cards += 1;
+                if (cal.key !== month || cal.label !== label || cal.current !== (month === '2026-11')) {
+                    fail(id, 'month', JSON.stringify([cal.key, cal.label, cal.current]));
+                }
+                if (JSON.stringify(cal.columns) !== JSON.stringify(weekColumns)) {
+                    fail(id, 'columns', JSON.stringify(cal.columns));
+                }
+                // The rows: six wide, each one week of the app's (Friday to Thursday), every
+                // cell under the letter of its own weekday, the weeks in order.
+                cal.weeks.forEach((week, at) => {
+                    const cells = week.filter(Boolean);
+                    if (week.length !== 6 || cells.length === 0) fail(id, `row ${at}`, String(week.length));
+                    if (new Set(cells.map(cell => weekStartOf(cell.date))).size !== 1) fail(id, `row ${at} week`, '');
+                    week.forEach((cell, column) => {
+                        if (cell && LETTERS[cell.weekday] !== cal.columns[column]) fail(id, `row ${at} column`, cell.date);
+                    });
+                    if (at > 0 && !(cal.weeks[at - 1].filter(Boolean).pop().date < cells[0].date)) fail(id, `row ${at} order`, '');
+                });
+
+                const drawn = {};
+                cal.weeks.forEach(week => week.filter(Boolean).forEach(cell => {
+                    drawn[cell.date] = (drawn[cell.date] || []).concat([['grid', cell]]);
+                }));
+                cal.saturdays.forEach(cell => { drawn[cell.date] = (drawn[cell.date] || []).concat([['saturday', cell]]); });
+                const mine = device.oracle[id];
+                const counted = {};
+                let attended = 0;
+                let absent = 0;
+
+                datesBetween(`${month}-01`, last).forEach(date => {
+                    const weekday = new Date(`${date}T12:00:00`).getDay();
+                    // THE WEEK GRID'S READING of this man's cell on this date: what
+                    // renderWeekCell asks, in the order it asks it, with its own words.
+                    const week = JSON.parse(device.run(`(function (date, id) {
+                        if (isAbsent(State.schedule, date, id, State.layer)) return JSON.stringify({ absent: true, sites: [] });
+                        const labels = placeLabelsIn(State.schedule);
+                        return JSON.stringify({ absent: false,
+                            sites: entriesFor(State.schedule, date, id, State.layer).map(entry => {
+                                const place = placeLabelFrom(labels, entry.placeId);
+                                const rate = entryRate(entry);
+                                const hours = entryExtraHours(entry);
+                                return { id: String(entry.placeId), name: place, initial: siteInitial(place),
+                                    mark: rate === RATE_DOUBLE ? 'double' : rate === RATE_EXTRA ? 'extra' : '',
+                                    word: rate === RATE_DOUBLE ? 'כפול'
+                                        : rate === RATE_EXTRA ? (hours ? plusAmount(hours) : 'נוספות') : '' };
+                            }) });
+                    })(${JSON.stringify(date)}, ${JSON.stringify(id)})`));
+                    const recorded = week.absent || week.sites.length > 0;
+                    const was = mine[date] || { absent: false, sites: [] };
+                    if (was.absent !== week.absent || JSON.stringify(was.sites.slice().sort())
+                        !== JSON.stringify([...new Set(week.sites.map(site => site.id))].sort())) {
+                        fail(id, `${date} the week's reading against what was recorded`, JSON.stringify(week));
+                    }
+                    const found = drawn[date] || [];
+                    // Once, in the grid - or, a Saturday, under it and only when it holds a record.
+                    const want = weekday !== 6 ? ['grid'] : recorded ? ['saturday'] : [];
+                    if (JSON.stringify(found.map(one => one[0])) !== JSON.stringify(want)) {
+                        fail(id, `${date} drawn`, JSON.stringify(found.map(one => one[0])));
+                        return;
+                    }
+                    if (week.absent) absent += 1;
+                    else if (week.sites.length > 0) {
+                        attended += 1;
+                        new Set(week.sites.map(site => site.id)).forEach(site => { counted[site] = (counted[site] || 0) + 1; });
+                    }
+                    if (found.length === 0) return;
+                    const cell = found[0][1];
+                    tally.cells += 1;
+                    if (cell.absent !== week.absent || JSON.stringify(cell.sites) !== JSON.stringify(week.sites)) {
+                        fail(id, `${date} cell`, `${JSON.stringify(cell)} !== ${JSON.stringify(week)}`);
+                    }
+                    const day = `יום ${NAMES[weekday]} ${date.slice(8)}/${date.slice(5, 7)}/${date.slice(0, 4)}`;
+                    const said = week.absent ? ['נעדר'] : week.sites.length === 0 ? ['ללא רישום']
+                        : week.sites.map(site => (site.word ? `⁨${site.name}⁩ ${site.word}` : `⁨${site.name}⁩`));
+                    if (cell.said !== `${day} · ${said.join(' · ')}`) fail(id, `${date} said`, cell.said);
+                    if (cell.number !== Number(date.slice(8)) || cell.today !== (date === TODAY)) fail(id, `${date} number`, '');
+                    if (cell.absent) tally.absent += 1;
+                    if (!recorded) tally.blank += 1;
+                    if (weekday === 6) tally.saturday += 1;
+                    if (cell.sites.length === 2) tally.two += 1;
+                    cell.sites.forEach(site => { if (site.mark) tally[site.mark] += 1; });
+                });
+
+                // Under it: the days per site and the two totals, against the same count.
+                const sites = {};
+                cal.sites.forEach(site => { sites[site.id] = site.days; });
+                if (JSON.stringify(Object.keys(sites).sort().map(key => [key, sites[key]]))
+                    !== JSON.stringify(Object.keys(counted).sort().map(key => [key, counted[key]]))) {
+                    fail(id, 'days per site', `${JSON.stringify(sites)} !== ${JSON.stringify(counted)}`);
+                }
+                if (cal.sites.some((site, at) => at > 0 && site.days > cal.sites[at - 1].days)) fail(id, 'order', '');
+                if (cal.attended !== attended || cal.absent !== absent) {
+                    fail(id, 'totals', `${cal.attended}/${cal.absent} !== ${attended}/${absent}`);
+                }
+                // On the month today is in, it is the count the card has always shown.
+                if (month === '2026-11' && JSON.stringify(cal.sites) !== JSON.stringify(facts.month)) {
+                    fail(id, 'this month', `${JSON.stringify(cal.sites)} !== ${JSON.stringify(facts.month)}`);
+                }
+                // And whichever month the calendar is on, the fourteen days stay today's.
+                if (facts.strip[0].date !== TODAY || facts.strip.length !== 14) fail(id, 'strip', facts.strip[0].date);
+            });
+        });
+        device.run('WORKER_CARD_MONTH = null');
+    });
+
+    check('every day of two months, for every man of six records, is the week\'s reading of it',
+        wrong.length === 0, wrong.slice(0, 4).join(' | '));
+    check('many days were compared', tally.cells > 1200 && tally.cards > 40, JSON.stringify(tally));
+    check('absences among them', tally.absent > 50, String(tally.absent));
+    check('doubled days', tally.double > 40, String(tally.double));
+    check('days with extra hours', tally.extra > 40, String(tally.extra));
+    check('days at two sites', tally.two > 20, String(tally.two));
+    check('Saturdays with a record, which the grid has no column for', tally.saturday > 40, String(tally.saturday));
+    check('and days with nothing on them', tally.blank > 200, String(tally.blank));
+}
+
+{
+    suite('the calendar drawn: the month, its steps, a day that only navigates');
+
+    const device = seededPhone(47, OPEN);
+    const worker = device.State.schedule.workers.filter(one => {
+        const cal = device.facts(one.id).calendar;
+        return cal.saturdays.length > 0 && cal.sites.length > 0;
+    })[0];
+    given('a man with a month that has sites and a recorded Saturday', Boolean(worker));
+    const id = JSON.stringify(worker.id);
+    device.run(`openWorkerCard(${id})`);
+    const body = device.dom.getElementById('workerCardBody');
+    const facts = device.facts(worker.id);
+    const cal = facts.calendar;
+    const texts = selector => body.querySelectorAll(selector).map(node => node.textContent);
+
+    same('it opens on the month today is in, named', texts('.wcard-cal-label'), ['נובמבר 2026']);
+    same('under its own heading, with the two steps and no way "back" to where it already is',
+        [body.textContent.indexOf('לוח החודש') !== -1, texts('.wcard-cal-step'), texts('.wcard-cal-home')],
+        [true, ['חודש קודם', 'חודש הבא'], []]);
+    same('the six letters of the week screen\'s days head it', texts('.wcard-cal-head'), ['ו׳', 'א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳']);
+    const grid = cal.weeks.reduce((all, week) => all.concat(week), []);
+    same('one button per day and an empty place where the month has no day',
+        [body.querySelectorAll('.wcard-cal-day').length, body.querySelectorAll('.wcard-cal-gap').length],
+        [grid.filter(Boolean).length, grid.filter(cell => !cell).length]);
+    same('each named for its day and what is on it, and carrying its date',
+        body.querySelectorAll('.wcard-cal-day').map(node => [node.dataset.date, node.getAttribute('aria-label')]),
+        grid.filter(Boolean).map(cell => [cell.date, cell.said]));
+    same('each showing its number, and the letter of each site with the week\'s mark - or the week\'s dash',
+        body.querySelectorAll('.wcard-cal-day').map(node => node.textContent),
+        grid.filter(Boolean).map(cell => String(cell.number) + (cell.absent ? '—'
+            : cell.sites.map(site => site.initial + ({ double: '●', extra: '+' }[site.mark] || '')).join(''))));
+    same('today is marked as today, and only today',
+        body.querySelectorAll('.wcard-cal-day').filter(node => node.getAttribute('aria-current') === 'date')
+            .map(node => node.dataset.date), [TODAY]);
+    same('the Saturdays with a record are listed under it, by date',
+        [body.textContent.indexOf('ימי שבת עם רישום') !== -1,
+            body.querySelectorAll('.wcard-cal-saturday').map(node => node.dataset.date)],
+        [true, cal.saturdays.map(cell => cell.date)]);
+    check('the marks are explained in the week screen\'s own line, and the tap in one sentence',
+        body.textContent.indexOf('● = יום כפול · + = שעות נוספות · — = נעדר') !== -1
+        && body.textContent.indexOf('לחיצה על יום פותחת אותו במסך היום.') !== -1);
+    same('the count under it names every site in words, with its days, then the two totals',
+        [body.querySelectorAll('.wcard-month-row').map(row => row.textContent),
+            body.querySelectorAll('.wcard-month-totals .wcard-pair').map(pair => pair.textContent)],
+        [cal.sites.map(site => site.name + site.days), [`נוכחות${cal.attended}`, `נעדר${cal.absent}`]]);
+
+    // A STEP BACK.
+    device.run('workerCardStepMonth(-1)');
+    const october = device.facts(worker.id).calendar;
+    same('one step back is October, and the card says so', [october.key, texts('.wcard-cal-label')],
+        ['2026-10', ['אוקטובר 2026']]);
+    same('with the way back to this month', texts('.wcard-cal-home'), ['חזרה לחודש הנוכחי']);
+    check('the count is headed for the month shown, not «החודש»',
+        body.textContent.indexOf('ימים בכל אתר החודש') === -1 && body.textContent.indexOf('ימים בכל אתראוקטובר 2026') !== -1,
+        body.textContent.slice(0, 80));
+    same('and counts that month', body.querySelectorAll('.wcard-month-row').map(row => row.textContent),
+        october.sites.map(site => site.name + site.days));
+    same('nobody is "today" in another month',
+        body.querySelectorAll('.wcard-cal-day').filter(node => node.getAttribute('aria-current') === 'date').length, 0);
+    device.run('workerCardStepMonth(1)');
+    same('a step forward again is the month today is in, held as "no month chosen"',
+        [device.run('WORKER_CARD_MONTH'), texts('.wcard-cal-label'), texts('.wcard-cal-home')], [null, ['נובמבר 2026'], []]);
+    device.run('workerCardStepMonth(1); workerCardStepMonth(1)');
+    same('the year turns with the month', [device.run('WORKER_CARD_MONTH'), texts('.wcard-cal-label')],
+        ['2027-01', ['ינואר 2027']]);
+    same('a month nobody has reached yet is empty and says so',
+        [device.facts(worker.id).calendar.sites, device.facts(worker.id).calendar.attended,
+            body.textContent.indexOf('אין ימי עבודה בתקופה הזו.') !== -1], [[], 0, true]);
+    device.run('workerCardStepMonth(-1)');
+    same('and turns back', device.run('WORKER_CARD_MONTH'), '2026-12');
+    device.run('workerCardStepMonth(0)');
+    same('«חזרה לחודש הנוכחי» comes home', [device.run('WORKER_CARD_MONTH'), texts('.wcard-cal-label')], [null, ['נובמבר 2026']]);
+    device.run('workerCardStepMonth(-1); closeWorkerCard()');
+    device.run(`openWorkerCard(${id})`);
+    same('a card opened again starts on this month, whatever the last one was left on',
+        [device.run('WORKER_CARD_MONTH'), texts('.wcard-cal-label')], [null, ['נובמבר 2026']]);
+    same('thirty-one days and twenty-eight: every month has all of its days',
+        ['2026-12', '2027-02', '2028-02'].map(month => {
+            device.run(`WORKER_CARD_MONTH = ${JSON.stringify(month)}`);
+            const shown = device.facts(worker.id).calendar;
+            // Saturdays have no column and, in a month with no record, no line either.
+            return shown.weeks.reduce((sum, week) => sum + week.filter(Boolean).length, 0) + shown.saturdays.length;
+        }), [31 - 4, 28 - 4, 29 - 4]);
+    device.run('WORKER_CARD_MONTH = null');
+
+    // A DAY NAVIGATES.
+    const disk = JSON.stringify(device.dump());
+    const record = JSON.stringify(device.State.schedule);
+    const renders = device.renders.count;
+    device.views.length = 0;
+    device.run('workerCardGoDay("2026-10-15")');
+    same('a day closes the card and opens that date on the day screen',
+        [device.dom.getElementById('workerCardModal').style.display, device.State.date, device.views],
+        ['none', '2026-10-15', ['day']]);
+    check('and writes nothing: the disk and the record are what they were',
+        JSON.stringify(device.dump()) === disk && JSON.stringify(device.State.schedule) === record);
+    same('it asked for no redraw of its own beyond the screen it opened', device.renders.count, renders);
+    device.run(`openWorkerCard(${id}); workerCardGoDay("not a date"); workerCardGoDay("2026-02-31")`);
+    same('something that is not a date goes nowhere and leaves the card open',
+        [device.dom.getElementById('workerCardModal').style.display, device.State.date, device.views],
+        ['flex', '2026-10-15', ['day']]);
+    device.run('closeWorkerCard()');
+    check('the week screen\'s cell takes the same two steps to a day',
+        source('js/ui/week.js').indexOf("const open = () => { State.date = date; showView('day'); };") !== -1
+        && /function workerCardGoDay\(date\) \{\s+if \(!isRealDate\(date\)\) return;\s+closeWorkerCard\(\);\s+State\.date = date;\s+showView\('day'\);\s+\}/.test(CARD));
+}
+
+// ---------------------------------------------------------------- 6. call, and WhatsApp
+{
+    suite('the two doors carry the seder\'s number, and a number it refuses has no door');
+
+    const device = seededPhone(48, SHUT);
+    // tests/seder.test.mjs's own cases, so the two suites cannot drift on what a number is.
+    const seder = source('tests/seder.test.mjs');
+    const usable = [['052-884-1930', '972528841930'], ['0528841930', '972528841930'],
+        [' 052 884 1930 ', '972528841930'], ['+972 52-884-1930', '972528841930'],
+        ['972528841930', '972528841930'], ['00972-52-884-1930', '972528841930'],
+        ['+972 (0)52-884-1930', '972528841930'], ['٠٥٢٨٨٤١٩٣٠', '972528841930'],
+        ['0587654321', '972587654321']];
+    const unusable = ['', '   ', null, undefined, '1234', '03-1234567', '052-884-193', '052-884-19301',
+        '+970 59-123-4567', '+1 212 555 0100', 'אין', '0528841930 / 0541234567', '972-3-1234567'];
+    given('these are the seder suite\'s cases', usable.every(([typed]) => seder.indexOf(`['${typed}', '`) !== -1)
+        && unusable.filter(one => typeof one === 'string' && one.trim()).every(typed => seder.indexOf(`'${typed}'`) !== -1));
+    const contact = phone => JSON.parse(device.run(`JSON.stringify(workerCardContact(${JSON.stringify(phone === undefined ? null : phone)}))`));
+    usable.forEach(([typed, number]) => {
+        same(`«${typed}»: both doors open ${number}`, contact(typed),
+            { tel: `tel:+${number}`, whatsapp: `https://wa.me/${number}` });
+        same(`«${typed}»: and it is the seder's own answer`, device.call('sederWaNumber', typed), number);
+    });
+    unusable.forEach(typed => same(`«${typed}» has no door`, contact(typed), null));
+    same('undefined has no door', JSON.parse(device.run('JSON.stringify(workerCardContact(undefined))')), null);
+
+    const [first, second, third] = device.State.schedule.workers;
+    first.phone = '052-884-1930';
+    second.phone = '03-1234567';
+    delete third.phone;
+    const body = device.dom.getElementById('workerCardBody');
+    const links = () => body.querySelectorAll('A').map(node => ({ text: node.textContent, href: node.href,
+        target: node.target || '', rel: node.rel || '', label: node.getAttribute('aria-label') }));
+
+    device.run(`openWorkerCard(${JSON.stringify(first.id)})`);
+    same('a man with a mobile number: «התקשר» dials it and «וואטסאפ» opens his chat, with no text',
+        links(), [
+            { text: 'התקשר', href: 'tel:+972528841930', target: '', rel: '', label: `התקשר אל ⁨${first.name}⁩` },
+            { text: 'וואטסאפ', href: 'https://wa.me/972528841930', target: '_blank', rel: 'noopener noreferrer',
+                label: `וואטסאפ אל ⁨${first.name}⁩` }]);
+    check('his number is still written out above them', body.textContent.indexOf('052-884-1930') !== -1);
+    device.run(`openWorkerCard(${JSON.stringify(second.id)})`);
+    same('a number the seder would not use: no door, the number as written, and the seder\'s words for it',
+        [links(), body.textContent.indexOf('03-1234567') !== -1, body.textContent.indexOf('אין מספר טלפון תקין') !== -1],
+        [[], true, true]);
+    device.run(`openWorkerCard(${JSON.stringify(third.id)})`);
+    same('no number at all: no door, and the crew row\'s own words',
+        [links(), body.textContent.indexOf('בלי טלפון') !== -1, body.textContent.indexOf('אין מספר טלפון תקין') !== -1],
+        [[], true, false]);
+    device.run('closeWorkerCard()');
+    check('the crew row is as it was: the card is where the doors are',
+        source('js/ui/roster.js').indexOf('tel:') === -1 && source('js/ui/roster.js').indexOf('wa.me') === -1);
+    check('the doors are links the person\'s own tap follows - the card opens no window itself',
+        CARD.indexOf('window.open') === -1 && CARD.indexOf('location.href') === -1 && CARD.indexOf('?text=') === -1);
 }
 
 // ---------------------------------------------------------------- the shell

@@ -17,6 +17,9 @@
 //     fence, the cloud, a backup or the rescue file; a damaged, poisoned, absent or stale
 //     one is simply no journey; a disk that refuses it costs nothing but the place;
 //   - that walking the whole journey writes NOTHING but that key;
+//   - the second pass: what the button at the foot of the day's list says - the day a new
+//     journey opens on, or where he is in the one he left - and which drivers the sending
+//     station names again among the workers;
 //   - every Hebrew word the feature adds, pinned.
 //
 // The screens - the dock's row, the bar inside הסעות, the panel, the taps and a reload at
@@ -562,10 +565,91 @@ await block('a disk that refuses it costs the place and nothing else', async () 
     same('a disk that takes it again is believed again', [device.call('journeyWasKept'), kept(device).station], [true, 4]);
 });
 
+await block('the button at the foot of the day: the day it opens on, or where he is', async () => {
+    const device = crewPhone('d_foot');
+    device.ctx.anyRecordOnRestDay = () => false;
+    const words = (now, today) => device.call('journeyDayEntryWords', now === undefined ? Date.now() : now, today || TODAY);
+    const disk = JSON.stringify(device.dump());
+    same('with no journey it names the day a new one opens on', words(), 'בניית סידור ליום רביעי 11/11/2026');
+    same('on a Friday evening that is Sunday - and so it never says «מחר»',
+        words(undefined, '2026-11-13'), 'בניית סידור ליום ראשון 15/11/2026');
+    same('which is the day the journey then opens on',
+        device.call('journeyDefaultDate', '2026-11-13'), '2026-11-15');
+    same('asking wrote nothing, not even the journey\'s own key', JSON.stringify(device.dump()), disk);
+
+    device.call('journeyStart');
+    device.call('journeyGo', 3);
+    same('while the journey is on the screen its place is known', device.call('journeyStation'), 3);
+    device.call('journeyLeave');
+    same('left at the rides, the button says where he is', words(), 'המשך בניית הסידור · שלב 3 מתוך 5');
+    const at = kept(device).at;
+    same('for the three hours the journey is still his', words(at + 3 * HOUR), 'המשך בניית הסידור · שלב 3 מתוך 5');
+    same('and a minute past them it offers a new one', words(at + 3 * HOUR + 60 * 1000), 'בניית סידור ליום רביעי 11/11/2026');
+    same('the tap is the same door as the row in the WhatsApp dialog: it continues at that station',
+        (device.call('journeyStart'), [device.call('journeyStation'), device.call('journeyDate')]), [3, DAY]);
+    device.call('journeyFinish');
+    same('finished, it offers a new one again', words(), 'בניית סידור ליום רביעי 11/11/2026');
+
+    device.putRaw(KEY, '{"version":1,"date":"2026-11-11","stat');
+    same('a preference that will not read is no journey here either',
+        reopen(device).call('journeyDayEntryWords', Date.now(), TODAY), 'בניית סידור ליום רביעי 11/11/2026');
+});
+
+await block('station 5: a driver whose message was opened is named again among the workers', async () => {
+    const device = crewPhone('d_twice');
+    const crew = () => device.call('sederCrew', device.State.schedule, DAY, 'actual');
+    const drivers = () => plain(device.call('journeyOpenedDrivers', DAY, crew()));
+    same('nobody seated: nobody', drivers(), []);
+    device.call('transportPlace', DAY, 'w_01', 'tv_01', 1);
+    device.call('transportPlace', DAY, 'w_02', 'tv_01', 2);
+    device.call('transportPlace', DAY, 'w_04', 'tv_02', 1);
+    device.call('transportPlace', DAY, 'w_06', 'tv_02', 2);
+    same('drivers nobody opened are not named', drivers(), []);
+    device.call('transportMarkOpened', DAY, 'tv_01');
+    given('the vehicle card\'s own mark stands', device.call('transportMarkState', DAY, 'tv_01') === 'opened');
+    same('the driver whose message was opened, by the vehicle card\'s own mark', drivers(),
+        [{ id: 'w_01', name: 'אחמד', vehicle: 'tv_01' }]);
+    check('he is still on the seder\'s list - named, never skipped',
+        crew().some(row => row.workerId === 'w_01'));
+    const disk = JSON.stringify(device.dump());
+    drivers();
+    same('reading it writes nothing', JSON.stringify(device.dump()), disk);
+
+    // The mark is believed only while the message is the one it was made on.
+    device.call('transportPlace', DAY, 'w_03', 'tv_01', 3);
+    given('a passenger added changed his message, and the mark no longer stands',
+        device.call('transportMarkState', DAY, 'tv_01') === 'none');
+    same('so he is no longer named as opened', drivers(), []);
+    device.call('transportMarkOpened', DAY, 'tv_01');
+    device.call('transportMarkOpened', DAY, 'tv_02');
+    same('two opened drivers, in the vehicles\' order', drivers().map(one => one.id), ['w_01', 'w_04']);
+
+    // A driver taken off his site is not on the seder's list, so there is no second message.
+    device.State.commit(device.call('unassignPlace', device.State.schedule, DAY, 'w_04', 'actual', 'p_01'));
+    check('a driver with no site that day gets no worker\'s message, and is not named',
+        !drivers().some(one => one.id === 'w_04'), JSON.stringify(drivers()));
+
+    const off = crewPhone('d_twice_off', { rides: false });
+    same('with הסעות off there are no drivers to name',
+        plain(off.call('journeyOpenedDrivers', DAY, off.call('sederCrew', off.State.schedule, DAY, 'actual'))), []);
+    check('and asking did not turn it on', off.raw(ENABLED) === null);
+});
+
+await block('the rides\' bar says only what is left', async () => {
+    // journeyRideWords still answers in the screen's words (pinned above); what the bar
+    // DRAWS is decided by journeyRideOpen, and tests/journey.browser.mjs reads the glass.
+    const code = JOURNEY.replace(/\/\/.*$/gm, '');
+    check('the bar\'s sentence is drawn only when something is left',
+        /const left = journeyRideOpen\(read\.ride\);[\s\S]{0,200}left \? journeyRideWords\(read\.ride\) : ''/.test(code));
+    check('the summary at the sending station opens the summary\'s own dialog, for the journey\'s date',
+        /openTransportSummary\(live\.date\)/.test(code) && !/shareTextOut\(/.test(code));
+});
+
 await block('every word the journey adds, and no other', async () => {
     const T = crewPhone('d_words').global('JOURNEY_TEXT');
     same('the block holds exactly these words', Object.keys(T).sort(),
-        ['absent', 'back', 'checkArchived', 'checkClean', 'checkEmptySites', 'checkLead', 'checkWaiting', 'entry',
+        ['absent', 'back', 'checkArchived', 'checkClean', 'checkEmptySites', 'checkLead', 'checkWaiting', 'dayEntry',
+            'dayResume', 'entry',
             'finish', 'forDay', 'leave', 'lookLead', 'lookRides', 'lookSites', 'next', 'notKept', 'pipDone',
             'pipOpen', 'pipSkipped', 'placed', 'rideLost', 'rideNoDriver', 'rideOff', 'rideWaiting', 'sendAll',
             'sendDayMessage', 'sendDrivers', 'sendDriversNone', 'sendLead', 'sendWorkers', 'stations', 'stepOf',
@@ -584,6 +668,8 @@ await block('every word the journey adds, and no other', async () => {
     same('finish', T.finish, 'סיום');
     same('the place was not kept', T.notKept,
         'המקום בבניית הסידור לא נשמר במכשיר. אם האפליקציה תיסגר, מתחילים מהשלב הראשון.');
+    same('the button at the foot of the day', T.dayEntry('יום רביעי', '11/11/2026'), 'בניית סידור ליום רביעי 11/11/2026');
+    same('the same button, in the middle of a journey', T.dayResume(3), 'המשך בניית הסידור · שלב 3 מתוך 5');
     same('placed', T.placed(12), 'שובצו: 12');
     same('not recorded', T.waiting(3), 'לא נרשמו: 3');
     same('away', T.absent(1), 'נעדרים: 1');

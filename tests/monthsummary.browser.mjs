@@ -134,15 +134,17 @@ try {
     const withIt = await layout();
     check('the menu is shut, and its rows with it', !(await page.locator('#monthSummaryOpen').isVisible()));
     await page.evaluate(() => { window.__entry = monthSummaryEntry; monthSummaryEntry = undefined; render(); });
-    same('a build without the file has the three outputs it always had',
-        await page.locator('.report-output-actions button').count(), 3);
+    // Counted without this file's row only: «תלוש לכל עובד» (js/ui/payslips.js) is the
+    // menu's other added row on «לפי עובד», and is not this suite's to remove.
+    same('a build without the file has the three outputs it always had, and no row of this file',
+        await page.locator('.report-output-actions button:not(#payslipsEntry)').count(), 3);
     const without = await layout();
     await page.evaluate(() => { monthSummaryEntry = window.__entry; render(); });
     same('the toolbar, the heading, the trigger, the switch, the range and the sheet are on the pixels they were on',
         withIt, without);
     await page.locator('.report-output-actions > summary').click();
     same('opened, the menu has the three outputs and then this row',
-        await page.locator('.report-output-actions button:visible').evaluateAll(nodes => nodes.map(node => node.textContent.replace(/^[^א-ת]*/, ''))),
+        await page.locator('.report-output-actions button:visible:not(#payslipsEntry)').evaluateAll(nodes => nodes.map(node => node.textContent.replace(/^[^א-ת]*/, ''))),
         ['הדפסה', 'שיתוף כתמונה', 'יצוא', 'סיכום חודש']);
     const entryBox = await page.locator('#monthSummaryOpen').boundingBox();
     check('the row is 44px both ways and wholly on the glass', entryBox.height >= 44 && entryBox.width >= 44

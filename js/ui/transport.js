@@ -2050,12 +2050,21 @@ function transportSummaryIsOpen() {
 
 // Only from the open screen, so only on a phone that turned הסעות on, and always about
 // the day that screen is about.
-function openTransportSummary() {
-    if (!transportEnabled() || !transportIsOpen() || !transportDate) return false;
+//
+// ONE OTHER CALLER, and it names its day: the seder's journey at its sending station
+// (js/ui/journey.js), where this screen is shut and the same preview must still be read
+// before anything leaves. With no date given this is exactly what it was - a shut screen,
+// no dialog. `transportSummaryFor` is the day the open dialog is about, whoever opened it.
+let transportSummaryFor = null;
+function openTransportSummary(date) {
+    if (!transportEnabled()) return false;
+    const day = transportIsOpen() ? transportDate : (isRealDate(date) ? date : null);
+    if (!day) return false;
     const parts = transportSummaryParts();
     if (!parts.modal || !parts.text) return false;
+    transportSummaryFor = day;
     const T = TRANSPORT_TEXT;
-    const parsed = parseLocalDate(transportDate);
+    const parsed = parseLocalDate(day);
     parts.title.textContent = T.summaryTitle;
     parts.context.textContent = `${hebrewDayName(parsed)} ${formatFullDate(parsed)}`;
     parts.label.textContent = T.summaryLabel;
@@ -2064,7 +2073,7 @@ function openTransportSummary() {
     parts.picture.textContent = T.summaryPicture;
     parts.close.textContent = T.summaryClose;
     parts.status.textContent = '';
-    parts.text.value = transportSummaryText(transportDate);
+    parts.text.value = transportSummaryText(day);
     parts.modal.style.display = 'flex';
     parts.text.scrollTop = 0;
     return true;
@@ -2074,12 +2083,13 @@ function closeTransportSummary() {
     if (typeof document === 'undefined' || !document.getElementById) return;
     const modal = document.getElementById('transportSummaryModal');
     if (modal && modal.style) modal.style.display = 'none';
+    transportSummaryFor = null;
 }
 
 function transportSummaryRefresh() {
-    if (!transportSummaryIsOpen() || !transportDate) return;
+    if (!transportSummaryIsOpen() || !transportSummaryFor) return;
     const field = transportSummaryParts().text;
-    const now = transportSummaryText(transportDate);
+    const now = transportSummaryText(transportSummaryFor);
     if (field && field.value !== now) field.value = now;
 }
 
@@ -2117,7 +2127,7 @@ function transportSummaryPicture() {
 // can be open at a time, both being opened from the panel they cover.
 function readTransportPrintout() {
     const report = transportReportIsOpen();
-    if (!report && (!transportSummaryIsOpen() || !transportDate)) return null;
+    if (!report && (!transportSummaryIsOpen() || !transportSummaryFor)) return null;
     const range = report ? transportReportRange(transportReportKey, todayStr()) : null;
     if (report && !range) return null;
     const field = report ? transportReportParts().text : transportSummaryParts().text;
@@ -2125,7 +2135,7 @@ function readTransportPrintout() {
     const blocks = String((field && field.value) || '').split(/\n{2,}/)
         .map(block => block.split('\n').map(clean).filter(Boolean)).filter(block => block.length > 0);
     if (blocks.length === 0) return null;
-    const name = report ? TRANSPORT_TEXT.reportFile(range.from, range.to) : TRANSPORT_TEXT.summaryFile(transportDate);
+    const name = report ? TRANSPORT_TEXT.reportFile(range.from, range.to) : TRANSPORT_TEXT.summaryFile(transportSummaryFor);
     return { title: blocks[0].join(' '), name, blocks: blocks.slice(1) };
 }
 

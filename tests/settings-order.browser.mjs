@@ -73,6 +73,9 @@ const CONTROLS = [
     'button | pushReminderTest | שליחת התראת ניסיון | FarkadReminders.test()',
     'button | syncAuthBtn | ☁️ התחבר לענן | farkadSignIn()',
     'button | transportSwitch | הפעלת הסעות במכשיר הזה | ',
+    // v187, MOVED ON PURPOSE: one row added to עדכון וגרסה - «מה חדש» (js/ui/whatsnew.js). Nothing
+    // that was on the sheet moved or changed for it; it is the one control this list gained.
+    "button | whatsNewRow | מה חדש | openWhatsNew('all')",
     'input | importInput |  | importBackup(event)',
     'select | pushReminderDays |  | FarkadReminders.daysChanged()',
     'textarea | diagnosticText |  | '
@@ -119,6 +122,7 @@ const SENTENCES = [
     'למחרת בבוקר · בדיקה ועדכון',
     'לפי שעון ישראל · בכל מכשיר מפעילים בנפרד',
     'לשחזור חירום בלבד.',
+    'מה חדש',
     'מידע טכני',
     'מידע על ההתראות',
     'מכשיר ועזרה', 'מכשיר ועזרה',
