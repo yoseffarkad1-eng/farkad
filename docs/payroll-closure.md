@@ -554,7 +554,7 @@ check.
 All **proposed**; in the existing block (`ACC_TEXT` in `js/ui/accounts.js`), pinned word for
 word in `tests/accounts.test.mjs`, and tabled in [Hebrew in Phase 4](#hebrew-in-phase-4)
 with the phase beside each: `credit` («יתרת זכות» - v180's own word), 33 strings of the
-activation (`activation…`) and 8 of the months page (`months…`). The months' dry run and
+activation (`activation…`; three more at v190, for the tracking day) and 8 of the months page (`months…`). The months' dry run and
 the refusal of an edit are Phase 6's strings, unchanged.
 
 ### What is still NOT built after Phase 8
