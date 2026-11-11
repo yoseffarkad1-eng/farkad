@@ -4,7 +4,25 @@
 real project was not touched. This is the order in which it is done, by whom, what each
 person checks, and what to do when a check fails. The design it follows is in
 [`docs/payroll-closure.md`](payroll-closure.md) (the release candidate and Phase 8 at the top;
-Phases 1 to 7 under it). The build is **v190**, one commit on top of main at v186 (`9846d7f`). Everything stated as "measured" names the suite that measures it.
+Phases 1 to 7 under it). Everything stated as "measured" names the suite that measures it.
+
+**TWO BUILDS, ON TWO DAYS** - the owner's decision 71, option B (2026-11-11): nobody on any
+phone sees anything of the pay book until he says "activate".
+
+| | the build | what a person sees | when |
+|---|---|---|---|
+| **v190** | the pay book carried and asleep: `paybookActivation: false`, `paybookHonour: true` | **nothing new.** The build it was made on, plus the version line (`tests/dormant.browser.mjs`, eleven screens beside that build out of Git) | served first, any day; every phone updates to it |
+| **v191** | v190 with ONE line changed: `paybookActivation: true` | one row in ⋯ → כללי, and the screen behind it | served on the day he says "activate" |
+
+The flow in one line: **the dormant build → all phones update → a backup → the "activate"
+build → he reads and confirms.**
+
+Why two flags and not one: OFFERING the step and HONOURING a record that is on are different
+promises. v190 does not offer; it does honour - a phone on v190 that is handed a record
+another phone turned on is on, wholly (`tests/activation.test.mjs`, V13b;
+`tests/activation.browser.mjs`; on the real rules, `tests/activation.emulator.test.mjs`, N).
+So on the day, only the phone that PRESSES needs v191; every other phone needs to be on
+v190 or later, which it has been for days.
 
 Two people act here:
 
@@ -14,9 +32,9 @@ Two people act here:
 
 ## What turns it on, in five sentences
 
-1. The build that is served has `paybook`, `months` and `cold` **false**, as every build
-   before it. On a record nobody has turned on it is the app as it is today, plus one row
-   in ⋯.
+1. Both builds have `paybook`, `months` and `cold` **false**, as every build before them.
+   On a record nobody has turned on, v190 is the app as it is today and nothing more;
+   v191 is that plus one row in ⋯.
 2. The pay book is turned on **for the record**, not for a phone: a person presses a
    button, and one entry — the opening, `pay.po_open`, "tracking begins on this day" — is
    written to the shared record by one server transaction.
@@ -25,13 +43,14 @@ Two people act here:
    refuse it whole.
 4. Every phone that holds the record reads the same entry, so **all phones are on
    together** and none can be half on (`tests/activation.test.mjs`, V4).
-5. From that moment a phone on a build from before the pay book **cannot write at all** —
+5. From that moment a phone on a build from before the pay book - older than v190 -
+   **cannot write at all** —
    it shows a sync error and keeps its work until it is updated (`tests/activation.test.mjs`,
    V9b, on the real bytes of v180, v183, v184 and v186 against the fake rules;
    `tests/activation.emulator.test.mjs`, O, against the real ones). **One thing such a phone
    can still do, if it is on v186 and shares rides: seat a man.** The ride plans are documents
    of their own and the rule that stops its days does not look at them (measured, the same
-   suite, R) - see [A phone on v186 that has not updated](#a-phone-on-v186-that-has-not-updated).
+   suite, R) - see [A phone on v186 (or older) that has not updated](#a-phone-on-v186-or-older-that-has-not-updated).
 
 ## The point of no return
 
@@ -52,10 +71,12 @@ What changes on the screens is one thing: **what a man is said to owe**, for men
 an advance in a period nobody closed (the one-debt ruling of 2026-11-10).
 
 - **Before the first closure** there is a way back, and it loses nothing: the maintainer
-  serves this same build with one line changed — `paybookActivation: false` in
-  `js/model/schema.js`. Every phone that updates then reads the record exactly as it read
-  before the button (measured: every figure, `tests/activation.test.mjs`, V6; on the
-  emulator, W). The three entries above stay in the record and are ignored.
+  serves a build with one line changed — **`paybookHonour: false`** in
+  `js/model/schema.js` (and the offer false, as in v190). Every phone that updates then
+  reads the record exactly as it read before the button (measured: every figure,
+  `tests/activation.test.mjs`, V6 and V13b; on the emulator, W). The three entries above
+  stay in the record and are ignored. **Serving v190 again is NOT the way back**: v190
+  honours the record.
   **The rules are NOT rolled back** — see [Rolling back](#rolling-back).
 - **After the first closure** there is no way back. A closure through the pay book writes
   a frozen payslip and deductions a person chose; a build that does not read the pay book
@@ -66,15 +87,17 @@ an advance in a period nobody closed (the one-debt ruling of 2026-11-10).
 
 | # | do | check | if the check fails |
 |---|---|---|---|
-| A1 | On the exact commit to be served, from one clean detached worktree: `npm ci`, `npm test`, `npm run test:release`. **`test:release` includes the emulator suites - the only place the REAL rules are run**, among them `test:activation-emulator`. | Every check passes. Say which commit. | Stop. Nothing is served. An emulator suite that was "not run" is a stop, not a note. |
+| A1 | **For each of the two builds, before it is served**, on the exact commit, from one clean detached worktree: `npm ci`, `npm test`, `npm run test:release`. **`test:release` includes the emulator suites - the only place the REAL rules are run**, among them `test:activation-emulator`. | Every check passes. Say which commit. | Stop. Nothing is served. An emulator suite that was "not run" is a stop, not a note. |
 | A2 | On the same commit: `npm run test:gate-open`. | It ends with «what differs is exactly tests/gate-open.expected.mjs». | A NEW difference is a guarantee nobody has read with the pay book on. Read it, fix it or add it to the list with its reason. Do not serve until it is the list. |
-| A3 | The ONE rules file to paste is `firestore.rules` at the commit that is served - the file every emulator suite of A1 ran with. See [The rules file](#the-rules-file). | `cmp` of the text handed to the owner against `git show <commit>:firestore.rules` says nothing. | Hand over the file again. Nothing typed, nothing merged by hand. |
+| A3 | The ONE rules file to paste is `firestore.rules` at the v190 commit (v191 does not touch it) - the file every emulator suite of A1 ran with. See [The rules file](#the-rules-file). | `cmp` of the text handed to the owner against `git show <commit>:firestore.rules` says nothing. | Hand over the file again. Nothing typed, nothing merged by hand. |
 | A4 | Firestore console → Indexes → Single field → exemptions. | There are exemptions for `days`, `ledger`, `pay`, `payIndex`, `monthIndex`, `roster`, `advances` — or the owner adds them. (Firestore also limits a document to 40,000 index entries; the emulator does not enforce it and no suite here can see it. Phase 6, open risk.) | Add them before step 5. Not adding them does not block activation today; it brings a wall closer that nobody can measure from here. |
-| A5 | Serve the build (merge, Pages). **The merge also starts `.github/workflows/rules.yml`** - read [Merging starts the rules workflow](#merging-starts-the-rules-workflow) BEFORE merging. | The Pages deployment for that commit succeeded. The `rules` run is RED with «firestore.rules was NOT published» (no secret - expected), or green with a summary naming the commit and the file's sha256 (a secret was set: the rules ARE live, and step 2 below becomes a comparison only). | Do not ask the owner to do anything. A `rules` run that is green with no such summary, or red for any other reason, is read before anything else happens. |
+| A5 | Serve **v190** (merge, Pages). **The merge also starts `.github/workflows/rules.yml`** - read [Merging starts the rules workflow](#merging-starts-the-rules-workflow) BEFORE merging. (The v191 merge does not change `firestore.rules` and does not start it.) | The Pages deployment for that commit succeeded. The `rules` run is RED with «firestore.rules was NOT published» (no secret - expected), or green with a summary naming the commit and the file's sha256 (a secret was set: the rules ARE live, and step 2 below becomes a comparison only). | Do not ask the owner to do anything. A `rules` run that is green with no such summary, or red for any other reason, is read before anything else happens. |
+
+| A6 | **Only when the owner says "activate"**: A1 and A2 on the v191 commit, then serve it. | Its diff against v190 in what ships is one line of `js/model/schema.js` and the three stamps. | Anything else in that diff: stop. It is not the build that was prepared. |
 
 ## Merging starts the rules workflow
 
-This commit changes `firestore.rules`. `.github/workflows/rules.yml` runs on every push to
+The v190 commit changes `firestore.rules`. `.github/workflows/rules.yml` runs on every push to
 main that changes that file, and tries to PUBLISH it to the real project with the secret
 `FIREBASE_SERVICE_ACCOUNT`. The workflow is not changed by this build.
 
@@ -83,33 +106,37 @@ main that changes that file, and tries to PUBLISH it to the real project with th
 | **not set** (the state today: the v185 run went red at the key step and published nothing) | the run is **red**, «firestore.rules was NOT published», the live rules are whatever they were | the owner pastes the file by hand - step 2 of Part B |
 | **set** (if the owner ever sets it) | **the merge itself publishes the new rules**, within minutes, at about the moment Pages starts serving the build; nothing orders the two | step 2 of Part B is only the comparison: what the console shows must be this commit's `firestore.rules` |
 
-**Both are safe, and so is either order of "rules live" and "build on a phone" - while
-nobody has pressed the button.** Measured, cell by cell
+**Both are safe, and so is either order of "rules live" and "v190 on a phone" - nobody CAN
+press a button on v190, and on v191 while nobody has.** Measured, cell by cell
 (`tests/activation.emulator.test.mjs`, on the emulator, each build's own bytes and adapter):
 
 | the phone's build | the rules | the record | what happens |
 |---|---|---|---|
 | v180, v183, v184, v186 | live today | not on | records a day, synced - today's state (O, «under the rules LIVE TODAY») |
 | v180, v183, v184, v186 | **new** | not on | records a day, restores a file, synced: every new rule is vacuous without a pay book (O, «BEFORE the record is on») |
-| v190 and an older build side by side | **new** | not on | **the days while the phones update one by one**: v190 writes a day at protocol 2, the older phone one after it at protocol 1, and again each - all on the server and on both phones, both synced, nobody on (O, «beside this build») |
-| **v190** | live today | not on | records a day, shares rides, as v186 does. The button asks the server, is told the rules are the old ones, says so and writes nothing; sent anyway, the opening is refused whole (T) |
-| **v190** | **new** | not on | as v186, plus the row in ⋯; the button works (N) |
+| **v190 as it ships** and an older build side by side | **new** | not on | **the days while the phones update one by one**: v190 writes a day at protocol 2, the older phone one after it at protocol 1, and again each - all on the server and on both phones, both synced, nobody on, and no `pay` key on the server's document after any of the four writes (O, «beside this build» - re-run on the build as it ships) |
+| **v190** | live today | not on | records a day (accepted at protocol 2, no `pay` map written), shares rides, as v186 does. Offers nothing; asks the server nothing (T) |
+| **v191** | live today | not on | as v190, plus the row. The button asks the server, is told the rules are the old ones, says so and writes nothing; sent anyway, the opening is refused whole (T) |
+| **v191** | **new** | not on | as v190, plus the row in ⋯; the button works (N) |
+| **v190**, beside the v191 phone that pressed | **new** | **on** | **on, wholly**: the same arithmetic, the accounts home, and it closes an account through the pay book (N) |
 | v180, v183, v184, v186 | **new** | **on** | every write to the record refused: a day, an old-style closure, a restore. The phone shows a sync error and keeps its work. v186's ride plans are still accepted (O, «AFTER»; R) |
 | v180, v183, v184, v186 | live today | **on** | **the hazard**: its restore is accepted and the pay book is gone from the server (O, «the hazard») - cannot arise unless the new rules are taken back after the button |
 
 So, of "the new rules live BEFORE this build reaches a phone":
 
 - **it is not required** for anything a phone does before the button - a v190 phone under
-  the rules of today is a v186 phone with one more row in ⋯;
+  the rules of today is a v186 phone to look at, and a v191 phone is that with one more
+  row in ⋯;
 - **it is required before the button**, and that is enforced twice without anybody
   remembering it: the app asks by reading and refuses with a sentence, and the rules of
   today refuse the opening whole if it were sent anyway;
 - **it is preferred** only for tidiness: the owner then never meets the sentence «השרת
   עדיין עובד עם הכללים הישנים».
 
-The order below - rules, then phones, then the button - is the one that needs no judgement.
+The order below - v190 on every phone, the rules, a backup, v191, the button - is the one
+that needs no judgement.
 
-### A phone on v186 that has not updated
+### A phone on v186 (or older) that has not updated
 
 After the button, on the new rules (measured, R, with v186's own adapter out of Git):
 
@@ -127,31 +154,35 @@ phone that has not updated. Update it; its days go up by themselves.
 
 ## Part B — the owner
 
-Each step is done on the phone named. **Do them in this order.**
+Each step is done on the phone named. **Do them in this order.** Steps 1 and 2 are DAY ONE
+and can be done any day; steps 3 to 9 are the day he says "activate".
 
-### 1. Take a backup — the owner's main phone
+### 1. Update every phone to v190 — day one
 
-⋯ → גיבוי → «שמור קובץ גיבוי». Send the file to yourself (WhatsApp to your own number, or
-email).
+1. the owner's main phone, 2. the owner's second phone, 3. the other two people's phones.
 
-- **Check:** the file is in הורדות / קבצים and is about the size it has been (around
-  185 KB today). ⋯ shows the backup's age as today.
-- **If it fails:** stop. Nothing else here is done without a backup from today.
+On each: open the app, accept the update when it offers it (or ⋯ → עדכון → check), then
+⋯ → the version line.
 
-A backup is the work record as it is before anything changes. It is also the only copy
-that is not a mirror: sync copies a mistake to all three phones as faithfully as a
-correction.
+- **Check, on EACH phone, by looking — not by assuming:** the version is v190.
+- **Check:** NOTHING else is different. No new row in ⋯, the «מקדמות» tab, the reports and
+  the day screen are what they were. That is the point of this build; if anybody sees a
+  line about «פנקס שכר», stop and tell the maintainer - the wrong build was served.
+- No window of an older build stays open beside an updated one on the same phone.
+- **A phone that cannot be updated today** goes on working as it did. It must be on v190
+  (or later) before step 5.
 
-### 2. Publish the rules — once (owner, with the maintainer on the phone)
+### 2. Publish the rules — once (owner, with the maintainer on the phone) — any time before step 5
 
-Firebase console → Firestore Database → Rules.
+Firebase console → Firestore Database → Rules. It may be done before or after step 1
+(measured both ways); it must be done before the button, and the button checks.
 
 1. **Copy what is there now into a file and keep it.** The maintainer compares it with
    `docs/firestore.rules.before-paybook`, which is main's `firestore.rules` at v186: the
    rules of v184 plus the shared rides' block. They must be identical. **This is believed
-   and has not been checked:** the owner reported pasting that file on 2026-11-10; nobody
-   has read the console since. (The file of before the rides, v184's, WAS compared with the
-   console, byte for byte, earlier that day.)
+   and has not been checked:** the owner reported pasting that file on 2026-11-10 and says
+   he has not changed it; nobody has read the console since. (The file of before the
+   rides, v184's, WAS compared with the console, byte for byte, earlier that day.)
    - **If they differ: stop.** The file in this repository is not what is live, and
      nothing here was measured against what is live. The one difference with a known
      answer: the console still shows the rules WITHOUT the rides' block (`git show
@@ -177,23 +208,34 @@ Firebase console → Firestore Database → Rules.
   Publish. At this step that is completely safe — nothing has been written that the old
   rules do not know. Tell the maintainer what the phone said.
 
-### 3. Update every phone — in this order
+### 3. Take a backup — the owner's main phone — the day he says "activate"
 
-1. the owner's main phone, 2. the owner's second phone, 3. the other two people's phones.
+⋯ → גיבוי → «שמור קובץ גיבוי». Send the file to yourself (WhatsApp to your own number, or
+email).
 
-On each: open the app, accept the update when it offers it (or ⋯ → עדכון → check), then
-⋯ → the version line.
+- **Check:** the file is in הורדות / קבצים and is about the size it has been (around
+  185 KB today). ⋯ shows the backup's age as today.
+- **Check, again, on each phone:** the version is v190 or later. A phone on an older build
+  from step 5 on cannot write a day until it is updated (it keeps what is typed on it,
+  shows a sync error and sends it after the update) — and what it SHOWS a man owes is the
+  old figure. It can still seat men in הסעות
+  ([above](#a-phone-on-v186-or-older-that-has-not-updated)).
+- **If either fails:** stop. Nothing else here is done without a backup from today and
+  every phone on v190.
 
-- **Check, on EACH phone, by looking — not by assuming:** the version is the one the
-  maintainer named. ⋯ → כללי shows a new line: «פנקס שכר (סגירת חשבון, תשלומים וארכיון):
-  עוד לא הופעל ברישום הזה.» with the button «פנקס שכר - הכנה והפעלה».
+A backup is the work record as it is before anything changes. It is also the only copy
+that is not a mirror: sync copies a mistake to all three phones as faithfully as a
+correction.
+
+### 3b. The "activate" build — the maintainer serves v191; the owner's main phone updates
+
+- **Check, on the owner's main phone:** the version is v191, and ⋯ → כללי shows a new
+  line: «פנקס שכר (סגירת חשבון, תשלומים וארכיון): עוד לא הופעל ברישום הזה.» with the button
+  «פנקס שכר - הכנה והפעלה».
+- The other phones may take v191 too (they then show the same row) or stay on v190 (they
+  show nothing until the record is on). Either way they follow the record.
 - **Check:** the «מקדמות» tab, the reports and the day screen are what they were.
   Nothing has changed yet.
-- **If a phone cannot be updated today:** do not go on. From step 5 that phone cannot
-  write a day until it is updated (it keeps what is typed on it, shows a sync error and
-  sends it after the update) — and what it SHOWS a man owes is the old figure. It can
-  still seat men in הסעות ([above](#a-phone-on-v186-that-has-not-updated)).
-- No window of an older build stays open beside an updated one on the same phone.
 
 ### 4. Read the screen — the owner's main phone
 
@@ -209,7 +251,7 @@ Read, in this order:
 | **«סגירות ישנות»** — a number | Closures made before the pay book have no payment record. After step 5 they are on a list, «סגירות ישנות לבדיקה», and you answer each when convenient: paid / still owed / unknown. Nothing waits on it. |
 | the carry line, if it appears | The record has no approval yet that an advance balance carries to the next account; the button gives it, once. (If it does not appear, the record already has it.) |
 | **«גודל הרישום והארכיון»** | The record's size out of 1,024 KB, and what leaves it later: a closed and fully paid account after 14 days, a month closed for everybody after six months and only when asked. **A day in a month that has moved can no longer be changed** — not a wage day, not a רימא count, not a יוסף גבס count. |
-| **«יום תחילת המעקב»** | The default is the first day of the fortnight that holds today. Every closure and payment from that day on is recorded in the pay book; what was closed before it does not change. Choose an earlier day only if you want to close an earlier period through the new screens. |
+| **«יום תחילת המעקב»** | **The field already holds 30/10/2026** - the day you chose on 11/11 - with the line «יום תחילת המעקב שנקבע: 30/10/2026…» under it. **Leave it.** A period from that day on that nobody closed is closed on the new page; a period already closed the old way does not change and waits on «סגירות ישנות לבדיקה». See [The tracking day](#the-tracking-day). If you put a LATER day in the field the screen warns - «…מספר התקופות: N» - that N unclosed periods would be left before tracking, where nothing can close them afterwards. The day cannot be changed after the button. |
 
 - **If a figure looks wrong:** stop here and send the maintainer a picture of the
   screen. Nothing has happened.
@@ -230,15 +272,16 @@ Read, in this order:
 
 ### 6. Look at the other phones
 
-On each, with signal, without touching anything in the app: the «מקדמות» tab is now
-«חשבונות עובדים», and ⋯ → כללי says «פנקס השכר פעיל ברישום הזה. יום תחילת המעקב: …».
+On each, with signal, without touching anything in the app - **on v190 as on v191**: the
+«מקדמות» tab is now «חשבונות עובדים», and ⋯ → כללי says «פנקס השכר פעיל ברישום הזה. יום
+תחילת המעקב: 30/10/2026».
 
 - **A phone whose tab is still the old advances list** has not heard (no signal) or was
   not updated. With no signal it is on the old arithmetic for the whole record until it
   hears, then it changes by itself. A closure made on it the old way in the meantime is
   not lost and is not silent: it arrives on «סגירות ישנות לבדיקה» for you to answer
   (`tests/activation.test.mjs`, V8).
-- **A phone that shows a sync error on every write** is on an old build. Update it.
+- **A phone that shows a sync error on every write** is on a build older than v190. Update it.
 
 ### 7. Before the first closure — stop and look
 
@@ -250,7 +293,7 @@ This is the last moment the way back exists. On the accounts list:
 - the two phones show the same list.
 
 If something is wrong: **close nothing**, tell the maintainer. The way back is one line
-and one served build.
+(`paybookHonour: false`) and one served build.
 
 ### 8. The first closure — one man, on purpose
 
@@ -263,6 +306,8 @@ read the page, «שולם הכול» or what was really paid, «אישור סג�
 
 ### 9. Afterwards
 
+- **The debt list of step 4 (decision 76):** go through it, and for each man who in fact
+  settled by hand record a «החזר» on his advances page (the «מקדמות» button on his row).
 - «סגירות ישנות לבדיקה» — answer when convenient.
 - A closed, fully paid account leaves the server's live record by itself 14 days later;
   «ארכיון סגירות» shows what is ready and what stays, with the reason.
@@ -273,25 +318,48 @@ read the page, «שולם הכול» or what was really paid, «אישור סג�
 
 ## What each of the three people sees
 
-| | before step 5 | after step 5 |
+| | before step 5 (v190; and v191 but for the last row) | after step 5 (v190 and v191 alike) |
 |---|---|---|
 | the day screen, the week, the crew, the seder, הסעות, the WhatsApp message | as today | **the same** |
 | reports: pay, invoice, רימא, יוסף גבס | as today | the same wages, days and counts. A man's advance debt carried into an account can read higher (the ruling) — only for men on the list of step 4 |
 | the «מקדמות» tab | the advances list | «חשבונות עובדים»: a row a man — his open period's wage, «יתרת שכר לתשלום», «חוב מקדמות», and for almost nobody «יתרת זכות». One man's advances page is the existing one, from the «מקדמות» button on his row |
 | closing an account | the old dialog («סגור את החשבון») | the review page only: per-advance deduction, extra deductions, what was paid. **Needs signal** — a closure or payment with no connection is refused, in a sentence, and nothing is written |
 | giving an advance, a repayment, «תיקון טעות» | as today | **the same forms**, with or without signal |
-| ⋯ | one new line and button under כללי | the line says it is on, since which day; no button |
-| a phone that was not updated | works | **every write to the record is refused**: sync error, not «מסונכרן», the work stays on the phone until it updates. Its shared ride plans still go through |
+| ⋯ | **v190: nothing new.** v191: one new line and button under כללי | the line says it is on, since which day; no button |
+| a phone on a build older than v190 | works | **every write to the record is refused**: sync error, not «מסונכרן», the work stays on the phone until it updates. Its shared ride plans still go through |
 
 All three accounts may close and pay (the owner's rule 8). All three may press the button
-of step 5 — it is in ⋯, behind a screen and a confirmation that says it cannot be turned
-off. If only the owner should be able to, that is decision 72.
+of step 5 **on a phone that has v191** — it is in ⋯, behind a screen and a confirmation
+that says it cannot be turned off. If only the owner should be able to, that is decision
+72; with two builds it is also true that a phone left on v190 has no button to press.
+
+## The tracking day
+
+**Decided: 2026-10-30** (the owner, 2026-11-11) - the first day of the fortnight
+30/10-12/11. `PAYBOOK_TRACKING_DAY_DECIDED` in `js/model/payroll.js`; the screen offers it
+from that day on, whatever day he presses (`tests/activation.test.mjs`, V14a).
+
+What it means when he presses AFTER that fortnight has ended, walked with figures on a
+seeded record (V14b: five men, activation on 14/11):
+
+| on 14/11 | under 30/10 |
+|---|---|
+| an account for 30/10-12/11 (or one of its weeks) **closed the old way** | **does not change**: the same wage, deduction and left-over; not closable a second time; on «סגירות ישנות לבדיקה» for an answer when convenient. An advance it deducted is not owed again |
+| an account for it **nobody closed** | its period waits INSIDE tracking and is closed on the new review page; an advance inside it reads as a debt until that closure deducts it (before the button the old walk assumed it had already come off) |
+| the fortnight open on the day (13/11-26/11) | the current account, as on any day |
+| anything unclosed from BEFORE 30/10 | before tracking, under either day: it stays where it is, and its advances are on the debt list of step 4 (decision 76) |
+
+Nothing is double-counted or lost: the sum the men owe, every closure and every sheet are
+the same before and after (V14b). **A later day - 13/11 - changes no figure and strands
+the unclosed accounts**: before tracking, refused by the review page, with no other door
+on a record that is on (V14c, KNOWN). That is why the screen offers 30/10 and warns of a
+later day, and why the day he chose is the one to keep.
 
 ## The rules file
 
-**One paste.** The file is `firestore.rules` at the commit that is served. For v190 the
-exact text was also handed over beside the commit as `firebase-rules-v190.txt`, byte for
-byte the same file.
+**One paste.** The file is `firestore.rules` at the v190 commit (v191 does not change it).
+The exact text was also handed over beside the commit as `firebase-rules-paybook.txt`, byte
+for byte the same file.
 
 Every difference from the file believed live today (`docs/firestore.rules.before-paybook`:
 main's `firestore.rules` at v186, 396 lines, the shared rides' block in it) — and there is
@@ -338,8 +406,9 @@ the rides' block: no client refuses to run without it.
 
 | when | the build | the rules | what is lost |
 |---|---|---|---|
-| after step 2, before step 5 | nothing to do | paste the saved text back (the file WITH the rides' block - not an older one, or הסעות stops being shared). Safe. | nothing |
-| after step 5, **before the first closure** | serve this build with `paybookActivation: false`. Every phone updates. | **leave the new rules.** | nothing: every figure reads as before the button; three inert entries stay in the record |
+| v190 served, nothing else done | serve the build before it; a v190 phone has left nothing on the server an older build cannot read | nothing to do | nothing |
+| after step 2, before step 5 | nothing to do (v191, if served, may stay or go back to v190) | paste the saved text back (the file WITH the rides' block - not an older one, or הסעות stops being shared). Safe. | nothing |
+| after step 5, **before the first closure** | serve a build with **`paybookHonour: false`** and `paybookActivation: false`. Every phone updates. **Not v190** - v190 honours the record. | **leave the new rules.** | nothing: every figure reads as before the button; three inert entries stay in the record |
 | after the first closure | — | **never.** | there is no way back; fix forward |
 
 Why the rules are never rolled back once the record is on: under the rules published
@@ -381,6 +450,8 @@ once. Nothing is lost by the mistake itself unless an older build restored in be
   green runs skipped the publish; the v185 run was red at the key step). What it does with
   a key is read from its text, not seen.
 
+- **Three real phones on two builds.** v190 beside v191 on a record that is on was measured
+  in Node, in Chromium and on the emulator, two phones at a time.
 - **No real phone.** Every screen here was driven in Chromium with emulated touch. The
   keyboard over the review page, the date control in the iPhone's own locale, and a slow
   signal between the tap and the answer have not been seen on a device.

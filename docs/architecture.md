@@ -259,9 +259,12 @@ accept, from a screen a person reads first. `paybookOn(schedule)` in `js/model/s
 is the one reader of the three flags - the flag through the test seam, or the record's
 entry - and every gate hands it the record: the one-debt ruling, the planners, both
 archive moves, the cold store's writer, the screens. So the answer is the same on every
-phone that holds the record, and a phone cannot be half on. `paybookActivation: true` is
-the shipped flag that says this build offers that step and honours that entry; `false` is
-the way back, safe until the first closure. The order in which it is done is
+phone that holds the record, and a phone cannot be half on. Two shipped flags stand beside
+the three and neither turns anything on: `paybookActivation` says this build OFFERS that
+step (false in v190 - the owner's decision 71: nobody sees the row until he says so; true
+in the build served on that day, which differs by that one line), and `paybookHonour` says
+it HONOURS that entry (true: a phone on v190 that is handed an activated record is on;
+`false` is the way back, safe until the first closure). The order in which it is done is
 `docs/payroll-activation.md`.
 
 `ledgerWritesEnabled()` now also honours `FARKAD_FLAGS.ledgerWrites`. The const

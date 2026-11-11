@@ -26,7 +26,11 @@ such commit any more, and the order in which it is done is
 
 **And the release candidate, v190, comes before Phase 8:** that phase merged with main at
 v186 (the shared rides), as one commit, with the rules of both in one file and the rollout
-table measured again.
+table measured again. (It was numbered v187 while it was prepared.)
+
+**And the owner's three decisions come before that** (2026-11-11): the candidate ships
+DORMANT AND UNSEEN, the offer and the honouring are two flags, and the tracking day is
+2026-10-30. That section is first.
 
 Phases 0 and 1 were built on `bd59a68` (v169); Phase 2 on `0acaceb` (v171); Phase 3 on
 Phase 2 merged with main at v172 (`8c943fa`); Phase 4 on Phase 3 merged with main at
@@ -42,10 +46,101 @@ wrong](#where-the-audit-and-the-design-were-wrong).
     node tests/activation.test.mjs          # Phase 8: turning it on for one record, on the build as it ships
     npm run -s test:paybook-emulator        # the PUBLISHED rules and the production adapter (needs Java)
 
-## The release candidate — v190 (Phase 8 on top of main at v186)
+## The owner's three decisions, applied — v190 dormant, and the build after it
 
 **Candidate. Not served, not merged, on no phone; no rules published; no real record
-read.** One commit on `9846d7f`. It waits for the owner's decisions 71, 75 and 76 and his
+read.** The release entry is `docs/releases.md`, v190; the order is
+[`docs/payroll-activation.md`](payroll-activation.md).
+
+### What he decided (2026-11-11; his words were «ب», «30/10», «نعم»)
+
+| # | | |
+|---|---|---|
+| 71 | **Option B.** The row «פנקס שכר - הכנה והפעלה» is HIDDEN: nobody on any phone sees it until he says "activate"; then a build that shows it is served, he reads the dry-run report and confirms | two builds: v190 with `paybookActivation: false`, and v190 with that one line changed |
+| 75 | The tracking day is **2026-10-30** | `PAYBOOK_TRACKING_DAY_DECIDED`; the screen offers it |
+| 76 | **Yes**: after activation he goes through the debt list and records «החזר» for the men who settled by hand | nothing built; the runbook's last step |
+
+### One flag did two things, and they had to part
+
+Phase 8's `paybookActivation: true` meant "this build OFFERS the step and HONOURS the
+entry" (`paybookActivated` began with `if (!paybookActivationOffered()) return false`).
+Shipping it `false` to hide the row would also have shipped a build that does NOT honour
+an activated record - and on the day, the owner presses on the next build while the other
+phones are still on this one. Each of them would then read the old arithmetic beside a
+phone reading the new, until it updated: the state Phase 8 exists to rule out, produced by
+the very build that was meant to be safe.
+
+| the flag | says | ships in v190 | read by |
+|---|---|---|---|
+| `paybookActivation` | this build OFFERS the step: the row in ⋯, the screen, `planOpening` answering as the activation, `planActivation` answering `offered` | **false** | `paybookActivationOffered()` - one read in what ships (`tests/activation.test.mjs`, V11) |
+| `paybookHonour` | this build HONOURS an opening on the record: `paybookOn`, `monthsOn`, `coldOn`, and with them every gate | **true** | `paybookHonoured()`, the first line of `paybookActivated` |
+
+With the offer false and the honouring true:
+
+- **on a record nobody turned on**, every gate is shut; `planActivation` is `off` with no
+  report; `planOpening` and the carry approval refuse with `gate`; the row is not drawn;
+  nothing is written or asked (V13a; `tests/dormant.browser.mjs`). No path in this build
+  writes an opening.
+- **on a record another phone turned on**, every gate is open by the record alone;
+  `planActivation` answers `on` with the day; the row says «on since»; the accounts home
+  takes the tab; closures and payments go through the server-first door (V13b; the browser
+  suite; the emulator's N).
+- **the way back** is `paybookHonour: false` - and no longer the offer's flag.
+
+Two small things followed in the code: `planActivation` answers `on` for an activated
+record whether or not the build offers (it answered `off`), and `accountsActivationRow`
+draws the «on since» line for a record the build honours (it drew nothing without the
+offer). Neither is reachable on a record that is not on.
+
+### What v190 writes that the build before it does not
+
+Asked again because the row is now hidden and "nothing visible" must not hide a write
+(V13a on a document seeded as v186 left it; the emulator's O and T on the real rules):
+
+| | v186 | v190, record not on |
+|---|---|---|
+| an edit's payload | one field path, `protocol: 1` | the same one field path, **`protocol: 2`** |
+| the server's document after it | no `pay` key | **no `pay` key** - an edit writes none |
+| its own disk | no `pay` key | an empty `pay: {}` |
+| a WHOLE-document write (a restore) | no `pay` key | carries the empty `pay: {}` |
+| an older phone writing after it | - | accepted at protocol 1, as ever (the mixed-fleet row, re-run on the build as it ships) |
+
+So the earlier statement "it writes an empty `pay: {}` map and protocol 2 onto an
+unactivated record from its first edit" is half right: protocol 2, yes, from the first
+edit; the empty map, only by a whole-document write. Both are harmless to the older
+builds beside it, measured on v180, v183, v184 and v186.
+
+### The tracking day
+
+`planOpening` accepts any real day up to today; it always did. What was wrong was the
+OFFER: the screen put "the first day of the fortnight that holds today" in the field. He
+chose 30/10 on 11/11; pressed on or after 13/11, the field would have said 13/11, and a
+press that did not touch it would have fixed that day for good.
+
+- `paybookTrackingDefault(today)`: the decided day once it has come; before it, what it
+  was. The screen's field starts on it.
+- `planActivation().report.tracking`: `{ offered, decided, asked, stranded }` - `stranded`
+  are the periods with work that nobody closed, from the day offered on, that the day
+  ASKED would leave before tracking. The screen says the decided day and what it means,
+  and - only for a later day - how many periods it would strand. Three proposed strings.
+- **Why the later day is the worse one** (V14c, KNOWN): `planClosure` refuses a period
+  that begins before tracking (`before-tracking`), and on a record that is on the old
+  dialog routes to the review page - so such a period can never be closed, and its
+  advance stays a debt until a «החזר» is typed. Under 30/10 the same period waits INSIDE
+  tracking and is closed on the review page.
+- **What is closed the old way inside tracking** is untouched under either day: the
+  closure reports its own record, cannot be closed twice (`closed`), and waits on
+  «סגירות ישנות לבדיקה». Walked with figures on five men: V14b, and the table in
+  `docs/releases.md`, v190.
+
+### Pinned expectations this step moved
+
+The table is in `docs/releases.md`, v190 («Pinned expectations this build moved»).
+
+## The release candidate as it was merged — Phase 8 on top of main at v186
+
+**As written when the candidate was assembled; the section above is what became of its
+three open decisions.** One commit on `9846d7f`. It waited for the owner's decisions 71, 75 and 76 and his
 explicit approval. The release entry is `docs/releases.md`, v190; the order is
 [`docs/payroll-activation.md`](payroll-activation.md). Nothing was built in this step: it
 is Phase 8 merged with what main gained, re-measured.
@@ -151,7 +246,7 @@ in between. That is not built. What is built:
 | **what turns it on** | one entry in the shared record: the opening, `pay.po_open` - "tracking begins on this day" (Phase 1's `planOpening`). It was already the first thing the pay book needs, already append-only on the wire and in the rules, and every build that keeps `pay` already carries it. A second entry beside it would be a second fact that could disagree with the first |
 | **who** | a person, from the app: ⋯ → «פנקס שכר - הכנה והפעלה», a screen that is read first, one button, the app's own confirmation |
 | **the one function** | `paybookOn(schedule)` in `js/model/schema.js`: the build's flag (the test seam - false in everything a person installs) **or** a record that holds a readable opening. `monthsOn` and `coldOn` beside it. Every reader of the three flags now hands over the record: the one-debt ruling (`advanceDebtStays(schedule)`), the planners, `planArchive`, `planMonths`, the two archive moves, the cold store's writer, the screens. `tests/activation.test.mjs` V11 reads the source and lists every remaining read of the three flags: the three predicates and the fallback beside each of their three callers |
-| **a new shipped flag** | `paybookActivation: true` - this build OFFERS the step and HONOURS the entry. It is not a second way to turn anything on. `false` is the way back (below) |
+| **a new shipped flag** | `paybookActivation: true` - this build OFFERS the step and HONOURS the entry. It is not a second way to turn anything on. `false` is the way back (below). **(Since v190 these are two flags - `paybookActivation` for the offer, shipped false, and `paybookHonour` for the honouring, shipped true and the way back: see the first section.)** |
 | **all phones together** | there is no setting, no local key and no per-phone answer. The same record gives the same answer on every phone that holds it; a phone that has not heard is on the old arithmetic for the WHOLE record until it has, and then on the new for the whole record (V4) |
 
 **With the step offered and nobody having taken it, the build is the build main serves
@@ -263,7 +358,7 @@ one, and the opening's closed document; every day, advance, ledger entry, wage, 
 line and count is what it was, and the only figure that reads differently is what a man
 is said to owe going into an account (V5, field for field).
 
-- **Before it:** serve this build with `paybookActivation: false`. A phone on that build
+- **Before it:** serve this build with `paybookActivation: false` (since v190: with **`paybookHonour: false`**). A phone on that build
   reads the activated record exactly as it read before the button - every figure (V6; on
   the emulator, W) - keeps the opening in its own copy, records days at protocol 2, and
   refuses a closure with `gate`. **The rules stay.**
@@ -480,12 +575,12 @@ the refusal of an edit are Phase 6's strings, unchanged.
 
 | # | the question | recommended default |
 |---|---|---|
-| 71 | The build that is served OFFERS the step: one row in ⋯ on every phone, on a record that is not on. Nothing happens until somebody opens it, reads the screen, presses the button and confirms - and the server must already run the new rules. | **As built** (`paybookActivation: true`): otherwise the dry runs cannot be read on the real record before the gate opens, and turning it on needs a second served build. The alternative is one line (`false`), a build that shows nothing, and a second build on the day. |
+| 71 | The build that is served OFFERS the step: one row in ⋯ on every phone, on a record that is not on. Nothing happens until somebody opens it, reads the screen, presses the button and confirms - and the server must already run the new rules. | **As built** (`paybookActivation: true`): otherwise the dry runs cannot be read on the real record before the gate opens, and turning it on needs a second served build. The alternative is one line (`false`), a build that shows nothing, and a second build on the day. **DECIDED 2026-11-11: the alternative (option B).** |
 | 72 | All three accounts can press the button (as all three may close and pay, rule 8). | **As built**, with the confirmation. If only the owner should: say so - it is a list of who may activate, in one constant, and a sentence for the other two. |
 | 73 | An activation always writes the carry approval if the record has none. | **As built.** Without it the worker's card and the accounts page can show two figures for one man. |
 | 74 | From the moment the record is on, a phone on an older build cannot write even a day (it keeps the work and shows a sync error). Before this phase it could go on recording days. | **As built.** It could otherwise close an account the old way with no signal. Every phone updates first - the runbook's step 3. |
-| 75 | The day tracking begins: the screen offers the first day of the fortnight that holds today. | **That day.** Earlier only if he wants an earlier period closed through the new screens; it cannot be changed afterwards. |
-| 76 | Men on the screen's debt list whose advance was in fact settled by hand in a period nobody closed. | **He notes them at step 4 and records a «החזר» for each after turning it on.** The app cannot know which were. |
+| 75 | The day tracking begins: the screen offers the first day of the fortnight that holds today. | **That day.** Earlier only if he wants an earlier period closed through the new screens; it cannot be changed afterwards. **DECIDED 2026-11-11: 2026-10-30**, which the screen now offers on whatever day he presses. |
+| 76 | Men on the screen's debt list whose advance was in fact settled by hand in a period nobody closed. | **He notes them at step 4 and records a «החזר» for each after turning it on.** The app cannot know which were. **DECIDED 2026-11-11: yes.** |
 | 77 | Settling a disagreement between two bodies of one pay entry (decision 49) is designed and not built. | **Go ahead without it**: it cannot arise through the screens. Build it before any restore from a file is expected in anger. |
 | 78 | Every proposed string of this phase. | The owner reads the table; the activation screen's are the ones he will read first. |
 
