@@ -31,10 +31,10 @@ check('the origin served this commit, byte for byte', served.ok,
 const browser = await launch(chromium);
 // (Phase 8: a record can turn the pay book on by itself - its opening. So that this suite
 // goes on measuring a BUILD with the flags it names, on whatever record, its pages do not
-// honour the record's switch: `paybookActivation: false`, the rule tests/paybook.world.mjs
+// honour the record's switch: `paybookHonour: false` (v190: its own flag), the rule tests/paybook.world.mjs
 // keeps for the node suites. tests/activation.browser.mjs is where the build as it ships
 // meets a record that is turned on.)
-const OPEN = { paybook: true, paybookActivation: false };
+const OPEN = { paybook: true, paybookActivation: false, paybookHonour: false };
 const DRAFT = 'farkadPayDraft';
 
 const T = {
@@ -420,8 +420,9 @@ await a.page.waitForTimeout(200);
     // MOVED AT PHASE 8, in its fixture and not in what it asks: this record holds an
     // opening, and the build AS IT SHIPS now reads an opening as "the pay book is on".
     // «The gate shut» on such a record is the build that does not honour it - the three
-    // flags false and `paybookActivation` false, which is also this build's way back.
-    const d = await openPhone(browser, server.url, { cloud: net, flags: { paybookActivation: false } });
+    // flags false and `paybookHonour` false (v190: the honouring has its own flag), which is
+    // also this build's way back.
+    const d = await openPhone(browser, server.url, { cloud: net, flags: { paybookActivation: false, paybookHonour: false } });
     await d.page.waitForFunction(() => State.schedule.workers.length === 5 && FarkadSync.status === 'synced', null, { timeout: 20000 });
     same('the build with the pay book shut reads the same record whole - the closures that moved are in it',
         await d.page.evaluate(() => [FARKAD_FLAGS.paybook, paybookOn(State.schedule), Object.keys(closedPeriods(State.schedule, 'w_ahmad')).length,

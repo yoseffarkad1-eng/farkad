@@ -2045,7 +2045,7 @@ function paybookActivationView(schedule, date, stamp) {
 // the pay book on, and the two plans that turn it on. IT WRITES NOTHING: `changes` is
 // empty, and the plans inside it are plans.
 //
-//   state      'off'      this build does not offer the step
+//   state      'off'      this build does not offer the step (and the record is not on)
 //              'on'       the record is on already - `since` is its opening day
 //              'offered'  it may be turned on (subject to `reasons`)
 //   reasons    the opening plan's own: `stamp`, `gate`, `permission`, `date`,
@@ -2067,7 +2067,10 @@ function paybookActivationView(schedule, date, stamp) {
 function planActivation(schedule, date, stamp) {
     const out = { kind: 'activation', state: 'off', ok: false, reasons: [], since: null,
         opening: null, carry: null, report: null, changes: [] };
-    if (typeof paybookActivationOffered !== 'function' || !paybookActivationOffered()) return out;
+    const offered = typeof paybookActivationOffered === 'function' && paybookActivationOffered();
+    // A build that does not offer the step still says `on` of a record another phone
+    // turned on (v190: the offer and the honouring are two flags) - and `off` otherwise.
+    if (!offered && !(typeof paybookActivated === 'function' && paybookActivated(schedule))) return out;
     const fold = paybookFold(schedule);
     if (paybookWritesEnabled(schedule)) {
         out.state = 'on';

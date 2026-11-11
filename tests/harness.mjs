@@ -327,7 +327,7 @@ function hashOf(text) {
 // book. A device whose flags name a gate is one its suite built on purpose and is left
 // exactly as named. Without the preload this returns what it was handed, untouched: a
 // device given no flags gets exactly what a person installs.
-const GATE_FLAGS = ['paybook', 'months', 'cold', 'paybookQueue', 'paybookActivation'];
+const GATE_FLAGS = ['paybook', 'months', 'cold', 'paybookQueue', 'paybookActivation', 'paybookHonour'];
 function gateOpenFlags(named) {
     const open = globalThis.FARKAD_GATE_OPEN;
     if (!open || typeof open !== 'object') return named || null;

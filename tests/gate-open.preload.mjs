@@ -18,7 +18,7 @@
 //
 // ONE RULE, for pages and devices alike: A SUITE THAT NAMES A GATE KEEPS WHAT IT NAMED.
 // A device or a page whose own flags mention `paybook`, `months`, `cold`, `paybookQueue`
-// or `paybookActivation` is one the suite built on purpose - "the build with the pay book
+// `paybookActivation` or `paybookHonour` is one the suite built on purpose - "the build with the pay book
 // shut", "the queue's old door" - and opening a gate under it would measure nothing. Only
 // a device given no word about the gates (which is every device of every suite written
 // before the pay book) is opened.
@@ -28,7 +28,7 @@
 // Nothing here is loaded by the app, by a gate or by another suite.
 
 const OPEN = Object.freeze({ paybook: true, months: true, cold: true });
-const GATES = ['paybook', 'months', 'cold', 'paybookQueue', 'paybookActivation'];
+const GATES = ['paybook', 'months', 'cold', 'paybookQueue', 'paybookActivation', 'paybookHonour'];
 
 // tests/harness.mjs reads this when it makes a device.
 globalThis.FARKAD_GATE_OPEN = OPEN;

@@ -52,7 +52,7 @@ let made = 0;
 export function payDevice(options = {}) {
     made += 1;
     // SINCE PHASE 8 A RECORD CAN TURN THE PAY BOOK ON BY ITSELF (the opening,
-    // paybookActivated in js/model/schema.js), and nearly every record in these suites
+    // paybookActivated in js/model/schema.js; `paybookHonour`), and nearly every record in these suites
     // holds an opening. So that the suites go on measuring what they were written to
     // measure - a BUILD with the flags named, on whatever record - a device made here
     // does not honour the record's switch unless it asks to (`activation: true`):
@@ -64,7 +64,9 @@ export function payDevice(options = {}) {
     //   activation: true   the build exactly as it ships: the record decides
     //
     // tests/activation.test.mjs is where the build as it ships meets an activated record.
-    const honoured = options.activation === true ? {} : { paybookActivation: false };
+    // (v190: OFFERING the step and HONOURING the entry are two flags. «Does not honour» names
+    // both, so that these devices are the same build whatever the shipped offer is.)
+    const honoured = options.activation === true ? {} : { paybookActivation: false, paybookHonour: false };
     const device = makeDevice(Object.assign({ deviceId: `d_book${made}` }, options, {
         flags: options.shipped ? Object.assign({}, honoured, options.flags || {})
             : Object.assign({}, honoured, WRITER_ON, options.flags || {})

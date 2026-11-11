@@ -498,9 +498,13 @@ function accountsActivationRow() {
     if (!before || !before.parentNode) return;
     let box = document.getElementById('paybookActivationBox');
     // Three cheap questions - never the dry runs, which this row does not show.
+    // v190: the «on» line belongs to the RECORD (a build that honours an opening says so
+    // whether or not it offers the step); the sentence and the button belong to a build
+    // that OFFERS it. A build that does neither for this record draws nothing.
     const offered = typeof paybookActivationOffered === 'function' && paybookActivationOffered();
-    const opening = offered && accountsOpen() ? paybookFold(State.schedule).opening : null;
-    const state = !offered ? 'off' : (accountsOpen() ? (opening ? 'on' : 'off') : 'offered');
+    const activated = typeof paybookActivated === 'function' && paybookActivated(State.schedule);
+    const opening = (activated || offered) && accountsOpen() ? paybookFold(State.schedule).opening : null;
+    const state = accountsOpen() ? (opening && (activated || offered) ? 'on' : 'off') : (offered ? 'offered' : 'off');
     if (state === 'off') { if (box) box.remove(); return; }
     if (!box) {
         box = el('section', 'acc-activation-row');

@@ -1211,7 +1211,7 @@ const without = (record, fields) => {
     // (Phase 8: «the gate shut» on THIS record means a build that does not honour the
     // record's own switch - O0 holds an opening, and the build as it ships now reads an
     // opening as "on". The old refusal is the old build's, and is asserted on one.)
-    const shutBuild = makeDevice({ deviceId: 'd_shut_vocab', flags: { paybookActivation: false } });
+    const shutBuild = makeDevice({ deviceId: 'd_shut_vocab', flags: { paybookActivation: false, paybookHonour: false } });
     const shippedBuild = makeDevice({ deviceId: 'd_shipped_vocab' });
     check('PHASE 8: the build as it ships, on that same OPENED record, is under the ruling - 150.01 is an ordinary answer there too',
         shippedBuild.call('planClosure', clone(O0), 'w_khaled', FORTNIGHT, { allocations: { [oldAdvance]: 150.01 } }, st).ok === true

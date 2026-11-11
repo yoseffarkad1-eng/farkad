@@ -124,13 +124,28 @@ const FARKAD_SHIPPED_FLAGS = {
     // below answers as a build with the three flags on answers - on every phone that
     // holds it, at once, and on no other record.
     //
-    // THIS flag says only that this build OFFERS that step and HONOURS that entry. With
-    // it true and no opening on the record the app is the build main serves, plus one
-    // row in the settings sheet. With it false the row is gone AND an opening already on
-    // the record is not honoured: that is the way back for whoever maintains this, and it
-    // is safe only until the first closure or payment is recorded (the point of no return
-    // - see docs/payroll-activation.md). It is not a second way to turn anything on.
-    paybookActivation: true
+    // TWO FLAGS SINCE v190, because OFFERING the step and HONOURING the entry are two
+    // different promises and the owner chose to make them on two different days (decision
+    // 71, option B, 2026-11-11: nobody sees the row until he says "activate").
+    //
+    // `paybookActivation` - this build OFFERS the step: the one row in the settings sheet,
+    // the screen behind it, and planOpening answering as the activation. FALSE in v190:
+    // nothing of the pay book is on any screen of a record nobody turned on, and no
+    // planner in this build will write an opening. A later build sets it true, and that
+    // one line is the whole of that build.
+    paybookActivation: false,
+
+    // `paybookHonour` - this build HONOURS an opening that is on the record: a phone that
+    // RECEIVES a record another phone turned on is on, wholly, at once (paybookOn below).
+    // TRUE, and deliberately not the same flag as the offer: the phones do not update
+    // together, so on the day the offering build is served a phone still on THIS build
+    // will be handed an activated record - and a phone that reads it by the old arithmetic
+    // while the others read the new is the two-arithmetics state Phase 8 exists to rule
+    // out. With it false an opening already on the record is not honoured: that is the
+    // way back for whoever maintains this, and it is safe only until the first closure or
+    // payment is recorded (the point of no return - see docs/payroll-activation.md).
+    // Neither flag is a second way to turn anything on.
+    paybookHonour: true
 };
 
 // FROZEN. `const` binds the name, not the object: anything holding a reference could set
@@ -2458,8 +2473,14 @@ function paybookActivationOffered() {
     return FARKAD_FLAGS.paybookActivation === true;
 }
 
+// Does this build read an opening on the record as "on"? Not the same question as
+// whether it OFFERS the step - see FARKAD_SHIPPED_FLAGS.
+function paybookHonoured() {
+    return FARKAD_FLAGS.paybookHonour === true;
+}
+
 function paybookActivated(schedule) {
-    if (!paybookActivationOffered()) return false;
+    if (!paybookHonoured()) return false;
     const book = schedule && isPlainObject(schedule.pay) ? schedule.pay : null;
     if (!book || !Object.prototype.hasOwnProperty.call(book, PAYBOOK_ACTIVATION_ENTRY)) return false;
     const entry = book[PAYBOOK_ACTIVATION_ENTRY];
