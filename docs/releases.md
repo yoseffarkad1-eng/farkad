@@ -1,8 +1,11 @@
 ## v190 — the pay book, carried and not shown: the dormant build (CANDIDATE - NOT SERVED)
 
 **Not served. Not merged. On no phone. No rules were published, the real project was not
-touched, and no real record was read.** One commit on top of main. No gate result is written
-here: validation is recorded against the exact clean commit, and no count is carried over.
+touched, and no real record was read.** One commit on top of main at v187 (`4454f38`, «סיכום
+חודש») - it was prepared on v186 (`9846d7f`) and main moved under it once; if main moves
+again before this is merged, it is merged in again and the gates are run again. No gate
+result is written here: validation is recorded against the exact clean commit, and no count
+is carried over.
 
 (While it was being prepared this candidate was numbered v187; that number went to another
 release. Wherever an older note says "the v187 candidate", it is this build.)
@@ -240,6 +243,8 @@ None was weakened. Each moved because what ships moved, with its reason beside t
 | `tests/activation.browser.mjs` | «both phones run the build as it ships» with `paybookActivation` true; «the day offered is the first day of the fortnight that holds today» | two phones name the offer; a third is the build as it ships; the day offered is that day only while 30/10 has not come (it has not, on that record's today) | the same; decision 75 |
 | `tests/activation.emulator.test.mjs` | every section seeded with the wire form THIS build makes (an empty `pay` map); the mixed fleet's new phone with no flag named = the offering build | seeded as v186 left the document (no `pay` key; one section keeps the other shape); the mixed fleet's new phone is the build as it ships | what is live has no such key; and the row had to be re-run on what ships |
 | `tests/accounts.test.mjs` | `ACC_TEXT` | + three strings (none moved); + the commit `tests/dormant.browser.mjs` compares against is the one this suite reads `reports.js` from | decision 75 |
+| `tests/accounts.test.mjs`, `tests/dormant.browser.mjs` | «the commit this build is made on» = `9846d7f` (v186) | `4454f38` (v187) | main moved; `js/ui/reports.js` without the five hooks is still main's file byte for byte, and the dormant comparison is now against v187's screens |
+| `tests/activation.test.mjs` V9b, `tests/activation.emulator.test.mjs` O | older builds: v180, v183, v184, v186 | + v187; and a build before v187 is not asked for `js/ui/monthsummary.js` | the build every phone should be on by then |
 
 ### Known NOT covered
 
