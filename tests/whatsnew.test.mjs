@@ -87,6 +87,11 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    { build: 'v190', items: [
+        { title: 'תיקון: נגיעה כפולה וחצות',
+            text: 'נגיעה כפולה ליד שם עובד כבר לא מסמנת עובד אחר כנעדר, ושיבוץ שנפתח לפני חצות נשמר ליום שהיה כתוב במסך.',
+            where: 'היום ← לא נרשמו', go: 'day' }
+    ] },
     { build: 'v189', items: [
         { title: 'דוחות: כל קבוצה בתקופה שלה',
             text: 'הדוח נפתח כשהעובדים השבועיים בשבוע הנוכחי והדו־שבועיים בשבועיים שלהם, ושבוע קודם שעדיין פתוח כתוב מתחת לקבוצה.',

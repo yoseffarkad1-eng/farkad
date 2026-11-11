@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v189';
+const APP_VERSION = 'v190';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -309,23 +309,68 @@ function watchForCrashes() {
 // The costliest input error is the wrong date, and the app used to hand it out itself:
 // "today" was computed once at load, and a phone app is not reopened, it is resumed -
 // often the next morning, where the first record of the new day landed on yesterday.
+//
+// AND NEVER UNDER AN OPEN WRITER. The follow used to be made the moment the page came back,
+// whatever was open over the day. The assign sheet, «לאן הלך» and a site's picker each name
+// their day once, when they are drawn - the sheet's meta line is the only thing on the
+// screen that says which day is being written - and every one of them writes to State.date
+// at the tap, as «🧹 רוקן אתר» does after its question. A sheet opened at 23:50 on Tuesday
+// and taken up again at 00:05 still said «יום שלישי 10/11», and the site tapped in it was
+// written to Wednesday, rate-stamped and queued for the cloud; Tuesday was left with
+// nothing, as if he had not worked. (The review of v189, c1 and c2.)
+//
+// So while anything that midEdit (js/ui/offline.js) counts is open - any dialog, a field
+// holding what somebody typed - the date stays where the screen says it is, and every write
+// lands on the day the surface named. The follow is owed, not dropped. It is made at the
+// first moment nothing is open: the instant the last dialog closes, in that same turn, so
+// no frame of the old day is painted after the close; or the next time the page is brought
+// back. Never on a timer: a day changed at some moment nobody chose is a day changed under
+// a finger already on its way to the glass. And, exactly as before, only if the screen is
+// still on the old today - a day somebody moved to on purpose meanwhile is his choice.
+//
+// Nor is the day DRAWN again while something is being typed into it. The redraw a new day
+// asks for (the «היום» button, the drawer's today) takes a focused box out of the page, and
+// a box taken away by a redraw commits nothing (dayTearingDown, js/ui/day.js): the digits a
+// man was typing into a site's count when the phone locked were thrown away on unlocking.
+// They are kept; the redraw comes with the next one.
 function watchDayRollover() {
     let knownToday = todayStr();
+    // The old today the screen is to leave once nothing is open over it; null when no follow
+    // is owed.
+    let leaving = null;
+    const busy = () => typeof midEdit === 'function' && midEdit();
+
+    const follow = () => {
+        if (leaving === null || busy()) return false;
+        const from = leaving;
+        leaving = null;
+        if (State.date !== from) return false;
+        hideUndo();
+        State.date = todayStr();
+        return true;
+    };
+
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState !== 'visible') return;
         const now = todayStr();
-        if (now === knownToday) return;
-
-        // Follow the calendar only if the screen was sitting on the old today. Someone
-        // deliberately fixing a past date must not be yanked off it mid-correction.
-        if (State.date === knownToday) {
-            hideUndo();
-            State.date = now;
+        const turned = now !== knownToday;
+        if (turned) {
+            // Follow the calendar only if the screen was sitting on the old today. Someone
+            // deliberately fixing a past date must not be yanked off it mid-correction.
+            if (State.date === knownToday) leaving = knownToday;
+            knownToday = now;
+            takeDailySnapshot();
         }
-        knownToday = now;
-        takeDailySnapshot();
-        render();
+        if (follow() || (turned && !busy())) render();
     });
+
+    // The moment the last dialog closes. Every dialog is a .modal shown and hidden by its
+    // style, the attribute js/ui/modal.js watches for the same moment (it gives the focus
+    // back first: its observer was made first, at boot).
+    if (typeof MutationObserver !== 'function') return;
+    const closed = new MutationObserver(() => { if (follow()) render(); });
+    document.querySelectorAll('.modal').forEach(modal =>
+        closed.observe(modal, { attributes: true, attributeFilter: ['style'] }));
 }
 
 // The boot, and what it is deliberately NOT waiting for.

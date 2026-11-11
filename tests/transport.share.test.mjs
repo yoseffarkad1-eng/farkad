@@ -21,6 +21,11 @@
 //   the first meeting with the cloud, in each of its four cases;
 //   the rules of today refusing every path: «עדיין לא משותף», nothing lost;
 //   three places the app can be stopped mid-step, and what the next opening makes of each;
+//   a disk that refuses (the review of v189, c3 and c4): a plan or a list another phone
+//     made, the same fact held only in memory, a disk that hands back other bytes, a copy
+//     aside and then the plan refused, «use mine» refused, a session with no disk at all,
+//     and the ladder counted - nothing drawn or sent that the disk does not hold, and no
+//     write again at once unless the record moved;
 //   what stays on the phone (a driver's «נפתח» mark), v174's rule, pruning, a document
 //     of a version this build does not know, the backup and the rescue file;
 //   and the REAL older builds, out of Git, beside a cloud that holds shared plans.
@@ -288,9 +293,13 @@ await block('a change goes up, the other phone draws it - and the record knows n
     same('the write fence did not move', a.Store.fenceState(), fence);
     same('the record on the disk is as it was', a.raw('scheduleData:v2'), disk);
     same('and the record still says it is synced', a.Sync.status, 'synced');
-    const sent = cloud.transport.writes.map(write => JSON.stringify(write.data)).join('\n');
+    // `updatedAt` is read for its shape and nothing else: it is the clock, and a write
+    // whose milliseconds are .052 or .054 (two in a thousand) matched the phone prefixes
+    // below - a red check that measured nothing but the moment of the run.
+    const sent = cloud.transport.writes.map(write => JSON.stringify(Object.assign({}, write.data, { updatedAt: undefined }))).join('\n');
     check('what went up carries ids and vehicle names, and no man\'s name, phone or site',
-        !/אחמד|מוחמד|יוסי|סמיר|Ali|052|054|הרצליה|חיפה|dailyRate|p_0/.test(sent), sent.slice(0, 200));
+        cloud.transport.writes.every(write => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(write.data.updatedAt))
+        && !/אחמד|מוחמד|יוסי|סמיר|Ali|052|054|הרצליה|חיפה|dailyRate|p_0/.test(sent), sent.slice(0, 200));
     check('and no mark of an opened chat', !/marks|openedAt|sig/.test(sent));
     same('every key this phone wrote is a transport key of its own',
         transportKeys(a), [dayKey(DAY), ENABLED, SETTINGS, sharedKey(DOC), sharedKey('settings')].sort());
@@ -657,6 +666,341 @@ await block('no room to put this phone\'s copy aside: the shared plan is not dra
     cloud.transport.publish();
     await settleUntil(() => b.raw(asideKey(DOC)) !== null, 5000);
     same('with room, the copy goes aside and the shared plan is drawn', [seats(b), shareOf(b).notices(DAY).length], ['tv_01=w_01+[w_02]', 1]);
+});
+
+// ================================================================== a disk that refuses (the review of v189)
+//
+// c3: the disk refused an ADOPTED plan and memory kept it anyway. The next answer from the
+// cloud found memory equal to itself ('same') and recorded the cloud's revision as this
+// phone's; after a reopen the disk's older plan read as this phone's change and was sent
+// over the other phone's - on every phone, with no copy aside and no notice. c4: an answer
+// that recorded nothing counted as progress, and the phone wrote again at once, for ever.
+// Each block below is one of the reviewers' sequences, and each was red on v189.
+
+// What the DISK holds for a day: what the next opening will read.
+const diskSeats = (device, date = DAY) => {
+    const raw = device.raw(dayKey(date));
+    if (!raw) return null;
+    const trips = JSON.parse(raw).trips || {};
+    return Object.keys(trips).sort().map(v => `${v}=${trips[v].driver || '?'}+[${trips[v].passengers.join(',')}]`).join(' ');
+};
+const recordOf = (device, name = DOC) => (device.raw(sharedKey(name)) ? JSON.parse(device.raw(sharedKey(name))) : null);
+const writesBy = (cloud, id, from = 0) => cloud.transport.attempts.slice(from)
+    .filter(one => one.kind === 'write' && one.data && one.data.updatedBy === id).length;
+// The moment a phone has HEARD a revision: its listener was handed it (the fake hands a
+// listener the whole list, synchronously, and keeps it as `last`).
+const heard = (cloud, line, name, revision) => settleUntil(() => cloud.transport.subscribers.some(one => one.phone === line
+    && (one.last || []).some(doc => doc.name === name && doc.data.revision === revision)), 5000);
+// Closed and opened again, as iPhones do: the disk carried over, a new connection.
+const reopened = (cloud, device, id) => {
+    const disk = device.dump();
+    shareOf(device).disconnect();
+    const again = phone(id, { storage: disk });
+    shareOf(again).connect(cloud.transport.phone().adapter);
+    return again;
+};
+const offOf = (device, id) => (device.call('transportSettings').vehicles.find(v => v.id === id) || {}).off;
+
+await block('a full disk refuses the plan another phone made: this phone draws what it keeps, says so, and after a reopen the other phone\'s plan is intact everywhere', async () => {
+    // 1. The first reviewer's sequence: full, room again with no word from the cloud, reopened.
+    {
+        const { cloud, a, b, lineB } = await pair();
+        const from = cloud.transport.attempts.length;
+        b.setQuota(key => String(key).indexOf('farkadTransport:') === 0);
+        place(a, 'w_02', 'tv_01', 2);
+        given('B has heard revision 2', await heard(cloud, lineB, DOC, 2));
+        await settle(TICK * 10);
+        same('B draws what its disk holds - not the plan the disk refused', [seats(b), diskSeats(b)], ['tv_01=w_01+[]', 'tv_01=w_01+[]']);
+        same('its record of the day is the revision its disk holds', recordOf(b).rev, 1);
+        same('the line says there is no room, in the sentence it already had', shareOf(b).state(), 'noRoom');
+        same('and the screen is not told that a change was lost: no change of the person\'s is pending', b.call('transportWasKept'), true);
+        await settle(TICK * 20);
+        same('B sent nothing', writesBy(cloud, 'd_b', from), 0);
+
+        // Room again - a write of the record reclaims a restore point - and no word from the cloud.
+        b.setQuota(null);
+        await settle(TICK * 30);
+        same('with room and no new word, B claims no revision its disk does not hold', [recordOf(b).rev, diskSeats(b)], [1, 'tv_01=w_01+[]']);
+
+        const again = reopened(cloud, b, 'd_b');
+        given('reopened, it settles', await idle(cloud, a, again), shareOf(again).state());
+        same('nothing was sent over the other phone\'s plan', [rev(cloud), cloudSeats(cloud)], [2, 'tv_01=w_01+[w_02]']);
+        same('A still has its plan, and B has it now, on its disk', [seats(a), seats(again), diskSeats(again)],
+            ['tv_01=w_01+[w_02]', 'tv_01=w_01+[w_02]', 'tv_01=w_01+[w_02]']);
+        same('nothing aside and nobody told: there was no conflict', [a.raw(asideKey(DOC)), again.raw(asideKey(DOC)),
+            shareOf(a).notices(DAY), shareOf(again).notices(DAY)], [null, null, [], []]);
+        shareOf(a).disconnect();
+        shareOf(again).disconnect();
+    }
+    // 2. The second reviewer's: full, room again, the next word is a change to another day, reopened.
+    {
+        const { cloud, a, b, lineB } = await pair();
+        b.setQuota(key => String(key).indexOf('farkadTransport:') === 0);
+        place(a, 'w_02', 'tv_01', 2);
+        given('B has heard revision 2', await heard(cloud, lineB, DOC, 2));
+        await settle(TICK * 10);
+        same('full: B draws what its disk holds', [seats(b), diskSeats(b), recordOf(b).rev], ['tv_01=w_01+[]', 'tv_01=w_01+[]', 1]);
+        b.setQuota(null);
+        place(a, 'w_03', 'tv_05', 1, NEXT);
+        given('B has heard the other day', await heard(cloud, lineB, `day_${NEXT}`, 1));
+        await settle(TICK * 10);
+        same('with room, that word draws the plan B could not keep before - and the disk has it', [seats(b), diskSeats(b), recordOf(b).rev],
+            ['tv_01=w_01+[w_02]', 'tv_01=w_01+[w_02]', 2]);
+        const again = reopened(cloud, b, 'd_b');
+        given('reopened, it settles', await idle(cloud, a, again), shareOf(again).state());
+        same('nothing was sent over the other phone\'s plan', [rev(cloud), cloudSeats(cloud), seats(a), seats(again)],
+            [2, 'tv_01=w_01+[w_02]', 'tv_01=w_01+[w_02]', 'tv_01=w_01+[w_02]']);
+        same('and the other day is on both', [seats(a, NEXT), seats(again, NEXT)], ['tv_05=w_03+[]', 'tv_05=w_03+[]']);
+        shareOf(a).disconnect();
+        shareOf(again).disconnect();
+    }
+});
+
+await block('a full disk refuses the list another phone changed: a vehicle turned off stays off on every phone', async () => {
+    const { cloud, a, b, lineB } = await pair();
+    a.call('transportSetVehicleSeats', 'tv_02', 6);
+    given('the list is shared, and on B\'s disk', await idle(cloud, a, b) && rev(cloud, 'settings') === 1 && b.raw(SETTINGS) !== null);
+    b.setQuota(key => String(key).indexOf('farkadTransport:') === 0);
+    same('A turns a vehicle off from today', a.call('transportSetVehicleOff', 'tv_03', DAY), true);
+    given('B has heard the list at revision 2', await heard(cloud, lineB, 'settings', 2));
+    await settle(TICK * 10);
+    same('B says there is no room', shareOf(b).state(), 'noRoom');
+    same('and draws its list as its disk holds it', [offOf(b, 'tv_03'), JSON.parse(b.raw(SETTINGS)).vehicles.find(v => v.id === 'tv_03').off],
+        [undefined, undefined]);
+    same('its record of the list is the revision its disk holds', recordOf(b, 'settings').rev, 1);
+    b.setQuota(null);
+    await settle(TICK * 30);
+    const again = reopened(cloud, b, 'd_b');
+    given('reopened, it settles', await idle(cloud, a, again), shareOf(again).state());
+    same('the list in the cloud is still A\'s, with the vehicle off', [rev(cloud, 'settings'),
+        cloud.transport.docs.get('settings').vehicles.find(v => v.id === 'tv_03').off], [2, DAY]);
+    same('off on A, and off on B', [offOf(a, 'tv_03'), offOf(again, 'tv_03')], [DAY, DAY]);
+    same('nothing aside and nobody told', [a.raw(asideKey('settings')), again.raw(asideKey('settings')),
+        shareOf(a).notices(DAY), shareOf(again).notices(DAY)], [null, null, [], []]);
+    shareOf(a).disconnect();
+    shareOf(again).disconnect();
+});
+
+await block('the same fact, held only in memory, is not a revision this phone holds - and a change the disk refused is not sent', async () => {
+    // B's disk refuses the DAY and takes the share record: the shape in which memory saying
+    // what the cloud says could be recorded as a revision the disk does not have.
+    const { cloud, a, b, lineB } = await pair();
+    const from = cloud.transport.attempts.length;
+    b.setQuota(key => key === dayKey(DAY));
+    place(b, 'w_02', 'tv_01', 2);
+    same('B\'s change is on its screen and not on its disk, and the screen says so',
+        [seats(b), diskSeats(b), b.call('transportWasKept')], ['tv_01=w_01+[w_02]', 'tv_01=w_01+[]', false]);
+    await settle(TICK * 20);
+    same('it is owed, and NOT sent: the cloud is to hold what a phone keeps', [shareOf(b).owed(), writesBy(cloud, 'd_b', from), rev(cloud)], [DOC, 0, 1]);
+
+    place(a, 'w_02', 'tv_01', 2);                // A makes the same change
+    given('B has heard revision 2', await heard(cloud, lineB, DOC, 2));
+    await settle(TICK * 10);
+    same('B\'s record stays at the revision its disk holds', recordOf(b).rev, 1);
+    same('asked again, B answers that it could not keep it', shareOf(b).take(DOC, cloud.transport.docs.get(DOC)), 'unkept');
+
+    const again = reopened(cloud, b, 'd_b');
+    given('reopened, with room, it settles', await idle(cloud, a, again), shareOf(again).state());
+    same('nothing was sent over A\'s plan', [rev(cloud), cloudSeats(cloud), seats(a)], [2, 'tv_01=w_01+[w_02]', 'tv_01=w_01+[w_02]']);
+    same('and B holds it, on its disk', [seats(again), diskSeats(again), recordOf(again).rev], ['tv_01=w_01+[w_02]', 'tv_01=w_01+[w_02]', 2]);
+    same('nothing aside and nobody told', [again.raw(asideKey(DOC)), shareOf(again).notices(DAY), shareOf(a).notices(DAY)], [null, [], []]);
+
+    // With room, the person's change goes up as it always did.
+    place(again, 'w_04', 'tv_01', 3);
+    given('it goes up', await idle(cloud, a, again));
+    same('as revision 3, and A draws it', [rev(cloud), seats(a)], [3, 'tv_01=w_01+[w_02,w_04]']);
+    shareOf(a).disconnect();
+    shareOf(again).disconnect();
+});
+
+// "On the disk" is asked of the disk itself (Store.durableGet), not of Store's session
+// cache: that cache answers with what this session wrote, and a disk that ACCEPTS a write
+// and hands back something else has not got it. Pinned, because the cache would say yes.
+await block('a disk that takes a write and hands back something else does not hold it: nothing of it is sent', async () => {
+    const { cloud, a, b } = await pair();
+    const from = cloud.transport.attempts.length;
+    b.corruptWhen(key => key === dayKey(DAY));
+    place(b, 'w_03', 'tv_01', 2);
+    given('the disk took the write and holds something else', String(b.raw(dayKey(DAY))).indexOf('\u0000corrupted') !== -1);
+    same('B\'s session holds the change, and the screen says it was not kept', [seats(b), b.call('transportWasKept')], ['tv_01=w_01+[w_03]', false]);
+    await settle(TICK * 20);
+    same('it is owed and NOT sent', [shareOf(b).owed(), writesBy(cloud, 'd_b', from), rev(cloud)], [DOC, 0, 1]);
+    // A disk that keeps what it is given again: the next change carries the first with it.
+    b.corruptWhen(() => false);
+    place(b, 'w_04', 'tv_01', 3);
+    given('it goes up', await idle(cloud, a, b));
+    same('both changes, as the next revision, drawn on A', [rev(cloud), seats(a)], [2, 'tv_01=w_01+[w_03,w_04]']);
+    shareOf(a).disconnect();
+    shareOf(b).disconnect();
+});
+
+await block('a copy aside, and then the shared plan refused: the copy goes back as it was and nothing is offered over a plan not drawn', async () => {
+    const run = async staged => {
+        const { cloud, a, b } = await pair();
+        shareOf(b).flushDelayMs = 100000;        // B has a change of its own, on its disk, not sent yet
+        place(b, 'w_03', 'tv_01', 2);
+        if (staged) b.putRaw(asideKey(DOC), staged);
+        b.setQuota(key => key === dayKey(DAY)); // room for a copy aside, none for the day
+        place(a, 'w_02', 'tv_01', 2);
+        await settleUntil(() => shareOf(b).state() === 'noRoom', 5000);
+        return { cloud, a, b };
+    };
+    const { cloud, a, b } = await run(null);
+    same('the line says there is no room', shareOf(b).state(), 'noRoom');
+    same('B draws its own plan, which is what its disk holds', [seats(b), diskSeats(b)], ['tv_01=w_01+[w_03]', 'tv_01=w_01+[w_03]']);
+    same('and no copy aside is offered beside a shared plan it did not draw', [b.raw(asideKey(DOC)), shareOf(b).notices(DAY)], [null, []]);
+    shareOf(b).flush();
+    await settle(TICK * 10);
+    same('nothing of B\'s is sent over the winner', [rev(cloud), cloudSeats(cloud)], [2, 'tv_01=w_01+[w_02]']);
+    b.setQuota(null);
+    cloud.transport.publish();
+    await settleUntil(() => b.raw(asideKey(DOC)) !== null && seats(b) === 'tv_01=w_01+[w_02]', 5000);
+    same('with room, B\'s copy goes aside, and the shared plan is drawn and on the disk',
+        [seats(b), diskSeats(b), shareOf(b).notices(DAY)], ['tv_01=w_01+[w_02]', 'tv_01=w_01+[w_02]', [{ name: DOC, why: 'changed' }]]);
+    same('the copy aside is B\'s own plan', JSON.parse(JSON.parse(b.raw(asideKey(DOC))).text).trips.tv_01.passengers, ['w_03']);
+    shareOf(a).disconnect();
+    shareOf(b).disconnect();
+
+    // A copy aside from before, not answered yet: put back byte for byte.
+    const earlier = JSON.stringify({ v: 1, why: 'changed', text: JSON.stringify({ date: DAY, unavailable: {}, status: {}, trips: { tv_02: { driver: 'w_04', passengers: [], seats: {} } } }), at: 1 });
+    const second = await run(earlier);
+    same('an earlier copy aside is on the disk exactly as it was', second.b.raw(asideKey(DOC)), earlier);
+    same('and B still draws its own plan', [seats(second.b), diskSeats(second.b)], ['tv_01=w_01+[w_03]', 'tv_01=w_01+[w_03]']);
+    shareOf(second.a).disconnect();
+    shareOf(second.b).disconnect();
+});
+
+await block('«use mine» on a disk that refuses it: the shared plan stays drawn, the copy stays aside, nothing is sent - and nothing is reversed after a reopen', async () => {
+    const { cloud, a, b } = await pair();
+    cloud.transport.muted = true;
+    place(a, 'w_02', 'tv_01', 2);
+    place(b, 'w_03', 'tv_01', 2);
+    await settleUntil(() => shareOf(a).owed() === null && shareOf(b).owed() === null, 5000);
+    cloud.transport.muted = false;
+    cloud.transport.publish();
+    given('both settle', await idle(cloud, a, b));
+    const won = cloudSeats(cloud);
+    const loser = won === 'tv_01=w_01+[w_02]' ? b : a;
+    const winner = loser === a ? b : a;
+    const mine = loser === b ? 'tv_01=w_01+[w_03]' : 'tv_01=w_01+[w_02]';
+    const copy = loser.raw(asideKey(DOC));
+    given('the loser holds the plan that won, and its own aside', seats(loser) === won && copy !== null, won);
+
+    loser.setQuota(key => key === dayKey(DAY));
+    same('use mine, refused by the disk', shareOf(loser).useMine(DOC), false);
+    same('the shared plan is still what is drawn, and what the disk holds', [seats(loser), diskSeats(loser)], [won, won]);
+    same('the copy aside is kept as it was, with its notice and its two buttons', [loser.raw(asideKey(DOC)), shareOf(loser).notices(DAY)],
+        [copy, [{ name: DOC, why: 'changed' }]]);
+    same('and the screen says the change was not saved', loser.call('transportWasKept'), false);
+    await settle(TICK * 20);
+    same('nothing was sent', [rev(cloud), cloudSeats(cloud)], [2, won]);
+
+    const again = reopened(cloud, loser, loser === a ? 'd_a' : 'd_b');
+    given('reopened, it settles', await idle(cloud, again, winner), shareOf(again).state());
+    same('nothing was sent over the shared plan, and the other phone still has it', [rev(cloud), cloudSeats(cloud), seats(winner)], [2, won, won]);
+    same('the copy is still offered', shareOf(again).notices(DAY), [{ name: DOC, why: 'changed' }]);
+    same('use mine, with room: its plan is its plan again', (shareOf(again).useMine(DOC), seats(again)), mine);
+    given('it goes up', await idle(cloud, again, winner));
+    same('as revision 3, drawn on the other phone with nothing said', [rev(cloud), seats(winner), shareOf(winner).notices(DAY)], [3, mine, []]);
+    shareOf(winner).disconnect();
+    shareOf(again).disconnect();
+});
+
+// THE ONE EXCEPTION, pinned so that the rule above is not taken further than it goes: a
+// session with NO disk at all (storage refused for a reason that is not room - js/store.js
+// then holds everything in memory for the rest of the session, "memory is the whole of
+// storage here"). Nothing of that session outlives it, so there is no older disk to come
+// back as this phone's change, and the shared plan is drawn there as it always was.
+await block('a session with no disk at all still draws the shared plan, and its disk is what it was at the next opening', async () => {
+    const { cloud, a, b, lineB } = await pair();
+    const from = cloud.transport.attempts.length;
+    const before = b.raw(dayKey(DAY));
+    b.failWrite(key => String(key).indexOf('farkadTransport:') === 0);
+    place(a, 'w_02', 'tv_01', 2);
+    given('B has heard revision 2', await heard(cloud, lineB, DOC, 2));
+    await settle(TICK * 10);
+    given('the first refused write took the disk away for the session', b.Store.available === false);
+    same('B draws the shared plan, held where this session holds everything', seats(b), 'tv_01=w_01+[w_02]');
+    same('it owes nothing and says it is shared', [shareOf(b).owed(), shareOf(b).state()], [null, 'shared']);
+    await settle(TICK * 20);
+    same('and sends nothing', writesBy(cloud, 'd_b', from), 0);
+    same('the disk itself still holds what it held', [b.raw(dayKey(DAY)), recordOf(b).rev], [before, 1]);
+    const again = reopened(cloud, b, 'd_b');
+    given('opened again with a disk, it settles', await idle(cloud, a, again), shareOf(again).state());
+    same('it takes the shared plan from the cloud, and nothing went over it', [rev(cloud), seats(again), seats(a)],
+        [2, 'tv_01=w_01+[w_02]', 'tv_01=w_01+[w_02]']);
+    shareOf(a).disconnect();
+    shareOf(again).disconnect();
+});
+
+await block('a disk that refuses the share record: the phone asks on the ladder, not in a loop - counted over fifty minutes of a phone\'s time', async () => {
+    // The shipped ladder (5 s, doubling, never slower than 5 min) at a thousandth of its
+    // time, so that three seconds here are fifty minutes on a phone.
+    const LADDER = { retryMs: 5, retryMaxMs: 300 };
+    const rungs = window => {
+        let at = 0;
+        for (let n = 0; ; n += 1) {
+            const wait = Math.min(LADDER.retryMaxMs, LADDER.retryMs * Math.pow(2, Math.min(n, 10)));
+            if (at + wait > window) return n;
+            at += wait;
+        }
+    };
+    // The most writes the ladder allows in a window: one per rung, and three more for the
+    // ways in that are not the ladder (the listener's word, the write it answered).
+    const ceiling = window => rungs(window) + 3;
+    check('the ladder scaled here is the one the file ships: 5 s, doubling, never slower than 5 min',
+        /\n\s*retryMs: 5000,\n\s*retryMaxMs: 300000\n/.test(SHARE));
+
+    // 1. The suite's own case: the disk takes the day and refuses the share record.
+    {
+        const { cloud, a, b } = await pair();
+        Object.assign(shareOf(b), LADDER);
+        b.setQuota(key => String(key).indexOf('farkadTransport:shared:') === 0);
+        const from = cloud.transport.attempts.length;
+        place(a, 'w_02', 'tv_01', 2);
+        await settle(3000);
+        const writes = writesBy(cloud, 'd_b', from);
+        check(`three seconds - fifty minutes on a phone - and B wrote ${writes} times: no more than the ladder's ${ceiling(3000)}`,
+            writes <= ceiling(3000), `${writes} writes`);
+        check('and it did ask again: the ladder is alive', writes >= 2, `${writes} writes`);
+        same('every one of them refused: the other phone\'s plan was never written over', [rev(cloud), cloudSeats(cloud)], [2, 'tv_01=w_01+[w_02]']);
+        same('B holds the plan it was handed, on its disk', [seats(b), diskSeats(b)], ['tv_01=w_01+[w_02]', 'tv_01=w_01+[w_02]']);
+        b.setQuota(null);
+        given('with room, it settles at the cloud\'s revision', await idle(cloud, a, b), shareOf(b).state());
+        const quiet = cloud.transport.attempts.length;
+        await settle(LADDER.retryMaxMs * 3);
+        same('and then asks nothing more', cloud.transport.attempts.length, quiet);
+        shareOf(a).disconnect();
+        shareOf(b).disconnect();
+    }
+    // 2. A full disk: B cannot keep the plan at all - it says so and asks nothing.
+    {
+        const { cloud, a, b } = await pair();
+        Object.assign(shareOf(b), LADDER);
+        b.setQuota(key => String(key).indexOf('farkadTransport:') === 0);
+        const from = cloud.transport.attempts.length;
+        place(a, 'w_02', 'tv_01', 2);
+        await settle(1500);
+        same('B, full, wrote nothing in twenty-five minutes of a phone\'s time', writesBy(cloud, 'd_b', from), 0);
+        same('and says there is no room', shareOf(b).state(), 'noRoom');
+        shareOf(a).disconnect();
+        shareOf(b).disconnect();
+    }
+    // 3. B's own change, on its disk, the share record refused: the write LANDS and cannot be recorded.
+    {
+        const { cloud, a, b } = await pair();
+        Object.assign(shareOf(b), LADDER);
+        b.setQuota(key => String(key).indexOf('farkadTransport:shared:') === 0);
+        const from = cloud.transport.attempts.length;
+        place(b, 'w_03', 'tv_01', 2);
+        await settle(1500);
+        const writes = writesBy(cloud, 'd_b', from);
+        check(`a write that landed and could not be recorded: ${writes} writes in twenty-five minutes, no more than ${ceiling(1500)}`,
+            writes <= ceiling(1500), `${writes} writes`);
+        same('it landed once and was never written over', [rev(cloud), cloudSeats(cloud), seats(a)], [2, 'tv_01=w_01+[w_03]', 'tv_01=w_01+[w_03]']);
+        shareOf(a).disconnect();
+        shareOf(b).disconnect();
+    }
 });
 
 await block('two windows of the app on one phone: the window that did not adopt does not send its old copy', async () => {

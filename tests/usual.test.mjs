@@ -587,6 +587,66 @@ await block('a double tap is one tap, and a chip the record no longer agrees wit
     same('and the tray drawn now has no chip for him', tray(moved).of('אמיר').offer, null);
 });
 
+// The review of v189 (c0): the man after the one placed often has NO chip, and what came
+// under the finger was his «נעדר» or his name - or, the last man waiting placed, a ✕ of
+// «נעדרים». The trays have one clock (trayTapTooSoon, js/ui/day.js); tests/usual.browser.mjs
+// measures the layouts, this the rule, on the harness's own clock.
+await block('the trays have one clock, and «נעדר» in the tray has its own step on ↶', async () => {
+    const device = seeded('d_clock');
+    ['placePickerModal', 'placePickerTitle', 'placePickerContext', 'placePickerList'].forEach(name => device.dom.register(name));
+    const control = (name, cls) => tray(device).node.querySelectorAll('.chip')
+        .find(chip => chip.querySelectorAll('.chip-main')[0].textContent.startsWith(name)).querySelectorAll(cls)[0];
+    const cancel = name => device.run('renderAbsentTray()').querySelectorAll('.chip')
+        .find(chip => chip.querySelectorAll('.chip-main')[0].textContent.startsWith(name)).querySelectorAll('.chip-side')[0];
+    const absent = id => device.run(`isAbsent(State.schedule, State.date, ${JSON.stringify(id)}, 'actual')`);
+    tray(device).of('אמיר').offer.click();
+    const placed = dayOf(device, 'w_01');
+    given('the chip placed him', JSON.parse(placed).entries[0].placeId === A, placed);
+    device.clock.now += 200;
+    control('דאוד', '.chip-side').click();
+    same('200 ms after a chip, another man\'s «נעדר» marks nobody absent', dayOf(device, 'w_04'), 'null');
+    device.clock.now += 200;
+    control('גדי', '.chip-main').click();
+    same('nor does another man\'s name open «לאן הלך»', device.dom.getElementById('placePickerModal').style.display || '', '');
+    device.clock.now += 200;
+    cancel('זיאד').click();
+    check('nor does a ✕ of «נעדרים» cancel an absence', absent('w_07'));
+    same('and the step on ↶ is still the chip\'s', bare(device.run('undoLabel')), 'אמיר דוגמה נרשם באתר צפון');
+
+    device.clock.now += 701;
+    control('דאוד', '.chip-side').click();
+    check('after the window «נעדר» marks him absent', absent('w_04'));
+    same('with a step of its own on ↶, in the words of the sheet\'s «נעדר»', bare(device.run('undoLabel')), 'דאוד דוגמה נרשם כנעדר');
+    device.run('runUndo()');
+    same('↶ takes back his absence and nothing else', [absent('w_04'), JSON.parse(dayOf(device, 'w_04') || '{"entries":[]}').entries.length, dayOf(device, 'w_01')],
+        [false, 0, placed]);
+    device.run('runRedo()');
+    check('↷ marks him absent again', absent('w_04'));
+
+    // And «לאן הלך», which the name opens: a site picked there has its own step on ↶ too -
+    // it was a bare commit, and ↶ took back the step before it.
+    device.clock.now += 701;
+    control('גדי', '.chip-main').click();
+    const pick = device.dom.getElementById('placePickerList').querySelectorAll('.place-btn')
+        .find(node => node.textContent.includes('אתר דרום'));
+    given('the name opened «לאן הלך» with the site in it', Boolean(pick));
+    pick.click();
+    same('a site picked in «לאן הלך» is his', JSON.parse(dayOf(device, 'w_03')).entries.map(entry => entry.placeId), [B]);
+    same('with a step of its own on ↶, in the sheet\'s words', bare(device.run('undoLabel')), 'גדי דוגמה נרשם באתר דרום');
+    device.run('runUndo()');
+    same('↶ takes back that pick and leaves the absence before it', [JSON.parse(dayOf(device, 'w_03') || '{"entries":[]}').entries.length, absent('w_04')], [0, true]);
+
+    // A double tap on «נעדר» itself: the next man's «נעדר» slides into its place.
+    device.clock.now += 5000;
+    control('גדי', '.chip-side').click();
+    device.clock.now += 150;
+    control('הלל', '.chip-side').click();
+    same('a «נעדר» 150 ms after a «נעדר» marks only the first man', [absent('w_03'), dayOf(device, 'w_05')], [true, 'null']);
+    device.clock.now += 701;
+    control('הלל', '.chip-side').click();
+    check('and after the window the next man is one tap', absent('w_05'));
+});
+
 await block('while recording is held the tap records nothing and offers no undo', async () => {
     const device = seeded('d_held');
     const drawn = tray(device);
