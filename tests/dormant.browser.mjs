@@ -37,7 +37,7 @@ import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import { launch, openPhone, seed, bare, FORTNIGHT } from './accounts.world.mjs';
 
-export const BASE = '9846d7f';
+export const BASE = '4454f38';
 
 const root = new URL('..', import.meta.url).pathname;
 const git = args => execFileSync('git', ['-C', root].concat(args), { maxBuffer: 256 * 1024 * 1024 });

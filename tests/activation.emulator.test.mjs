@@ -69,12 +69,14 @@ const source = readFileSync(ADAPTER, 'utf8');
 const RULES_LIVE = '9846d7f';
 // The builds a phone may still be on when the owner presses the button: all four were
 // served on 2026-11-10, and v186 is the build v190 is made on top of.
-const OLDER = [['v180', 'd3103d6'], ['v183', '1af6729'], ['v184', '990f5b4'], ['v186', RULES_LIVE]];
+// v187 (4454f38, «סיכום חודש») joined at v190, when main moved to it; its rules are v186's.
+const OLDER = [['v180', 'd3103d6'], ['v183', '1af6729'], ['v184', '990f5b4'], ['v186', RULES_LIVE], ['v187', '4454f38']];
+const SINCE_V187 = ['js/ui/monthsummary.js'];
 const NOT_ON_MAIN = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
     'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
 
 function sourcesOf(name, sha) {
-    const order = loadOrder().filter(file => NOT_ON_MAIN.indexOf(file) === -1);
+    const order = loadOrder().filter(file => NOT_ON_MAIN.indexOf(file) === -1 && (name === 'v187' || SINCE_V187.indexOf(file) === -1));
     const files = order.filter(file => {
         try { git(['cat-file', '-e', `${sha}:${file}`]); return true; } catch (error) { return false; }
     });

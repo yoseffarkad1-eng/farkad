@@ -572,6 +572,9 @@ function renderReportActions() {
     actions.appendChild(button(
         client ? `📊 יצוא חיוב - ${isolate(client.name)}` : '📊 יצוא',
         'btn-secondary', exportReports));
+    // «סיכום חודש» (js/ui/monthsummary.js), when that file is on this build: its one way
+    // in, a row of this menu. It reads a month of its own and never this screen's range.
+    if (typeof monthSummaryEntry === 'function') actions.appendChild(monthSummaryEntry());
     menu.appendChild(actions);
     return menu;
 }

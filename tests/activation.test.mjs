@@ -559,9 +559,13 @@ let ACTIVATED = null;
     const git = args => execFileSync('git', ['-C', sourceRoot()].concat(args), { maxBuffer: 64 * 1024 * 1024 });
     const NOT_ON_MAIN = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js',
         'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
-    const order = loadOrder().filter(file => NOT_ON_MAIN.indexOf(file) === -1);
+    // MOVED AT v190 (main moved to v187 under it): «סיכום חודש» (js/ui/monthsummary.js) is
+    // v187's, so a build before v187 is not asked for it - and v187 itself joins the list.
+    const SINCE_V187 = ['js/ui/monthsummary.js'];
+    const wholeOrder = loadOrder().filter(file => NOT_ON_MAIN.indexOf(file) === -1);
     const answers = {};
-    for (const [name, sha] of [['v180', 'd3103d6'], ['v183', '1af6729'], ['v184', '990f5b4'], ['v186', '9846d7f']]) {
+    for (const [name, sha] of [['v180', 'd3103d6'], ['v183', '1af6729'], ['v184', '990f5b4'], ['v186', '9846d7f'], ['v187', '4454f38']]) {
+        const order = wholeOrder.filter(file => name === 'v187' || SINCE_V187.indexOf(file) === -1);
         suite(`V9b: ${name}, its real bytes out of Git, on a record that is turned on beside it`);
 
         let present = false;
@@ -627,9 +631,9 @@ let ACTIVATED = null;
         same('and this build, beside it, goes on recording', (put(mine, '2026-10-19', 'w_nasser'), await settled([mine]), Boolean(cloud.doc.days['2026-10-19'])), true);
     }
     suite('V9b: every one of them answers the same way');
-    same('v180, v183, v184 and v186: a day before, yes; a day, an old-style closure and a restore after, refused',
+    same('v180, v183, v184, v186 and v187: a day before, yes; a day, an old-style closure and a restore after, refused',
         Object.keys(answers).map(name => [name, answers[name].dayBefore, answers[name].dayRefused, answers[name].closeRefused, answers[name].restoreRefused]),
-        [['v180', true, true, true, true], ['v183', true, true, true, true], ['v184', true, true, true, true], ['v186', true, true, true, true]]);
+        [['v180', true, true, true, true], ['v183', true, true, true, true], ['v184', true, true, true, true], ['v186', true, true, true, true], ['v187', true, true, true, true]]);
     console.log('  measured, what each older phone says of itself after its write is refused: ' + JSON.stringify(Object.keys(answers).map(name => [name, answers[name].says])));
 }
 
@@ -745,7 +749,7 @@ let ACTIVATED = null;
 
     // And against v186 ITSELF - its real bytes out of Git - on the same record.
     const NOT_ON_MAIN = ['js/model/payroll.js', 'js/sync/transact.js', 'js/sync/closed.js', 'js/model/months.js', 'js/sync/months.js', 'js/cold.js'];
-    const sources = loadOrder().filter(file => NOT_ON_MAIN.indexOf(file) === -1)
+    const sources = loadOrder().filter(file => NOT_ON_MAIN.indexOf(file) === -1 && file !== 'js/ui/monthsummary.js')   // v187's file
         .map(file => ({ file, code: git(['show', `9846d7f:${file}`]).toString('utf8') }));
     const otherCloud = cloudFor(base, { doc: asV186Left() });
     const v186 = makeDevice({ sources, appVersion: 'v186', deviceId: 'd_13v186', storage: { [SCHEDULE]: JSON.stringify(base.State.schedule) } });
