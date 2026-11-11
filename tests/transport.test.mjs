@@ -23,9 +23,16 @@
 //     kept home - composed exactly, and a READING: no key on the disk moves for it;
 //   a number is a wa.me number by the seder's own rule;
 //   what it keeps is under its own keys, through Store - never the schedule, the outbox,
-//     the write fence, a backup, a restore point, the rescue file or the cloud - a record
-//     of it that will not read is copied aside and cannot block the day, and old days are
-//     pruned;
+//     the journal, the write fence, a backup, a restore point or the rescue file, and
+//     never the RECORD's document in the cloud. MOVED with the shared plan
+//     (js/ui/transport-share.js): this used to end "or the cloud". The cloud is now
+//     reached ONLY under the transport paths and ONLY on a phone whose switch is on
+//     and that is signed in. MOVED AGAIN in v186, when the gate opened: the count of
+//     calls to the transport documents here is no longer nought on such a phone - it is
+//     the plan and the list, under their own names, and nothing else - and it is still
+//     nought on a phone whose switch is off. What sharing does is
+//     tests/transport.share.test.mjs. A record of it that will not read is copied aside
+//     and cannot block the day, and old days are pruned;
 //   a vehicle turned OFF (the lasting switch) is not one of the day's vehicles from the day
 //     it is off from: the list is written and NO day is - the men its stored plans seat are
 //     waiting by a reading, and are in their seats again, byte for byte, when it is turned
@@ -50,6 +57,9 @@ const read = path => {
 const SEDER = read('../js/ui/seder.js');
 const ENGINE = read('../js/model/transport.js');
 const SCREEN = read('../js/ui/transport.js');
+// Loaded after the screen, as index.html loads it: every block below runs with the share
+// file PRESENT and its gate as shipped (shut), so what they pin is this build.
+const SHARE = read('../js/ui/transport-share.js');
 const TICK = 6;
 
 const DAY = '2026-11-10';       // a Tuesday
@@ -258,6 +268,7 @@ function load(device) {
     vm.runInContext(SEDER, device.ctx, { filename: 'js/ui/seder.js' });
     vm.runInContext(ENGINE, device.ctx, { filename: 'js/model/transport.js' });
     vm.runInContext(SCREEN, device.ctx, { filename: 'js/ui/transport.js' });
+    vm.runInContext(SHARE, device.ctx, { filename: 'js/ui/transport-share.js' });
     return device;
 }
 
@@ -974,10 +985,20 @@ await block('none of it is the record: not the schedule, not the outbox, not the
             && device.call('isFarkadRecordKey', key) === false));
 });
 
-await block('none of it leaves the phone: no cloud, no backup, no restore point, no rescue file', async () => {
+// MOVED TWICE. v185 (the shared plan, shipped shut): was 'none of it leaves the phone: no
+// cloud, no backup, no restore point, no rescue file'; became never the RECORD's cloud,
+// and - the gate shut - not the transport documents either. v186 (the gate opens): the
+// last clause is now the opposite, on purpose - a signed-in phone with the switch on DOES
+// write its plan and its list, to documents of their own - and what is measured is that
+// they go there and NOWHERE ELSE. The four things about the record's cloud, the backup,
+// the restore points and the rescue file are unchanged since v171.
+await block('none of it is in the record\'s cloud, a backup, a restore point or the rescue file - it leaves the phone only as transport documents of its own', async () => {
     const cloud = makeCloud();
     const device = crewPhone('d_cloud');
     device.Sync.connect(cloud.adapter);
+    same('the share file is there, and its gate is open', device.global('TransportShare').on(), true);
+    device.global('TransportShare').flushDelayMs = TICK;
+    device.global('TransportShare').connect(cloud.transport.adapter);
     const synced = await settleUntil(() => device.Sync.status === 'synced' && device.Sync.pendingCount() === 0, 5000);
     given('the phone is connected and has sent its record', synced, device.Sync.status);
     const attempts = cloud.attempts.length;
@@ -988,8 +1009,18 @@ await block('none of it leaves the phone: no cloud, no backup, no restore point,
     device.call('transportMarkOpened', DAY, 'tv_01');
     given('the plan is on this phone', device.raw(DAY_KEY) !== null && device.raw(SETTINGS) !== null);
     await settle(TICK * 20);
-    same('the cloud was not written to', cloud.attempts.length, attempts);
+    same('the record\'s cloud was not written to', cloud.attempts.length, attempts);
     same('and holds the document it held', JSON.stringify(cloud.doc), doc);
+    same('the plan and the list went up as documents of their own, by their own names',
+        [...cloud.transport.docs.keys()].sort(), [`day_${DAY}`, 'settings']);
+    same('every call the phone made to them was a listen or a write of one of those two',
+        [...new Set(cloud.transport.attempts.map(one => (one.kind === 'subscribe' ? 'subscribe' : `write:${one.name}`)))].sort(),
+        ['subscribe', `write:day_${DAY}`, 'write:settings']);
+    check('what went up has no man\'s name, phone or site, and no mark of an opened chat',
+        !/אחמד|מוחמד|יוסי|סמיר|Ali|052|054|הרצליה|חיפה|marks|openedAt/.test(JSON.stringify([...cloud.transport.docs.values()])));
+    same('and the phone\'s only new keys are its own notes of those two documents',
+        Object.keys(device.dump()).filter(key => /:shared:|:aside:/.test(key)).sort(),
+        [`farkadTransport:shared:day_${DAY}`, 'farkadTransport:shared:settings']);
     check('which has no word of transport in it', !/transport|tv_0|ta_/i.test(JSON.stringify(cloud.doc)));
 
     // The control, so the silence above is about this feature and not a dead connection.
@@ -1650,7 +1681,28 @@ await block('the words, every one of them, and no other', async () => {
         rIdle: [['סוואנה, קורולה'], 'רכבים בלי עובדים בימים עם שיבוץ: סוואנה, קורולה'],
         rDriversTitle: 'נהגים בתקופה:',
         rDriver: [['אחמד', '3 ימים', 'סוואנה (2), קורולה (1)'], '- אחמד – 3 ימים: סוואנה (2), קורולה (1)'],
-        rDriverVehicle: [['סוואנה', 2], 'סוואנה (2)']
+        rDriverVehicle: [['סוואנה', 2], 'סוואנה (2)'],
+        // MOVED (the shared plan): eighteen keys added, none changed. Shown only where
+        // the gate of js/ui/transport-share.js is open; `switchLead` above stays the
+        // sentence of a build where it is shut.
+        switchLeadShared: 'שיבוץ העובדים לרכבים והודעה לכל נהג. מופעל בכל מכשיר בנפרד. במכשיר שמחובר לענן, השיבוץ ורשימת הרכבים משותפים עם הטלפונים האחרים שהפעילו הסעות. לא נכלל בגיבוי.',
+        shareChecking: 'בודק את השיבוץ המשותף…',
+        shareShared: 'השיבוץ משותף עם הטלפונים האחרים ומעודכן.',
+        shareWaiting: 'השינוי שמור במכשיר הזה ועדיין לא התעדכן בענן.',
+        shareUnchecked: 'אין חיבור: לא ניתן לבדוק אם השיבוץ מעודכן. מוצג מה ששמור במכשיר הזה.',
+        shareNotShared: 'השיבוץ עדיין לא משותף: הענן אינו מאפשר זאת כרגע. הוא שמור במכשיר הזה בלבד.',
+        shareNoRoom: 'אין מקום במכשיר לשמור בצד את השיבוץ שלך, ולכן השיבוץ המשותף לא הוצג. מוצג מה ששמור במכשיר הזה.',
+        shareChangedDay: 'השיבוץ של היום הזה שונה בטלפון אחר. מוצג השיבוץ המשותף, והשיבוץ שלך נשמר בצד.',
+        shareChangedList: 'רשימת הרכבים שונתה בטלפון אחר. מוצגת הרשימה המשותפת, והרשימה שלך נשמרה בצד.',
+        shareFirstDay: 'במכשיר הזה היה ליום הזה שיבוץ שונה מהמשותף. מוצג השיבוץ המשותף, והשיבוץ של המכשיר נשמר בצד.',
+        shareFirstList: 'במכשיר הזה הייתה רשימת רכבים שונה מהמשותפת. מוצגת הרשימה המשותפת, והרשימה של המכשיר נשמרה בצד.',
+        shareUseMineDay: 'להשתמש בשיבוץ שלי',
+        shareUseMineList: 'להשתמש ברשימה שלי',
+        shareKeepShared: 'להשאיר את המשותף',
+        shareUseMineDayTitle: 'להחליף את השיבוץ המשותף בשיבוץ שלך?',
+        shareUseMineListTitle: 'להחליף את רשימת הרכבים המשותפת ברשימה שלך?',
+        shareUseMineLead: 'הטלפונים האחרים יראו את שלך במקום מה שמוצג עכשיו.',
+        shareUseMineOk: 'להחליף'
     };
     same('the block holds exactly these words', Object.keys(T).sort(), Object.keys(W).sort());
     Object.keys(W).forEach(key => {

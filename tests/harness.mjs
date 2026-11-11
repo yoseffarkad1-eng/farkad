@@ -1181,7 +1181,153 @@ export function makeCloud(options = {}) {
         }
     };
 
+    cloud.transport = makeTransportCloud(options.transport || {});
+
     return cloud;
+}
+
+// הסעות, shared: the documents beside the schedule (schedules/<doc>/transport/<name>), and
+// the object js/sync/firebase-adapter.js hands js/ui/transport-share.js (transportOps).
+//
+// SEPARATE FROM THE SCHEDULE ON PURPOSE - its own documents, its own attempts, its own
+// online switch - because that is the claim under test: a suite can refuse every call
+// here and count that the record's cloud above was never asked for anything.
+//
+// Faithful to what the production adapter and the rules were MEASURED to do on the
+// emulator (tests/transport.emulator.test.mjs), and each line below names its fact:
+//   - a write is a transaction: it answers asynchronously, and of two built on the same
+//     revision one lands and the other is thrown `conflict` with the document that won
+//     (the SERVER's word to the one that loses at the commit is permission-denied; the
+//     production adapter reads again and says conflict - measured there, modelled here);
+//   - the rules refuse (permission-denied) a document whose shape, name or revision is
+//     not what firestore.rules allows - mirrored here key for key - and, with
+//     `rules: 'old'`, refuse everything: the rules in the field today have no such path;
+//   - a listener delivers the whole list from `from` on, asynchronously, and says
+//     `live: false` when it speaks from its cache (offline); under the old rules it is
+//     refused through its error callback and delivers nothing;
+//   - a write made offline fails `unavailable` - a transaction needs the server.
+export function makeTransportCloud(options = {}) {
+    const transport = {
+        docs: new Map(),
+        online: options.online !== false,
+        rules: options.rules || 'new',
+        attempts: [],            // every call made: { kind, name, base, data }
+        writes: [],              // every write that landed
+        subscribers: [],
+        reject: options.reject || null,     // (kind, name) => Error | null
+        hold: options.hold || null          // (name, data) => Promise | null: a write held open
+    };
+    const copy = value => JSON.parse(JSON.stringify(value));
+    const denied = () => Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
+    const isMap = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+    // firestore.rules, transportOk(name), line for line.
+    transport.allows = (name, data, existing) => {
+        if (transport.rules === 'old') return false;
+        if (!isMap(data) || data.v !== 1 || !Number.isInteger(data.revision)) return false;
+        if (typeof data.updatedAt !== 'string' || data.updatedAt.length >= 64) return false;
+        if (typeof data.updatedBy !== 'string' || data.updatedBy.length >= 128) return false;
+        const only = keys => Object.keys(data).every(key => keys.includes(key));
+        if (name === 'settings') {
+            if (!only(['v', 'revision', 'updatedAt', 'updatedBy', 'vehicles'])) return false;
+            if (!Array.isArray(data.vehicles) || data.vehicles.length > 60) return false;
+        } else {
+            if (!/^day_[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(name)) return false;
+            if (!only(['v', 'revision', 'updatedAt', 'updatedBy', 'date', 'unavailable', 'status', 'trips'])) return false;
+            if (typeof data.date !== 'string' || name !== 'day_' + data.date) return false;
+            if (!isMap(data.unavailable) || Object.keys(data.unavailable).length > 60) return false;
+            if (!isMap(data.status) || Object.keys(data.status).length > 300) return false;
+            if (!isMap(data.trips) || Object.keys(data.trips).length > 60) return false;
+        }
+        return existing ? data.revision === existing.revision + 1 : data.revision === 1;
+    };
+
+    const listFor = from => [...transport.docs.keys()].filter(name => name >= from).sort()
+        .map(name => ({ name, data: copy(transport.docs.get(name)) }));
+    // Every listener of every phone that has a signal is told, live. `muted` holds the
+    // news back: the moment in which a refused write's answer arrives BEFORE the snapshot
+    // that explains it - two channels with no ordering between them.
+    transport.muted = false;
+    transport.publish = () => {
+        if (transport.muted || transport.rules === 'old') return;
+        transport.subscribers.slice().forEach(one => {
+            if (!one.phone.online) return;
+            one.last = listFor(one.from);
+            one.onDocs(copy(one.last), { live: true });
+        });
+    };
+    // Another phone's write, put straight on the server: checked by the same rules.
+    transport.put = (name, data) => {
+        if (!transport.allows(name, data, transport.docs.get(name) || null)) throw denied();
+        transport.docs.set(name, copy(data));
+        transport.writes.push({ name, data: copy(data), by: 'put' });
+        Promise.resolve().then(transport.publish);
+    };
+
+    // One phone's connection: its own signal, the same server. Two phones, one of them in
+    // a tunnel, is two of these.
+    transport.phone = (start = {}) => {
+        const phone = { online: start.online !== false && transport.online };
+        // The signal going and coming back. A listener hears both: its cache (what it was
+        // last told, marked as not live), then the server.
+        phone.setOnline = online => {
+            phone.online = online;
+            Promise.resolve().then(() => {
+                transport.subscribers.filter(one => one.phone === phone).forEach(one => {
+                    if (transport.rules === 'old') return;
+                    if (!online) { if (one.last) one.onDocs(copy(one.last), { live: false }); return; }
+                    one.last = listFor(one.from);
+                    one.onDocs(copy(one.last), { live: true });
+                });
+            });
+        };
+        phone.adapter = {
+            write(name, base, data) {
+                transport.attempts.push({ kind: 'write', name, base, data: copy(data) });
+                const refusal = transport.reject ? transport.reject('write', name) : null;
+                if (refusal) return Promise.reject(refusal);
+                const land = () => {
+                    if (!phone.online) throw Object.assign(new Error('client is offline'), { code: 'unavailable' });
+                    // The transaction READS first, and the old rules refuse the read.
+                    if (transport.rules === 'old') throw denied();
+                    const existing = transport.docs.get(name) || null;
+                    const held = existing ? existing.revision : 0;
+                    // Then the transaction's own check, as in transportOps: a moved
+                    // document is a conflict carrying the document.
+                    if (held !== base || data.revision !== base + 1) {
+                        throw Object.assign(new Error('the transport document moved'), {
+                            code: 'conflict', revision: held, document: existing ? copy(existing) : null
+                        });
+                    }
+                    if (!transport.allows(name, data, existing)) throw denied();
+                    transport.docs.set(name, copy(data));
+                    transport.writes.push({ name, data: copy(data), by: 'adapter' });
+                    Promise.resolve().then(transport.publish);
+                    return { revision: data.revision };
+                };
+                const held = transport.hold ? transport.hold(name, data) : null;
+                return Promise.resolve(held).then(land);
+            },
+            subscribe(from, onDocs, onError) {
+                transport.attempts.push({ kind: 'subscribe', name: from });
+                const one = { from, onDocs, onError, phone, last: null };
+                const refusal = transport.reject ? transport.reject('subscribe', from) : null;
+                Promise.resolve().then(() => {
+                    if (refusal) { onError(refusal); return; }
+                    if (transport.rules === 'old') { onError(denied()); return; }
+                    transport.subscribers.push(one);
+                    // Offline at the start the SDK has nothing cached and says so only
+                    // after its own timeout; here it stays silent until there is a
+                    // signal - the client must not need the cache's word.
+                    if (phone.online) { one.last = listFor(from); onDocs(copy(one.last), { live: true }); }
+                });
+                return () => { transport.subscribers = transport.subscribers.filter(other => other !== one); };
+            }
+        };
+        return phone;
+    };
+    transport.adapter = transport.phone().adapter;
+    return transport;
 }
 
 // Let queued promises and the sync layer's debounce run. The push delay is real time in

@@ -683,6 +683,73 @@ service cloud.firestore {
         allow get: if allowed() && generation == 'paybook-8';
         allow list, create, update, delete: if false;
       }
+
+      // הסעות, shared: who rides to work in which vehicle. Documents OF THEIR OWN under
+      // the schedule - never a field of it - so that not one byte of a ride plan is in
+      // the document that carries pay, and nothing above this line reads or is read by
+      // what follows. The same people, by the same list.
+      //
+      //   transport/settings          the list of vehicles
+      //   transport/day_2026-11-10    one day: who sits where
+      //
+      // A WRITE IS A WHOLE DOCUMENT AT EXACTLY THE NEXT REVISION. "A man is in one seat"
+      // is a rule about the whole day, and a merge of fields cannot see it: two phones
+      // that each moved the same man would both land. So a day is replaced whole, by a
+      // writer that says which revision it was built on, and of two that built on the
+      // same one exactly one lands. The client turns the refusal into "the plan changed
+      // on another phone" and shows the one that won.
+      //
+      // Create and update only. Nothing here is ever deleted - by a careless tap, or by
+      // a bug in a client.
+      //
+      // The shape is checked as far as rules can check one: the exact top-level keys,
+      // their types, the day's name agreeing with the date it carries, and the sizes
+      // capped. What is inside a trip or a vehicle cannot be walked from here (no loops)
+      // and is validated by every client as it reads.
+      function transportStamped() {
+        return request.resource.data.v == 1
+          && request.resource.data.revision is int
+          && request.resource.data.updatedAt is string
+          && request.resource.data.updatedAt.size() < 64
+          && request.resource.data.updatedBy is string
+          && request.resource.data.updatedBy.size() < 128;
+      }
+
+      function transportSettingsOk() {
+        return request.resource.data.keys().hasOnly(['v', 'revision', 'updatedAt', 'updatedBy', 'vehicles'])
+          && request.resource.data.vehicles is list
+          && request.resource.data.vehicles.size() <= 60;
+      }
+
+      function transportDayOk(name) {
+        return name.matches('^day_[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.keys().hasOnly(
+               ['v', 'revision', 'updatedAt', 'updatedBy', 'date', 'unavailable', 'status', 'trips'])
+          && request.resource.data.date is string
+          && name == 'day_' + request.resource.data.date
+          && request.resource.data.unavailable is map
+          && request.resource.data.unavailable.size() <= 60
+          && request.resource.data.status is map
+          && request.resource.data.status.size() <= 300
+          && request.resource.data.trips is map
+          && request.resource.data.trips.size() <= 60;
+      }
+
+      function transportOk(name) {
+        return transportStamped()
+          && (name == 'settings' ? transportSettingsOk() : transportDayOk(name));
+      }
+
+      match /transport/{name} {
+        allow read: if allowed();
+        allow create: if allowed()
+          && transportOk(name)
+          && request.resource.data.revision == 1;
+        allow update: if allowed()
+          && transportOk(name)
+          && request.resource.data.revision == resource.data.revision + 1;
+        allow delete: if false;
+      }
     }
 
     // (The block that says WHICH rules these are is inside match /schedules above.)

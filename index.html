@@ -406,6 +406,10 @@
         <button type="button" class="btn-secondary transport-close" id="transportClose" onclick="closeTransport()"></button>
     </div>
     <p class="transport-note" id="transportNote" role="status" hidden></p>
+    <!-- The shared plan's one line and its notices (js/ui/transport-share.js). Empty and
+         hidden wherever that file's gate is shut. Outside the body for the same reason as
+         the live region below. -->
+    <div class="transport-share" id="transportShare" role="status" hidden></div>
     <div class="transport-body" id="transportBody"></div>
     <!-- Outside the body, which is rebuilt on every change: a live region that is
          destroyed and rebuilt announces nothing. -->
@@ -874,6 +878,11 @@
      reads or writes anything at load but one per-phone preference (js/ui/transport.js). -->
 <script src="js/model/transport.js"></script>
 <script src="js/ui/transport.js"></script>
+<!-- The shared plan. After transport.js: it reads that file's store and words, and that
+     file reaches it only through transportShareTell, at run time. NOT part of the sync
+     group and never loaded before sync/boot.js: it names nothing of the record's sync. It
+     does nothing at load but publish window.FarkadTransportShare for the adapter. -->
+<script src="js/ui/transport-share.js"></script>
 <!-- The seder's journey: after everything it frames - the day, the sheet, the WhatsApp
      dialog, the seder and הסעות - because its entry is put AFTER theirs in that dialog. It
      calls them only when it is used, and each of them asks for it through typeof. -->
