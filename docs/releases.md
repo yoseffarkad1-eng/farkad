@@ -422,9 +422,16 @@ own edge.
 - The emulator suites and `test:release` were not run for this build (it touches no rule
   and no sync file).
 
-## v190 — five faults the review of v189 found, repaired: a double tap in «לא נרשמו», midnight under an open sheet, «🧹 רוקן אתר» after midnight, and two in the shared rides (candidate - not served)
+## v190 — five faults the review of v189 found, repaired: a double tap in «לא נרשמו», midnight under an open sheet, «🧹 רוקן אתר» after midnight, and two in the shared rides (served 2026-11-11)
 
-**Not served until the merge and the Pages deployment are recorded here by the next release.**
+**Served.** Merged as `c33461b` (PR #72) on 2026-11-11 after both gates exited 0 on `182ba97` (`npm test` 11,164 of 11,164 checks; `npm run test:release` 20,621 of 20,621); the Pages deployment succeeded at 19:38 UTC. It was published before the hotfix's own verifiers had finished, on purpose: c0 was live and likely (quick taps while building tomorrow's seder from the tray), and the gate was green. Those verifiers, and a second pass after them, then found what v190 still does wrong. Each case is narrow, and in each the date on the screen tells the truth:
+- a box on the screen holding typed digits across midnight keeps the follow owed after he leaves the box, until the next return, so the morning's first record can land on yesterday under yesterday's header;
+- the advances' «סידור מקדמות» draft left open across midnight holds the follow until it is saved or cancelled;
+- a worker's or a site's card left open across midnight: the old day tapped in its calendar opens the new day;
+- hours typed into the assign sheet's «שעות נוספות» across midnight move to the new day when the sheet is shut with the box still focused (v189 did the same);
+- shared rides: a plan refused for want of room stays «noRoom» after room comes back, until another phone writes or the app reopens; and a share record left behind the disk can let «להשתמש בשלי» undo another phone's later seat;
+- double taps older than v190: on a man's name in the tray (opening «לאן הלך»), on a site's «+», on the tally and on a by-worker row, a second tap can write; in the walking assign sheet a double tap places the next man; low on a short phone a double tap on a chip can land on the undo bar's «בטל».
+None of them is repaired in v191 below; a second round on the day's writes, and one on the shared rides, are being built and verified apart. The first repair attempt was NOT shipped: its own verifiers found that it made the walking sheet swallow deliberate taps at a normal pace, which writes each site to the man before.
 Built on `0790d3f` (v189, served). A repair and nothing else: no new screen, no new key, no new
 field path, no new writer, and no new Hebrew in the app - the two undo sentences it adds are
 the assign sheet's own words for the same acts («… נרשם כנעדר», «… נרשם ב…» / «… הוסר מ…»).
