@@ -87,6 +87,11 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    { build: 'v191', items: [
+        { title: 'תצוגה גדולה',
+            text: 'מי שקשה לו לקרוא אותיות קטנות מפעיל תצוגה גדולה: האותיות, המספרים והכפתורים גדלים בכל המסכים, רק בטלפון שלו.',
+            where: 'הגדרות ← כללי ← תצוגה גדולה', go: 'display' }
+    ] },
     { build: 'v190', items: [
         { title: 'תיקון: נגיעה כפולה וחצות',
             text: 'נגיעה כפולה ליד שם עובד כבר לא מסמנת עובד אחר כנעדר, ושיבוץ שנפתח לפני חצות נשמר ליום שהיה כתוב במסך.',
@@ -381,7 +386,7 @@ await block('the news itself: every build, every item, every word', async () => 
 
     const items = builds.flatMap(entry => entry.items.map(item => ({ build: entry.build, ...item })));
     const ways = Object.keys(device.global('WHATSNEW_GO')).sort();
-    same('the ways «הראה לי» can go', ways, ['advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
+    same('the ways «הראה לי» can go', ways, ['advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'display', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
     check('every item is a title, a sentence and a place, and nothing else',
         items.every(item => Object.keys(item).every(key => ['build', 'title', 'text', 'where', 'go'].includes(key))
             && [item.title, item.text, item.where].every(value => typeof value === 'string' && value.trim() === value && value.length > 0)));
@@ -417,8 +422,9 @@ await block('every word of the line and the card, and no other', async () => {
     check('the file calls none of the three dialogs the app forbids', !/\b(alert|confirm|prompt)\s*\(/.test(code));
     check('nor writes markup from a string', !/innerHTML|insertAdjacentHTML|outerHTML/.test(code));
     check('nor touches the record\'s writers', !/State\.(commit|commitMany|save|persist)\b|FarkadSync\./.test(code));
+    // v191: «תצוגה גדולה» is a per-phone switch too - shown by its «הראה לי», never pressed.
     check('nor turns a per-phone switch on, nor starts a journey or a seder run',
-        !/transportSetEnabled|journeyStart|journeyGo|sederMarkOpened|FarkadReminders\.enable/.test(code));
+        !/transportSetEnabled|displaySetLarge|journeyStart|journeyGo|sederMarkOpened|FarkadReminders\.enable/.test(code));
     check('nor opens a reading of money for a period by itself, nor a payslip run',
         !/openMonthSummary|openPayslips|payslipsMarkOpened|openWorkerCard/.test(code));
     same('it writes one key and only through Store, optional', [(code.match(/Store\.set\(/g) || []).length,

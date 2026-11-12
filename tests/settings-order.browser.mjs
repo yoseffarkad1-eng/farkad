@@ -9,7 +9,14 @@
 //   a thing a person does from memory has moved or gone - a button that is not there, a
 //   sentence that changed, a row that is open today and shut tomorrow.
 //
-// So this file pins the ORDER (three sections, nine cards, by their own titles), the
+// v191: a TENTH card, «תצוגה גדולה», in «כללי» straight before «הסעות» - the other thing a
+// phone turns on for itself, which stays the last row of its section (js/ui/display.js; the
+// owner, 2026-11-11: one of the three is far-sighted). A moved expectation, on purpose and listed: ORDER, POSTURE and FOLD each
+// gain the row, the inventory gains its one button and its five runs of words (a second
+// «כבוי»), and the suite that said "nine cards" says ten. Nothing that was on the sheet
+// moved or changed a word: every other line of CONTROLS and SENTENCES is as it was.
+//
+// So this file pins the ORDER (three sections, ten cards, by their own titles), the
 // POSTURE (what is open when the sheet opens, and that it is the same every time), the
 // rule that a redraw neither opens nor shuts anything, every reason a row opens by
 // itself, and an INVENTORY: every control and every sentence that was on the v171 sheet,
@@ -35,15 +42,15 @@ const errors = [];
 
 // THE ORDER, as the owner asked for it on 2026-11-09 and as index.html now has it.
 const ORDER = [
-    {id: 'settingsDaily', section: 'כללי', cards: ['ענן וסנכרון', 'תזכורות בטלפון', 'הסעות']},
+    {id: 'settingsDaily', section: 'כללי', cards: ['ענן וסנכרון', 'תזכורות בטלפון', 'תצוגה גדולה', 'הסעות']},
     {id: 'settingsBackups', section: 'גיבוי ושחזור', cards: ['גיבוי', 'ייבוא ושחזור', 'שחזור חירום']},
     {id: 'settingsHelp', section: 'מכשיר ועזרה', cards: ['עדכון וגרסה', 'מצב המכשיר', 'מידע טכני']}
 ];
 // 'card' is the one that is not a row and cannot be shut.
-const POSTURE = {'ענן וסנכרון': 'card', 'תזכורות בטלפון': false, 'הסעות': false,
+const POSTURE = {'ענן וסנכרון': 'card', 'תזכורות בטלפון': false, 'תצוגה גדולה': false, 'הסעות': false,
     'גיבוי': true, 'ייבוא ושחזור': false, 'שחזור חירום': false,
     'עדכון וגרסה': false, 'מצב המכשיר': false, 'מידע טכני': false};
-const FOLD = {'תזכורות בטלפון': 'settingsFoldReminders', 'הסעות': 'transportSwitchCard',
+const FOLD = {'תזכורות בטלפון': 'settingsFoldReminders', 'תצוגה גדולה': 'displayLargeCard', 'הסעות': 'transportSwitchCard',
     'גיבוי': 'settingsFoldBackup', 'ייבוא ושחזור': 'settingsFoldRestore',
     'שחזור חירום': 'settingsFoldRescue', 'עדכון וגרסה': 'settingsFoldUpdate',
     'מצב המכשיר': 'settingsFoldDevice', 'מידע טכני': 'diagnosticGroup'};
@@ -68,6 +75,7 @@ const CONTROLS = [
     'button |  | 🔄 בדוק עדכון | checkForUpdate()',
     'button | diagnosticCopy | העתק | ',
     'button | diagnosticToggle | הסתר מידע טכני | ',
+    'button | displayLargeSwitch | הפעלת תצוגה גדולה במכשיר הזה | ',
     'button | pushReminderDisable | כיבוי ההתראות במכשיר הזה | FarkadReminders.disable()',
     'button | pushReminderEnable | הפעלת התראות במכשיר הזה | FarkadReminders.enable()',
     'button | pushReminderRefresh | בדיקה מחדש | FarkadReminders.refresh()',
@@ -87,6 +95,7 @@ const CONTROLS = [
 // held elsewhere (tests/smoke.mjs, tests/reminders.browser.mjs, and the last check here).
 const SENTENCES = [
     '10:00', '18:00', 'Galaxy / Android:', 'iPhone:',
+    'אותיות וכפתורים גדולים יותר',
     'אחסון והתקנה',
     'אין במכשיר הזה רישום של ייצוא קובץ גיבוי.',
     'אם כבר הוספת תזכורת ליומן, הסר את יומן פרקד ב־iPhone או את סדרת האירועים ב־Galaxy כדי למנוע תזכורת כפולה.',
@@ -105,6 +114,7 @@ const SENTENCES = [
     'העתק',
     'הפעלת הסעות במכשיר הזה',
     'הפעלת התראות במכשיר הזה',
+    'הפעלת תצוגה גדולה במכשיר הזה',
     'התחבר לענן',
     'התראה מפרקד גם כשהמסך נעול',
     'חזרה',
@@ -113,7 +123,7 @@ const SENTENCES = [
     'ייבוא ושחזור',
     'ייצא נתונים גולמיים',
     'יש מקום פנוי במכשיר.',
-    'כבוי',
+    'כבוי', 'כבוי',
     'כדי לראות התראה במסך הנעילה, אפשר התראות לפרקד בהגדרות הטלפון. מצב שקט, מיקוד וחיבור לרשת עשויים להשפיע על ההצגה.',
     'כיבוי ההתראות במכשיר הזה',
     'כל יום',
@@ -123,6 +133,7 @@ const SENTENCES = [
     'למחרת בבוקר · בדיקה ועדכון',
     'לפי שעון ישראל · בכל מכשיר מפעילים בנפרד',
     'לשחזור חירום בלבד.',
+    'מגדיל את האותיות, המספרים והכפתורים בכל המסכים. פועל במכשיר הזה בלבד.',
     'מה חדש',
     'מידע טכני',
     'מידע על ההתראות',
@@ -149,6 +160,7 @@ const SENTENCES = [
     'שמירת עותק של הנתונים בקובץ',
     'תזכורות בטלפון',
     'תזכורת הבוקר תגיע למחרת כל ערב שנבחר.',
+    'תצוגה גדולה',
     '↩️', 'ⓘ', '☁️', '✕', '💾', '💾', '📂', '🔄'
 ];
 
@@ -218,7 +230,7 @@ try {
     const record = await page.evaluate(() => JSON.stringify(State.schedule));
     await openSheet(page);
 
-    suite('three sections, nine cards, in the order that was asked for');
+    suite('three sections, ten cards, in the order that was asked for');
     same('the sections and their cards, by their own titles', await layout(page), ORDER);
     same('the jump buttons name the same three sections, in the same order',
         await page.locator('.settings-nav button').allTextContents(), ORDER.map(part => part.section));
@@ -612,8 +624,8 @@ try {
         });
         await openSheet(everything);
         await everything.waitForFunction(() => document.getElementById('settingsFoldReminders').open);
-        same('every reason standing: הסעות and מידע טכני are still shut, everything else is open',
-            await posture(everything), {'ענן וסנכרון': 'card', 'תזכורות בטלפון': true, 'הסעות': false,
+        same('every reason standing: הסעות, תצוגה גדולה and מידע טכני are still shut, everything else is open',
+            await posture(everything), {'ענן וסנכרון': 'card', 'תזכורות בטלפון': true, 'תצוגה גדולה': false, 'הסעות': false,
                 'גיבוי': true, 'ייבוא ושחזור': true, 'שחזור חירום': true,
                 'עדכון וגרסה': true, 'מצב המכשיר': true, 'מידע טכני': false});
         await everything.context().close();
@@ -659,7 +671,7 @@ try {
                     };
                 });
                 check(`${tag}, ${state}: every row is at least 56px tall and wider than a finger`,
-                    measured.rows.length === 8 && measured.rows.every(([, w, h]) => h >= 56 && w >= 44),
+                    measured.rows.length === 9 && measured.rows.every(([, w, h]) => h >= 56 && w >= 44),
                     JSON.stringify(measured.rows));
                 same(`${tag}, ${state}: nothing a finger lands on is under 44px either way`, measured.small, []);
                 same(`${tag}, ${state}: no field under 16px`, measured.fine, []);

@@ -1,0 +1,1126 @@
+/* v191: «תצוגה גדולה» - THE LARGE DISPLAY. Loaded fourth and last, over app.css,
+   readability.css and design.css, and EVERY RULE IN IT IS WRITTEN UNDER ONE CLASS:
+   `:root.display-large`, which js/ui/display.js puts on <html> on a phone where somebody
+   turned the mode on in ⋯, and on no other. Without the class this file matches nothing,
+   so a phone with the mode off is, rule for rule, the app it was (tests/largetext.browser.mjs
+   reads every screen twice with the mode off - this file served, and answered by an empty
+   one - and the two readings are the same, node for node; tests/largetext.test.mjs reads
+   this file as text and finds no selector that does not begin under the class).
+
+   WHY A FOURTH SHEET AND NOT A BLOCK IN design.css. The three sheets under this one are
+   layers and their order is the mechanism: app.css is how the thing works, readability.css
+   is the reading sizes the owner asked for (v140), design.css is the one look (v169) -
+   and each of them is what EVERY phone gets. This is none of those. It is not a look and
+   not a mechanism; it is the same app said again, larger, for one man's eyes on one phone
+   - a layer over all three that two of the three phones never enter. Written into
+   design.css it would sit among rules that hold eleven names on a screen and 56px rows
+   to the pixel, one typo away from moving them for everybody. Here, a mistake can only
+   reach a phone that asked for the mode.
+
+   WHO IT IS FOR. The owner, 2026-11-11: one of the people who use this is 62 and
+   far-sighted. He holds the phone where his arm ends and cannot read 14px there.
+
+   WHAT IT DOES - by raising each size where that size is set, never by magnifying:
+     - nothing on any screen is under 18px; what a person came to read - a name, a sum, a
+       count, a date, a button's words - is 20px and up, and the figures that are money
+       are larger and heavier than the words beside them;
+     - no text is lighter than 500, no line of running text tighter than 1.4;
+     - the secondary inks clear 7:1 on every ground they stand on, in both schemes, and
+       the hairlines between rows and the strokes of the icons are drawn stronger;
+     - everything a finger lands on is 52px both ways, every field 20px, and rows stand
+       further apart, so an eye and a thumb can tell one from the next.
+   NOT `zoom`, NOT `transform: scale`, and NOT a larger root font-size: each of those makes
+   a fixed bar wider than the phone or leaves the page's room for the bars wrong. The bars
+   here are simply taller, and js/ui/bars.js MEASURES them taller (law 8) - no height of a
+   bar is written in this file either.
+
+   THE PRICE, AND IT IS PAID ONLY HERE: fewer names on a screen. The eleven names of
+   tests/design.browser.mjs are the other two phones' and are not touched.
+
+   SCREEN ONLY. Paper and every exported file are what they were: the whole file is
+   inside `@media screen` (tests/largetext.browser.mjs lays the week out for print with
+   the mode on and off and finds the same boxes; tests/print.test.mjs is unchanged).
+
+   HOW IT IS LAID OUT.
+     1. THE TOKENS: the inks and the lines of the mode, both schemes.
+     2. THE FLOORS: body, fields, targets - one rule each - and a floor is a floor: where
+        one of the three sheets already asks MORE of a control than 52px (a message box
+        of 120, a day of the month 62 tall, a button 64 wide), that is said again here,
+        because a floor written `!important` would otherwise have taken it DOWN to 52
+        (v191's review; tests/largetext.browser.mjs toggles the class on every screen
+        and finds no control's min-height or min-width smaller with it than without).
+     3. THE SIZES, RESTATED: every rule of the three sheets under this one that sets a
+        font-size, a line-height or a weight, said again under the class, in the order it
+        stands there and behind the same media query, with the value this mode gives it
+        (a size under 16px -> 18, 16 -> 20, 17 -> 21, 18-19 -> 22, 20 -> 23, larger -> +3;
+        a line-height under 1.4 -> 1.4; a weight under 500 -> 500; the rest as they are;
+        and a value that is not a size, `font-size: 0` or `font: inherit`, unchanged)
+        AND WITH THE IMPORTANCE ITS ORIGINAL HAS. One rule for one rule, so that the copies
+        compete with each other exactly as their originals do - the same importance, the
+        same specificity plus (0,2,0), the same order - and the base's winner wins again,
+        its copy more specific than every rule its original beat. (Written all
+        `!important` first, it inverted the cascade wherever a later rule had won by
+        specificity alone: v189's card names its labels 600 over an older 400, and the
+        older one, made important, took them down to 500 - tests/largetext.browser.mjs
+        caught it.) KEPT BY HAND: a size added to one of the three sheets is added here
+        in the same commit - the suite fails on the screen where it is not.
+     4. THE SHAPES: the screens that could not simply be made larger - the tab bar, the
+        day's header, the week, the cars, the tiles and tables of the reports - each
+        under its own heading, with what was measured.
+   Blocks 1, 2 and 4 are `!important` throughout, for design.css's reason: they have to
+   beat three sheets whose selectors were sharpened against each other. */
+
+@media screen {
+
+/* ---- 1. THE TOKENS ----------------------------------------------------------------- */
+/* SEVEN TO ONE FOR EVERY WORD, not only for the three inks. design.css holds its inks to
+   7:1 on its three grounds and lets the coloured words - the accent on its soft ground, a
+   warning on its tint, «פעיל» on its green - stand at the 4.5 everybody quotes (measured:
+   5.4 to 6.8 in the light scheme, 6.7 for the accent in the dark one). For this reader
+   those are the words that say "look here", so each is moved until it clears 7:1 on its
+   own tint AND on a surface: light - accent 7.7 on its soft ground, warn 8.4, ok 7.6,
+   danger 7.3; dark - accent 8.2, danger 8.3 (warn and ok already stood at 9.7 and 8.5).
+   The second and third inks are each raised one step. The two lines are drawn where a
+   hairline was only hinted (a row's edge 1.3:1 on its ground before, about 3:1 now).
+   The grounds, the first ink and the ten site colours are NOT touched. */
+:root.display-large {
+    --ink-2: #2b333d;
+    --ink-3: #39424e;
+    --line: #6b7480;
+    --line-soft: #9aa3ae;
+    --accent: #163aa6;
+    --ok: #0e5530;
+    --warn: #6a3900;
+    --danger: #8f1d17;
+}
+:root.display-large[data-theme="dark"] {
+    --ink-2: #d5dbe3;
+    --ink-3: #bcc4ce;
+    --line: #8892a0;
+    --line-soft: #5a6370;
+    --accent: #9cc5ff;
+    --ok: #5bd893;
+    --warn: #ffc25c;
+    --danger: #ffa199;
+}
+@media (prefers-color-scheme: dark) {
+    :root.display-large:not([data-theme="light"]) {
+        --ink-2: #d5dbe3;
+        --ink-3: #bcc4ce;
+        --line: #8892a0;
+        --line-soft: #5a6370;
+        --accent: #9cc5ff;
+        --ok: #5bd893;
+        --warn: #ffc25c;
+        --danger: #ffa199;
+    }
+}
+/* design.css paints the chosen half of a two-way switch with --line in the dark scheme,
+   and --line is no longer a dark grey here: it keeps the grey it had. */
+:root.display-large[data-theme="dark"] .mode-toggle button.layer-on { background: #3a404a !important; }
+@media (prefers-color-scheme: dark) {
+    :root.display-large:not([data-theme="light"]) .mode-toggle button.layer-on { background: #3a404a !important; }
+}
+
+/* ---- 2. THE FLOORS ----------------------------------------------------------------- */
+:root.display-large input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),
+:root.display-large select,
+:root.display-large textarea { font-size: 20px !important; min-height: 52px !important; }
+:root.display-large button,
+:root.display-large summary,
+:root.display-large select,
+:root.display-large a.transport-wa { min-height: 52px !important; min-width: 52px !important; }
+/* ...AND WHAT THE SHEETS ALREADY ASKED ABOVE IT STANDS. Every control of the three sheets
+   with a min-height or a min-width over 52px, its value said again - the floor above,
+   being `!important`, beat each of these and took them down to 52: the message box from
+   120 to 52, a day of the worker's month from 62, the crew's buttons from 64 wide. */
+:root.display-large .reorder-foot-actions button { min-height: 54px !important; }
+:root.display-large .diagnostic-text { min-height: 180px !important; }
+:root.display-large #rosterView .roster-actions button,
+:root.display-large .worker-active-toggle,
+:root.display-large .worker-card-open,
+:root.display-large .site-card-open { min-width: 64px !important; }
+:root.display-large #shareText { min-height: 120px !important; }
+:root.display-large .sheet-place { min-height: 62px !important; }
+:root.display-large .sheet-actions button { min-height: 54px !important; }
+:root.display-large #transportSummaryText,
+:root.display-large #transportReportText,
+:root.display-large .scard-client-fold textarea { min-height: 140px !important; }
+:root.display-large #workerCardBody .wcard-cal-day { min-height: 62px !important; }
+:root.display-large #siteCardBody .scard-cal-day { min-height: 72px !important; }
+:root.display-large #workerCardBody .wcard-cal-saturday,
+:root.display-large #siteCardBody .scard-cal-saturday { min-width: 96px !important; }
+:root.display-large .find-head button { min-width: 64px !important; }
+:root.display-large .find-field button { min-width: 56px !important; }
+@media (max-width: 700px) {
+    :root.display-large .week-phone-date { min-height: 58px !important; }
+}
+
+/* ---- 3. THE SIZES, RESTATED --------------------------------------------------------- */
+:root.display-large body { font-size: 20px; line-height: 1.6; }
+:root.display-large h2 { font-size: 22px; }
+:root.display-large h3 { font-size: 21px; }
+:root.display-large h4 { font-size: 18px; }
+:root.display-large .brand-mark { font-size: 21px; font-weight: 800; }
+:root.display-large .brand strong { font-size: 22px; }
+:root.display-large .brand-sub { font-size: 18px; }
+:root.display-large .sync-chip { font-size: 18px; font-weight: 700; }
+:root.display-large .tab { font-size: 18px; font-weight: 500; }
+:root.display-large .tab-on { font-weight: 600; }
+@media (max-width: 700px) {
+:root.display-large .brand-mark { font-size: 18px; }
+:root.display-large .brand strong { font-size: 20px; }
+:root.display-large .tab { font-size: 18px; font-weight: 600; }
+:root.display-large .tabs .tab-on { font-weight: 700; }
+}
+:root.display-large button { font-size: 18px; font-weight: 500; }
+:root.display-large .btn-add { font-weight: 600; }
+:root.display-large .btn-on { font-weight: 600; }
+:root.display-large .btn-icon { font-size: 18px; }
+:root.display-large .reorder-titles h2 { font-size: 22px; }
+:root.display-large .reorder-sub { font-size: 18px; }
+:root.display-large .reorder-handle { font-size: 25px; line-height: 1; }
+:root.display-large .reorder-name strong { font-size: 18px; }
+:root.display-large .reorder-place { font-size: 18px; }
+:root.display-large .reorder-moves .btn-icon { font-size: 18px; }
+:root.display-large .reorder-exact { font-size: 18px; }
+:root.display-large .reorder-foot .reorder-moved-count { font-weight: 600; }
+:root.display-large .settings-open { font-size: 18px; font-weight: 600; }
+:root.display-large .settings-head h2 { font-size: 31px; line-height: 1.4; }
+:root.display-large .settings-eyebrow { font-size: 18px; }
+:root.display-large .settings-close { font-size: 20px; }
+:root.display-large .settings-nav button { font-size: 18px; font-weight: 600; }
+:root.display-large .settings-section-title h3 { font-size: 22px; }
+:root.display-large .settings-section-title span { font-size: 18px; }
+:root.display-large .settings-group h3 { font-size: 22px; font-weight: 600; }
+:root.display-large .settings-card-head .hint { font-size: 18px; }
+:root.display-large .settings-group .settings-status { font-size: 20px; line-height: 1.65; }
+:root.display-large .settings-group .settings-restore-warning { line-height: 1.65; }
+:root.display-large .settings-panel .app-version { font-size: 20px; }
+:root.display-large .settings-panel .app-version button { font-size: 20px; }
+:root.display-large .held-title { font-size: 18px; font-weight: 600; }
+:root.display-large .held-context-title { font-size: 18px; font-weight: 600; }
+:root.display-large .held-side { font-size: 18px; }
+:root.display-large .held-side b { font-weight: 600; }
+:root.display-large .backup-primary { font-size: 20px; font-weight: 600; }
+:root.display-large .diagnostic-text { font-size: 20px; line-height: 1.45; }
+:root.display-large .banner { font-size: 18px; }
+:root.display-large .banner-sum { font: inherit; }
+:root.display-large .banner-summary { font-size: 18px; line-height: 1.4; font-weight: 700; }
+:root.display-large .banner-go { font-size: 18px; font-weight: 700; }
+:root.display-large .banner-text { font-size: 18px; line-height: 1.5; }
+:root.display-large .banner-acts button { font-size: 18px; }
+:root.display-large .day-label { line-height: 1.4; }
+:root.display-large .day-label strong { font-size: 24px; }
+:root.display-large .day-date { font-size: 18px; font-weight: 500; }
+:root.display-large .day-picker-input { font-size: 20px; }
+:root.display-large .day-date { font-size: 18px; }
+:root.display-large .btn-today { font-size: 18px; }
+:root.display-large .day-tools input[type="date"] { font-size: 18px; }
+:root.display-large .layer-on { font-weight: 600; }
+:root.display-large .site-head-btn { font-size: 21px; line-height: 1; }
+:root.display-large .site-card-empty .site-empty { font-size: 18px; font-weight: 500; }
+:root.display-large .site-count { font-size: 18px; font-weight: 600; }
+:root.display-large .site-empty { font-size: 18px; }
+:root.display-large .assign-name { font-weight: 700; }
+:root.display-large .site-list .assign-main { font: inherit; }
+:root.display-large .assign-rate { font-size: 18px; line-height: 1.4; font-weight: 700; }
+:root.display-large .site-list .badge-split { font-size: 18px; }
+:root.display-large .rate-hours { font-size: 20px; }
+:root.display-large .yosefgeves-label { font-size: 18px; font-weight: 600; }
+:root.display-large .rima-label { font-size: 18px; font-weight: 600; }
+:root.display-large .rima-input,
+:root.display-large .yosefgeves-input { font-size: 20px; }
+:root.display-large .badge { font-size: 18px; font-weight: 600; }
+:root.display-large .tray-empty { font-size: 18px; }
+:root.display-large .tray-complete .tray-empty { font-weight: 600; }
+:root.display-large .tray-pending .chip-main { font-weight: 700; }
+:root.display-large .chip-side { font-size: 18px; }
+:root.display-large .btn-danger { font-weight: 600; }
+:root.display-large .worker-history-title { font-size: 18px; font-weight: 600; }
+:root.display-large .worker-history-row { font-size: 18px; }
+:root.display-large .phone-shared-hint { font-size: 18px; line-height: 1.45; }
+:root.display-large .roster-archive summary { font-size: 18px; }
+:root.display-large .roster-restore { font-size: 18px; }
+:root.display-large .picker-note { font-size: 18px; }
+:root.display-large .picker-context { font-size: 18px; }
+:root.display-large .picker-search { font: inherit; font-size: 20px; }
+:root.display-large .picker-search-summary { font-size: 18px; }
+:root.display-large #workerPickerModal .picker-name { font-weight: 700; }
+:root.display-large #workerPickerModal .picker-note { font-size: 18px; font-weight: 500; }
+:root.display-large .place-on { font-weight: 600; }
+:root.display-large #placePickerList .place-btn { font-weight: 600; }
+:root.display-large .place-choice-check { font-weight: 800; }
+:root.display-large .week-table thead th { font-size: 18px; font-weight: 600; }
+:root.display-large .name-cell { font-weight: 600; }
+:root.display-large .week-cell { font-size: 18px; }
+:root.display-large .week-table tfoot td { font-weight: 700; }
+:root.display-large .week-table tfoot .name-cell { font-size: 18px; }
+:root.display-large .cell-line { font-size: 18px; }
+:root.display-large .crew-header h1 { font-size: 29px; line-height: 1.4; }
+:root.display-large .crew-header p { font-size: 18px; }
+:root.display-large .crew-shortcuts button { font-size: 18px; }
+:root.display-large #rosterView .panel-head h2 { font-size: 23px; }
+:root.display-large #rosterView .panel-head .btn-add { font-size: 20px; }
+:root.display-large .crew-tools button { font-size: 18px; }
+:root.display-large .crew-search-field input { font-size: 20px; }
+:root.display-large .empty-action { font-size: 20px; }
+:root.display-large #rosterView .roster-details > strong { font-size: 22px; line-height: 1.5; }
+:root.display-large #rosterView .roster-details > .tag { font-size: 20px; }
+:root.display-large #rosterView .roster-meta { line-height: 1.65; }
+:root.display-large .crew-cycle { font-size: 18px; font-weight: 600; }
+:root.display-large #rosterView .crew-edit { font-size: 18px; }
+:root.display-large #rosterView .roster-archive summary { font-size: 18px; font-weight: 600; }
+:root.display-large #rosterView .roster-archive summary::before { font-size: 25px; }
+:root.display-large .roster-meta { font-size: 18px; }
+:root.display-large .range-bar input[type="date"] { font-size: 20px; }
+:root.display-large .report-table thead th { font-size: 18px; }
+:root.display-large .report-table tfoot td { font-weight: 700; }
+:root.display-large .report-weekly-breakdown > summary { font-size: 18px; font-weight: 600; }
+:root.display-large .report-weekly-name { font-size: 18px; }
+:root.display-large .report-weekly-line { font-size: 18px; }
+:root.display-large .report-weekly-when { font-weight: 600; }
+:root.display-large .report-weekly-value { font-weight: 600; }
+:root.display-large .report-weekly-total { font-weight: 700; }
+:root.display-large .report-other-account button { font-size: 20px; }
+:root.display-large .report-finance-line { font-size: 18px; line-height: 1.5; }
+@media screen and (max-width: 700px) {
+:root.display-large .report-table td::before { font-weight: 500; }
+:root.display-large .report-table td:first-child { font-size: 20px; font-weight: 700; }
+:root.display-large .report-payroll .report-table tbody td.cell-net { font-size: 39px; line-height: 1.4; font-weight: 800; }
+:root.display-large .report-payroll .report-table tbody td.cell-net::before { font-size: 18px; line-height: 1.4; font-weight: 500; }
+:root.display-large .report-payroll .report-table tbody td[data-label="נוכחות"],
+:root.display-large .report-payroll .report-table tbody td[data-label="ימי שכר"],
+:root.display-large .report-payroll .report-table tbody td[data-label="כפולים"],
+:root.display-large .report-payroll .report-table tbody td[data-label="מקדמות"] { font-size: 20px; font-weight: 700; }
+:root.display-large .report-payroll .report-table tbody td[data-label="נוכחות"]::before,
+:root.display-large .report-payroll .report-table tbody td[data-label="ימי שכר"]::before,
+:root.display-large .report-payroll .report-table tbody td[data-label="כפולים"]::before,
+:root.display-large .report-payroll .report-table tbody td[data-label="מקדמות"]::before { font-size: 18px; line-height: 1.4; }
+:root.display-large .report-payroll .report-table tbody td[data-label="שעות נוספות"],
+:root.display-large .report-payroll .report-table tbody td[data-label="נעדר"],
+:root.display-large .report-payroll .report-table tbody td[data-label="שכר יומי"],
+:root.display-large .report-payroll .report-table tbody td[data-label="נצבר"] { font-size: 18px; }
+}
+:root.display-large .range-chips .chip-on,
+:root.display-large .range-chips .chip-off { font-size: 18px; }
+:root.display-large .range-current { font-size: 20px; }
+:root.display-large .reports-heading { font-size: 25px; }
+:root.display-large .reports-controls .report-section-toggle button { font-weight: 700; }
+:root.display-large .report-range-heading > span { font-size: 18px; }
+:root.display-large .report-range-heading .range-current { font-size: 18px; font-weight: 600; }
+:root.display-large .reports-controls .range-chips button { font-size: 18px; line-height: 1.4; }
+:root.display-large .report-date-field { font-size: 18px; }
+:root.display-large .reports-controls .report-worker-picker summary { font-size: 18px; }
+:root.display-large .reports-controls .report-worker-picker summary::after { font-size: 20px; }
+:root.display-large #reportWorkerSearch { font-size: 20px; }
+:root.display-large .reports-controls .report-worker-choice input { font-size: 20px; }
+:root.display-large .reports-toolbar .reports-heading { font-size: 29px; }
+:root.display-large .report-output-actions > summary { font-size: 18px; font-weight: 700; }
+:root.display-large .report-output-actions button { font-size: 18px; line-height: 1.4; }
+:root.display-large .report-range-heading > span { font-size: 18px; }
+:root.display-large .reports-controls .report-worker-picker summary { font-weight: 500; }
+:root.display-large .report-explanation { font-size: 18px; }
+:root.display-large #reportsView .report-payroll > .hint { font-size: 18px; line-height: 1.55; font-weight: 500; }
+:root.display-large #reportsView .report h2 { font-size: 22px; }
+:root.display-large #reportsView .report-group { font-size: 21px; }
+@media screen and (max-width: 700px) {
+:root.display-large #reportsView .report-payroll tbody td:first-child .link-cell { font-size: 22px; font-weight: 750; }
+:root.display-large #reportsView .report-payroll tbody td[data-label="נצבר"] { font-size: 21px; font-weight: 700; }
+:root.display-large #reportsView .report-payroll tfoot td:last-child { font-size: 23px; font-weight: 800; }
+}
+:root.display-large .report-cycle-nav button { font-size: 18px; }
+:root.display-large #reportsView .report-group::after { font-size: 18px; font-weight: 500; }
+:root.display-large .report-calculation > summary { font-size: 18px; }
+@media screen and (max-width: 700px) {
+:root.display-large #reportsView .report-payroll tfoot td:last-child { font-size: 27px; }
+:root.display-large .report-layout-toggle { font-size: 18px; }
+:root.display-large .report-card-grid .report-worker-cards { font-size: 20px; }
+:root.display-large .report-tile-name { font-size: 20px; line-height: 1.4; }
+:root.display-large .report-tile-label { font-size: 18px; line-height: 1.4; font-weight: 500; }
+:root.display-large .report-tile-value { font-size: 27px; line-height: 1.4; }
+:root.display-large .report-tile-metrics strong { font-size: 21px; }
+:root.display-large .report-tile-deduction { font-size: 18px; }
+:root.display-large .report-tile-open { font-size: 18px; }
+}
+:root.display-large .reports-controls .report-worker-picker summary { font-weight: 600; }
+:root.display-large .report-search-count { font-size: 18px; }
+:root.display-large .report-explanation > summary { font-size: 18px; }
+@media screen and (max-width: 700px) {
+:root.display-large .report-tile-name { line-height: 1.4; font-weight: 750; }
+:root.display-large .report-tile-value { font-size: 29px; font-weight: 800; }
+:root.display-large .report-tile-currency { font-size: 18px; }
+:root.display-large .report-tile-metrics strong { font-size: 22px; line-height: 1.4; }
+:root.display-large .report-tile-label { font-size: 18px; line-height: 1.5; }
+:root.display-large .report-tile-open { font-size: 18px; }
+}
+:root.display-large .restore-fold summary { font-size: 18px; font-weight: 600; }
+:root.display-large .restore-fold summary::before { font-size: 18px; }
+:root.display-large .restore-label { font-size: 18px; }
+:root.display-large .restore-points button { font-size: 18px; }
+:root.display-large .invoice-picker-label { font-size: 18px; }
+:root.display-large .invoice-bars-head { font-size: 18px; font-weight: 600; }
+:root.display-large .invoice-bar-name { font-size: 18px; font-weight: 600; }
+:root.display-large .invoice-bar-count { font-size: 20px; font-weight: 700; }
+:root.display-large .invoice-bars-total { font-size: 18px; font-weight: 600; }
+:root.display-large .invoice-bars-total strong { font-size: 23px; font-weight: 800; }
+:root.display-large .report-rima-note { font-size: 18px; line-height: 1.5; }
+:root.display-large .report-yosefgeves-note { font-size: 18px; line-height: 1.5; }
+:root.display-large .link-cell { font-size: 18px; font-weight: 600; }
+:root.display-large .wday-date { line-height: 1.4; }
+:root.display-large .wday-date span { font-size: 18px; }
+:root.display-large .wday-note { font-size: 18px; }
+:root.display-large .ledger-reason { font-size: 18px; }
+:root.display-large .wday-note.wday-review { font-weight: 700; }
+:root.display-large .wday-money { font-weight: 700; }
+:root.display-large .wday-total { font-weight: 700; }
+:root.display-large .wday-total .wday-what { font-size: 18px; font-weight: 500; }
+:root.display-large .wday-chip { font-size: 18px; font-weight: 600; }
+:root.display-large .wday-chip-x2 { font-size: 18px; font-weight: 700; }
+:root.display-large .wday-net .wday-money { font-size: 22px; }
+:root.display-large .wday-rate { font-size: 18px; font-weight: 500; }
+:root.display-large .wday-derive { font-size: 18px; font-weight: 500; }
+:root.display-large .wday-advances-head { font-size: 18px; font-weight: 700; }
+:root.display-large .wday-ledger summary { font-size: 18px; font-weight: 600; }
+:root.display-large .wday-ledger summary::before { font-size: 18px; }
+:root.display-large .ledger-entry { font-size: 18px; }
+:root.display-large .ledger-kind { font-weight: 600; }
+:root.display-large .ledger-date { font-size: 18px; }
+:root.display-large .ledger-amount { font-weight: 700; }
+:root.display-large .ledger-note { font-size: 18px; }
+:root.display-large .ledger-origin { font-size: 18px; }
+:root.display-large .advance-form-title { font-size: 20px; font-weight: 700; }
+:root.display-large .advance-order-actions button { font-size: 23px; }
+:root.display-large .advance-balance > strong { font-size: 35px; }
+:root.display-large .advance-balance p { line-height: 1.6; }
+:root.display-large .advance-card-balance,
+:root.display-large .finance-preview { font-size: 22px; line-height: 1.6; font-weight: 700; }
+:root.display-large .report-worker-picker summary { font-weight: 700; }
+:root.display-large .report-selection-note { font-weight: 700; }
+:root.display-large .period-closure input,
+:root.display-large #advancesView > input { font: inherit; font-size: 20px; }
+:root.display-large .advance-form-amount { font-size: 20px; }
+:root.display-large .advance-form input[type="text"],
+:root.display-large .advance-form input[type="date"] { font-size: 20px; }
+:root.display-large .advance-form .layer-toggle button { font-size: 18px; }
+@media (max-width: 700px) {
+:root.display-large .week-table .corner .name-clip { font-size: 0; }
+:root.display-large .week-table .name-cell { font-size: 18px; }
+:root.display-large .week-table thead .day-initial { font-size: 18px; }
+:root.display-large .week-table thead small { font-size: 18px; }
+:root.display-large .week-cell .cell-line .site-mark { font-size: 18px; line-height: 1; }
+:root.display-large .week-cell .cell-extra::after { font-size: 18px; line-height: 1; font-weight: 800; }
+:root.display-large .week-legend-note { font-size: 18px; }
+:root.display-large .cell-absent { font-size: 0; }
+:root.display-large .cell-absent::before { font-size: 18px; }
+:root.display-large .week-table tfoot td { font-size: 18px; }
+:root.display-large .week-table tfoot .name-cell { font-size: 18px; }
+}
+@media screen and (max-width: 700px) {
+:root.display-large #weekView .week-range { font-size: 22px; }
+:root.display-large #weekView .week-header button { font-size: 18px; }
+:root.display-large .week-phone-back { font-size: 20px; }
+:root.display-large .week-phone-date { font-size: 18px; }
+:root.display-large .week-phone-date[aria-pressed="true"] { font-weight: 700; }
+:root.display-large .week-phone-panel h2 { font-size: 22px; }
+:root.display-large .week-phone-counts { font-size: 18px; }
+:root.display-large .week-phone-open { font-size: 20px; }
+:root.display-large .week-phone-name strong { font-size: 21px; }
+:root.display-large .week-phone-name .badge { font-size: 18px; }
+:root.display-large .week-phone-entry .tag-place { font-size: 18px; }
+:root.display-large .week-phone-rate,
+:root.display-large .week-phone-status { font-size: 18px; }
+:root.display-large .week-phone-fold summary { font-size: 18px; font-weight: 600; }
+}
+:root.display-large .modal-content input[type="text"],
+:root.display-large .modal-content input[type="email"],
+:root.display-large .modal-content input[type="password"],
+:root.display-large .modal-content input[type="tel"],
+:root.display-large .modal-content textarea { font-size: 20px; }
+:root.display-large .modal-content textarea { line-height: 1.5; }
+:root.display-large .field-label { font-size: 18px; }
+:root.display-large .form-more summary { font-size: 18px; }
+:root.display-large .modal-content input[type="number"] { font-size: 20px; }
+:root.display-large .ask-error { font-size: 18px; }
+:root.display-large .field-error { font-size: 18px; }
+:root.display-large #workerFormMore .field-label { font-weight: 600; }
+:root.display-large #workerFormModal .field-label { line-height: 1.4; }
+:root.display-large :is(#workerPickerModal, #placePickerModal, #workerFormModal, #shareModal, #askModal) .modal-content > h3 { line-height: 1.4; }
+:root.display-large .share-status { font-size: 18px; }
+:root.display-large #shareModal .share-styles button { font-size: 18px; }
+:root.display-large #shareText { line-height: 1.65; }
+:root.display-large .share-warning { font-size: 18px; line-height: 1.45; }
+:root.display-large #sederModal .modal-content > h3 { line-height: 1.4; }
+:root.display-large .seder-note { font-size: 18px; line-height: 1.45; }
+:root.display-large .seder-check { font-size: 20px; }
+:root.display-large .seder-who { line-height: 1.4; }
+:root.display-large .seder-name { font-weight: 650; }
+:root.display-large .seder-sites { font-size: 18px; }
+:root.display-large .seder-state { font-size: 18px; font-weight: 600; }
+:root.display-large .seder-shared { font-size: 18px; font-weight: 600; }
+:root.display-large .seder-status { font-size: 18px; }
+:root.display-large .seder-go { font-weight: 650; }
+:root.display-large .issue-value { font-size: 20px; font-weight: 700; }
+:root.display-large .issue-meta { font-size: 18px; }
+:root.display-large .issue-message { font-size: 18px; }
+:root.display-large .issue-label { font-size: 18px; }
+:root.display-large .storage-notice { font-size: 18px; }
+:root.display-large .hint { font-size: 18px; }
+:root.display-large .hint-warn { font-weight: 600; }
+:root.display-large .empty-hint { font-size: 18px; }
+@media (max-width: 700px) {
+:root.display-large .layer-toggle button { font-size: 18px; }
+:root.display-large .day-actions button { font-size: 18px; }
+}
+:root.display-large .setup-glyph { font-size: 35px; line-height: 1; }
+:root.display-large .setup-card button { font-size: 21px; }
+:root.display-large .setup-card .setup-alt { font-size: 18px; }
+:root.display-large .drawer-head h3 { font-size: 22px; }
+:root.display-large .drawer-day { font-size: 20px; }
+:root.display-large .dd-name { font-weight: 600; }
+:root.display-large .dd-count { font-weight: 700; }
+:root.display-large .dd-none .dd-count { font-weight: 500; }
+:root.display-large .drawer-week-title { font-size: 18px; }
+:root.display-large .drawer-btn { font-size: 24px; }
+:root.display-large .step-btn { font-size: 18px; }
+:root.display-large .undo-bar { font-size: 18px; }
+:root.display-large .undo-bar .btn-secondary { font-weight: 600; }
+:root.display-large .bulk-toggle { font-size: 18px; font-weight: 700; }
+:root.display-large .bulk-label { font-size: 18px; }
+:root.display-large .bulk-chip { font-weight: 700; }
+:root.display-large .now-editing { font-size: 20px; }
+:root.display-large .progress-done .now-count { font-weight: 700; }
+:root.display-large .mode-quiet .layer-off { font-size: 18px; }
+:root.display-large .mode-quiet .layer-on { font-size: 18px; }
+:root.display-large button.now-count { font-size: 18px; font-weight: 600; }
+:root.display-large .progress-ok { font-weight: 600; }
+:root.display-large .wrow-main { font-size: 20px; }
+:root.display-large .wrow-name { font-weight: 600; }
+:root.display-large .worker-list .wrow-name { font-weight: 700; }
+:root.display-large .tag { font-size: 18px; }
+:root.display-large .tag-place { font-weight: 600; }
+:root.display-large .tag-empty { font-weight: 600; }
+:root.display-large .tag-place .tag-rate { font-size: 18px; font-weight: 700; }
+:root.display-large .tag-rate { font-size: 18px; }
+:root.display-large .site-mark { font-size: 18px; }
+:root.display-large .sheet-place .site-mark { font-size: 18px; }
+:root.display-large .sheet-note { font-size: 18px; }
+:root.display-large .sheet-head h3 { font-size: 30px; line-height: 1.4; }
+:root.display-large .sheet-meta { font-size: 18px; }
+:root.display-large .sheet-status { font-size: 18px; font-weight: 600; }
+:root.display-large .sheet-place { font-size: 20px; font-weight: 700; }
+:root.display-large .sheet-key { font-size: 18px; line-height: 1.4; font-weight: 700; }
+:root.display-large .sheet-place-on { font-weight: 800; }
+:root.display-large .sheet-rate-name { font-size: 18px; }
+:root.display-large .chip-on,
+:root.display-large .chip-off { font-size: 18px; }
+:root.display-large .chip-on { font-weight: 600; }
+:root.display-large .report-period { font-size: 18px; }
+:root.display-large body { font-size: 21px; line-height: 1.55; }
+:root.display-large .wrow-name { font-size: 21px; }
+:root.display-large .tag { font-size: 18px; }
+:root.display-large .tag-empty { font-size: 18px; }
+:root.display-large .btn-icon { font-size: 22px; }
+:root.display-large .sheet-head h3 { font-size: 33px; }
+:root.display-large .sheet-place { font-size: 21px; }
+:root.display-large .sheet-actions button { font-size: 20px; }
+:root.display-large .chip-on,
+:root.display-large .chip-off { font-size: 18px; }
+:root.display-large .rate-hours { font-size: 20px; }
+:root.display-large .day-label strong { font-size: 25px; }
+:root.display-large .day-date { font-size: 18px; }
+@media (max-width: 359px) {
+:root.display-large .day-label strong { font-size: 22px; }
+}
+:root.display-large .progress-line strong { font-size: 21px; }
+:root.display-large .bulk-chip { font-size: 18px; }
+:root.display-large .modal-content h3 { font-size: 23px; }
+:root.display-large .modal-actions button { font-size: 20px; }
+:root.display-large .ask-error,
+:root.display-large .field-error { font-size: 18px; }
+@media (max-width: 700px) {
+:root.display-large .tab { font-size: 18px; font-weight: 600; }
+:root.display-large .report-table td { font-size: 20px; }
+:root.display-large .report-table td:first-child { font-size: 21px; }
+}
+:root.display-large .crash-detail { font-size: 18px; }
+:root.display-large .app-version button { font-size: 18px; }
+:root.display-large .progress-blocked { font-size: 18px; font-weight: 700; }
+@media (max-width: 700px) {
+:root.display-large .topbar .brand strong { font-size: 18px; }
+:root.display-large .day-label strong { font-size: 22px; line-height: 1.4; }
+:root.display-large .day-date { font-size: 18px; line-height: 1.4; }
+:root.display-large .day-tools .mode-toggle button { font-size: 18px; }
+:root.display-large .wrow-main { font-size: 20px; }
+}
+@media (max-width: 360px) {
+:root.display-large .banner-summary { line-height: 1.4; }
+:root.display-large .day-label strong { font-size: 23px; }
+}
+@media (max-height: 500px) {
+:root.display-large .day-label strong { font-size: 21px; }
+}
+:root.display-large .worker-active-toggle { font-weight: 700; }
+:root.display-large body { font-size: 22px; line-height: 1.55; }
+:root.display-large button { font-weight: 650; }
+:root.display-large input,
+:root.display-large select,
+:root.display-large textarea { font-size: 22px; }
+:root.display-large h1,
+:root.display-large h2,
+:root.display-large h3,
+:root.display-large strong,
+:root.display-large .field-label { font-weight: 750; }
+:root.display-large .hint,
+:root.display-large .empty-hint,
+:root.display-large .field-label,
+:root.display-large .field-error,
+:root.display-large .ask-error,
+:root.display-large .roster-meta,
+:root.display-large .crew-cycle,
+:root.display-large .sheet-meta,
+:root.display-large .sheet-status,
+:root.display-large .report-period,
+:root.display-large .report-explanation,
+:root.display-large .report-calculation,
+:root.display-large .report-tile-label,
+:root.display-large .report-tile-open,
+:root.display-large .report-tile-currency { font-size: 20px; }
+:root.display-large .btn-add,
+:root.display-large .btn-secondary,
+:root.display-large .modal-actions button,
+:root.display-large .ask-choices button { font-size: 21px; }
+:root.display-large .modal-content h3 { font-size: 26px; }
+:root.display-large .worker-info > summary { font-size: 20px; font-weight: 650; }
+:root.display-large .worker-info > summary span { font-size: 24px; }
+:root.display-large #workerDaysMeta { font-size: 20px; }
+:root.display-large .advance-balance > strong { font-size: 37px; }
+:root.display-large .advance-worker-card strong { font-size: 22px; font-weight: 750; }
+:root.display-large .advance-worker-card span { font-size: 23px; font-weight: 750; }
+:root.display-large #rosterView .roster-details > strong { font-size: 22px; }
+:root.display-large #rosterView .roster-details > .tag { font-size: 22px; }
+:root.display-large #rosterView .crew-edit { font-size: 20px; }
+:root.display-large .worker-active-toggle { font-size: 20px; }
+:root.display-large .crew-tools button,
+:root.display-large .crew-shortcuts button { font-size: 20px; }
+:root.display-large .site-name { font-weight: 700; }
+:root.display-large .site-head .site-name { font-size: 22px; }
+:root.display-large .wrow-name { font-size: 22px; font-weight: 750; }
+:root.display-large .tag,
+:root.display-large .rate-hours { font-size: 20px; }
+:root.display-large .day-header .btn-secondary { font-size: 18px; }
+:root.display-large .push-reminder-times strong { font-size: 35px; line-height: 1.4; }
+:root.display-large .push-reminder-times span { font-size: 20px; font-weight: 700; }
+:root.display-large .push-reminder-enable { font-weight: 700; }
+:root.display-large .push-reminder-status { font-size: 21px; line-height: 1.6; font-weight: 650; }
+:root.display-large .push-reminder-help summary { font-size: 21px; font-weight: 700; }
+@media screen and (max-width: 700px) {
+:root.display-large .tabs .tab { font-size: 18px; font-weight: 700; }
+:root.display-large .report-tile-name { font-size: 22px; font-weight: 750; }
+:root.display-large .report-tile-value { font-size: 33px; }
+:root.display-large .report-tile-metrics strong { font-size: 25px; }
+:root.display-large .report-tile-label,
+:root.display-large .report-tile-open,
+:root.display-large .report-tile-currency { font-size: 20px; }
+}
+:root.display-large .topbar .sync-chip { font-weight: 700; }
+:root.display-large .day-label strong { font-size: 23px; font-weight: 800; }
+:root.display-large .mode-toggle button.layer-on { font-weight: 800; }
+:root.display-large .now-count { font-weight: 800; }
+:root.display-large .assign-name { font-size: 23px; font-weight: 700; }
+:root.display-large .rima-label,
+:root.display-large .yosefgeves-label { font-weight: 600; }
+:root.display-large .day-actions .btn-success { font-weight: 800; }
+:root.display-large .week-range { font-weight: 800; }
+:root.display-large .week-table .name-cell { font-weight: 700; }
+:root.display-large .crew-cycle { font-weight: 500 !important; }
+:root.display-large .advance-worker-card span { font-weight: 800; }
+:root.display-large .settings-section-title h3 { font-weight: 800; }
+:root.display-large .settings-group h3 { font-size: 21px !important; line-height: 1.4; font-weight: 700 !important; }
+:root.display-large .settings-card-head .hint { line-height: 1.4; }
+:root.display-large #carryMigrationBox h3 { font-size: 21px; font-weight: 700; }
+:root.display-large .transport-panel button,
+:root.display-large .transport-panel summary,
+:root.display-large .transport-wa { font-size: 20px; font-weight: 700; }
+:root.display-large .transport-head h2 { font-size: 29px; line-height: 1.4; font-weight: 800; }
+:root.display-large .transport-context { font-size: 20px; font-weight: 600; }
+:root.display-large .transport-note { font-size: 20px; font-weight: 700; }
+:root.display-large .transport-share p { font-size: 20px; line-height: 1.4; }
+:root.display-large .transport-share-line { font-weight: 600; }
+:root.display-large .transport-share-line[data-state="notShared"],
+:root.display-large .transport-share-line[data-state="noRoom"],
+:root.display-large .transport-share-line[data-state="unchecked"],
+:root.display-large .transport-share-line[data-state="waiting"] { font-weight: 700; }
+:root.display-large .transport-share-notice { font-weight: 700; }
+:root.display-large .transport-view { font-size: 21px; line-height: 1.45; }
+:root.display-large .transport-view h3 { font-size: 22px; line-height: 1.4; }
+:root.display-large .transport-hint { font-size: 20px; }
+:root.display-large .transport-name { font-weight: 700; }
+:root.display-large .transport-sub { font-size: 18px; }
+:root.display-large .transport-badge { font-size: 18px; font-weight: 700; }
+:root.display-large .transport-quiet { font-size: 18px !important; }
+:root.display-large .transport-tray-title { font-size: 21px !important; font-weight: 800; }
+:root.display-large .transport-dot { font-size: 18px; line-height: 1; }
+:root.display-large .transport-card-line { font-size: 20px; font-weight: 700; }
+:root.display-large .transport-seat { font-size: 20px !important; line-height: 1.4; }
+:root.display-large .transport-seat-empty { font-size: 18px !important; }
+:root.display-large .transport-seat-name { font-weight: 800; }
+:root.display-large .transport-ghost { font-size: 21px; font-weight: 800; }
+:root.display-large .transport-fleet-off > h4 { font-size: 20px; font-weight: 700; }
+:root.display-large .transport-fleet-item-off .transport-name { font-weight: 600; }
+:root.display-large #transportSummaryModal .modal-content > h3 { line-height: 1.4; }
+:root.display-large #transportSummaryText { font-size: 20px; line-height: 1.65; }
+:root.display-large #transportSummaryModal .modal-actions button { font-size: 20px; }
+:root.display-large .advance-worker-card.advance-worker-zero strong { font-weight: 500 !important; }
+:root.display-large .advance-worker-card.advance-worker-zero span { font-weight: 500 !important; }
+:root.display-large .advance-balance.advance-balance-zero > strong { font-weight: 600 !important; }
+@media (max-width: 700px) {
+:root.display-large .week-cell .cell-line[data-initial]::before { font-size: 18px; line-height: 1; font-weight: 800; }
+:root.display-large .week-cell .cell-line .site-mark { font-size: 18px; }
+}
+:root.display-large .daycheck-entry { font-size: 20px; font-weight: 600; }
+:root.display-large #dayCheckModal .modal-content > h3 { line-height: 1.4; }
+:root.display-large .daycheck-clean { font-size: 20px; line-height: 1.4; font-weight: 650; }
+:root.display-large .daycheck-head { font-size: 18px; font-weight: 700; }
+:root.display-large .daycheck-say { font-size: 18px; line-height: 1.45; }
+:root.display-large .daycheck-go { font-size: 20px; font-weight: 600; }
+:root.display-large .daycheck-plain { font-size: 20px; font-weight: 600; }
+:root.display-large .daycheck-lead { font-size: 18px; line-height: 1.45; }
+:root.display-large .daycheck-foot button { font-size: 20px; }
+:root.display-large #transportReportModal .modal-content > h3 { line-height: 1.4; }
+:root.display-large .transport-report-ranges button { font-size: 20px; font-weight: 700; }
+:root.display-large #transportReportText { font-size: 20px; line-height: 1.65; }
+:root.display-large #transportReportModal .modal-actions button { font-size: 20px; }
+:root.display-large .journey-panel button,
+:root.display-large .journey-dock button,
+:root.display-large .journey-ride button { font-size: 20px; font-weight: 700; }
+:root.display-large .journey-pip-mark { font-size: 18px; line-height: 1; font-weight: 800; }
+:root.display-large .journey-pip-name { font-size: 20px; font-weight: 800; }
+:root.display-large .journey-count { font-size: 20px; font-weight: 700; }
+:root.display-large .journey-dock-top button.journey-count { font-size: 20px !important; }
+:root.display-large .journey-dock-row button { font-size: 20px !important; }
+:root.display-large .journey-ride-status { font-size: 20px; font-weight: 700; }
+:root.display-large .journey-head h2 { font-size: 27px; line-height: 1.4; font-weight: 800; }
+:root.display-large .journey-context { font-size: 20px; font-weight: 600; }
+:root.display-large .journey-note { font-size: 20px; font-weight: 700; }
+:root.display-large .journey-view { font-size: 21px; line-height: 1.45; }
+:root.display-large .journey-view h3 { font-size: 25px; line-height: 1.4; font-weight: 800; }
+:root.display-large .journey-view h4 { font-size: 22px; line-height: 1.4; }
+:root.display-large .journey-lead { font-size: 20px; }
+:root.display-large .journey-block-head { font-weight: 800; }
+:root.display-large .journey-warn { font-size: 20px; font-weight: 700; }
+:root.display-large .journey-ok { font-size: 20px; font-weight: 700; }
+:root.display-large .journey-send-who { line-height: 1.4; }
+:root.display-large .journey-send-sub { font-size: 20px; }
+:root.display-large .worker-card-open { font-size: 18px !important; line-height: 1.4 !important; }
+:root.display-large #workerCardModal .modal-content > h3 { line-height: 1.4; }
+:root.display-large .wcard-who { font-size: 20px; }
+:root.display-large .wcard-head { font-size: 21px; }
+:root.display-large .wcard-aside { font-size: 18px; font-weight: 500; }
+:root.display-large .wcard-label { font-size: 18px; }
+:root.display-large .wcard-value { font-size: 23px; }
+:root.display-large .wcard-owed .wcard-label { font-size: 20px; }
+:root.display-large .wcard-sub { font-size: 18px; }
+:root.display-large .wcard-move-date { font-size: 18px; }
+:root.display-large .wcard-move-amount { font-weight: 650; }
+:root.display-large .wcard-day-when { font-size: 18px; }
+:root.display-large .wcard-site { font-size: 18px; font-weight: 600; }
+:root.display-large .wcard-day-absent { font-size: 18px; font-weight: 600; }
+:root.display-large #workerCardModal .modal-actions button { font-size: 20px; }
+:root.display-large #monthSummaryModal .modal-content > h3 { line-height: 1.4; }
+:root.display-large .msum-nav button { font-size: 21px; font-weight: 650; }
+:root.display-large .msum-month { font-size: 25px; font-weight: 800; }
+:root.display-large .msum-range { font-size: 20px; }
+:root.display-large .msum-label { font-size: 21px; font-weight: 600; }
+:root.display-large .msum-value { font-size: 23px; font-weight: 800; }
+:root.display-large .msum-tile .msum-value { font-size: 33px; line-height: 1.4; }
+:root.display-large .msum-delta { font-size: 20px; font-weight: 650; }
+:root.display-large .msum-head { font-size: 22px; font-weight: 800; }
+:root.display-large .msum-sub { font-size: 21px; font-weight: 700; }
+:root.display-large .msum-site { font-size: 22px; font-weight: 700; }
+:root.display-large .msum-count { font-size: 25px; font-weight: 800; }
+:root.display-large .msum-bar-count { font-size: 31px; line-height: 1; }
+:root.display-large .msum-man { font-size: 22px; font-weight: 700; }
+:root.display-large .msum-total .msum-label { font-weight: 700; }
+:root.display-large .msum-total .msum-value { font-size: 27px; }
+:root.display-large .msum-lead .msum-value { font-size: 27px; }
+:root.display-large .msum-note { font-size: 20px; line-height: 1.45; }
+:root.display-large .msum-progress,
+:root.display-large .msum-compare { font-weight: 600; }
+:root.display-large .msum-warn { font-size: 20px !important; }
+:root.display-large #monthSummaryBody .empty-hint { font-size: 22px; }
+:root.display-large .msum-fold > button { font-size: 21px; font-weight: 650; }
+:root.display-large .msum-fold textarea { font-size: 20px; }
+:root.display-large #monthSummaryModal .modal-actions button { font-size: 21px; }
+:root.display-large #monthSummaryStatus { font-size: 20px; }
+:root.display-large .report-output-actions .payslips-entry { font-size: 20px; }
+:root.display-large #payslipsModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
+:root.display-large .payslips-which button { font-size: 21px; }
+:root.display-large .payslips-period-range { font-size: 22px; font-weight: 750; }
+:root.display-large .payslips-period-who { font-size: 20px; }
+:root.display-large .payslips-lead { font-size: 21px; line-height: 1.5; }
+:root.display-large #payslipsNote { font-size: 20px; }
+:root.display-large .payslips-nobody { font-size: 22px; }
+:root.display-large .payslips-name { font-size: 23px; line-height: 1.4; font-weight: 750; }
+:root.display-large .payslips-when { font-size: 21px; font-weight: 600; }
+:root.display-large .payslips-cycle { font-size: 20px; }
+:root.display-large .payslips-amount-label { font-size: 20px; font-weight: 600; }
+:root.display-large .payslips-value { font-size: 33px; line-height: 1.4; font-weight: 800; }
+:root.display-large .payslips-currency { font-size: 23px; font-weight: 700; }
+:root.display-large .payslips-state { font-size: 22px; font-weight: 700; }
+:root.display-large .payslips-warn { font-size: 21px; line-height: 1.45; font-weight: 600; }
+:root.display-large .payslips-actions .payslips-show,
+:root.display-large .payslips-actions .payslips-copy { font-size: 21px; font-weight: 600; }
+:root.display-large .payslips-door { font-size: 22px; line-height: 1.4; font-weight: 750; }
+:root.display-large #payslipsModal textarea.payslips-text { font-size: 21px; line-height: 1.5; }
+:root.display-large .payslips-status { font-size: 21px; font-weight: 600; }
+:root.display-large .payslips-foot button { font-size: 22px; }
+:root.display-large .wcard-door { font-size: 22px; font-weight: 700; }
+:root.display-large .wcard-cal-label { font-size: 23px; }
+:root.display-large #workerCardBody .wcard-cal-step,
+:root.display-large #workerCardBody .wcard-cal-home { font-size: 20px; font-weight: 600; }
+:root.display-large .wcard-cal-head { font-size: 20px; font-weight: 700; }
+:root.display-large #workerCardBody .wcard-cal-day { font-weight: 600; }
+:root.display-large .wcard-cal-number { font-size: 20px; line-height: 1.4; font-weight: 600; }
+:root.display-large .wcard-cal-site { font-size: 22px; line-height: 1.4; font-weight: 800; }
+:root.display-large .wcard-cal-absent { font-size: 25px; line-height: 1.4; font-weight: 800; }
+:root.display-large #workerCardBody .wcard-cal-saturday { font-size: 20px; }
+:root.display-large .wcard-cal-note { font-size: 20px; }
+:root.display-large .wcard-cal-hint { font-size: 20px !important; }
+:root.display-large .wcard-month .wcard-site { font-size: 21px; }
+:root.display-large .wcard-month-days { font-size: 23px; }
+:root.display-large .wcard-month-totals .wcard-label { font-size: 20px; }
+:root.display-large .find-entry { font-size: 20px; font-weight: 600; }
+:root.display-large .find-head h3 { line-height: 1.4; }
+:root.display-large .find-head button { font-size: 20px; }
+:root.display-large .find-field input { font-size: 22px; }
+:root.display-large .find-field button { font-size: 20px; }
+:root.display-large .find-status { font-size: 20px !important; }
+:root.display-large .find-name { font-size: 23px; font-weight: 700; }
+:root.display-large .find-who .badge { font-size: 20px; }
+:root.display-large .find-door { font-size: 20px; font-weight: 600; }
+:root.display-large .find-group { font-size: 21px; }
+:root.display-large .journey-day-entry { font-size: 21px; font-weight: 700; }
+:root.display-large body.journey-day .day-actions > #copyDayBtn { font-size: 20px !important; }
+:root.display-large #whatsNewBanner { font-size: 20px; font-weight: 600; }
+:root.display-large #whatsNewBanner button { font-size: 20px; }
+:root.display-large #whatsNewRow { font-size: 20px; font-weight: 700; }
+:root.display-large #whatsNewModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
+:root.display-large #whatsNewContext { font-size: 20px; }
+:root.display-large .whatsnew-build-name { font-size: 20px; font-weight: 700; }
+:root.display-large .whatsnew-item-title { font-size: 22px; line-height: 1.4; font-weight: 800; }
+:root.display-large .whatsnew-item-text { font-size: 21px; line-height: 1.45; }
+:root.display-large .whatsnew-item-where { font-size: 20px; line-height: 1.4; font-weight: 600; }
+:root.display-large .whatsnew-show { font-size: 21px; font-weight: 700; }
+:root.display-large .whatsnew-foot button { font-size: 21px; font-weight: 700; }
+:root.display-large .tray .chip button.chip-usual { font-size: 22px; line-height: 1.4; font-weight: 800; }
+:root.display-large .chip-usual-arrow { font-weight: 800; }
+:root.display-large .usual-note { font-size: 20px; line-height: 1.4; font-weight: 600; }
+:root.display-large .site-card-open { font-size: 20px !important; line-height: 1.4 !important; font-weight: 600; }
+:root.display-large #siteCardModal .modal-content > h3 { font-size: 21px; line-height: 1.4; }
+:root.display-large .scard-who .scard-name { font-size: 27px; line-height: 1.4; font-weight: 800; }
+:root.display-large .scard-who .scard-status { font-size: 20px; font-weight: 700; }
+:root.display-large .scard-nav button { font-size: 21px; font-weight: 650; }
+:root.display-large .scard-month { font-size: 27px; font-weight: 800; }
+:root.display-large .scard-head { font-size: 22px; font-weight: 800; }
+:root.display-large .scard-sub { font-size: 21px; font-weight: 700; }
+:root.display-large .scard-note { font-size: 20px; line-height: 1.45; }
+:root.display-large .scard-progress { font-weight: 600; }
+:root.display-large .scard-cal-head { font-size: 20px; font-weight: 700; }
+:root.display-large #siteCardBody .scard-cal-day { font-weight: 600; }
+:root.display-large .scard-cal-number { font-size: 20px; line-height: 1.4; font-weight: 600; }
+:root.display-large .scard-cal-men { font-size: 27px; line-height: 1.4; font-weight: 800; }
+:root.display-large .scard-cal-count { font-size: 20px; line-height: 1.4; font-weight: 700; }
+:root.display-large #siteCardBody .scard-cal-saturday { font-size: 20px; }
+:root.display-large .scard-label { font-size: 22px; font-weight: 600; }
+:root.display-large .scard-value { font-size: 29px; line-height: 1.4; font-weight: 800; }
+:root.display-large .scard-man-name { font-size: 22px; font-weight: 700; }
+:root.display-large .scard-man-days { font-size: 27px; font-weight: 800; }
+:root.display-large .scard-client > button { font-size: 22px; font-weight: 800; }
+:root.display-large .scard-client-fold textarea { font-size: 21px; line-height: 1.65; }
+:root.display-large .scard-client-fold button { font-size: 21px; font-weight: 700; }
+:root.display-large #siteCardStatus { font-size: 20px; }
+:root.display-large #siteCardModal .modal-actions button { font-size: 21px; }
+:root.display-large #reportsView .report-tile-name { font-size: 24px; line-height: 1.4; font-weight: 800; }
+:root.display-large .report-tile-facts .report-tile-metric strong { font-size: 27px; line-height: 1.4; font-weight: 800; }
+:root.display-large .report-tile-facts .report-tile-metric .report-tile-label { font-size: 20px; line-height: 1.4; font-weight: 600; }
+:root.display-large .report-tile-facts .report-tile-zero strong,
+:root.display-large .report-tile-facts .report-tile-zero .report-tile-label { font-weight: 600; }
+:root.display-large .report-tile-line-label { font-size: 22px; font-weight: 600; }
+:root.display-large .report-tile-line-value { font-size: 24px; font-weight: 800; }
+:root.display-large .report-tile-facts .report-tile-currency,
+:root.display-large .report-tile-line-currency { font-size: 20px; font-weight: 600; }
+:root.display-large .report-tile-note { font-size: 20px; line-height: 1.45; font-weight: 500; }
+:root.display-large .report-tile-note.report-tile-warn,
+:root.display-large #reportsView .report-payroll .hint-warn,
+:root.display-large #reportsView .report-payroll > .hint-warn,
+:root.display-large #workerDaysModal .hint-warn { font-size: 20px; line-height: 1.5; font-weight: 700; }
+:root.display-large .report-tile-facts .report-tile-amount .report-tile-label { font-size: 22px; font-weight: 700; }
+:root.display-large .report-tile-facts .report-tile-value { font-size: 35px; line-height: 1.4; font-weight: 800; }
+:root.display-large #reportsView .report-tile-open { font-size: 20px; font-weight: 700; }
+@media (max-width: 700px) {
+:root.display-large #reportsView .report-payroll .report-table tfoot td { font-size: 22px; font-weight: 700; }
+:root.display-large #reportsView .report-payroll .report-table tfoot td::before { font-weight: 600; }
+:root.display-large #reportsView .report-payroll .report-table tfoot td:last-child { font-size: 31px; }
+:root.display-large #reportsView .report-payroll .report-table tbody td[data-label="שעות נוספות"]:not(:empty) { font-size: 22px; font-weight: 800; }
+:root.display-large #reportsView .report-payroll .report-table tbody td[data-label="שעות נוספות"]:not(:empty)::before { font-weight: 700; }
+}
+:root.display-large #reportsView .report-payroll .hint,
+:root.display-large #reportsView .report-invoice .hint,
+:root.display-large #reportsView .report-explanation,
+:root.display-large #reportsView .report-explanation > summary,
+:root.display-large #reportsView .report-finance-line,
+:root.display-large #reportsView .report-weekly-breakdown > summary,
+:root.display-large #reportsView .report-weekly-name,
+:root.display-large #reportsView .report-weekly-line,
+:root.display-large #reportsView .report-rima-note,
+:root.display-large #reportsView .report-yosefgeves-note,
+:root.display-large #reportsView .invoice-picker-label { font-size: 20px; line-height: 1.55; }
+:root.display-large #reportsView .report-weekly-name { font-size: 22px; font-weight: 800; }
+:root.display-large #reportsView .report-group { font-size: 23px; font-weight: 800; }
+:root.display-large #reportsView .report-group::after { font-size: 20px; }
+:root.display-large #reportsView .invoice-bars-head { font-size: 22px; font-weight: 800; }
+:root.display-large #reportsView .invoice-bar-name { font-size: 22px; font-weight: 700; }
+:root.display-large #reportsView .invoice-bar-count { font-size: 27px; font-weight: 800; }
+:root.display-large #reportsView .invoice-bars-total { font-size: 22px; font-weight: 700; }
+:root.display-large #reportsView .invoice-bars-total strong { font-size: 35px; }
+:root.display-large #workerDaysModal .wday-extra { font-size: 21px; line-height: 1.4; font-weight: 800; }
+:root.display-large #workerDaysModal .tag-rate,
+:root.display-large #workerDaysModal .wday-chip,
+:root.display-large #workerDaysModal .wday-chip-x2,
+:root.display-large #workerDaysModal .wday-date span,
+:root.display-large #workerDaysModal .wday-note,
+:root.display-large #workerDaysModal .wday-rate,
+:root.display-large #workerDaysModal .wday-derive,
+:root.display-large #workerDaysModal .wday-advances-head,
+:root.display-large #workerDaysModal .wday-total .wday-what { font-size: 20px; }
+:root.display-large #workerDaysModal .wday-money { font-size: 22px; }
+:root.display-large .wday-summary-head { font-size: 23px; font-weight: 800; }
+:root.display-large #reportsView .invoice-picker button { font-size: 20px; }
+
+/* ---- 4. THE SHAPES ------------------------------------------------------------------ */
+
+/* The page's own text: 20px, and never lighter than 500. (Block 3 gave body the +4 every
+   18px rule gets; running text at 22px made every dialog a scroll.) A field's own words
+   are the browser's weight unless told, so they are told. */
+:root.display-large body { font-size: 20px !important; font-weight: 500; }
+:root.display-large input,
+:root.display-large select,
+:root.display-large textarea { font-weight: 500; }
+/* A field's hint - «חיפוש עובד» - is the third ink at the browser's own fade. */
+:root.display-large ::placeholder { color: var(--ink-3) !important; opacity: 1 !important; }
+/* A select is drawn by the browser on a grey of its own (white on #6b6b6b in a dark
+   Chromium, 5.3:1). Here it stands on the field's ground, in the page's ink. */
+:root.display-large select { background-color: var(--surface-2) !important; color: var(--ink) !important; border: 2px solid var(--line) !important; }
+/* A disabled control steps back, but stays readable: .4 left «מחק» at 2.3:1. */
+:root.display-large button:disabled,
+:root.display-large select:disabled,
+:root.display-large .step-btn:disabled { opacity: .62 !important; }
+
+/* THE ICONS AND THE HAIRLINES. A 1.8 stroke in the third ink is the first thing a
+   far-sighted eye loses: the tab's picture, the ✕ at the end of a row, the glyph beside a
+   button's words are drawn larger, heavier, and in the second ink or the first. */
+:root.display-large .tab { color: var(--ink-2) !important; }
+:root.display-large .tab.tab-on { color: var(--accent) !important; }
+:root.display-large .tab-icon svg,
+:root.display-large .settings-open svg,
+:root.display-large .settings-card-icon svg { stroke-width: 2.3; }
+:root.display-large .btn-ico { width: 24px; height: 24px; stroke-width: 2.3; }
+:root.display-large .btn-icon,
+:root.display-large .wrow .btn-icon,
+:root.display-large .assign-row .btn-icon { color: var(--ink) !important; font-weight: 800 !important; }
+/* ...but on the undo bar, the one inverse strip, the bar's own word colour (css/design.css). */
+:root.display-large .undo-bar .btn-icon { color: var(--paper) !important; }
+:root.display-large .site-mark { opacity: 1 !important; }
+:root.display-large .wrow,
+:root.display-large .roster-row,
+:root.display-large .advance-worker-card,
+:root.display-large .assign-row { border-bottom-width: 2px !important; }
+:root.display-large .settings-fold > summary::after { width: 12px; height: 12px; border-right-width: 3px; border-bottom-width: 3px; border-color: var(--ink-2); }
+:root.display-large .transport-fold > summary::before,
+:root.display-large .transport-more > summary::before { width: 11px; height: 11px; border-inline-start-width: 3px; border-bottom-width: 3px; }
+
+/* ROWS STAND FURTHER APART. The day's row was 56px - a 44px target with six above and
+   six below; here it is a 52px target with eight, and a name that is 24px tall. */
+:root.display-large .wrow-main { min-height: 68px !important; padding-block: 8px !important; }
+:root.display-large .assign-row { min-height: 64px; }
+:root.display-large .roster-row { padding-block: 14px !important; }
+:root.display-large .advance-worker-card { min-height: 76px !important; padding-block: 18px !important; align-items: center; }
+:root.display-large .picker-row { min-height: 64px; }
+:root.display-large .settings-fold > summary { min-height: 68px !important; }
+
+/* THE FIGURES THAT ARE MONEY, AND THE COUNTS: larger and heavier than the words beside
+   them - what a man is owed, what he owes, how many are recorded. */
+:root.display-large .advance-worker-card span { font-size: 26px !important; font-weight: 800 !important; }
+:root.display-large .advance-worker-card.advance-worker-zero span { font-size: 22px !important; font-weight: 600 !important; }
+:root.display-large .advance-worker-card.advance-worker-zero strong { font-weight: 600 !important; }
+:root.display-large .advance-balance.advance-balance-zero > strong { font-weight: 700 !important; }
+:root.display-large .advance-card-balance { font-size: 24px !important; font-weight: 800 !important; }
+:root.display-large .wcard-value { font-size: 26px !important; font-weight: 800 !important; }
+:root.display-large .wcard-move-amount { font-size: 22px !important; font-weight: 800 !important; }
+:root.display-large .report-tile-value { font-weight: 800 !important; }
+/* (Each of the next two is spelled as long as the rule it has to beat: block 3's
+   `button.now-count`, and block 2's floor for a field with its four `:not`s.) */
+:root.display-large button.now-count { font-size: 22px !important; font-weight: 800 !important; }
+:root.display-large input.site-count-input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]) { font-size: 24px !important; font-weight: 800 !important; }
+:root.display-large td.num,
+:root.display-large .wday-pay,
+:root.display-large .journey-count { font-weight: 800 !important; }
+
+/* THE DOCK'S TWO BUTTONS are what the day ends with every evening; block 3 took their
+   14px to the floor, and they are a button's words: 20px. */
+:root.display-large .day-actions > button { font-size: 20px !important; }
+
+/* THE TIGHT DAY (body.day-tight, js/ui/bars.js). When fewer than two rows of the crew fit
+   between the header and the dock, the app already has a smaller shape, and it is
+   MEASURED, not chosen here: the tab words leave the eyes (the pictures stay, and are
+   drawn heavier above), and the dock's phrases and the two-way switch go to one line and
+   an ellipsis. On the small phone this mode reaches that shape sooner - on the seder's
+   first station at 375x667 it is there from the start. The pictures-only tab bar is kept:
+   it is what gives the list its room. The ELLIPSIS is not: a phrase cut to «מיום שליש…» is
+   the one thing this reader cannot be asked to guess. The phrases wrap instead, and the
+   dock is as tall as its words; bars.js measures it at that height. */
+:root.display-large body.day-tight .day-actions button,
+:root.display-large body.day-tight .day-tools .mode-toggle button { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
+:root.display-large .day-actions > button { padding-inline: 6px !important; }
+
+/* THE TAB BAR ON THE 320px PHONE: five words at 18px in five tabs of 60.8px, and
+   «מקדמות» in bold is 66 - it ran 2.6px past its tab on each side (v191's review, read by
+   the walk). There the bar gives its two side gaps and its four seams to the tabs (64px
+   each) and the words are 500, the weight floor: «מקדמות» is 61.7. */
+@media (max-width: 359px) {
+    :root.display-large .tabs { gap: 0 !important; padding-inline: 0 !important; }
+    :root.display-large .tabs .tab { font-weight: 500 !important; }
+}
+
+/* THE DAY'S COUNT BESIDE UNDO AND REDO. On the phone the count «נרשמו 8 מתוך 14» shares
+   the line of undo, redo and «היום»; at 22px it no longer fitted beside them at 320 and
+   took a line of its own - 55px of a 568px screen, under a header that stays on the
+   glass. It keeps its place on that line and its words go to two lines inside it
+   instead. Not on the folded header (its words are off the eyes there) and not on a
+   phone held sideways (app.css's own one-line bar). */
+@media (max-width: 700px) and (min-height: 501px) {
+    :root.display-large body:not(.day-compact) .day-header .progress { flex: 1 1 0 !important; }
+    :root.display-large body:not(.day-compact) .day-header .progress .now-count { white-space: normal !important; }
+}
+
+/* THE SEDER'S FIRST STATION ON THE 320px PHONE (v191's review). The journey's row puts
+   five marks and the station's name above the day's own dock; at 32px a mark the fifth
+   went to a second line, and with the count's line above the dock and the header grew
+   into each other: the dock lay 29px over the header, cut «נרשמו 8 מתוך 14» in half, and
+   not one site or man of the day was on the glass. There the marks are the size
+   design.css draws them (26px, the 18px digit inside), so the five and the name keep one
+   line; «יציאה» takes the width its word needs (it ran 4px out of a share of the row).
+   Measured at 320x568 with the count's line above: the header and the dock no longer
+   meet, the count is whole, and the top of the day shows between them (65px; a short
+   scroll folds the header and gives it the rest). At 375x667 the first site and its
+   first man are both whole. */
+@media (max-width: 359px) {
+    :root.display-large .journey-pip-mark { inline-size: 26px !important; block-size: 26px !important; }
+    :root.display-large .journey-strip { gap: 4px; }
+}
+:root.display-large body.journey-day .journey-dock-row > button:first-child { flex: 0 0 auto !important; }
+
+/* A MAN'S NAME ON THE DAY IS NEVER CUT. app.css keeps it to one line and an ellipsis,
+   right where the name has its half of the row at 16px; at this size, on the 320px phone,
+   that half cut «מוחמד אבו ראס» to «מוחמד אבו…» and «איברהים עודה» too (v191's review). It
+   wraps instead - at a space, and inside a word only where one word is wider than the
+   row - and the row is as tall as the name. */
+:root.display-large .wrow-name { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere; }
+
+/* A SITE'S NAME ON A MAN'S ROW, AND A SUM ON THE ADVANCES LIST, were each one unbreakable
+   line - right for 16px, and at this size with the phone's own large text on top of it
+   (measured at twice this file's sizes) the badge ran 95px past a 440px screen and the
+   sum off the start edge. Both may now break; neither is ever cut. */
+:root.display-large .wrow-value { min-width: 0; max-width: 100%; }
+:root.display-large .wrow-value .tag { max-width: 100%; min-width: 0; white-space: normal !important; overflow-wrap: anywhere; }
+:root.display-large .tag .site-name { white-space: normal !important; overflow-wrap: anywhere; min-width: 0; }
+:root.display-large .advance-worker-card { flex-wrap: wrap; }
+:root.display-large .advance-worker-card span { flex-shrink: 1 !important; min-width: 0; overflow-wrap: anywhere; }
+
+/* WORDS THAT RAN OUT OF THEIR BUTTON on the 320px phone (v191's review; the walk reads
+   every control whose words are wider than it is, tests/screens.mjs):
+   - the day drawer's today: «יום שלישי» and the «היום» badge would not give way, and the
+     row ran 14px past its button. The badge goes under the day's name instead;
+   - the assign sheet's «שעות נוספות»: three rates and the hours shared one line in equal
+     thirds, and «נוספות» was 3px wider than its third. On the smallest phone the three
+     take what their words ask, and the hours go to the next line when there is no room;
+   - the reports' «דו־שבועי · 9» ran under «תצוגה מפורטת» beside it: the two cycles take
+     a line of their own, half of it each. */
+:root.display-large .dd-name { flex-wrap: wrap; row-gap: 2px; }
+@media (max-width: 359px) {
+    :root.display-large .sheet-rate-row button { flex: 1 1 auto !important; }
+}
+:root.display-large .report-browse-tools .report-cycle-nav { flex: 1 1 100% !important; }
+
+/* «כל העובדים» IN THE REPORTS: a man's row is the box that ticks him, and it is what a
+   finger lands on - 52px like every other target here (it was 45; the walk had never
+   opened the list - tests/screens.mjs opens it now). */
+:root.display-large .report-worker-choice { min-height: 52px !important; }
+:root.display-large .report-worker-choice input { width: 52px !important; height: 52px !important; flex-basis: 52px !important; }
+
+/* THE MONTH'S DAYS on the worker's card and the site's card are a sixth or a seventh of
+   the card's width, and the sheets say so (min-width: 0). The 52px floor made each day
+   wider than its column on the 320px phone: 52 in 45.2, so that every day lay 3.8px over
+   its neighbour and a tap on the seam opened the other date (v191's review). A day keeps
+   its column - 45px at 320, the app's own 44 and more, 52 and more from 375 - and it is
+   62px and taller, so what a finger has is never less than the floor's area. The one
+   exception to 52 both ways in this file; tests/largetext.browser.mjs holds it to exactly
+   that, and holds that no two controls on any screen lie over each other. */
+:root.display-large #workerCardBody .wcard-cal-day,
+:root.display-large #siteCardBody .scard-cal-day { min-width: 0 !important; }
+
+/* THE «i» OF AN EXPLANATION: its size is set by a `font` shorthand (14px in a 16px ring). */
+:root.display-large .report-explanation > summary::after { width: 26px !important; height: 26px !important; flex: 0 0 26px !important; border-width: 2px !important; font: 700 18px/23px Georgia, serif !important; }
+
+/* THE SEDER'S LINKS are <a>, not buttons; the floor of a target is said for them too. */
+:root.display-large a.seder-one,
+:root.display-large a.seder-go,
+:root.display-large .journey-send-row a { min-height: 52px !important; min-width: 52px !important; }
+
+/* ---- הסעות ---------------------------------------------------------------------------
+   The picture holds as it is: a seat is a share of the car's width, so two larger names
+   still sit side by side, the driver still on the LEFT, and a row of three seats still
+   three (64px was the seat's floor; the words make it 84 and up here, so a car is taller
+   and fewer of them are on the glass at once). Two things had a ceiling written for the
+   smaller letters: a waiting man's chip stopped at 240px and cut «איברהים עודה» to a
+   third, and a seat's name stopped at two lines - here at none: on the 320px phone a
+   seat is 61px of words and «מוחמד אבו ראס חוסיין» is four lines of them, and three cut
+   it to «ראס…». The drag reads the seats' rectangles off the document as they are
+   (js/ui/transport.js), so it follows whatever size they have.
+   THE SHARED PLAN'S NOTICES (js/ui/transport-share.js) take up to two fifths of the
+   screen and scroll inside themselves. On a short phone at these sizes two of them and
+   the line left the cars 67px under the waiting men - not one seat whole (v191's
+   review). There they take a quarter, and scroll inside it as before. */
+:root.display-large .transport-chip { max-width: min(340px, 86vw) !important; min-height: 56px !important; }
+:root.display-large .transport-seat { min-height: 84px !important; }
+:root.display-large .transport-seat-name { -webkit-line-clamp: none; }
+@media (max-height: 640px) {
+    :root.display-large .transport-share { max-height: 25vh !important; max-height: 25dvh !important; }
+}
+:root.display-large .transport-dot { width: 18px; height: 18px; }
+:root.display-large .transport-seat-driver.transport-seat-taken .transport-glyph-wheel { width: 20px; height: 20px; color: var(--ink); }
+:root.display-large .transport-glyph { width: 26px; height: 26px; stroke-width: 2.4; }
+:root.display-large .journey-pip-mark { inline-size: 32px; block-size: 32px; }
+
+/* ---- THE WEEK ON A PHONE --------------------------------------------------------------
+   The grid is the one screen that cannot simply be made larger: seven days and the names
+   across 375px left 66px for a name and cut every second one to «מוחמ…». Here the name
+   has its column - wide enough for a first name whole and the family name under it, never
+   an ellipsis - each day is 64px, and the grid is wider than the phone. It SCROLLS INSIDE
+   ITS OWN BOX (the box is app.css's, and so is the pinning of the names to the edge);
+   the page itself never moves sideways. The letter in the colour block is 18px in a 30px
+   block. The other view of the week («ימים») is a list and needed nothing but its sizes. */
+@media (max-width: 700px) {
+    :root.display-large #weekView { --week-name-w: clamp(112px, 31vw, 150px) !important; }
+    :root.display-large .week-table .name-clip { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere; line-height: 1.4; }
+    :root.display-large .week-table .name-cell { overflow: visible !important; padding: 8px !important; font-weight: 700 !important; }
+    :root.display-large .week-table td.week-cell,
+    :root.display-large .week-table th:not(.corner) { min-width: 64px !important; }
+    :root.display-large .week-table td.week-cell { height: 64px !important; }
+    :root.display-large .week-cell .cell-line { min-width: 30px !important; height: 30px !important; padding: 0 5px !important; border-radius: 8px !important; margin: 2px auto !important; }
+    :root.display-large .week-cell .cell-line[data-initial]::before { font-size: 18px !important; }
+    :root.display-large .week-cell .cell-line .site-mark { font-size: 18px !important; }
+}
+
+}

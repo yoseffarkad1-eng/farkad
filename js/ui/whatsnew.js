@@ -73,6 +73,11 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    { build: 'v191', items: [
+        { title: 'תצוגה גדולה',
+            text: 'מי שקשה לו לקרוא אותיות קטנות מפעיל תצוגה גדולה: האותיות, המספרים והכפתורים גדלים בכל המסכים, רק בטלפון שלו.',
+            where: 'הגדרות ← כללי ← תצוגה גדולה', go: 'display' }
+    ] },
     { build: 'v190', items: [
         { title: 'תיקון: נגיעה כפולה וחצות',
             text: 'נגיעה כפולה ליד שם עובד כבר לא מסמנת עובד אחר כנעדר, ושיבוץ שנפתח לפני חצות נשמר ליום שהיה כתוב במסך.',
@@ -491,7 +496,11 @@ const WHATSNEW_GO = Object.freeze({
             return openTransport(State.date);
         }
         return whatsNewSettings('transportSwitchCard', 'settingsDaily');
-    }
+    },
+    // v191: «תצוגה גדולה» - the row in ⋯ where it is turned on, opened and shown, and NOT
+    // pressed. The mode is one man's choice for his own phone (js/ui/display.js): being told
+    // about it is no reason for anybody's screen to change size.
+    display: () => whatsNewSettings('displayLargeCard', 'settingsDaily')
 });
 
 // The card steps aside first (which is also "seen"), and the settings sheet with it when
