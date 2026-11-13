@@ -290,27 +290,55 @@ try {
         await sheet.context.close();
 
         // ---- a double tap is one man
-        suite(`${tag}: a double tap is one tap`);
-        for (const gap of [120, 400]) {
-            const { context, page } = await phone(width, height, 'dark');
-            await bring(page, 'חסן', 0.4);
-            const point = await tapOffer(page, 'חסן');
-            await page.waitForTimeout(gap);
-            const under = await page.evaluate(([x, y]) => { const node = document.elementFromPoint(x, y);
-                const offer = node && node.closest('.chip-usual'); return offer ? offer.getAttribute('aria-label') : null; }, [point.x, point.y]);
-            await page.touchscreen.tap(point.x, point.y);
-            await settle(page, 250);
-            given(`${tag}, ${gap}ms: the next man's chip had slid under the finger`, bare(under).startsWith('שבץ את טארק דוגמה'), String(under));
-            check(`${tag}, ${gap}ms: the first man is placed`, JSON.parse(await dayOf(page, 'w_08')).entries[0].placeId === 'p_01');
-            same(`${tag}, ${gap}ms: the man who slid under the finger is not`, await dayOf(page, 'w_09'), 'null');
-            same(`${tag}, ${gap}ms: ten men are still waiting`, (await waiting(page)).length, 10);
-            same(`${tag}, ${gap}ms: the undo bar still names the first man`, bare(await undoSays(page)), 'חסן דוגמה נרשם בהרצליה');
-            // And once the guard has passed, the next man is one tap.
-            await page.waitForTimeout(800);
-            await tapOffer(page, 'טארק');
-            await settle(page, 200);
-            check(`${tag}, ${gap}ms: a tap after the guard places the next man`, JSON.parse(await dayOf(page, 'w_09') || '{"entries":[{}]}').entries[0].placeId === 'p_01');
-            await context.close();
+        //
+        // MOVED ON PURPOSE (v194): the pair was 120 and 400 ms, both pinned as ONE man, inside
+        // the trays' 700 ms of time alone. That clock is the one that kept the owner from
+        // taking two men off a site, and on the trays it did the same to a person going down
+        // the list chip after chip. The next man's OWN CHIP - the same act again - is now a
+        // tap once WALK_BOUNCE_MS have passed since the press before it and that placement is
+        // drawn (trayTapTooSoon, js/ui/day.js): 120 and 200 ms apart are one man, 400 ms apart
+        // are two, each at the site his own chip names. Judged on the gap the PAGE saw between
+        // the presses; a pair that reached it on the other side of the line is made again in a
+        // fresh page, twice at most.
+        suite(`${tag}: a double tap is one tap, and the next man's chip a moment later is a tap`);
+        for (const gap of [120, 200, 400]) {
+            const twice = gap < WALK_BOUNCE;
+            for (let attempt = 1; attempt <= 3; attempt += 1) {
+                const { context, page } = await phone(width, height, 'dark');
+                await page.evaluate(() => { window.__presses = []; window.addEventListener('pointerdown', event => window.__presses.push(event.timeStamp), true); });
+                await bring(page, 'חסן', 0.4);
+                const point = await tapOffer(page, 'חסן');
+                await page.waitForTimeout(gap);
+                const under = await page.evaluate(([x, y]) => { const node = document.elementFromPoint(x, y);
+                    const offer = node && node.closest('.chip-usual'); return offer ? offer.getAttribute('aria-label') : null; }, [point.x, point.y]);
+                await page.touchscreen.tap(point.x, point.y);
+                await settle(page, 250);
+                const presses = await page.evaluate(() => window.__presses.slice(-2));
+                const seen = presses.length === 2 ? Math.round(presses[1] - presses[0]) : null;
+                const ok = seen !== null && (twice ? seen < WALK_BOUNCE : seen >= WALK_BOUNCE);
+                if (!ok && attempt < 3) { await context.close(); continue; }
+                check(`${tag}, ${gap}ms: the page saw the two presses ${twice ? 'under' : 'at least'} ${WALK_BOUNCE} ms apart`, ok, String(seen));
+                given(`${tag}, ${gap}ms: the next man's chip had slid under the finger`, bare(under).startsWith('שבץ את טארק דוגמה'), String(under));
+                check(`${tag}, ${gap}ms: the first man is placed`, JSON.parse(await dayOf(page, 'w_08')).entries[0].placeId === 'p_01');
+                if (twice) {
+                    same(`${tag}, ${gap}ms: the man who slid under the finger is not`, await dayOf(page, 'w_09'), 'null');
+                    same(`${tag}, ${gap}ms: ten men are still waiting`, (await waiting(page)).length, 10);
+                    same(`${tag}, ${gap}ms: the undo bar still names the first man`, bare(await undoSays(page)), 'חסן דוגמה נרשם בהרצליה');
+                    // And once the guard has passed, the next man is one tap.
+                    await page.waitForTimeout(800);
+                    await tapOffer(page, 'טארק');
+                    await settle(page, 200);
+                    check(`${tag}, ${gap}ms: a tap after the guard places the next man`, JSON.parse(await dayOf(page, 'w_09') || '{"entries":[{}]}').entries[0].placeId === 'p_01');
+                } else {
+                    const next = JSON.parse(await dayOf(page, 'w_09') || 'null');
+                    check(`${tag}, ${gap}ms: the next man, by his own chip, is placed at the site it names`,
+                        Boolean(next) && next.entries.length === 1 && next.entries[0].placeId === 'p_01', JSON.stringify(next));
+                    same(`${tag}, ${gap}ms: nine men are still waiting - the two tapped and nobody else`, (await waiting(page)).length, 9);
+                    same(`${tag}, ${gap}ms: the undo bar names the second man`, bare(await undoSays(page)), 'טארק דוגמה נרשם בהרצליה');
+                }
+                await context.close();
+                break;
+            }
         }
     }
 
@@ -363,7 +391,9 @@ try {
             // one the bounce of «בטל» and of the foot of the day reads (sameFingerAgain).
             window.__downs = [];
             window.addEventListener('pointerdown', event => __downs.push(event.timeStamp), true);
-            document.addEventListener('click', event => {
+            // MOVED ON PURPOSE (v194): heard on the WINDOW - the page's own rule stops a spent
+            // click at the document (tapBefore, js/ui/sheet.js), and the window hears every one.
+            window.addEventListener('click', event => {
                 const hit = event.target && event.target.closest ? event.target.closest('button') : null;
                 __hits.push({ at: performance.now(), cls: hit ? hit.className : null, aria: hit ? hit.getAttribute('aria-label') : null });
             }, true);

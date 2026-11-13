@@ -112,8 +112,12 @@ try {
             font: parseFloat(getComputedStyle(entry).fontSize),
             sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 };
     });
+    // MOVED (the owner, 2026-11-11): «הכל חופש» left the header and ENDS this row, on a line of
+    // its own under the two (tests/holiday.browser.mjs); «חיפוש עובד» is still first in it.
+    // MOVED AGAIN (round two, the verifier of 9281f87): what ends the row there now is «עוד ⋯»
+    // (dayMoreEntry), the day's menu, and «הכל חופש» is behind it, on no screen.
     same('it is first in the row «בדיקת היום» stands in - on its right, level with it - and that row is still the last thing in the day',
-        [place.order, place.next, place.last], [['findEntry', 'dayCheckEntry'], true, true]);
+        [place.order, place.next, place.last], [['findEntry', 'dayCheckEntry', 'dayMoreEntry'], true, true]);
     same('the foot of the day is not a pixel taller for it', place.tall, place.without);
     check('under the trays, above the dock, 48px high, 16px, and the day does not scroll sideways',
         place.underTrays && place.aboveDock && place.h >= 48 && place.w >= 120 && place.font >= 16
@@ -122,7 +126,7 @@ try {
     await page.waitForTimeout(150);
     same('it is there in the other view of the day too, in the same place',
         await page.evaluate(() => [...document.getElementById('dayView').lastElementChild.children].map(node => node.id)),
-        ['findEntry', 'dayCheckEntry']);
+        ['findEntry', 'dayCheckEntry', 'dayMoreEntry']);
     await page.evaluate(() => setDayMode('sites'));
     await page.waitForTimeout(150);
     same('no other screen offers it', await page.evaluate(() => { const seen = [];

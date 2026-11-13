@@ -153,7 +153,9 @@ function usualNoteInto(tray, chips) {
 // or his name, or, when this was the last man waiting, a ✕ of «נעדרים» below. The second
 // tap of a double tap, or a bounce, would place HIM, mark him absent, or cancel another
 // man's absence. So the chip reads the trays' one clock (trayTapTooSoon, js/ui/day.js):
-// it starts it, and nothing on either tray does anything for DOUBLE_TAP_GUARD_MS after.
+// it starts it, and nothing on either tray does anything for DOUBLE_TAP_GUARD_MS after -
+// except the next man's own chip, tapped WALK_BOUNCE_MS or more after this one's press and
+// once this placement is drawn: chip after chip at a person's pace is a man per tap (v194).
 //
 // AND THE RECORD IS ASKED AGAIN AT THE TAP. The chip was drawn from the record as it was;
 // a tap acts on the record as it is. A man who has a record by now, a site archived since,
@@ -164,7 +166,7 @@ function usualNoteInto(tray, chips) {
 // whatever State.date says by the time of the tap - as every surface on the day screen
 // writes (editWithUndo, js/ui/undo.js). Left out, the day on screen.
 function usualAssign(workerId, placeId, at) {
-    if (trayTapTooSoon(true)) return false;
+    if (trayTapTooSoon(true, 'usual')) return false;
     const day = at && at.date ? at : { date: State.date, layer: State.layer };
     const worker = State.worker(workerId);
     const place = State.place(placeId);

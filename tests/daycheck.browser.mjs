@@ -210,11 +210,14 @@ const recordBefore = await page.evaluate(() => JSON.stringify(State.schedule));
     same('and no second element says it anywhere on the page',
         await page.locator('button', { hasText: ENTRY }).count(), 1);
     same('the dock still has its two buttons and no more', await page.locator('.day-actions button').count(), 2);
+    // MOVED (the owner, 2026-11-11): «הכל חופש» («רשום חופש לעובדים בלי רישום ביום הנבחר»)
+    // is no longer on the header - it ends the row this button stands in, at the foot of the
+    // day (tests/holiday.browser.mjs). Every other control of the header is as it was.
     same('the header has the controls it had: ☰, קודם, the date, הבא, בטל, שוב and the row of ways to look at the day',
         await page.evaluate(() => [...document.querySelectorAll('#dayView .day-header button')]
             .filter(node => node.checkVisibility()).map(node => node.getAttribute('aria-label') || node.textContent.trim())),
         ['בחר יום', 'יום קודם', 'בחר תאריך', 'יום הבא', 'אין מה לבטל', 'אין מה לבצע שוב', 'לפי עובדים', 'לפי אתרים',
-            'רשום חופש לעובדים בלי רישום ביום הנבחר', await page.evaluate(() => `פעולות מרוכזות (${State.unrecorded().length})`),
+            await page.evaluate(() => `פעולות מרוכזות (${State.unrecorded().length})`),
             await page.evaluate(() => `נרשמו ${State.activeWorkers().length - State.unrecorded().length} מתוך ${State.activeWorkers().length} - המשך אל הבא שטרם נרשם`)]);
     same('nothing in the WhatsApp dialog offers it', await page.locator('#shareModal').getByText(ENTRY).count(), 0);
 

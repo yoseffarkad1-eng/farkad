@@ -370,6 +370,21 @@ export const SCREENS = [
     { name: 'ask - choices', scope: ['#askModal'],
         open: async page => { await run(page, () => { askChoice({ title: 'מי יושב כאן?', choices: ['דוד כהן', 'עלי חסן', 'מוחמד אבו ראס', 'ביטול'] }); }); await pause(page); },
         close: page => run(page, () => askCancel()) },
+    // «עוד ⋯» at the foot of the day, and «הכל חופש» behind it (the owner, 2026-11-11, round two):
+    // the day's menu, read once its hold is over, and the question it goes straight on to, read
+    // once ITS hold is over. Shut by askClose: a held dialog answers nothing for its first 700ms.
+    { name: 'ask - the day\'s menu («עוד ⋯»)', scope: ['#askModal'],
+        open: async page => { await home(page); await run(page, () => { openDayMore(); }); await pause(page, 820); },
+        close: page => run(page, () => askClose(null)) },
+    { name: 'ask - «בטוח שכולם בחופש?», through the menu', scope: ['#askModal'],
+        open: async page => {
+            await home(page);
+            await run(page, () => { openDayMore(); });
+            await pause(page, 820);
+            await run(page, () => { document.querySelector('#askChoices button').click(); });
+            await pause(page, 820);
+        },
+        close: page => run(page, () => askClose(null)) },
 
     { name: 'banners', scope: ['#updateBanner', '#installBanner', '#offlineBanner', '#storageNotice', '#syncChip', '#undoBar'],
         open: async page => { await home(page); await run(page, () => {

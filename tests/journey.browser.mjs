@@ -49,6 +49,7 @@ import { chromium } from 'playwright';
 import { join } from 'node:path';
 import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
+import { tapsAtAPersonsPace } from './pace.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import { censusOnly } from './census.mjs';
@@ -100,6 +101,9 @@ async function open(width, height, scheme, options = {}) {
     const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, hasTouch: true,
         isMobile: true, timezoneId: 'Asia/Jerusalem', locale: 'he-IL' });
     const page = await context.newPage();
+    // v194: this suite walks the screens and is not about double taps - its taps come at a
+    // person's pace (tests/pace.mjs says why).
+    tapsAtAPersonsPace(page);
     const errors = [];
     const away = [];
     const asked = [];
@@ -176,6 +180,10 @@ const diskBut = (page, ...skip) => page.evaluate(keys => JSON.stringify(Object.k
 
 async function start(page) {
     await page.locator(WA_BUTTON).tap();
+    // MOVED ON PURPOSE (v194): a person's pace. The dialog's rows come up over the dock's button,
+    // and a tap in that place less than 300 ms after the one that opened it is that tap again
+    // (the page's rule, js/ui/sheet.js) - a driver's next tap came 30 ms later.
+    await page.waitForTimeout(350);
     await page.locator('#journeyEntry').tap();
     await page.waitForTimeout(150);
 }
@@ -378,9 +386,14 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
             next: row.nextElementSibling && row.nextElementSibling.querySelector('#dayCheckEntry') ? 'dayCheckEntry' : null,
             // v188: that row holds «חיפוש עובד» first and «בדיקת היום» beside it, one line, whole
             // under the journey's row and touching nothing of it.
+            // MOVED (the owner, 2026-11-11): «הכל חופש» left the header and ends that row, on a
+            // line of its own 24px under the two (tests/holiday.browser.mjs). Round two: what ends
+            // it there now is «עוד ⋯» (dayMoreEntry), the day's menu, «הכל חופש» behind it.
             footIds: under ? [...under.querySelectorAll('button')].map(node => node.id) : [],
             footClear: under ? [...under.querySelectorAll('button')].every(node => { const b = node.getBoundingClientRect(); return b.top >= box.bottom - 0.5 && b.height >= 47.5 && b.width >= 44; }) : false,
-            footOneLine: under ? new Set([...under.querySelectorAll('button')].map(node => Math.round(node.getBoundingClientRect().top))).size === 1 : false,
+            footOneLine: under ? new Set([...under.querySelectorAll('#findEntry, #dayCheckEntry')].map(node => Math.round(node.getBoundingClientRect().top))).size === 1 : false,
+            holidayUnder: under && under.querySelector('#dayMoreEntry') ? under.querySelector('#dayMoreEntry').getBoundingClientRect().top
+                >= Math.max(...[...under.querySelectorAll('#findEntry, #dayCheckEntry')].map(node => node.getBoundingClientRect().bottom)) + 23.5 : false,
             footTall: under ? Math.round(under.getBoundingClientRect().height) : 0,
             last: row.nextElementSibling === document.getElementById('dayView').lastElementChild,
             under: Math.max(...above, ...names) <= box.top + 0.5, font: parseFloat(style.fontSize),
@@ -391,12 +404,17 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     check('it is at the FOOT of the list: under every site, tray and name, straight above «בדיקת היום», which is still last',
         foot.inDayView && foot.under && foot.next === 'dayCheckEntry' && foot.last, JSON.stringify(foot));
     check('not on the header and not on the dock', !foot.header && !foot.dock);
-    same('the row under it is the day\'s own foot: «חיפוש עובד» then «בדיקת היום», in one line, whole and clear of it',
-        [foot.footIds, foot.footClear, foot.footOneLine], [['findEntry', 'dayCheckEntry'], true, true]);
-    check('and that row is one button tall - the journey\'s row is the only height the foot gained', foot.footTall <= 56, String(foot.footTall));
+    same('the row under it is the day\'s own foot: «חיפוש עובד» then «בדיקת היום», in one line, whole and clear of it - and «עוד ⋯» on a line of its own under them',
+        [foot.footIds, foot.footClear, foot.footOneLine, foot.holidayUnder], [['findEntry', 'dayCheckEntry', 'dayMoreEntry'], true, true, true]);
+    check('and that row is one button tall but for «עוד ⋯»\'s own line - the journey\'s row and that line are the only heights the foot gained',
+        foot.footTall <= 56 + 24 + 48, String(foot.footTall));
     check('the width of the list, 48px or more, in 16px words or larger', foot.w >= foot.list - 1 && foot.h >= 47.5 && foot.font >= 16,
         JSON.stringify({ w: foot.w, list: foot.list, h: foot.h, font: foot.font }));
     await page.locator(WA_BUTTON).tap();
+    // MOVED ON PURPOSE (v194): a person's pace. The dialog's rows come up over the dock's button,
+    // and a tap in that place less than 300 ms after the one that opened it is that tap again
+    // (the page's rule, js/ui/sheet.js) - a driver's next tap came 30 ms later.
+    await page.waitForTimeout(350);
     const entries = await page.evaluate(() => [...document.querySelectorAll('#shareModal .modal-actions > *')]
         .map(node => node.id).filter(id => ['sederEntry', 'transportEntry', 'journeyEntry'].includes(id)));
     same('one entry, in the WhatsApp dialog, after the seder\'s and הסעות\'s', entries, ['sederEntry', 'transportEntry', 'journeyEntry']);
@@ -879,9 +897,11 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'light']])
     await page.evaluate(() => { State.date = todayStr(); setDayMode('workers'); });
     await page.waitForTimeout(200);
     // v188: the row under the journey's holds «חיפוש עובד» and then «בדיקת היום» (js/ui/day.js).
-    same('the by-worker view ends in the same two rows, in the same order: the journey\'s, then find and the check',
+    // MOVED (the owner, 2026-11-11): and ends with «הכל חופש», which left the header. Round
+    // two: with «עוד ⋯», the day's menu, in that place - «הכל חופש» is behind it.
+    same('the by-worker view ends in the same two rows, in the same order: the journey\'s, then find, the check and «עוד ⋯»',
         await page.evaluate(() => [...document.getElementById('dayView').children].slice(-2).map(row => [...row.querySelectorAll('button')].map(node => node.id))),
-        [['journeyDayEntry'], ['findEntry', 'dayCheckEntry']]);
+        [['journeyDayEntry'], ['findEntry', 'dayCheckEntry', 'dayMoreEntry']]);
     await page.evaluate(() => { setDayMode('sites'); window.scrollTo(0, 0); });
     await page.waitForTimeout(250);
     same('the day\'s header is where it was, the size it was', await page.evaluate(() => { const box = document.querySelector('#dayView .day-header').getBoundingClientRect(); return [Math.round(box.top), Math.round(box.height)]; }), header);
@@ -1094,6 +1114,10 @@ for (const [width, height] of [[375, 667], [440, 956]]) {
     suite(`${width}x${height}: a phone that did not turn הסעות on`);
     given('הסעות is off on this phone', await page.evaluate(() => [transportEnabled(), localStorage.getItem('farkadTransport:enabled')]).then(v => v[0] === false && v[1] === null));
     await page.locator(WA_BUTTON).tap();
+    // MOVED ON PURPOSE (v194): a person's pace. The dialog's rows come up over the dock's button,
+    // and a tap in that place less than 300 ms after the one that opened it is that tap again
+    // (the page's rule, js/ui/sheet.js) - a driver's next tap came 30 ms later.
+    await page.waitForTimeout(350);
     same('the dialog has the seder\'s row and the journey\'s, and none for הסעות',
         await page.evaluate(() => [...document.querySelectorAll('#shareModal .modal-actions > *')].map(node => node.id).filter(id => /Entry$/.test(id))), ['sederEntry', 'journeyEntry']);
     await page.locator('#journeyEntry').tap();

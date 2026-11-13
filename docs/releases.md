@@ -1,4 +1,356 @@
-## v193 — repairs from a read-only audit of v192: the update's shelf, the backup doors, the frame, a paste and two links (candidate, not served)
+## v194 — «הכל חופש» behind «עוד ⋯» and a question, ↶ that does not write over another phone's newer record, a tap that no longer falls through a surface that shut, and men taken off a site one after another (candidate, not served)
+
+**Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `f2e79ed` (v193, served 2026-11-13: PR 75 merged, Pages run 95 succeeded; the served
+stamp could not be read from the build machine, whose network does not reach the site). Two
+branches in one commit that moves the three stamps: `round193` (six commits on `ae6e1a0`, v192),
+brought onto v193, and `slow-remove` (four commits on `f2e79ed`, part 4 below), merged into it
+and carried on to the two trays. The app's files: `js/ui/sheet.js`, `js/ui/day.js`,
+`js/ui/undo.js`, `js/ui/usual.js` (one argument and a comment), `js/ui/ask.js`, `css/app.css`,
+`css/design.css`, `css/large.css`, `index.html`, and `js/ui/whatsnew.js` for its three items;
+`sw.js` changes in its `VERSION` line and nowhere else.
+Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`,
+`firestore.rules` or `functions`; no money figure moves. The three parts below were written on
+the branch, on v192 and before the stamps moved, when the branch expected to be v193; where a
+note there said «v193» of this work it says v194 here and in the code's comments, and nothing
+else of them was changed. Every measurement in parts 1 to 3 was taken on the branch (`bb88a27`),
+not on this commit; part 4 says of each of its measurements where it was taken.
+
+NOT COVERED AND STILL WRONG, gathered from the parts below, where each is said in full:
+- **A mouse.** The page's rule is a finger's and a pen's; a mouse's double click on a surface's
+  way out still reaches what is under it, except where a surface has its own guard.
+- A control that stays the same node, or is drawn again with the same words in the same
+  rectangle, and means something else (the next man's tile in the walking sheet, the next man's
+  «נעדר» in a tray) is still the surfaces' own guards' to stop, as on v192.
+- «his own site» tapped twice in his own sheet took it off once on v192 too; the check holds it
+  and has no control.
+- «עוד ⋯» itself is not 48px from its neighbours and can open across the dock's edge on some
+  day lengths; it writes nothing and only opens the menu.
+- v192 opens «שבוע» 400px down after a day scrolled 400px, and so does this build.
+- The other writers the audit's finding 4 names in passing (a migration decision, the
+  held-record writers in ⋯) still write a man's day without touching the step: a step about
+  ANOTHER man stays armed after them.
+- Still open from the same audit and not in this build: a restore on a nearly full disk can
+  spend the restore points (js/store.js); the cloud rules check order and not content, and a
+  damaged cloud document is adopted by the snapshot door (firestore.rules, js/sync) - both the
+  owner's approval.
+- From part 4, where each is said in full: the cost of one commit on a large record
+  (`js/state.js`, `js/store.js`, `js/sync` - not touched); the page moving at its very end; the
+  list closing up under a finger that aims at where a man WAS; a press dropped, silently, because
+  the write before it was not drawn yet; on the trays, a control of another kind still held for
+  700 ms; and the owner's iPhone, on which none of it was measured.
+- All the Hebrew is PROPOSED, the three «מה חדש» items included (pinned in
+  `tests/whatsnew.test.mjs`); the owner has not read it.
+- Never tried on a real phone: Chromium with emulated touch only.
+
+«מה חדש» (all three «הראה לי» go to the day and press nothing):
+
+| title | text | where |
+|---|---|---|
+| «הכל חופש: מאחורי «עוד ⋯» ועם שאלה» | «הכפתור הכל חופש עבר אל «עוד ⋯» בתחתית רשימת היום, ולפני הרישום יש שאלה עם שמות כל העובדים שיירשם להם חופש.» | «היום ← בתחתית הרשימה ← עוד ⋯» |
+| «תיקון: ביטול לא דורס רישום ממכשיר אחר» | «ביטול פעולה (↶) כבר לא כותב רישום ישן מעל רישום שהשתנה בינתיים ממכשיר אחר, אלא אומר שהפעולה לא בוצעה.» | «היום ← בטל או ↶» |
+| «תיקון: הסרת עובדים בזה אחר זה» | «אפשר להסיר עובדים מאתר, ולבטל היעדרויות, בזה אחר זה בקצב רגיל בלי שלחיצה תיבלע, וסרגל הביטול כבר לא עולה מתחת לאצבע.» | «היום ← ✕ ליד שם העובד» |
+
+### 1. A tap falls through a surface that just shut (v192's STILL WRONG, repaired)
+
+The note under v192 below stands as it was written; this is what was done about it.
+
+REPRODUCED on v192 (`ae6e1a0`) in Chromium with a touch screen, two taps 150 ms apart at one
+point, before anything was changed: the walking sheet on its last waiting man - his tile places
+him, the sheet shuts, and the second tap took another man off his site by the row's ✕ that had
+been under the tile (↶ then read «דוגמה 5 הוסר מאתר צפון» at 320x568 and 375x667, «דוגמה 11…»
+at 440x956); the sheet's «סגור» standing over the dock's copy button - the previous day copied
+into the waiting men at 320x568, 375x667, 390x844 and 440x956; in a man's own sheet, its
+opening window over, «נעדר» marked and unmarked him with his site gone (all three phones), a
+second site added and taken off again (320x568), and «שעות נוספות» left the day «יום כפול» (3 of
+9 points swept across the button); and the way out of ten surfaces opened by the app's own
+functions let a second click through to the page in every one (askConfirm, the WhatsApp dialog,
+«חיפוש עובד», «בדיקת היום», «כרטיס עובד», «כרטיס אתר», «לאן הלך», a site's picker, ⋯, the day
+drawer).
+
+THE MECHANISM is one rule of the page's, not a guard per button (`js/ui/sheet.js`, beside the
+press's own clock that v192 added): **a press that comes down on the same spot as the press
+before it - inside the rectangle the control that press hit stood in, or within 8px of the very
+point - less than `WALK_BOUNCE_MS` (300 ms) after it on the presses' own clock, and on a control
+that is NOT the one that press came down on, is spent.** Its press, release, mouse events and
+click stop at the document, in the capture phase, after every listener of the window has seen
+them and before any control, any surface's own guard, the backdrop's closer or a drag. It asks
+no surface anything, so it covers every one that shuts and every one that opens. No second
+clock: it reads v192's `lastPress` and `WALK_BOUNCE_MS`.
+
+What it leaves alone: a press on the same control, still there (a text box, a seat); the same
+control drawn again as it was - the same rectangle to the pixel and the same markup - so the
+day's arrows, which every render builds anew, still take two quick taps as two days; one
+control inside the other while the earlier one is still on the page (a box and its label); a
+press anywhere else, whatever its time; a press 300 ms or more later; a keyboard's click and a
+click from code. A spent press is not a press to repeat, so a burst is one tap. The surfaces'
+own guards (the sheet's opening window, the walk's bounce, the trays' clock, the pickers) are
+untouched.
+
+HELD BY `tests/doubletap.browser.mjs`, its last sections: each case above as a sweep over phone
+sizes, made twice in every layout - as the build has it, and with the rule's memory emptied
+between the two taps, which must write in at least one layout - and what the rule never takes
+(a ✕ elsewhere 150 ms after «סגור»; the copy button 350 and 450 ms after the «סגור» that stood
+over it; «יום הבא» twice; a search box twice). On v192 the same file fails 20 of those checks.
+
+NOT COVERED, said plainly:
+- **A mouse.** The rule is a finger's and a pen's (`pointerType`); a mouse's double click on a
+  surface's way out still reaches what is under it, except where a surface has its own guard.
+  With the mouse included, eight browser suites that drive the page with back-to-back mouse
+  clicks stopped; that was the reason, and it is a decision to revisit, not a finding that a
+  mouse is safe.
+- A control that stays the same node, or is drawn again with the same words in the same
+  rectangle, and means something else: the next man's tile in the walking sheet and the next
+  man's «נעדר» in a tray are still the surfaces' own guards' to stop, as on v192.
+- «his own site» tapped twice in his own sheet took it off once on v192 too; the check holds it
+  and has no control.
+- Never tried on a real phone.
+
+Moved expectations, each with its reason in place:
+- `tests/doubletap.browser.mjs` - the three openers' control puts the page's rule aside as well
+  as the surface's deadline.
+- `tests/scroll.browser.mjs`, `tests/usual.browser.mjs`, `tests/holiday.browser.mjs` - their
+  click and press meters listen on the window, because a spent tap stops at the document.
+- `tests/journey.browser.mjs`, `tests/transport.browser.mjs`, `tests/transport.share.browser.mjs`
+  - suites that walk screens and are not about double taps now tap at a person's pace
+  (`tests/pace.mjs`: every `Locator.tap()` at least 330 ms after the one before, and a drag's
+  first touch likewise). At a driver's pace - 30 to 60 ms between taps - «המשך» drawn again
+  for the next station, the answer of a question that came up over its own button, and a man
+  picked up from under an answer just given were each, to the page, a double tap. No check in
+  them changed.
+
+### 2. «הכל חופש», round two (the owner, 2026-11-11: the place is dangerous; ask whether he is sure)
+
+Branch `holiday-r2` (`f6cf5ff..ceb0480`, built on v191) brought onto v192 as one change.
+
+- **The place.** «הכל חופש» is on no screen. The foot of the day ends with «עוד ⋯» (the crew
+  rows' own words), which writes nothing and opens the day's menu: the day as its title, «הכל
+  חופש» and «סגור». `tests/holiday.browser.mjs` sweeps every day of 1-16 men on 1-4 sites in
+  both views at 320x568, 375x667, 440x956, 667x375 and 568x320, the large display off and on,
+  both schemes: no control outside a dialog says «הכל חופש», and in the menu it stands 48px and
+  more from every target a finger can reach and from the finger that opened it. «עוד ⋯» itself
+  can open across the dock's edge on some day lengths, as any last row does; a tap there opens
+  the menu and nothing else.
+- **The question** is the app's own `askConfirm`: «בטוח שכולם בחופש?», the day on its own
+  line, how many, every man by name, that it is a day off without pay, what is kept; the
+  confirming button the destructive kind, the focus on «ביטול», nothing answering for
+  `DOUBLE_TAP_GUARD_MS`, and it opens at its top at twice the text size.
+- **↶** takes the whole holiday back in one step, each man's own day as it was.
+- **The leak.** The compact day's page floor is on `#dayView`, not on `<body>`, and
+  `readDayScroll` keeps `day-compact` to the day.
+- `css/large.css` block 3 says the new sizes again; `tests/screens.mjs` opens the menu and the
+  question.
+
+WHAT THE PORT CHANGED, v192 winning on mechanism:
+- The door captures the day it was drawn on; the menu and the question name THAT day and the
+  holiday is written there (`markAllHoliday`'s `drawnFor`), whatever the calendar did
+  meanwhile. Round two shut a menu whose day the screen had left; `tests/holiday.test.mjs`
+  moved with it. If the day written is no longer the one on the screen, no ↶ is offered and
+  none older is left armed.
+- The foot row is still handed through v192's `trayClock` (`tests/find.test.mjs`,
+  `tests/holiday.test.mjs` source pins moved).
+- **The confirming button no longer fades in.** `tests/holiday.browser.mjs` read «כן, כולם
+  בחופש» at 3.3:1 (375x667 light) and 4.05:1 (dark) 60 ms after the question opened, here and -
+  measured with the same probe - on round two's own tree: Chromium fades the button's background
+  from the ordinary accent to the destructive one over 120 ms when it is shown again, whatever
+  order the class is added in. `askConfirm` turns the transition off on a destructive answer
+  (`js/ui/ask.js`); no `transitionrun` after it.
+- v192's own checks of the old header button moved to the menu's route:
+  `tests/midnight.browser.mjs` («הכל חופש» on a day the calendar moved under: the question
+  names Tuesday and Tuesday is written) and `tests/forms.browser.mjs`.
+- **Round two's «every tab opens its screen at its top» is taken back.** It scrolled the window
+  on every change of screen, and `tests/scroll.browser.mjs` 10b - v166's decision that the week
+  tab and back leave the window where it was - went red on it. Another screen now opens where
+  v192 opens it. Measured against `ae6e1a0` on 48 sequences (375x667, 320x568, 440x956, both
+  schemes, the large display off and on, 16 and 30 men, the day at 90 and at 400): the scroll
+  and the top bar's place on «שבוע», «צוות», «מקדמות», «דוחות» and «היום» again are the same
+  number on both, every one. `tests/holiday.browser.mjs` «nothing leaks» holds that the page is
+  not a pixel taller for the day's class on any other screen. That v192 itself opens «שבוע»
+  400px down after a day scrolled 400px is as it was, and is not this round's.
+
+### 3. ↶ and ↷ only over what this phone's own step left (the audit of v192, findings 1 and 4)
+
+(1) ↶ stayed armed after another phone's correction of the same man was adopted, and pressed
+then it wrote this phone's OLD copy of his day over the newer record - on both phones and in
+the cloud, each saying «מסונכרן»; ↷ put back this phone's own edit, never the correction.
+Reproduced on v192 by `tests/undo-stale.test.mjs` (22 of its 32 checks red there). Now every
+step asks first whether the day it would write over still holds what this phone's last step
+left on it (`undoStands`, `js/ui/undo.js`, the live record compared field for field at the
+press): if not, nothing is written, both arrows are forgotten and the person is told. The two
+steps over several men («N עובדים נרשמו ב…», «N עובדים הוסרו מ…») and the holiday's go back man
+by man: each man still standing is put back, each one changed since is left, and how many were
+left is said. Copy-a-day's own step already did this silently and is unchanged.
+
+(4) «הכל חופש» left ↶ holding the step before it. It is its own single step now (above).
+
+Not done: the other writers finding 4 names in passing (a migration decision, the held-record
+writers in ⋯) still write a man's day without touching the step; with (1) repaired, ↶ pressed
+after them is refused when that man's day changed, but a step about ANOTHER man stays armed,
+as on v192.
+
+### 4. Men taken off a site one after another (the owner's report from his phone)
+
+The owner, from his phone (translated): "When I remove several workers one after another the app
+does a JUMP, it does not freeze. But if I try to force it to remove two workers, one of the two
+removals does not happen and things get mixed up. I wait about 5 seconds between each removal."
+
+Everything below was measured in **Chromium (Playwright, headless) with emulated touch**, the
+processor slowed through CDP where it says so. **That is not his iPhone**, and nothing here was
+tried on a real phone. The diagnosis was made on v193 (`f2e79ed`) and on the first v194 candidate
+(`01c2a3b`), on a record of a season written by the model's own functions: 30 men, 8 sites, 312
+recorded days, 16 advances, 128 closed periods - 781 KB of JSON, 3,937 KB of `localStorage`. The
+counts (how many men came off) are what the conclusions rest on; the milliseconds are one busy
+machine's.
+
+**The tap that was dropped - since v166.** `secondTapTooSoon('row-remove')` (`js/ui/day.js`): a
+row's ✕ did nothing when it came less than 700 ms after the row ✕ before it - time alone, one
+clock for every row of the day, and the clock began again at every tap it dropped. It came in
+with v166, the commit that stopped the page jumping to its top after every ✕: before it every
+removal threw him to the top and the gap "happened by itself"; v165 has no guard and takes a man
+per tap at any pace. Six taps with the finger kept where the first ✕ was, men taken off of six:
+
+| gap between taps | v165 | v186 | v189 | v193 | 01c2a3b | this build |
+|---|---|---|---|---|---|---|
+| 150 ms | 6 | 1 | 1 | 1 | 1 | 3, and 2 |
+| 250 ms | 6 | 1 | 1 | 1 | 1 | 3 |
+| 350 ms | 6 | 1 | 1 | 1 | 1 | 6 |
+| 400 ms | 6 | 1 | 1 | 1 | 1 | 6 |
+| 650 ms | 6 | 1 | 1 | 1 | 1 | 6 |
+| 700 ms | (not run) | (not run) | (not run) | (not run) | (not run) | 6 |
+| 750 ms | 6 | 6 | 6 | 6 | 6 | 6 |
+
+(«this build»: the code of this commit, measured before these notes were written. 150 ms was
+run twice: 3 of 6 when the page saw the presses 153 and 147 ms apart, 2 of 6 when it saw them
+150 and 149 - two gaps that add up to 299 or to 300, on the line.) Aiming did
+not help - each ✕ found again before its tap, six named men, 300 to 650 ms: 1 of 6 on v193. On
+the season with the processor slowed 4x and 6x, eight taps on v193: 400 ms, 1 or 2 of 8; 700 ms,
+4 or 5 of 8; 1000 ms, 8 - on a slow phone the safe interval was nearer a second. The first
+candidate's page rule (part 1) sat in front of that clock and did not replace it.
+
+**The undo bar under the finger.** The bar is fixed above the dock, and a row's ✕ is on the same
+side of the screen as the bar's «בטל» and ✕. For the lowest row a finger reaches (320x568,
+375x667, 390x844) the bar came up over the place his ✕ had been, and a second tap there 450 ms
+later landed on the bar's «סגור»: the bar went away and the next man stayed on his site - 6 of 6
+cases, with the 700 ms clock out of the way. No pace answers this one.
+
+**The jump that could be measured.** Filmed frame by frame, 20 cases at 320x568, 375x667 and
+440x956: in every ordinary case v193 does not jump - the page stays, the rows above stay, the
+rows below come up one row (59px) in one frame. One real jump: the site's head scrolled off and
+the man tapped the FIRST row showing under the sticky header. `keepDayAnchor` passed over the row
+that went and held the NEXT one where it was, so the page scrolled back 59px (scrollY 291 → 232):
+the man from under the header stood under the finger, where every other ✕ puts the man below. If
+his iPhone jumps at EVERY removal it does something this browser does not, and that is not
+measured.
+
+**What is repaired** (`js/ui/day.js`, `js/ui/undo.js`, `js/ui/usual.js`):
+
+1. A row's ✕ (`rowRemoveTooSoon`) ignores exactly two presses: one made less than 300 ms
+   (`WALK_BOUNCE_MS`) after the press of the removal before it - on the presses' own clock,
+   measured from the last press LET THROUGH - and one made before that removal was drawn. A
+   keyboard's press and a click from code act at once. With part 1's page rule (the same spot
+   again under 300 ms on a different control is spent at the document) the two agree: a true
+   double tap is one man, a burst is one man for every 300 ms of it (every second or third
+   tap at 150 ms), and 350 ms and slower is a man per tap.
+2. The anchor (`keepDayAnchor`): the first row still on the page takes the place of the first
+   one that went, so the first row under the header behaves like every other row (scrollY 291 →
+   291 at the three sizes).
+3. The undo bar (`undoBarAwayFromPress`): after a row's ✕, a bar that stands where that finger
+   came down (22px around it) is put away in the same turn, before it is drawn. The step stays
+   on the header's ↶, by name, under part 3's rule like every other step; «הכל חופש» keeps its
+   own step and its bar.
+4. **The two trays** - the same clock stood on the ✕ of «נעדרים», «נעדר» and the usual-site chip
+   of «לא נרשמו» (`trayTapTooSoon`). With this part taken out of this build: six taps on the ✕
+   of «נעדרים» 350 ms apart (and 400 ms, slowed 4x) cancelled ONE absence, five on «נעדר» marked
+   one man. Now the SAME ACT AGAIN on the next man - the same kind of control as the last tray
+   write let through - is judged as a row's ✕ is: 6 of 6 and 5 of 5 at both paces. **And only
+   the same act.** v190's guarantee is about a DIFFERENT control coming up under the finger (a
+   man nobody touched marked absent, an absence cancelled, «לאן הלך» opened), and that is held
+   exactly as it was: a control of another kind, and a man's name, do nothing for the whole
+   700 ms after any tap on the trays, and so does a press with no finger. The row's rule was not
+   given to the trays whole for that reason - 350 ms after a chip placed a man, the «נעדר» of a
+   man nobody touched would have been a tap.
+
+**Pinned expectations moved, on purpose** - each because 300-700 ms between two taps on the same
+kind of control was pinned as ONE man, and that is the reported fault:
+`tests/scroll.browser.mjs`, two taps on a row's ✕ and on a ✕ of «נעדרים»: 120 and 200 ms one,
+400 and 900 ms two (400 was one); `tests/usual.browser.mjs`, the usual chip with the next man's
+chip under the finger: 120 and 200 ms one man, 400 ms two (400 was one). Nothing else of v190's
+or v192's double-tap suites moved.
+
+**Held by** `tests/removepace.browser.mjs` (`npm run test:removepace-browser`, in `test:all`): on
+the season, slowed 4x - six men off one site every 400 ms with the finger in one place, named
+men, a double tap, a press before the removal before it was drawn, ↶ after two removals, the
+first row under the header at three sizes, the bar at two, and the trays. With each repair taken
+out it goes red on that repair.
+
+**WHAT REMAINS, and where:**
+
+- **The cost of one commit** - not touched; every millisecond of it is in `js/state.js`,
+  `js/store.js` and `js/sync`. Profiled on the season with the processor slowed 4x, per removal:
+  the ✕ handler 246-351 ms (22-36 ms on a small record at full speed, about 55-65 ms on the
+  season at full speed), of which `guardedSave` 262 - `save` 180 (`JSON.stringify` of the whole
+  record 45, `Store.setVerified` 53, `rememberConfirmed` 24, `FarkadSync.markSaved` →
+  `pruneJournal` → `collectQueueGarbage` 49), the journal 15 - and `render()` 77. About 70% of a
+  removal is the durable write of an 800 KB record and it grows with the record; the UI makes
+  one commit and one render per ✕, there is no doubled call to take out. With sync on (a fake
+  cloud inside the page) the document coming back costs `receive` 157 ms per removal more at 4x.
+  What the real SDK adds on an iPhone is not measured. None of it is a five-second freeze in
+  Chromium, and the owner says it does not freeze.
+- **The jump at the very end of the page**: with the page scrolled as far as it goes and a man's
+  ✕ on the glass, the page gets one row shorter and the browser clamps the scroll - everything
+  moves DOWN 59px and the man ABOVE comes under the finger (320x568: scrollY 2537 → 2478; 440x956
+  with the bar up: 2253 → 2194). Holding the height means a spacer under the foot, in the part
+  of the page `tests/mobile.test.mjs` measures to the pixel. Measured, not repaired.
+- **The list closes up.** A person who read the list once and taps where the men WERE gets the
+  wrong man from the second tap on (aiming at the 1st and 3rd at their first positions takes the
+  1st and the 4th). Keeping the vacated row as an empty slot until the finger leaves would end
+  it; it changes how the screen behaves and is the owner's to decide. Not done.
+- **A press dropped because the write before it was not drawn yet** is dropped silently, like
+  every guard here. Slowed 6x, a removal takes 500-700 ms to reach the glass and a tap every
+  400 ms was 4 or 5 of 8 (slow-remove's tip, before the merge); on a phone that slow at a normal
+  pace that is still "a removal that did not happen", and its cause is the cost above.
+- **On the trays**, a different control inside 700 ms is still dropped silently - «נעדר» tapped
+  400 ms after another man was placed by his chip does nothing. Whether the undo bar comes up
+  under a finger working down a tray was not measured, and the bar is not put away there.
+- **A triple tap can be two men** on a row and on the trays (its third press, when it comes
+  300 ms or more after the first), as on the walking sheet since v192.
+- **His iPhone.** None of this has been on it. Playwright's WebKit could not be run on the
+  build machine and is not iOS Safari either.
+
+**Found while this build was verified, and not about removals** (`tests/holiday.browser.mjs`,
+the sweep of part 2): at 667x375 - a phone on its side - a day of four men by worker, scrolled to
+its end, is compact, and the tab bar's words, dropped when the day was drawn because the screen
+could not hold the crew (`body.day-tight`, `fitDayList` in `js/ui/bars.js`), fit again. Nothing
+asks when the header compacts: the bars are measured after a render and once more 640 ms after
+the app starts or the viewport is stirred. When that later measurement comes the tab bar is 4px
+taller and the page 13px longer, and a window already at the end is left 13px short of it (y 168,
+end 181) until the next scroll; «עוד ⋯» is whole above the dock either way. The sweep reaches
+that day about 640 ms into a fresh page, and once in a whole run of the suite the measurement
+fell between its last scroll and its read (exit 1, one check of 393). The first candidate
+(`01c2a3b`) has the same race with none of part 4 in it: 35 of 60 fresh pages in a probe of the
+sweep's first four days. The sweep now asks for the measurement at every turn before it reads
+(0 of 60, and nothing moves 900 ms later); what it checks is unchanged. The app is not changed:
+`js/ui/bars.js` deciding again when the header compacts is a change to the bars' measuring, and
+not this build's.
+
+### Hebrew - PROPOSED, not read by the owner
+
+| where | words |
+|---|---|
+| ↶/↷ refused (`UNDO_TEXT.stale`) | «הרישום הזה השתנה מאז, אולי ממכשיר אחר. הפעולה לא בוצעה ושום רישום לא שונה.» |
+| a step over several men, some left (`UNDO_TEXT.partial`) | «רישום אחד השתנה מאז, אולי ממכשיר אחר, ונשאר כמו שהוא.» · «N רישומים השתנו מאז, אולי ממכשיר אחר, ונשארו כמו שהם.» |
+| the holiday's question, title (two lines) | «בטוח שכולם בחופש?» / «<יום> <תאריך>» |
+| its sentence | «לעובד אחד בלי רישום יירשם יום חופש ללא שכר:» · «ל-N העובדים בלי רישום יירשם יום חופש ללא שכר:» |
+| its confirming button | «כן, כולם בחופש» |
+| its step on ↶ | «חופש נרשם לעובד אחד» · «חופש נרשם ל-N עובדים» |
+| the accessible name of «עוד ⋯» at the foot of the day | «אפשרויות עבור <יום> <תאריך>» |
+
+The first two are pinned in `tests/undo-stale.test.mjs`, the rest in `tests/holiday.test.mjs`.
+Reused, unchanged: «עוד ⋯» and «סגור» (the crew screen's), «הכל חופש», its accessible name, the
+sentence when nobody is missing and «עבודה, היעדרויות וחשבונות סגורים יישמרו.» (v116's). Gone:
+v190's question «הכל חופש · <תאריך>» / «לרשום חופש ל-N עובדים בלי רישום? …» / «רשום חופש».
+
+## v193 — repairs from a read-only audit of v192: the update's shelf, the backup doors, the frame, a paste and two links (served 2026-11-13)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
 Built on `ae6e1a0` (v192, served 2026-11-13: PR 74 merged, Pages run 94 succeeded; the served
@@ -10,7 +362,8 @@ branches integrated in one commit that moves the three stamps: `swfresh` (`sw.js
 entry with no item: nothing here is seen on a screen unless something goes wrong. The two
 parts below were written on their branches, before the stamps moved, and say so. STILL OPEN
 from the same audit and NOT in this build: ↶ pressed after another phone's newer record was
-adopted writes this phone's old copy over it (js/ui/undo.js, day.js, sheet.js - in repair);
+adopted writes this phone's old copy over it (js/ui/undo.js, day.js, sheet.js - in repair)
+(repaired in v194);
 a restore on a nearly full disk can spend the restore points (js/store.js - the owner's
 approval); the cloud rules check order and not content, and a damaged cloud document is
 adopted by the snapshot door (firestore.rules, js/sync - the owner's approval).

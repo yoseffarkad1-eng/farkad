@@ -510,8 +510,11 @@ try {
                     below, header: Math.round(header.getBoundingClientRect().height), nav: Math.round(nav.height) };
             });
             const top = await rows();
-            same(`${size[0]}: at the top the header is full, and the switch and «הכל חופש» are on it`,
-                [top.compact, top.switchShown, top.below.includes('הכל חופש')], [false, true, true]);
+            // MOVED (the owner, 2026-11-11): «הכל חופש» is no longer on the header at all - it
+            // ends the foot of the day (tests/holiday.browser.mjs); the switch's line still
+            // stands at the top and still goes once the day is scrolled.
+            same(`${size[0]}: at the top the header is full, the switch is on it, and «הכל חופש» is not`,
+                [top.compact, top.switchShown, top.below.includes('הכל חופש')], [false, true, false]);
             await page.evaluate(() => window.scrollTo(0, 200));
             await settle(page, 120);
             const down = await rows();

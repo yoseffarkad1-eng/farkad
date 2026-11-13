@@ -106,7 +106,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v193">
+<meta name="farkad-build" content="v194">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -639,6 +639,9 @@
     <div class="modal-content">
         <h3 id="askTitle"></h3>
         <p class="hint" id="askMessage"></p>
+        <!-- The men a question is about, when it names them (askConfirm's `names`): one to
+             a line, scrolling inside the dialog when the list is long. -->
+        <ul class="ask-list" id="askList" style="display:none"></ul>
         <input id="askInput" type="text" onkeydown="askKeydown(event)"/>
         <p class="ask-error" id="askError"></p>
         <!-- askChoice's named answers; hidden whenever an ordinary two-button question

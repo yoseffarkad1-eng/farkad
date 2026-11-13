@@ -1479,4 +1479,38 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 #workerDaysModal .wday .tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 #reportsView .invoice-picker button { font-size: 16px; }
 
+/* ---- «עוד ⋯» at the foot of the day, «הכל חופש» behind it (the owner, 2026-11-11; dayMoreEntry, js/ui/day.js) --
+   «הכל חופש» stood here on its first move off the header: a writer at the end of the day, and
+   the end of a day is wherever its length puts it - on the dock's edge, as the day opens, on
+   some lengths of every phone (js/ui/day.js has the sweep). It is on no screen now. In its
+   place stands the door to it, which writes nothing: «עוד ⋯», the day's menu.
+   It ENDS the row of «חיפוש עובד» and «בדיקת היום»: on a line of its own 24px under them, at
+   the row's far end - the left - and no wider than its words. The line break is the row's
+   own ::after, ordered between the two lines: a full-width item of no height, so the gap is
+   the row's own 8px twice and 8px of the button's own margin.
+   NO BREAK ON A SHORT SCREEN, 580px tall and less - the journey's own threshold, for the
+   same reason: the last man of the crew must still clear the pinned header with the day
+   scrolled to its end, and on a 320x568 phone with a home indicator and the undo bar up the
+   break and its margins (72px) put him under it (tests/mobile.test.mjs, the transitions at
+   320 - measured red, then this). There the button follows the row's own wrap: beside the
+   two where they leave it room - a phone turned sideways, 500px tall and less, 16px further
+   from «בדיקת היום» than the two are from each other, the foot one button tall - and on the
+   next line by the row's own 8px where they do not (320x568: 56px, and the last man keeps
+   his place).
+   No min-width: its words and padding make it 82px wide (93 with the large display), and a
+   min-width of its own over 52 would be taken down to the large display's !important floor
+   of 52 (css/large.css, block 2) - a floor that lowered a control.
+   With no site at all it stands alone under the setup card (.day-more-row). */
+.daycheck-row.day-foot-more::after { content: ''; order: 2; flex: 0 0 100%; }
+.daycheck-row .day-more-action { order: 3; flex: 0 0 auto; margin: 8px 0 0; margin-inline-start: auto; min-height: 48px; padding: 10px 18px; font-size: 16px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; }
+@media (max-height: 580px) {
+    .daycheck-row.day-foot-more::after { content: none; }
+    .daycheck-row .day-more-action { margin: 0; margin-inline-start: auto; }
+}
+@media (max-height: 500px) {
+    .daycheck-row .day-more-action { margin-inline-start: 16px; }
+}
+.day-more-row { display: flex; justify-content: flex-end; margin: 24px 0 4px; }
+.day-more-row .day-more-action { margin: 0; min-height: 48px; padding: 10px 18px; font-size: 16px; font-weight: 600; }
+
 }

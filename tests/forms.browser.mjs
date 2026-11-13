@@ -376,7 +376,13 @@ const canWrite = page => page.evaluate(() =>
     await toggle.click();
     check('one tap turns worker back on',await toggle.getAttribute('aria-checked')==='true');
     await page.evaluate(()=>showView('day'));
+    // MOVED (v194, the owner's «הכל חופש» round two): the button is on no screen - «עוד ⋯» at the
+    // foot of the day opens the day's menu, the menu's «הכל חופש» (v116's accessible name kept)
+    // goes on to the question, and each holds a moment before it answers.
+    await page.locator('#dayMoreEntry').click();
+    await page.waitForFunction(()=>{const first=document.querySelector('#askChoices button');return Boolean(first)&&!first.disabled;});
     await page.getByRole('button',{name:'רשום חופש לעובדים בלי רישום ביום הנבחר'}).click();
+    await page.waitForFunction(()=>document.getElementById('askOk').style.display!=='none'&&!document.getElementById('askOk').disabled);
     check('holiday confirmation names the selected date', (await page.textContent('#askTitle')).includes('02/10'));
     await page.locator('#askOk').click();
     check('holiday recorded for both active workers',await page.evaluate(()=>State.activeWorkers().every(w=>isAbsent(State.schedule,'2026-10-02',w.id,'actual'))));

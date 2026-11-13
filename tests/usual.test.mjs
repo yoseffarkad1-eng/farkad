@@ -736,10 +736,15 @@ await block('the shell: on the page after the files it calls, in the offline she
     // is one more block at the END of the layer, so this block is last but for the blocks
     // added since - today exactly one, named here. What is held is unchanged: the usual
     // site's look is whole, in one place, and read below without its neighbour.
+    // MOVED AGAIN (the owner, 2026-11-11): «הכל חופש» at the foot of the day is one more
+    // block after that one, and the last - so the blocks after this one are those two, named.
+    // Round two: that block is «עוד ⋯»'s now, «הכל חופש» behind it - the same block, renamed.
     const next = css.indexOf('/* ---- ', from + 10);
+    const holiday = css.indexOf('/* ---- «עוד ⋯» at the foot of the day, «הכל חופש» behind it');
     check('the last block of the screen layer but for the ones added since', css.trimEnd().endsWith('}')
         && (next === -1 || (css.indexOf('/* ---- the reports say the account') === next
-            && css.indexOf('/* ---- ', next + 10) === -1)));
+            && css.indexOf('/* ---- ', next + 10) === holiday && holiday > next
+            && css.indexOf('/* ---- ', holiday + 10) === -1)));
     const block = next === -1 ? css.slice(from) : css.slice(from, next);
     check('48px and 18px, written there', /min-height: 48px/.test(block) && /font-size: 18px/.test(block));
     same('css/readability.css does not name it', /chip-usual|usual-note/.test(source('css/readability.css')), false);
