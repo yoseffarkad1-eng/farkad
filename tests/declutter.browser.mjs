@@ -456,12 +456,19 @@ try {
         await page.evaluate(() => window.scrollTo(0, 0));
         await settle(page);
         await tap(page, `() => document.querySelector('#dayView .day-header button.now-count')`);
+        // MOVED ON PURPOSE (the review of the hotfix, R2 and R3, and its second review): opened by
+        // a tap, and each time it walks on to the next man, the walk takes the same finger again
+        // for no man inside WALK_BOUNCE_MS (300 ms) of the press that moved it (js/ui/sheet.js) -
+        // so a deliberate 400 ms is left here, as a person leaves it; round one's 700 ms window
+        // swallowed taps at that pace. What is held is unchanged: the walk, man by man.
+        await page.waitForTimeout(400);
         const first = await page.evaluate(() => __sheet());
         same('«נרשמו X מתוך Y» opens the sheet on the first man not recorded', [first.open, first.who], [true, unrecorded[0]]);
         same('with the forward button, which skips him', first.forward, ['דלג']);
         await tap(page, sheetAction('נעדר'));
         const next = await page.evaluate(id => ({ sheet: __sheet(), away: isAbsent(State.schedule, State.date, id, 'actual') }), unrecorded[0]);
         same('«נעדר» records him and walks on to the next', [next.away, next.sheet.who], [true, unrecorded[1]]);
+        await page.waitForTimeout(400);
         await tap(page, sheetTile(GIVAT));
         same('a site for the last man closes the run', await page.evaluate(() => [__sheet().open,
             entriesFor(State.schedule, State.date, __idOf('נאדר עלי'), 'actual').map(e => e.placeId)]), [false, ['p3']]);

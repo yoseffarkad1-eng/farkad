@@ -679,9 +679,18 @@ await block('drawing the suggestions writes nothing, and nothing is learned', as
     same('it reaches State.commit by no name of its own', (code.match(/State\.commit/g) || []).length, 0);
     same('the one write it borrows is the sheet\'s pick, called once', (code.match(/sheetPickPlace\(/g) || []).length, 1);
     const sheetCode = source('js/ui/sheet.js');
-    same('which the sheet\'s own tile calls', (sheetCode.match(/const stood = sheetPickPlace\(worker, place\);/g) || []).length, 1);
-    check('and which is editWithUndo over assignPlace at the regular rate, on the day and layer on screen',
-        /function sheetPickPlace\(worker, place\) \{\s*return editWithUndo\(worker\.id,\s*`\$\{isolate\(worker\.name\)\} נרשם ב\$\{isolate\(place\.name\)\}`, \(\) =>\s*assignPlace\(State\.schedule, State\.date, worker\.id, State\.layer, place\.id, RATE_NORMAL\)\);\s*\}/.test(sheetCode));
+    // MOVED ON PURPOSE (the second review of the hotfix, c1): the pick is made on the day the
+    // surface that calls it NAMED when it was drawn - the sheet's day, the tray's day - handed
+    // in as `at`, and editWithUndo builds the change on that day (js/ui/undo.js). It read
+    // State.date at the tap, and the sheet's hours, written after midnight's follow, landed on
+    // the next day. The pins are the same three facts: one write, the sheet's tile calls it,
+    // and it is editWithUndo over assignPlace at the regular rate - now on the named day.
+    same('which the sheet\'s own tile calls, with the sheet\'s day', (sheetCode.match(/const stood = sheetPickPlace\(worker, place, at\);/g) || []).length, 1);
+    check('and which is editWithUndo over assignPlace at the regular rate, on the day and layer its surface named',
+        /function sheetPickPlace\(worker, place, at\) \{\s*return editWithUndo\(worker\.id,\s*`\$\{isolate\(worker\.name\)\} נרשם ב\$\{isolate\(place\.name\)\}`, \(date, layer\) =>\s*assignPlace\(State\.schedule, date, worker\.id, layer, place\.id, RATE_NORMAL\), at\);\s*\}/.test(sheetCode));
+    check('and the chip hands it the day the tray was drawn for, asked again of that day at the tap',
+        /return sheetPickPlace\(worker, place, day\);/.test(USUAL)
+        && /usualAssign\(worker\.id, place\.id, at\)/.test(USUAL));
     same('no batch: there is no button that places several men', /שיבוץ כל/.test(code), false);
 });
 

@@ -87,6 +87,11 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    { build: 'v192', items: [
+        { title: 'דוחות: שמות בולטים וצבע לכל קבוצה',
+            text: 'בכרטיס של כל עובד השם גדול ובולט, השבועיים בכתום והדו־שבועיים בכחול, ובראש כל קבוצה כתוב רק שבועי או דו־שבועי.',
+            where: 'דוחות ← לפי עובד', go: 'payReport' }
+    ] },
     { build: 'v191', items: [
         { title: 'תצוגה גדולה',
             text: 'מי שקשה לו לקרוא אותיות קטנות מפעיל תצוגה גדולה: האותיות, המספרים והכפתורים גדלים בכל המסכים, רק בטלפון שלו.',

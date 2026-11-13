@@ -70,6 +70,8 @@ const pageFacts = () => page.evaluate(() => ({
     range: { ...REPORT_RANGE },
     preset: REPORT_PRESET,
     headings: [...document.querySelectorAll('#reportsView .report-payroll h3.report-group[id]')].map(node => node.textContent),
+    // What the glass shows of each (the owner, 2026-11-11: the word alone).
+    shown: [...document.querySelectorAll('#reportsView .report-payroll h3.report-group[id]')].map(node => node.innerText.trim()),
     warn: [...document.querySelectorAll('#reportsView .report-payroll .hint-warn')]
         .filter(node => node.offsetParent !== null).map(node => node.textContent),
     tiles: [...document.querySelectorAll('#reportsView .report-worker-tile')].map(tile => ({
@@ -87,7 +89,11 @@ try {
     suite('the page as it opens: each group in its own period, and no amber sentence');
     const facts = await pageFacts();
     same('it opens on the fortnight containing today', facts.range, FORT);
-    same('the weekly group under its week, the fortnightly under its fortnight',
+    // MOVED ON PURPOSE (the owner, 2026-11-11: «שבועי» or «דו־שבועי» is enough, told apart
+    // by colour): the glass shows each heading's word and nothing else. The heading's TEXT -
+    // what the paper prints and the picture titles a table with - still says its own dates.
+    same('on the glass each group is its cycle\'s word, and nothing else', facts.shown, ['שבועי', 'דו־שבועי']);
+    same('the weekly group under its week, the fortnightly under its fortnight - in the text the paper and the picture read',
         facts.headings.map(plain), ['שבועי · 06/11/2026 - 12/11/2026', 'דו־שבועי · 30/10/2026 - 12/11/2026']);
     same('no amber sentence is on the screen', facts.warn.filter(text => text.includes(AMBER)), []);
     // LITERALS, worked by hand: w_wa week 2 = 450 + 2x450 = 1,350, less 300 = 1,050, three
@@ -142,18 +148,26 @@ try {
                 const rect = node.getBoundingClientRect();
                 return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 0.5;
             })));
-        // Every pair of dates - the sentence's and each heading's - goes to a new line
+        // Every pair of dates ON THE GLASS - the open account's sentence - goes to a new line
         // WHOLE. At doubled text on 320px no line can hold one, and there it may wrap
         // inside its own block; the floor that holds there is the one above.
+        // MOVED ON PURPOSE (2026-11-11): a heading's dates are no longer on the glass - they
+        // are the paper's and the picture's (below) - so they are held to being absent here.
         if (scale === 1) {
-            check(`${name}: no pair of dates is broken across lines`, await page.evaluate(() =>
-                [...document.querySelectorAll('#reportsView .report-payroll .report-dates')].every(node => {
+            check(`${name}: no pair of dates on the glass is broken across lines`, await page.evaluate(() => {
+                const shown = [...document.querySelectorAll('#reportsView .report-payroll .report-dates')]
+                    .filter(node => !node.closest('.report-group-when'));
+                return shown.length > 0 && shown.every(node => {
                     const range = document.createRange();
                     range.selectNodeContents(node);
                     const rects = [...range.getClientRects()].filter(rect => rect.width > 0);
                     return rects.length > 0 && rects.every(rect => Math.abs(rect.top - rects[0].top) < 2);
-                })));
+                });
+            }));
         }
+        same(`${name}: and no heading's dates are on the glass`, await page.evaluate(() =>
+            [...document.querySelectorAll('#reportsView .report-payroll .report-group-when')]
+                .map(node => [getComputedStyle(node).display, node.getBoundingClientRect().width])), [['none', 0], ['none', 0]]);
     }
     await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -177,6 +191,11 @@ try {
             .every(node => getComputedStyle(node).display !== 'none'),
         getComputedStyle(document.querySelector('.report-other-account p')).display !== 'none',
         getComputedStyle(document.querySelector('.report-other-account button')).display]), [true, true, 'none']);
+    // The part of each heading the glass leaves out (2026-11-11) is on the paper.
+    same('on paper each heading says its own dates', await page.evaluate(() =>
+        [...document.querySelectorAll('#reportsView .report-payroll h3.report-group[id]')].map(node =>
+            node.innerText.replace(/[‎⁦-⁩]/g, '').replace(/\s+/g, ' ').trim())),
+    ['שבועי · 06/11/2026 - 12/11/2026', 'דו־שבועי · 30/10/2026 - 12/11/2026']);
     await page.emulateMedia({ media: null });
     const paper = readPdf(await page.pdf({ format: 'A4', printBackground: true })).pages.map(pageText).join('\n');
     const reversed = text => [...text].reverse().join('');

@@ -841,7 +841,7 @@
 :root.display-large .scard-client-fold button { font-size: 21px; font-weight: 700; }
 :root.display-large #siteCardStatus { font-size: 20px; }
 :root.display-large #siteCardModal .modal-actions button { font-size: 21px; }
-:root.display-large #reportsView .report-tile-name { font-size: 24px; line-height: 1.4; font-weight: 800; }
+:root.display-large #reportsView .report-tile-name { font-size: 29px; line-height: 1.4; font-weight: 900; }
 :root.display-large .report-tile-facts .report-tile-metric strong { font-size: 27px; line-height: 1.4; font-weight: 800; }
 :root.display-large .report-tile-facts .report-tile-metric .report-tile-label { font-size: 20px; line-height: 1.4; font-weight: 600; }
 :root.display-large .report-tile-facts .report-tile-zero strong,
@@ -879,6 +879,10 @@
 :root.display-large #reportsView .report-weekly-name { font-size: 22px; font-weight: 800; }
 :root.display-large #reportsView .report-group { font-size: 23px; font-weight: 800; }
 :root.display-large #reportsView .report-group::after { font-size: 20px; }
+:root.display-large #reportsView h3.report-group[data-cycle] { font-size: 27px; font-weight: 900; }
+@media (max-width: 700px) {
+:root.display-large #reportsView .report-payroll-group[data-cycle] tbody td:first-child .link-cell { font-size: 25px; font-weight: 900; }
+}
 :root.display-large #reportsView .invoice-bars-head { font-size: 22px; font-weight: 800; }
 :root.display-large #reportsView .invoice-bar-name { font-size: 22px; font-weight: 700; }
 :root.display-large #reportsView .invoice-bar-count { font-size: 27px; font-weight: 800; }

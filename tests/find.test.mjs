@@ -382,7 +382,10 @@ function phone(crew) {
     check('the day draws its entry at the foot of the list, first in the row «בדיקת היום» stands in',
         // v188, MOVED: the closure now begins with the journey's own row, appended ABOVE this
         // one (js/ui/journey.js); the row «חיפוש עובד» stands in is built exactly as it was.
-        /const check = \(\) => \{\s+const journey = typeof journeyDayEntry === 'function' \? journeyDayEntry\(\) : null;\s+if \(journey\) root\.appendChild\(journey\);\s+const foot = typeof dayCheckEntry === 'function' \? dayCheckEntry\(\) : el\('div', 'daycheck-row'\);\s+if \(typeof findEntry === 'function'\) foot\.insertBefore\(findEntry\(\), foot\.firstChild\);\s+if \(foot\.firstChild\) root\.appendChild\(foot\);\s+\};/
+        // MOVED AGAIN (the second review of the hotfix): each row is handed through trayClock
+        // as it is appended - the trays' one clock, so the second tap of a double tap on the
+        // last man's chip starts nothing from the foot. The rows themselves are as they were.
+        /const check = \(\) => \{\s+const journey = typeof journeyDayEntry === 'function' \? journeyDayEntry\(\) : null;\s+if \(journey\) root\.appendChild\(trayClock\(journey\)\);\s+const foot = typeof dayCheckEntry === 'function' \? dayCheckEntry\(\) : el\('div', 'daycheck-row'\);\s+if \(typeof findEntry === 'function'\) foot\.insertBefore\(findEntry\(\), foot\.firstChild\);\s+if \(foot\.firstChild\) root\.appendChild\(trayClock\(foot\)\);\s+\};/
             .test(source('js/ui/day.js')));
     same('and nothing else in the app opens it', ['index.html', 'js/app.js', 'js/ui/day.js', 'js/ui/sheet.js', 'js/ui/roster.js',
         'js/ui/reports.js', 'js/ui/share.js', 'js/ui/week.js', 'js/ui/settings.js', 'js/ui/workercard.js']

@@ -25,7 +25,7 @@
 //
 //   WITH THE MODE OFF, the app is what it was: every screen measured twice - once as
 //   served, once with css/large.css answered by an empty file - and the two readings are
-//   the same, node for node; and a pinned sample of v189's own sizes still reads as pinned.
+//   the same, node for node; and a pinned sample of the base's own sizes still reads as pinned.
 //   And the app's OWN floors hold for everybody on every screen, in both schemes: every
 //   text at 4.5:1, every target 44px both ways, every field 16px (three screens were under
 //   them before v191 and are repaired in css/design.css).
@@ -407,17 +407,19 @@ for (const [width, height] of PHONES) {
 // which moves one for everybody fails against a number a person can read: `size/weight` of
 // the words, and the height of a row and a bar, at 440x956. Every one of them was also
 // v186's (9846d7f) but the reports' card, which v189 rebuilt to tell the account (a man's
-// name 19/750 then, his «נותר לתשלום» 30/800, a label 16/400).
+// name 19/750 then, his «נותר לתשלום» 30/800, a label 16/400). MOVED in v192, on purpose: a
+// man's name on that card is the owner's 26/900 (it was v189's 21/800) - the first thing on
+// his card, in his group's colour; the mode restates it at 29/900 (css/large.css).
 const BASE = { body: '18/400', tab: '15/700', wrowName: '19/700', wrowTag: '16/650', wrow: 56, dayLabel: '20/800', dayDate: '14/400',
     dock: '14/800', tabs: 63, topbar: 52, siteName: '18/700', assignName: '20/700', rima: '15/600', rimaInput: '16/400',
     weekName: '14/700', weekCell: 48, weekLetter: '13px', rosterName: '19/750', rosterMeta: '16/400',
     advanceName: '19/500', advanceSum: '20/800', advanceRow: 58,
-    tileName: '21/800', tileValue: '32/800', tileLabel: '16/600', seat: '16/700', seatEmpty: '15/700', chip: '16/700', seatBox: 66,
+    tileName: '26/900', tileValue: '32/800', tileLabel: '16/600', seat: '16/700', seatEmpty: '15/700', chip: '16/700', seatBox: 66,
     settingsRow: 60, settingsTitle: '17/700', settingsHint: '14/400' };
 {
-    suite('440x956 dark, large display OFF: a pinned sample of v189\'s own sizes');
+    suite('440x956 dark, large display OFF: a pinned sample of the base\'s own sizes (v189\'s, and v192\'s name on a card)');
     const { context, page } = await openApp(browser, server.url, { width: 440, height: 956, scheme: 'dark', large: false });
-    same('they are what v189 drew', await page.evaluate(sampleInPage), BASE);
+    same('they are what the base draws', await page.evaluate(sampleInPage), BASE);
     await context.close();
 
     suite('440x956 dark, large display ON: the same sample, and every one of them larger');
@@ -543,7 +545,7 @@ const BASE = { body: '18/400', tab: '15/700', wrowName: '19/700', wrowTag: '16/6
     same('the tab bar is the height it was, and measured so', [off.tabs, Math.abs(off.nav - off.tabs) <= 1], [barsOff.tabs, true]);
     same('every other key on the disk is byte for byte what it was before the tap', await disk(), beforeOff);
     await page.evaluate(() => closeSettings());
-    same('and the sample reads exactly as v189 drew it', await page.evaluate(sampleInPage), BASE);
+    same('and the sample reads exactly as the base draws it', await page.evaluate(sampleInPage), BASE);
     check('nothing threw', errors.length === 0, errors.slice(0, 3).join(' | '));
     await context.close();
 }

@@ -11,6 +11,26 @@ let pickerPlaceId = null;
 // one turns one tap per worker into three.
 let sheetWorkerId = null;
 
+// THE DAY THE SHEET NAMES, read once, when it opens (the second review of the hotfix, c1).
+//
+// Its meta line says «יום שלישי 10/11» and is the only thing on the screen saying which day
+// is being written. Every control in it used to write to State.date as it stood at the tap,
+// and the two could part: the sheet shut after midnight with its «שעות נוספות» box still
+// holding the focus - Escape, a «סגור» that takes no focus, the backdrop - and the follow of
+// the calendar (js/app.js) moved State.date in the close's own turn, before the box let go of
+// the focus; its `change` came after, and the hours typed on Tuesday were taken off Tuesday
+// and written onto Wednesday, rate-stamped and queued, over Wednesday's regular day. So the
+// day and the layer are taken when the sheet is opened - from the surface that opened it, or
+// the day on screen - and the meta line, the tiles, the rates, the hours, «נעדר», the walk
+// to the next man and the step on ↶ are all of THAT day, by construction, whatever State.date
+// does meanwhile. Null while the sheet is shut.
+let sheetDate = null;
+let sheetLayer = null;
+
+function sheetDay() {
+    return { date: sheetDate || State.date, layer: sheetLayer || State.layer };
+}
+
 // OPENED FROM A MAN'S ROW ON A SITE, THE SHEET IS ABOUT HIM (v167).
 //
 // The walk above is the evening's run down the roster, and the tally «נרשמו X מתוך Y» and
@@ -31,33 +51,194 @@ let sheetStays = false;
 // opened from a row, a finger on the sheet does nothing - its press, its release and its
 // click stop at the sheet. A keyboard's click (detail 0) is never a bounce, so a digit or
 // Enter still acts at once. Measured in tests/declutter.browser.mjs, both ways.
+//
+// AND SO DOES EVERY WRITER A TAP OPENS (the review of the hotfix, R2). The sheet opened from a
+// man's row was the only one guarded. A name in «לא נרשמו» opens «לאן הלך», a site's «+» opens
+// its picker - and the second tap of a double tap on either landed on the site or the «+ הוסף»
+// the surface had just put under the finger, and wrote a rate-stamped day nobody chose.
+// Measured in Chromium at four phone sizes: 14 double taps on a name of 64, 16 on a site's
+// «+» of 24. So each of these, opened by a tap, takes no finger on its WRITING controls for
+// DOUBLE_TAP_GUARD_MS, the same way: press, release and click stop at the surface, and a
+// keyboard's click still acts at once. The window is time and not place: a site the person
+// MEANS inside it is ignored too - and nothing is written by that, and the surface stays open
+// on the same man, so the next tap is the same tap again.
+//
+// THE GUARD COVERS THE WRITING CONTROLS ONLY, and the backdrop (the second review of the
+// hotfix). It stopped the whole surface, and a «סגור» tapped inside the window - or the search
+// box, or «נקה» - did nothing and said nothing, the picker left open over the day. Each surface
+// names what writes (`writes`, a selector), and a press anywhere else on it is a press. The
+// backdrop stays guarded: where a surface opens below the finger, the second tap of the double
+// tap that opened it comes down on the backdrop above it, which would shut it (v167).
+//
+// THE SHEET THAT WALKS THE EVENING NEVER SWALLOWS A DELIBERATE TAP (the second review of the
+// hotfix, BLOCKER). The tally and a row of «לפי עובדים» open the sheet that walks, and a site,
+// «נעדר» or «דלג» moves it on to the next man with the same tiles in the same places: a double
+// tap placed him AND the next man (R3). Round one answered with DOUBLE_TAP_GUARD_MS after every
+// move - and at a person's pace, a tap every 400-600 ms, a deliberate tap fell inside it, was
+// swallowed without a sign, and every later site went to the man BEFORE the one it was meant
+// for: a wrong man's pay (probe-walk, 4 men: אמיר, אמיר, בסאם, בסאם at the four taps). A walk
+// cannot be guarded by a window a deliberate tap can fall into, because a tap it swallows does
+// not leave the walk where it was - it shifts every tap after it by one man. So on the walking
+// sheet the window is a BOUNCE, and only after a MOVE: a press less than WALK_BOUNCE_MS after the
+// press of the tap that last moved the sheet to a man - opened it on him, or walked it on to him -
+// is the same finger again and does nothing; any press later than that is a tap; a write that
+// leaves the sheet on the same man arms nothing. Measured on the presses' own clock (the
+// pointerdown's timeStamp, the time the touch was made, which a busy page does not compress:
+// with the page held 120 ms per click, two taps 150 ms apart were handled 316 ms apart by
+// performance.now() and stamped 346 ms apart, the gap Playwright actually sent), not on the
+// page's clock at the handler. 300 ms: a double tap or a bounce is 100-250 ms between presses,
+// and a man read off the paper and his site chosen takes longer than 350 - the boundary sits
+// halfway, 50 ms clear of each. And not a window over the slide. The slide the advance asks for
+// (.sheet-swap, css/app.css: 32 px over 600 ms) does not run on the phones at all - the sheet's
+// entrance in css/readability.css is set on every .modal-content, later in the cascade, and takes
+// its place; what moves is the name's flash. Forced to run, it puts the next man's tile 10 px
+// from its place at 300 ms and 7 px at 350, on tiles 139-199 px wide with 8 px between them: a
+// tap at that pace lands on the tile it was aimed at either way (tests/doubletap.browser.mjs
+// measures both, at 320, 375 and 440). The sheet a man's row opens keeps v167's
+// DOUBLE_TAP_GUARD_MS at its opening, as it was: it does not walk, so nothing shifts under it.
+//
+// A BOUNCE IS THE SAME FINGER IN THE SAME PLACE (the third review of the hotfix). The window was
+// time alone, so a press on ANOTHER site less than WALK_BOUNCE_MS after the move was taken for the
+// bounce of the one before - and a tap it swallows shifts every tap after it by one man, exactly
+// as the window it replaced did. A bounce comes down where the press it repeats came down: so it
+// is a press inside the control that press hit, as that control stood then (sameFingerAgain,
+// below), and soon enough after it; a press on any other control is a tap whatever its time. What
+// is left the reviewers measured and no window can take back: four taps on ONE tile 200-250 ms
+// apart, meant for four men, are on the presses' own clock and on the glass the very double taps
+// the walk must take as one man - the second and the fourth are dropped, and the next site tapped
+// goes to the man before. Their "300 ms" double tap reaches the page 329-332 ms apart (measured):
+// the spacing at which a deliberate pace must place every man. The boundary stays where the spec
+// put it, halfway between a double tap (100-250) and a deliberate pace (350 and slower); the sheet
+// says who it is waiting for in its title, and the step on ↶ names the last man placed.
+const WALK_BOUNCE_MS = 300;
 let sheetGuardUntil = 0;
-let sheetGuardWatching = false;
+// The press of the tap that last moved the walking sheet to a man (opened it, walked it on) -
+// when and where it came down (lastPress, below); null when none has (opened by code, by the
+// keyboard, or from his row).
+let sheetBounceFrom = null;
+let placePickerGuardUntil = 0;
+let workerPickerGuardUntil = 0;
+const fingerGuarded = new Set();
 
 function sheetClock() {
     return typeof performance !== 'undefined' && performance && typeof performance.now === 'function'
         ? performance.now() : Date.now();
 }
 
-function guardSheetTap(event) {
-    if (event.detail > 0 && sheetClock() < sheetGuardUntil) {
-        event.preventDefault();
-        event.stopPropagation();
+// THE PRESS OF THE TAP UNDER WAY: when the finger (or the mouse) went down - the timeStamp of its
+// pointerdown, the time the touch was made - where on the glass, and the rectangle of the control
+// it came down on, as that control stood at the press (the press point itself, BOUNCE_REACH each
+// way, where it came down on none). Every press is seen here first - the window, in the capture
+// phase - so a surface the press OPENS knows when and where its opener was pressed, and so does
+// the undo bar that comes up under it (js/ui/undo.js). A press is the tap's until the turn after
+// its click (or its cancel); an event with no press of its own open - a click from code - is
+// taken as pressed where and when it happened.
+const PRESSED_CONTROL = 'button, a, input, select, textarea, label, [role="button"]';
+// How far outside the control it hit a bounce may still come down (CSS px): a finger's own jitter.
+const BOUNCE_REACH = 8;
+let lastPress = null;
+
+function pressArea(node, x, y) {
+    const control = node && node.closest ? node.closest(PRESSED_CONTROL) : null;
+    if (control && control.getBoundingClientRect) {
+        const box = control.getBoundingClientRect();
+        if (box.width > 0 && box.height > 0) return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
     }
+    return { left: x, top: y, right: x, bottom: y };
 }
 
+if (typeof window !== 'undefined' && window && typeof window.addEventListener === 'function') {
+    window.addEventListener('pointerdown', event => {
+        lastPress = { stamp: event.timeStamp, x: event.clientX, y: event.clientY,
+            area: pressArea(event.target, event.clientX, event.clientY), open: true };
+    }, true);
+    window.addEventListener('pointercancel', () => { if (lastPress) lastPress.open = false; }, true);
+    window.addEventListener('click', () => {
+        const press = lastPress;
+        if (press) setTimeout(() => { press.open = false; }, 0);
+    }, true);
+}
+// The press of the tap whose click is being handled now, or null (a keyboard, code).
+function openPress() {
+    return lastPress && lastPress.open ? lastPress : null;
+}
+// The press `event` belongs to: the open one when the event is its own, else the event itself.
+function pressOf(event) {
+    const press = lastPress;
+    if (press && press.open && press.stamp <= event.timeStamp + 1 && event.timeStamp - press.stamp < 1000) return press;
+    const x = typeof event.clientX === 'number' ? event.clientX : 0;
+    const y = typeof event.clientY === 'number' ? event.clientY : 0;
+    return { stamp: event.timeStamp, x, y, area: pressArea(event.target, x, y), open: false };
+}
+// THE SAME FINGER AGAIN: `press` came down inside the control `before` came down on (as it stood
+// then, BOUNCE_REACH around it), less than WALK_BOUNCE_MS after it, on the presses' own clock. A
+// bounce, or the second tap of a double tap: it repeats a press, where that press was. A press
+// anywhere else, or later, is a tap of its own.
+function sameFingerAgain(press, before) {
+    if (!press || !before || !before.area) return false;
+    const after = press.stamp - before.stamp;
+    if (!(after >= 0 && after < WALK_BOUNCE_MS)) return false;
+    const area = before.area;
+    return press.x >= area.left - BOUNCE_REACH && press.x <= area.right + BOUNCE_REACH
+        && press.y >= area.top - BOUNCE_REACH && press.y <= area.bottom + BOUNCE_REACH;
+}
+
+// The guard on one surface, installed the first time it opens: capture, on the surface
+// itself, so it runs before any tile, chip or button inside it and stops the press before it
+// reaches the backdrop's closer on the document. `writes` names the surface's writing
+// controls; `held(press)` says whether a press (pressOf, above) is to be ignored; `seen(press)`,
+// when given, is told of each click on a writing control that was let through, with its press -
+// or null for a keyboard's click, which is never a bounce and never starts one.
+function guardFingersOn(surface, writes, held, seen) {
+    if (!surface || fingerGuarded.has(surface)) return;
+    const guard = event => {
+        const target = event.target;
+        const control = target && target.closest ? target.closest(writes) : null;
+        const covered = target === surface || (control && surface.contains(control));
+        if (!covered) return;
+        if (!(event.detail > 0)) {
+            if (seen && control && event.type === 'click') seen(null);
+            return;
+        }
+        const press = pressOf(event);
+        if (held(press)) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+        if (seen && control && event.type === 'click') seen(press);
+    };
+    ['mousedown', 'mouseup', 'click'].forEach(type => surface.addEventListener(type, guard, true));
+    fingerGuarded.add(surface);
+}
+
+// The press of the click being handled on the sheet (guardFingersOn's `seen`), for the walk to
+// arm its bounce from when that click moves it on; null for a keyboard's.
+let sheetTapPress = null;
+
+// The sheet's writing controls: the sites, the rates and the hours, «נעדר», and the way on.
+// Not «סגור» (sheet-close).
+const SHEET_WRITES = '.sheet-place, .sheet-rate-row button, .sheet-rate-row input, .sheet-actions button:not(.sheet-close)';
+
+// `options.stay`: opened from a man's row, about him (sheetStays). `options.tapped`: opened by
+// a tap that may have a twin - the tally, a row of «לפי עובדים». Opened from a row, the sheet
+// takes no finger on its writers for DOUBLE_TAP_GUARD_MS (v167); opened by a tap to walk, it
+// takes none for the walk's bounce (WALK_BOUNCE_MS, above); opened by code, it takes one at
+// once. `options.date` and `options.layer`: the day the surface that opened it named
+// (sheetDate, above); left out, the day on screen.
 function openAssignSheet(workerId, options) {
     sheetWorkerId = workerId;
     sheetStays = Boolean(options && options.stay);
+    sheetDate = options && options.date ? options.date : State.date;
+    sheetLayer = options && options.layer ? options.layer : State.layer;
     renderAssignSheet();
     const sheet = document.getElementById('assignSheet');
-    if (!sheetGuardWatching) {
-        // Capture, on the sheet itself: it runs before any tile, chip or button inside it,
-        // and stops the press before it reaches the backdrop's closer on the document.
-        ['mousedown', 'mouseup', 'click'].forEach(type => sheet.addEventListener(type, guardSheetTap, true));
-        sheetGuardWatching = true;
-    }
+    guardFingersOn(sheet, SHEET_WRITES,
+        press => sheetClock() < sheetGuardUntil || sameFingerAgain(press, sheetBounceFrom),
+        press => { sheetTapPress = press; });
     sheetGuardUntil = sheetStays ? sheetClock() + DOUBLE_TAP_GUARD_MS : 0;
+    // Opened by a tap to walk: the walk's bounce, from the opener's press - where it came down.
+    sheetBounceFrom = !sheetStays && options && options.tapped ? openPress() : null;
     // Opening is calm; only an ADVANCE animates. A leftover swap class from the last
     // run would replay the slide on open and dilute what it signals.
     sheet.querySelector('.sheet-content').classList.remove('sheet-swap');
@@ -67,10 +248,23 @@ function openAssignSheet(workerId, options) {
 
 function closeAssignSheet() {
     document.removeEventListener('keydown', sheetKeydown);
-    document.getElementById('assignSheet').style.display = 'none';
+    const sheet = document.getElementById('assignSheet');
+    // WHAT IS TYPED IN IT IS KEPT FIRST, on the sheet's day, while the sheet is still the
+    // screen. A box holding the focus - the hours, mid-number - commits on `change`, which
+    // fires when the box is left; shut by Escape, or by a «סגור» that takes no focus (an
+    // iPhone's tap on a button), it was left only after the sheet had gone, so the hours
+    // came in behind the close: an edit with its step offered over whatever the day screen
+    // had become. Let go of here, they are written before anything else happens; the day
+    // they are written on is the sheet's either way (sheetDate).
+    const active = document.activeElement;
+    if (active && sheet.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) active.blur();
+    sheet.style.display = 'none';
     sheetWorkerId = null;
     sheetStays = false;
     sheetGuardUntil = 0;
+    sheetBounceFrom = null;
+    sheetDate = null;
+    sheetLayer = null;
     render();
 }
 
@@ -95,12 +289,13 @@ function sheetKeydown(event) {
 }
 
 // The next worker with nothing recorded, after this one in roster order. Wraps back to
-// the start so someone skipped earlier is not stranded.
+// the start so someone skipped earlier is not stranded. On the sheet's day (sheetDate).
 function nextUnfilledAfter(workerId) {
+    const { date, layer } = sheetDay();
     const workers = State.activeWorkers();
     const start = workers.findIndex(w => w.id === workerId);
-    const isEmpty = worker => !isAbsent(State.schedule, State.date, worker.id, State.layer)
-        && entriesFor(State.schedule, State.date, worker.id, State.layer).length === 0;
+    const isEmpty = worker => !isAbsent(State.schedule, date, worker.id, layer)
+        && entriesFor(State.schedule, date, worker.id, layer).length === 0;
 
     for (let step = 1; step <= workers.length; step++) {
         const candidate = workers[(start + step) % workers.length];
@@ -122,6 +317,13 @@ function advanceSheet() {
     }
     sheetWorkerId = next;
     renderAssignSheet();
+    // Another man under the same tiles: the walk's bounce, from the press of the tap that moved
+    // it on (none for a keyboard's digit) - the same finger again, in the same place inside
+    // WALK_BOUNCE_MS, does nothing, and the next tap after it is his. NOT a window of
+    // DOUBLE_TAP_GUARD_MS here: a deliberate tap fell into that one, and every site after it went
+    // to the man before; nor time alone: a tap on another site is never the same finger.
+    sheetBounceFrom = sheetTapPress;
+    sheetTapPress = null;
 
     // The sheet looks the same from worker to worker, so the advance has to MOVE: the
     // card slides in slowly enough to be seen and the name line flashes. The move is
@@ -132,20 +334,25 @@ function advanceSheet() {
     content.classList.add('sheet-swap');
 }
 
-// A SITE PICKED FOR A MAN ON THE DAY ON SCREEN: a regular day there, one field path, with
-// the step back on ↶. It was written inline in the tile below until the tray's suggestion
-// (js/ui/usual.js) needed the very same act - and a second copy of a write is how two
-// doors come to record two different things. Both call this, and nothing else does.
-// Returns whether the edit stood (editWithUndo's verdict, State.commit's under it).
-function sheetPickPlace(worker, place) {
+// A SITE PICKED FOR A MAN ON THE DAY HIS SURFACE NAMED: a regular day there, one field path,
+// with the step back on ↶. It was written inline in the tile below until the tray's
+// suggestion (js/ui/usual.js) needed the very same act - and a second copy of a write is how
+// two doors come to record two different things. Both call this, and nothing else does.
+// `at` is the day each of them was drawn for (editWithUndo, js/ui/undo.js). Returns whether
+// the edit stood (editWithUndo's verdict, State.commit's under it).
+function sheetPickPlace(worker, place, at) {
     return editWithUndo(worker.id,
-        `${isolate(worker.name)} נרשם ב${isolate(place.name)}`, () =>
-            assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL));
+        `${isolate(worker.name)} נרשם ב${isolate(place.name)}`, (date, layer) =>
+            assignPlace(State.schedule, date, worker.id, layer, place.id, RATE_NORMAL), at);
 }
 
 function renderAssignSheet() {
     const worker = State.worker(sheetWorkerId);
     if (!worker) return;
+    // The sheet's day, read once at its opening (sheetDate). Every control below writes to
+    // it - `at` - and to nothing else.
+    const at = sheetDay();
+    const { date, layer } = at;
 
     const workers = State.activeWorkers();
     const position = workers.findIndex(w => w.id === worker.id) + 1;
@@ -154,17 +361,17 @@ function renderAssignSheet() {
     // The sheet covers the day header, so while it is open this line is the only thing
     // on screen that says WHICH day is being written - and thirty taps into the wrong
     // day is the mistake the fixed header exists to prevent.
-    const day = parseLocalDate(State.date);
+    const day = parseLocalDate(date);
     document.getElementById('assignSheetMeta').textContent =
-        `${position} מתוך ${workers.length} · ${State.unrecorded().length} נותרו` +
+        `${position} מתוך ${workers.length} · ${unrecordedOn(date, layer).length} נותרו` +
         ` · ${hebrewDayName(day)} ${formatShortDate(day)}`;
 
     const body = document.getElementById('assignSheetBody');
     clear(body);
 
-    const entries = entriesFor(State.schedule, State.date, worker.id, State.layer);
+    const entries = entriesFor(State.schedule, date, worker.id, layer);
     const chosen = new Set(entries.map(entry => entry.placeId));
-    const absent = isAbsent(State.schedule, State.date, worker.id, State.layer);
+    const absent = isAbsent(State.schedule, date, worker.id, layer);
     const status = el('p', absent ? 'sheet-status sheet-status-absent'
         : entries.length ? 'sheet-status sheet-status-recorded' : 'sheet-status sheet-status-pending',
         absent ? 'נעדר ביום הזה' : entries.length === 1 ? 'רשום באתר אחד'
@@ -179,12 +386,12 @@ function renderAssignSheet() {
             on ? 'sheet-place sheet-place-on' : 'sheet-place',
             () => {
                 if (on) {
-                    editWithUndo(worker.id, `${isolate(worker.name)} הוסר מ${isolate(place.name)}`, () =>
-                        unassignPlace(State.schedule, State.date, worker.id, State.layer, place.id));
+                    editWithUndo(worker.id, `${isolate(worker.name)} הוסר מ${isolate(place.name)}`, (date, layer) =>
+                        unassignPlace(State.schedule, date, worker.id, layer, place.id), at);
                     renderAssignSheet();
                     return;
                 }
-                const stood = sheetPickPlace(worker, place);
+                const stood = sheetPickPlace(worker, place, at);
                 // A second site in a day is normal here, so picking one cannot assume the
                 // worker is finished - only move on when this is their first. And only
                 // when the edit STOOD: a refused commit has already rolled back and put
@@ -237,9 +444,9 @@ function renderAssignSheet() {
                     // Through undo because leaving 'שעות נוספות' discards the hours that
                     // were typed into it, and a mis-tap on this row is otherwise silent
                     // and permanent.
-                    editWithUndo(worker.id, `${isolate(worker.name)}: ${RATE_LABELS[rate]}`, () =>
-                        setRate(State.schedule, State.date, worker.id, State.layer,
-                            entry.placeId, rate, rate === RATE_EXTRA ? entryExtraHours(entry) : 0));
+                    editWithUndo(worker.id, `${isolate(worker.name)}: ${RATE_LABELS[rate]}`, (date, layer) =>
+                        setRate(State.schedule, date, worker.id, layer,
+                            entry.placeId, rate, rate === RATE_EXTRA ? entryExtraHours(entry) : 0), at);
                     renderAssignSheet();
                 }));
             });
@@ -255,10 +462,13 @@ function renderAssignSheet() {
                 hours.placeholder = 'ש׳';
                 hours.setAttribute('aria-label',
                     `שעות נוספות ב${placeLabelFrom(labels, entry.placeId)}`);
+                // On the sheet's day (`at`), not on State.date at the `change`: the box is left
+                // last of all, after the sheet has shut and the calendar's follow has had its
+                // turn (sheetDate, above).
                 hours.addEventListener('change', () => {
-                    editWithUndo(worker.id, `${isolate(worker.name)}: ${hours.value || 0} שעות נוספות`, () =>
-                        setRate(State.schedule, State.date, worker.id, State.layer,
-                            entry.placeId, RATE_EXTRA, hours.value));
+                    editWithUndo(worker.id, `${isolate(worker.name)}: ${hours.value || 0} שעות נוספות`, (date, layer) =>
+                        setRate(State.schedule, date, worker.id, layer,
+                            entry.placeId, RATE_EXTRA, hours.value), at);
                     renderAssignSheet();
                 });
                 row.appendChild(hours);
@@ -285,15 +495,15 @@ function renderAssignSheet() {
     const actions = el('div', 'sheet-actions');
     actions.appendChild(button(absent ? '✓ נעדר' : 'נעדר', absent ? 'chip-on' : 'btn-secondary', () => {
         if (absent) {
-            editWithUndo(worker.id, `ההיעדרות של ${isolate(worker.name)} בוטלה`, () =>
-                clearWorkerDay(State.schedule, State.date, worker.id, State.layer));
+            editWithUndo(worker.id, `ההיעדרות של ${isolate(worker.name)} בוטלה`, (date, layer) =>
+                clearWorkerDay(State.schedule, date, worker.id, layer), at);
             renderAssignSheet();
             return;
         }
         // Same gate as the site tiles: an absence is a complete answer for this worker,
         // but only an absence that was actually recorded is.
-        if (editWithUndo(worker.id, `${isolate(worker.name)} נרשם כנעדר`, () =>
-            markAbsent(State.schedule, State.date, worker.id, State.layer))) advanceSheet();
+        if (editWithUndo(worker.id, `${isolate(worker.name)} נרשם כנעדר`, (date, layer) =>
+            markAbsent(State.schedule, date, worker.id, layer), at)) advanceSheet();
         else renderAssignSheet();
     }));
     // The forward button says what forward MEANS right now. With nothing recorded for
@@ -317,7 +527,8 @@ function renderAssignSheet() {
     // been written and sent by the time the finger leaves the glass - there is nothing
     // here to save, and a button that says there is teaches somebody that closing without
     // pressing it loses the evening. It does not, and they should not have to wonder.
-    actions.appendChild(button('סגור', 'btn-secondary', closeAssignSheet));
+    // Not a writing control: no guard holds it (SHEET_WRITES).
+    actions.appendChild(button('סגור', 'btn-secondary sheet-close', closeAssignSheet));
     foot.appendChild(actions);
     foot.appendChild(el('p', 'sheet-note', 'כל בחירה נשמרת מיד במכשיר. אין מה לשמור כאן.'));
 }
@@ -355,19 +566,39 @@ function forwardChevron() {
 // where it is makes the mistake self-correcting: the thumb is already on it.
 let pickerOrder = [];
 
-function openWorkerPicker(placeId) {
+// The day the picker names in its context line, read once when it opens - from the site
+// card that opened it, or the day on screen - and the day every «+ הוסף», «✓ נמצא» and
+// «🧹 רוקן אתר» in it writes to, as the assign sheet's (sheetDate, above). Null while shut.
+let pickerDate = null;
+let pickerLayer = null;
+
+function pickerDay() {
+    return { date: pickerDate || State.date, layer: pickerLayer || State.layer };
+}
+
+// `options.tapped`: opened by a tap on the site's «+», which may have a twin - no finger for a
+// moment (guardFingersOn, above). `options.date`, `options.layer`: the day the card named.
+function openWorkerPicker(placeId, options) {
     pickerPlaceId = placeId;
+    pickerDate = options && options.date ? options.date : State.date;
+    pickerLayer = options && options.layer ? options.layer : State.layer;
     document.getElementById('workerPickerSearch').value = '';
 
-    const here = new Set(workersAtPlace(State.schedule, State.date, placeId, State.layer));
-    const unrecorded = new Set(State.unrecorded().map(w => w.id));
+    const here = new Set(workersAtPlace(State.schedule, pickerDate, placeId, pickerLayer));
+    const unrecorded = new Set(unrecordedOn(pickerDate, pickerLayer).map(w => w.id));
     pickerOrder = State.activeWorkers().slice().sort((a, b) => {
         const rank = worker => (here.has(worker.id) ? 2 : unrecorded.has(worker.id) ? 0 : 1);
         return rank(a) - rank(b);
     }).map(worker => worker.id);
 
     renderWorkerPicker();
-    document.getElementById('workerPickerModal').style.display = 'flex';
+    const modal = document.getElementById('workerPickerModal');
+    // Its writing controls: each row's «+ הוסף» / «✓ נמצא», and «🧹 רוקן אתר». The search box,
+    // «נקה», «הצג את כל העובדים» and «סגור» are never held (guardFingersOn, above).
+    guardFingersOn(modal, '.picker-row button, button[onclick="clearWorkerPicker()"]',
+        () => sheetClock() < workerPickerGuardUntil);
+    workerPickerGuardUntil = options && options.tapped ? sheetClock() + DOUBLE_TAP_GUARD_MS : 0;
+    modal.style.display = 'flex';
 }
 
 function clearWorkerPickerSearch() {
@@ -380,14 +611,17 @@ function clearWorkerPickerSearch() {
 function renderWorkerPicker() {
     const place = State.place(pickerPlaceId);
     if (!place) return;
+    // The picker's day (pickerDate): what it shows and what each row writes.
+    const at = pickerDay();
+    const { date, layer } = at;
 
-    const here = new Set(workersAtPlace(State.schedule, State.date, place.id, State.layer));
-    const unrecorded = new Set(State.unrecorded().map(w => w.id));
+    const here = new Set(workersAtPlace(State.schedule, date, place.id, layer));
+    const unrecorded = new Set(unrecordedOn(date, layer).map(w => w.id));
 
     document.getElementById('workerPickerTitle').textContent =
         `הוסף עובדים ל${isolate(place.name)} · ${here.size} רשומים`;
-    const date = parseLocalDate(State.date);
-    document.getElementById('workerPickerContext').textContent = `${hebrewDayName(date)} · ${formatFullDate(date)}`;
+    const named = parseLocalDate(date);
+    document.getElementById('workerPickerContext').textContent = `${hebrewDayName(named)} · ${formatFullDate(named)}`;
     const query = document.getElementById('workerPickerSearch').value.trim().toLocaleLowerCase();
     document.getElementById('workerPickerClear').disabled = !document.getElementById('workerPickerSearch').value;
 
@@ -423,11 +657,11 @@ function renderWorkerPicker() {
         if (!inHere && unrecorded.has(worker.id)) {
             row.classList.add('picker-row-pending');
             label.appendChild(el('span', 'picker-note picker-note-pending', 'טרם נרשם'));
-        } else if (!inHere && isAbsent(State.schedule, State.date, worker.id, State.layer)) {
+        } else if (!inHere && isAbsent(State.schedule, date, worker.id, layer)) {
             label.appendChild(el('span', 'picker-note', 'נעדר ביום הזה'));
         }
         if (!inHere && !unrecorded.has(worker.id)) {
-            const elsewhere = entriesFor(State.schedule, State.date, worker.id, State.layer)
+            const elsewhere = entriesFor(State.schedule, date, worker.id, layer)
                 .map(entry => (State.place(entry.placeId) || {}).name)
                 .filter(Boolean)
                 .join(', ');
@@ -444,9 +678,9 @@ function renderWorkerPicker() {
             const label = inHere
                 ? `${isolate(worker.name)} הוסר מ${isolate(place.name)}`
                 : `${isolate(worker.name)} נוסף ל${isolate(place.name)}`;
-            editWithUndo(worker.id, label, () => (inHere
-                ? unassignPlace(State.schedule, State.date, worker.id, State.layer, place.id)
-                : assignPlace(State.schedule, State.date, worker.id, State.layer, place.id, RATE_NORMAL)));
+            editWithUndo(worker.id, label, (date, layer) => (inHere
+                ? unassignPlace(State.schedule, date, worker.id, layer, place.id)
+                : assignPlace(State.schedule, date, worker.id, layer, place.id, RATE_NORMAL)), at);
             renderWorkerPicker();
         }, `${inHere ? 'הסר את' : 'הוסף את'} ${isolate(worker.name)} ${inHere ? 'מ' : 'ל'}${isolate(place.name)}`);
         action.setAttribute('aria-pressed', String(inHere));
@@ -473,8 +707,8 @@ async function clearWorkerPicker() {
     const place = State.place(pickerPlaceId);
     if (!place) return;
 
-    const date = State.date;
-    const layer = State.layer;
+    // The picker's own day (pickerDate) - the one its context line names behind the question.
+    const { date, layer } = pickerDay();
     const here = workersAtPlace(State.schedule, date, place.id, layer);
     if (here.length === 0) {
         askTell(`אף אחד לא רשום ב${isolate(place.name)} ביום הזה.`);
@@ -517,21 +751,33 @@ async function clearWorkerPicker() {
 function closeWorkerPicker() {
     document.getElementById('workerPickerModal').style.display = 'none';
     pickerPlaceId = null;
+    pickerDate = null;
+    pickerLayer = null;
+    workerPickerGuardUntil = 0;
 }
 
 // The mirror of the site picker, for when a name in the tray is tapped instead.
-function openPlacePicker(workerId) {
+// `options.tapped`: opened by that tap, which may have a twin - no finger for a moment
+// (guardFingersOn, above). Drawn again after a pick, it keeps the window it opened with.
+// `options.date`, `options.layer`: the day the tray named when it was drawn - the day the
+// context line says and every site in it writes to, as the assign sheet's (sheetDate); the
+// redraw after a pick is handed the same day again. Left out, the day on screen.
+function openPlacePicker(workerId, options) {
     const worker = State.worker(workerId);
     if (!worker) return;
+    const at = {
+        date: options && options.date ? options.date : State.date,
+        layer: options && options.layer ? options.layer : State.layer
+    };
 
     document.getElementById('placePickerTitle').textContent = `לאן הלך ${isolate(worker.name)}?`;
-    const date = parseLocalDate(State.date);
-    document.getElementById('placePickerContext').textContent = `${hebrewDayName(date)} · ${formatFullDate(date)}`;
+    const named = parseLocalDate(at.date);
+    document.getElementById('placePickerContext').textContent = `${hebrewDayName(named)} · ${formatFullDate(named)}`;
 
     const container = document.getElementById('placePickerList');
     container.innerHTML = '';
 
-    const current = new Set(entriesFor(State.schedule, State.date, workerId, State.layer)
+    const current = new Set(entriesFor(State.schedule, at.date, workerId, at.layer)
         .map(entry => entry.placeId));
 
     State.activePlaces().forEach(place => {
@@ -552,10 +798,10 @@ function openPlacePicker(workerId) {
                 // schedule the moment it is called, before editWithUndo has taken its copy.
                 editWithUndo(workerId, inHere
                     ? `${isolate(worker.name)} הוסר מ${isolate(place.name)}`
-                    : `${isolate(worker.name)} נרשם ב${isolate(place.name)}`, () => (inHere
-                    ? unassignPlace(State.schedule, State.date, workerId, State.layer, place.id)
-                    : assignPlace(State.schedule, State.date, workerId, State.layer, place.id, RATE_NORMAL)));
-                openPlacePicker(workerId);
+                    : `${isolate(worker.name)} נרשם ב${isolate(place.name)}`, (date, layer) => (inHere
+                    ? unassignPlace(State.schedule, date, workerId, layer, place.id)
+                    : assignPlace(State.schedule, date, workerId, layer, place.id, RATE_NORMAL)), at);
+                openPlacePicker(workerId, at);
             }
         );
         const dot = el('span', 'place-choice-dot');
@@ -570,11 +816,16 @@ function openPlacePicker(workerId) {
         container.appendChild(choice);
     });
 
-    document.getElementById('placePickerModal').style.display = 'flex';
+    const modal = document.getElementById('placePickerModal');
+    // Its writing controls are its sites; «סגור» is never held (guardFingersOn, above).
+    guardFingersOn(modal, '.place-btn', () => sheetClock() < placePickerGuardUntil);
+    if (options && options.tapped) placePickerGuardUntil = sheetClock() + DOUBLE_TAP_GUARD_MS;
+    modal.style.display = 'flex';
 }
 
 function closePlacePicker() {
     document.getElementById('placePickerModal').style.display = 'none';
+    placePickerGuardUntil = 0;
 }
 
 // ---------------------------------------------------------------- copying a day in
@@ -582,8 +833,12 @@ function closePlacePicker() {
 // Two ways of not typing thirty names again, and the same rule under both: only workers
 // with NOTHING recorded are filled. A copy can never overwrite something a person entered
 // by hand - including something one of the other two entered a minute ago.
-function copyDayInto(fromDate, fromLayer, source, empty, options) {
-    const targets = State.unrecorded();
+// `at`: the day the copy is INTO, as the button named it when it was drawn (renderCopyButton);
+// left out, the day on screen.
+function copyDayInto(fromDate, fromLayer, source, empty, options, at) {
+    const dateAtCopy = at && at.date ? at.date : State.date;
+    const layerAtCopy = at && at.layer ? at.layer : State.layer;
+    const targets = unrecordedOn(dateAtCopy, layerAtCopy);
     if (targets.length === 0) {
         askTell('כל העובדים כבר טופלו ביום הזה.');
         return;
@@ -598,9 +853,7 @@ function copyDayInto(fromDate, fromLayer, source, empty, options) {
     // Snapshotted BEFORE the change-building below: assignPlace and markAbsent mutate
     // the schedule the moment they are called, so a snapshot taken after the loop
     // reads the copy back as "no change" and the undo offer never appears. Date and
-    // layer are captured now - by undo time the person may be on another day.
-    const dateAtCopy = State.date;
-    const layerAtCopy = State.layer;
+    // layer were captured above - by undo time the person may be on another day.
     const held = targets.map(worker => ({
         id: worker.id,
         before: snapshotWorkerDay(dateAtCopy, layerAtCopy, worker.id)
@@ -610,7 +863,7 @@ function copyDayInto(fromDate, fromLayer, source, empty, options) {
     targets.forEach(worker => {
         if (isAbsent(State.schedule, fromDate, worker.id, fromLayer)) {
             if (withAbsences) {
-                changes.push(markAbsent(State.schedule, State.date, worker.id, State.layer));
+                changes.push(markAbsent(State.schedule, dateAtCopy, worker.id, layerAtCopy));
             }
             return;
         }
@@ -619,7 +872,7 @@ function copyDayInto(fromDate, fromLayer, source, empty, options) {
         if (entries.length === 0) return;
 
         entries.forEach(entry => {
-            changes.push(assignPlace(State.schedule, State.date, worker.id, State.layer,
+            changes.push(assignPlace(State.schedule, dateAtCopy, worker.id, layerAtCopy,
                 entry.placeId, entryRate(entry), entryExtraHours(entry)));
         });
     });
@@ -653,8 +906,14 @@ function copyDayInto(fromDate, fromLayer, source, empty, options) {
                 === JSON.stringify(side === 'before' ? item.after : item.before))
             .map(item => setWorkerDay(State.schedule, dateAtCopy, item.id, layerAtCopy,
                 side === 'before' ? item.before : item.after)));
-        offerUndo(count === 1 ? `הועתק עובד אחד ${source}` : `הועתקו ${count} עובדים ${source}`,
-            restoreTo('before'), restoreTo('after'));
+        // Offered over the day it restores into, while that day is on the screen - as
+        // editWithUndo offers its own (js/ui/undo.js).
+        if (dateAtCopy === State.date && layerAtCopy === State.layer) {
+            offerUndo(count === 1 ? `הועתק עובד אחד ${source}` : `הועתקו ${count} עובדים ${source}`,
+                restoreTo('before'), restoreTo('after'));
+        } else {
+            hideUndo();
+        }
     }
 
     const copied = countCopied(changes);
@@ -689,28 +948,37 @@ function lastRecordedDayBefore(schedule, date, layer) {
 // Not "copy last week" - the roster does not repeat weekly here. But consecutive working
 // days often look alike, and starting from the last one and fixing the differences is
 // the difference between thirty taps and five.
+//
+// Into the day the button was drawn for (copyButtonDay, below) - the day its words count
+// back from - rather than State.date at the tap.
 function copyPreviousDay() {
-    const from = lastRecordedDayBefore(State.schedule, State.date, State.layer);
+    const at = copyButtonDay || { date: State.date, layer: State.layer };
+    const from = lastRecordedDayBefore(State.schedule, at.date, at.layer);
     if (!from) {
         askTell('אין יום קודם עם רישום להעתיק ממנו.');
         return;
     }
 
     const parsed = parseLocalDate(from);
-    const gapDays = Math.round((parseLocalDate(State.date) - parsed) / 86400000);
-    copyDayInto(from, State.layer,
+    const gapDays = Math.round((parseLocalDate(at.date) - parsed) / 86400000);
+    copyDayInto(from, at.layer,
         `מ${hebrewDayName(parsed)} ${formatShortDate(parsed)}`,
         `אין מה להעתיק מ${formatShortDate(parsed)}.`,
         // Sites carry across any gap; absences only from the adjacent day, where
         // "he was out yesterday" still says something about today.
-        { skipAbsences: gapDays > 1 });
+        { skipAbsences: gapDays > 1 }, at);
 }
+
+// The day the copy button was last drawn for: render() draws it on every pass (js/app.js),
+// so this is the day its label was counted back from.
+let copyButtonDay = null;
 
 // The button names the day it will copy from, because "the previous day" is a guess the
 // person then has to check, and the whole point of the button is not having to.
 function renderCopyButton() {
     const btn = document.getElementById('copyDayBtn');
     if (!btn) return;
+    copyButtonDay = { date: State.date, layer: State.layer };
 
     // THE HOLD IS SAID BY THE BUTTON, not only worn by the stylesheet.
     //

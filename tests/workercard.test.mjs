@@ -1234,9 +1234,14 @@ const cellOf = (facts, label) => ((facts.pay || []).filter(one => one.label === 
         [device.dom.getElementById('workerCardModal').style.display, device.State.date, device.views],
         ['flex', '2026-10-15', ['day']]);
     device.run('closeWorkerCard()');
-    check('the week screen\'s cell takes the same two steps to a day',
-        source('js/ui/week.js').indexOf("const open = () => { State.date = date; showView('day'); };") !== -1
-        && /function workerCardGoDay\(date\) \{\s+if \(!isRealDate\(date\)\) return;\s+closeWorkerCard\(\);\s+State\.date = date;\s+showView\('day'\);\s+\}/.test(CARD));
+    // MOVED ON PURPOSE (the review of the hotfix, R1): the week screen's cell and the card's
+    // day each settle, as they set the date, a follow of the calendar still owed from
+    // midnight (dayChosenByHand, js/app.js) - without it the card's own close handed a man
+    // who tapped the old today the new one. What is held is unchanged: the same steps, both.
+    check('the week screen\'s cell takes the same steps to a day',
+        /const open = \(\) => \{\s+State\.date = date;\s+if \(typeof dayChosenByHand === 'function'\) dayChosenByHand\(\);\s+showView\('day'\);\s+\};/
+            .test(source('js/ui/week.js'))
+        && /function workerCardGoDay\(date\) \{\s+if \(!isRealDate\(date\)\) return;\s+closeWorkerCard\(\);\s+State\.date = date;\s+if \(typeof dayChosenByHand === 'function'\) dayChosenByHand\(\);\s+showView\('day'\);\s+\}/.test(CARD));
 }
 
 // ---------------------------------------------------------------- 6. call, and WhatsApp

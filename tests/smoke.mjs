@@ -149,9 +149,14 @@ async function seedRoster(page) {
   // says it does rather than by a label that is no longer written on it. Matched on the
   // verb only: isolate() wraps the site's name in invisible bidi marks, so the name
   // inside an aria-label never matches as plain text.
+  //
+  // MOVED ON PURPOSE (the review of the hotfix, R2 and R3): a writer a tap opens takes no
+  // finger for DOUBLE_TAP_GUARD_MS (js/ui/sheet.js) - the second tap of a double tap on the
+  // «+» used to land on a «+ הוסף» and record a man nobody chose. So each opening by a tap in
+  // this file waits that moment out before the surface is touched; what is held is unchanged.
   await page.locator('.site-card').first()
     .getByRole('button', { name: /הוסף עובד ל/ }).click();
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(800);
   check('the picker lists every active worker',
     (await page.locator('#workerPickerList .picker-row').count()) === 3);
 
@@ -200,7 +205,7 @@ async function seedRoster(page) {
   // the whole point of the model: a second site ADDS, it does not replace
   await page.locator('.site-card').nth(1)
     .getByRole('button', { name: /הוסף עובד ל/ }).click();
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(800);
   await page.locator('#workerPickerList .picker-row').filter({ hasText: 'דוד' }).getByRole('button').click();
   await page.waitForTimeout(200);
   await page.locator('#workerPickerModal').getByRole('button', { name: 'סגור' }).click();
@@ -2460,15 +2465,22 @@ async function seedRoster(page) {
   check('progress starts at zero', (await page.textContent('.progress-line')).includes('0 מתוך 3'));
 
   // one tap per worker: the sheet advances by itself
+  //
+  // MOVED ON PURPOSE (the review of the hotfix, R3, and its second review): the walk takes the
+  // same finger again for no man inside WALK_BOUNCE_MS (300 ms) of the press that moved it
+  // (js/ui/sheet.js) - a double tap placed two men - and NEVER swallows a tap at a person's
+  // pace: round one's 700 ms window did, and every later site went to the man before. So the
+  // run goes at a deliberate 400 ms between men, faster than that window was; still one tap
+  // per man.
   await page.locator('.now-count').click();
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(400);
   check('the continue button opens the first unfilled worker',
     (await page.textContent('#assignSheetTitle')) === 'דוד');
   check('opening the sheet is calm, with no advance animation',
     (await page.locator('#assignSheet .sheet-content.sheet-swap').count()) === 0);
 
   await page.locator('.sheet-place').filter({ hasText: 'הרצליה' }).click();
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(400);
   check('picking a site advances to the next unfilled worker',
     (await page.textContent('#assignSheetTitle')) === 'שרה');
   check('and the move to a new name announces itself',
@@ -2476,7 +2488,7 @@ async function seedRoster(page) {
   check('the sheet stays open through the run', await page.isVisible('#assignSheet'));
 
   await page.locator('.sheet-place').filter({ hasText: 'תל אביב' }).click();
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(400);
   check('and again', (await page.textContent('#assignSheetTitle')) === 'עלי');
 
   // absence also advances - it is a complete answer for that worker
@@ -2507,14 +2519,17 @@ async function seedRoster(page) {
   });
   await page.waitForTimeout(200);
 
+  // MOVED ON PURPOSE (the review of the hotfix, R3, and its second review): a deliberate 400 ms
+  // between men, as the walk above says - the count of taps is what this measures, and it is
+  // unchanged; and at this pace not one of the thirteen may be swallowed.
   let taps = 0;
   await page.locator('.now-count').click(); taps++;
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(400);
 
   for (let i = 0; i < 12; i++) {
     await page.locator('.sheet-place').first().click();
     taps++;
-    await page.waitForTimeout(90);
+    await page.waitForTimeout(400);
   }
   await page.waitForTimeout(200);
 
@@ -3541,6 +3556,9 @@ async function seedRoster(page) {
   // one press takes the whole thing back
   check('the undo bar offers the whole tap back',
     (await page.textContent('#undoBar')).includes('2 עובדים'));
+  // MOVED BACK (the third review of the hotfix): round two made «בטל» take no finger for 700 ms
+  // after the bar appeared and waited that out here; «בטל» ignores only the same finger again now
+  // (js/ui/undo.js), and a press on it made on purpose acts at once, as on v190.
   await page.locator('#undoBar').getByRole('button', { name: 'בטל' }).click();
   await page.waitForTimeout(300);
   const undone = await page.evaluate(() => ({
@@ -7556,6 +7574,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     await page.locator('#undoBar').isVisible() &&
     (await page.textContent('#undoBar')).includes('דוד'));
 
+  // MOVED BACK (the third review of the hotfix): no moment to wait out, as above.
   await page.locator('#undoBar').getByRole('button', { name: 'בטל' }).click();
   await page.waitForTimeout(300);
   const restored = await page.evaluate(() =>
