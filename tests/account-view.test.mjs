@@ -65,6 +65,24 @@ function v186Reports() {
     return V186_REPORTS;
 }
 
+// The build on the phones when the owner asked for the names and the groups' colours
+// (2026-11-11): origin/main, c33461b, v190. See the section about them below.
+const V190 = 'c33461b';
+let V190_REPORTS = null;
+function v190Reports() {
+    if (V190_REPORTS === null) {
+        let code = '';
+        try {
+            code = execFileSync('git', ['-C', ROOT, 'show', `${V190}:js/ui/reports.js`],
+                { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+        } catch (error) { code = ''; }
+        given('the v190 commit is in this repository', code.length > 0, V190);
+        given('and its headings carry no colour of their own', code.indexOf('data-cycle') === -1);
+        V190_REPORTS = code;
+    }
+    return V190_REPORTS;
+}
+
 // Wednesday. The fortnight the page opens on, and its two weeks.
 const TODAY = '2026-11-11';
 const FORT = { from: '2026-10-30', to: '2026-11-12' };
@@ -186,9 +204,15 @@ const plain = text => String(text).replace(/[‎‏⁦⁧⁨⁩]/g, '');
 // Everything else under a group - the table, its band, the notes, the fold, the financial
 // lines - is still held to v186 node for node, and tests/reportsclarity.test.mjs holds
 // every figure of a card to the table cell it is read from.
+//
+// MOVED ON PURPOSE (the groups' colours, the owner, 2026-11-11): data-cycle - the one
+// attribute that says which pay group a heading, a group's table and cards, and its button
+// in the row above belong to, for the stylesheet to colour - is a look and is left out of
+// the node-for-node comparison here. tests/reportnames.test.mjs holds the attribute itself,
+// and every text and every other attribute below is still held to v186.
 function snap(node) {
     const out = { tag: node.tagName, cls: node.className || '' };
-    const attrs = Object.keys(node.attributes || {}).filter(key => key !== 'id');
+    const attrs = Object.keys(node.attributes || {}).filter(key => key !== 'id' && key !== 'data-cycle');
     if (attrs.length) out.attrs = attrs.sort().map(key => [key, node.attributes[key]]);
     const kids = node.children.filter(kid => kid.className !== 'report-worker-cards');
     if (node.children.length === 0) out.text = node.textContent;
@@ -280,11 +304,22 @@ for (const [reading, flags] of [['gates shut', SHUT], ['gates open', OPEN]]) {
         const page = pageOf(device);
         same('two groups, weekly first',
             page.map(group => group.id), ['report-cycle-weekly', 'report-cycle-biweekly']);
-        // PINNED: each heading says its own dates.
+        // PINNED: each heading's TEXT - what the paper prints and the picture titles its table
+        // with - says its own dates. MOVED ON PURPOSE (the owner, 2026-11-11: «שבועי» or
+        // «דו־שבועי» is enough on the screen): the dates are the heading's .report-group-when,
+        // which the screen alone leaves out (css/app.css), so the glass reads the cycle's word
+        // and nothing else. tests/reportnames.browser.mjs measures the glass and the paper.
         same('the weekly heading says the week', plain(page[0].heading), 'שבועי · 06/11/2026 - 12/11/2026');
         same('the fortnightly heading says the fortnight', plain(page[1].heading), 'דו־שבועי · 30/10/2026 - 12/11/2026');
         check('the dates in a heading are one left-to-right run',
             page[0].heading === 'שבועי · ⁦06/11/2026 - 12/11/2026⁩', JSON.stringify(page[0].heading));
+        const headings = device.run('renderPayrollTable()').querySelectorAll('.report-group')
+            .filter(node => String(node.id || '').indexOf('report-cycle-') === 0);
+        same('on the screen each heading is its cycle\'s word: the dates are the part the screen leaves out',
+            headings.map(node => [node._text, node.children.map(kid => kid.className)]),
+            [['שבועי', ['report-group-when']], ['דו־שבועי', ['report-group-when']]]);
+        same('and each heading says which group it is, for its colour',
+            headings.map(node => node.getAttribute('data-cycle')), ['weekly', 'biweekly']);
         same('the weekly count is the men with something in their week', page[0].workers, '3 עובדים');
         same('the fortnightly count is unchanged', page[1].workers, '3 עובדים');
 
@@ -878,6 +913,56 @@ for (const [reading, flags] of [['gates shut', SHUT], ['gates open', OPEN]]) {
     // Before the page has ever opened there is no range, and no view.
     device.run('REPORT_RANGE.from = null; REPORT_RANGE.to = null; 1');
     check('no range, no account view', device.run('reportAccountView()') === false);
+}
+
+// ------------------------------- the names and the groups' colours moved no figure
+//
+// The owner, 2026-11-11, on v190: the names clearer, and the groups told by their word and a
+// colour rather than by dates. A change of LOOK on the one page pay is read from, so it is
+// held here to the build he was holding - v190, c33461b, out of Git - on this suite's own
+// crew: every card as a person reads it, every row of every table, every band, the whole
+// text of the pay section (the headings' dates included, which the paper and the picture
+// print), every sheet of the file, every row of the calculation and every man's statement,
+// on the default and on three explicit ranges, under both readings of the money gates.
+// (v190Reports, beside v186Reports at the top of this file, reads it.)
+const figuresOf = device => {
+    const section = device.run('renderPayrollTable()');
+    return {
+        cards: section.querySelectorAll('.report-worker-tile').map(tile =>
+            [tile.getAttribute('data-report-worker-id'), tile.textContent]),
+        tables: section.querySelectorAll('.report-payroll-group').map(group => {
+            const table = group.querySelectorAll('TABLE')[0];
+            const rows = tag => table.querySelectorAll(tag + ' TR').map(tr => tr.children.map(cell => cell.textContent));
+            return { head: rows('THEAD'), body: rows('TBODY'), foot: rows('TFOOT') };
+        }),
+        headings: section.querySelectorAll('.report-group').map(node => [node.textContent, node.getAttribute('data-workers')]),
+        text: section.textContent
+    };
+};
+for (const [reading, flags] of [['gates shut', SHUT], ['gates open', OPEN]]) {
+    for (const [view, span, preset] of [['the default', null, null], ['the fortnight by hand', FORT, 'custom'],
+        ['a week by hand', WEEK2, 'weekly'], ['the month', { from: '2026-11-01', to: '2026-11-30' }, 'month']]) {
+        suite(`${reading}, ${view}: every figure of every card and row is v190's`);
+        const now = phone(flags);
+        const old = phone(flags, v190Reports());
+        if (span) { byHand(now, span, preset); byHand(old, span, preset); }
+        const a = figuresOf(now);
+        const b = figuresOf(old);
+        given('the page holds cards and rows', a.cards.length >= 3 && a.tables.length >= 1, String(a.cards.length));
+        same('every card, man by man, word for word', a.cards, b.cards);
+        same('every table: its heads, its rows and its band', a.tables, b.tables);
+        same('every heading\'s text and count (the dates the paper and the picture print)', a.headings, b.headings);
+        check('the whole text of the pay section', a.text === b.text, `${a.text.length} vs ${b.text.length} chars`);
+        same('every sheet of the file', now.run('JSON.stringify(reportSheets())'), old.run('JSON.stringify(reportSheets())'));
+        same('every row of the calculation', rowsOf(now), rowsOf(old));
+        now.State.schedule.workers.forEach(worker => same(`${worker.id}: his statement`,
+            now.run(`workerStatementText('${worker.id}')`), old.run(`workerStatementText('${worker.id}')`)));
+        ['w_wa', 'w_ba'].forEach(id => {
+            const x = dialogOf(now, id);
+            const y = dialogOf(old, id);
+            check(`${id}: his days dialog, title and all`, x.title === y.title && x.meta === y.meta && x.body === y.body);
+        });
+    }
 }
 
 {

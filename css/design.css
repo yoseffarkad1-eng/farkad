@@ -60,6 +60,17 @@
        button in the app, so "green" means one thing. */
     --wa: #25d366;
     --on-wa: #04210f;
+    /* The reports' two pay groups (2026-11-11): weekly ORANGE, fortnightly BLUE - the one
+       pair of hues that stays two colours to the common colour-blind eyes (protan, deutan:
+       ΔE2000 over 40 between them) and to the rare one (tritan), and never red against
+       green. -ink is the words (the heading, a man's name): 7:1 and more on the paper, the
+       card and the card pressed. -mark is the edge beside them: lighter than every site
+       colour, so it never reads as a site (js/ui/sitecolor.js), and 3:1 on its ground.
+       tests/reportnames.browser.mjs measures all of it in both schemes. */
+    --group-weekly-ink: #7f3700;
+    --group-weekly-mark: #dc6400;
+    --group-biweekly-ink: #0b4a8f;
+    --group-biweekly-mark: #2f7de1;
     --radius: 12px;
     --radius-sm: 12px;
     --shadow: none;
@@ -83,6 +94,10 @@
     --warn-bg: #2e2208;
     --danger: #ff8a80;
     --danger-bg: #3a1513;
+    --group-weekly-ink: #ffb066;
+    --group-weekly-mark: #ffb066;
+    --group-biweekly-ink: #86d0ff;
+    --group-biweekly-mark: #86d0ff;
     --shadow-lift: 0 12px 40px -8px rgba(0, 0, 0, .9);
 }
 @media (prefers-color-scheme: dark) {
@@ -104,6 +119,10 @@
         --warn-bg: #2e2208;
         --danger: #ff8a80;
         --danger-bg: #3a1513;
+        --group-weekly-ink: #ffb066;
+        --group-weekly-mark: #ffb066;
+        --group-biweekly-ink: #86d0ff;
+        --group-biweekly-mark: #86d0ff;
         --shadow-lift: 0 12px 40px -8px rgba(0, 0, 0, .9);
     }
 }
@@ -1307,7 +1326,11 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 /* One card per man, the whole width: label and value on one line need the room. */
 #reportsView .report-worker-cards { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 #reportsView .report-worker-tile { gap: 10px; padding: 14px 14px 6px; text-align: start; }
-#reportsView .report-tile-name { min-height: 0; justify-content: flex-start; font-size: 21px; font-weight: 800; line-height: 1.3; }
+/* His name, the first thing on his card (the owner, 2026-11-11: "can the names show more and
+   be clearer, maybe in another colour, so I don't search much for the name"): larger and
+   heavier than every figure on the card but the amount to pay, which stays the largest; in
+   his group's ink (below); and a long name wraps - it is never cut. */
+#reportsView .report-tile-name { min-height: 0; justify-content: flex-start; font-size: 26px; font-weight: 900; line-height: 1.25; overflow-wrap: anywhere; }
 .report-tile-facts { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
 /* What he did: a number over its word, the extra hours in the accent so they are found. */
@@ -1376,6 +1399,46 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 #reportsView .report-weekly-fact { color: var(--ink); }
 #reportsView .report-group { font-size: 20px; font-weight: 800; }
 #reportsView .report-group::after { color: var(--ink); font-size: 16px; }
+
+/* THE TWO PAY GROUPS, ONE COLOUR EACH (the owner, 2026-11-11: «שבוע» or «דו שבועי» is enough,
+   "distinguishing between them with colours"). js/ui/reports.js writes data-cycle on a
+   group's heading, on the group (its cards and its rows) and on its button in the row
+   above; this is the whole of what the colour is. The heading says the cycle's word in the
+   group's ink beside the group's edge, and every man under it carries the same edge on the
+   side his name starts - so a card met in the middle of a scroll still says its group. The
+   other headings of the page (the money, the band) carry no data-cycle and keep their look.
+   Paper keeps the print stylesheet's; the picture draws its own. */
+/* It wraps: at 320px with doubled text the word and its count do not share a line, and a
+   heading that cannot wrap widens the whole page (tests/mobile.test.mjs measured 369 in 320). */
+#reportsView h3.report-group[data-cycle] { flex-wrap: wrap; row-gap: 4px; overflow-wrap: anywhere; padding-inline-start: 12px; border-inline-start: 8px solid transparent; border-radius: 4px; font-size: 24px; font-weight: 900; }
+#reportsView h3.report-group[data-cycle="weekly"] { border-inline-start-color: var(--group-weekly-mark); color: var(--group-weekly-ink); }
+#reportsView h3.report-group[data-cycle="biweekly"] { border-inline-start-color: var(--group-biweekly-mark); color: var(--group-biweekly-ink); }
+#reportsView .report-payroll-group[data-cycle] .report-worker-tile { border-inline-start: 8px solid transparent !important; }
+#reportsView .report-payroll-group[data-cycle="weekly"] .report-worker-tile { border-inline-start-color: var(--group-weekly-mark) !important; }
+#reportsView .report-payroll-group[data-cycle="biweekly"] .report-worker-tile { border-inline-start-color: var(--group-biweekly-mark) !important; }
+#reportsView .report-payroll-group[data-cycle="weekly"] .report-tile-name,
+#reportsView .report-payroll-group[data-cycle="weekly"] .link-cell { color: var(--group-weekly-ink); }
+#reportsView .report-payroll-group[data-cycle="biweekly"] .report-tile-name,
+#reportsView .report-payroll-group[data-cycle="biweekly"] .link-cell { color: var(--group-biweekly-ink); }
+#reportsView .report-cycle-nav button[data-cycle] { border-inline-start: 6px solid transparent !important; }
+#reportsView .report-cycle-nav button[data-cycle="weekly"] { border-inline-start-color: var(--group-weekly-mark) !important; color: var(--group-weekly-ink) !important; }
+#reportsView .report-cycle-nav button[data-cycle="biweekly"] { border-inline-start-color: var(--group-biweekly-mark) !important; color: var(--group-biweekly-ink) !important; }
+/* The edge is 5px wider than the border it replaced, and it took the 5px from the words: at
+   320px «שבועי» was cut to «שבוע» in a row of three buttons, and «דו־שבועי · 9» ran past its
+   button in a row of two (v192's verification). The padding beside the edge gives them back -
+   the words have v190's room. With three groups (a man whose cycle changed inside the period
+   has a group of his own) the buttons take a line of their own, a third of the row each,
+   rather than a third of what «תצוגה מפורטת» leaves them. */
+#reportsView .report-cycle-nav button[data-cycle] { padding-inline-start: 7px; }
+#reportsView .report-browse-tools .report-cycle-nav:has(> button:nth-of-type(3)) { flex-basis: 100%; }
+/* «תצוגה מפורטת» on a phone: each row is a card as well, with the same edge, and the name at
+   the head of it in the same ink, a size under the card's. */
+@media (max-width: 700px) {
+    #reportsView .report-payroll-group[data-cycle] tbody tr { border-inline-start-width: 8px; }
+    #reportsView .report-payroll-group[data-cycle="weekly"] tbody tr { border-inline-start-color: var(--group-weekly-mark); }
+    #reportsView .report-payroll-group[data-cycle="biweekly"] tbody tr { border-inline-start-color: var(--group-biweekly-mark); }
+    #reportsView .report-payroll-group[data-cycle] tbody td:first-child .link-cell { font-size: 22px; font-weight: 900; overflow-wrap: anywhere; }
+}
 
 /* «לפי אתר»: each site's worker-site days large, the total largest; then the three lists,
    each plainly its own. */

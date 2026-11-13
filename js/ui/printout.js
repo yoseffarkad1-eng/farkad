@@ -384,6 +384,11 @@ function readReportPrintout() {
         const wrap = table.closest('.report-payroll-group, .report-reconcile-group, .report-rima-group, .report-yosefgeves-group');
         let heading = wrap && wrap.previousElementSibling;
         while (heading && !heading.matches('h3.report-group')) heading = heading.previousElementSibling;
+        // Its TEXT, not what the glass shows of it: on the default account a group's heading
+        // holds its own dates (.report-group-when), which the screen leaves out since the
+        // owner asked for the cycle's word alone (2026-11-11) and which a picture handed to
+        // somebody who did not choose the range must still carry. printoutText reads
+        // textContent, so they are here; tests/reportnames.browser.mjs holds it.
         return {
             groupTitle: printoutText(heading),
             headers: [...table.querySelectorAll('thead th')].map(printoutText),

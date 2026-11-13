@@ -30,6 +30,7 @@ const browser = await launchLocalBrowser(chromium, { executablePath: process.env
 const errors = [];
 const SHOTS = process.env.USUAL_SHOTS || '';
 
+const WALK_BOUNCE = 300;         // WALK_BOUNCE_MS, js/ui/sheet.js: the same finger's bounce
 const TODAY = '2026-11-10';     // a Tuesday evening
 const DAY = '2026-11-11';       // tomorrow, the day on screen
 const bare = text => String(text || '').replace(/[⁦-⁩‎]/g, '');
@@ -358,6 +359,10 @@ try {
             // Which button each click reached, and when by the page's own clock - the one
             // the guard reads.
             window.__hits = [];
+            // And every press, on the presses' own clock (their pointerdown timeStamps) - the
+            // one the bounce of «בטל» and of the foot of the day reads (sameFingerAgain).
+            window.__downs = [];
+            window.addEventListener('pointerdown', event => __downs.push(event.timeStamp), true);
             document.addEventListener('click', event => {
                 const hit = event.target && event.target.closest ? event.target.closest('button') : null;
                 __hits.push({ at: performance.now(), cls: hit ? hit.className : null, aria: hit ? hit.getAttribute('aria-label') : null });
@@ -366,7 +371,11 @@ try {
                 const node = document.elementFromPoint(x, y);
                 const hit = node && node.closest('button');
                 const tray = hit && hit.closest('.tray');
-                return hit ? { cls: hit.className, aria: hit.getAttribute('aria-label'), tray: tray ? tray.className : null } : null;
+                // Where else a button under the finger can be: the undo bar, a row at the foot.
+                const bar = hit && hit.closest('#undoBar');
+                const row = hit && hit.closest('.journey-day-row, .daycheck-row');
+                return hit ? { cls: hit.className, aria: hit.getAttribute('aria-label'), tray: tray ? tray.className : null,
+                    bar: bar ? 'undoBar' : null, row: row ? row.className : null, text: hit.textContent.trim().slice(0, 40) } : null;
             };
             window.__centre = node => { const b = node.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; };
             window.__day = () => JSON.stringify(((State.schedule.days[day] || {}).actual) || {});
@@ -519,7 +528,10 @@ try {
         same('after the window the name opens «לאן הלך» for him', [await page.evaluate(() => document.getElementById('placePickerModal').style.display),
             bare(await page.evaluate(() => document.getElementById('placePickerTitle').textContent))], ['flex', 'לאן הלך גדי?']);
         // And a site picked there has its own step on ↶ - it was a bare commit, and ↶ stayed
-        // on the step before it.
+        // on the step before it. MOVED ON PURPOSE (the review of the hotfix, R2): «לאן הלך»
+        // opened by a tap takes no finger for DOUBLE_TAP_GUARD_MS (js/ui/sheet.js), so that
+        // moment is waited out before the site is tapped.
+        await page.waitForTimeout(800);
         await page.locator('#placePickerList .place-btn', { hasText: SITE }).tap();
         await settle(page, 150);
         same('a site picked in «לאן הלך» has its own step on ↶, in the sheet\'s words',
@@ -617,6 +629,193 @@ try {
         same('while recording is held a tap records nothing', await dayOf(page, 'w_02'), held);
         await page.evaluate(() => { farkadWritesBlocked = window.__held; });
         await context.close();
+    }
+
+    // ============================================================== what comes up under the finger
+    // The second review of the hotfix, two cases c0's clock did not reach (both older than it).
+    //
+    // THE UNDO BAR: on a short phone, with the chip low on the screen, the bar the placement
+    // offers comes up where the chip was, and the second tap of a double tap landed on «בטל» and
+    // took the placement straight back - two taps, no man, and a stamped empty day on the record
+    // (c0.mjs: 4 of 5 name sets at 375x667 with the chip at 85% of the screen). «בטל» takes no
+    // finger that is the same finger again (js/ui/undo.js).
+    //
+    // THE FOOT OF THE DAY: when the man placed was the last one waiting, the trays fold away and
+    // the rows at the foot - «בניית סידור», «חיפוש עובד», «בדיקת היום» - come up under the finger;
+    // the second tap started the journey: the day moved to tomorrow and the journey's place was
+    // written (probe-lastman.mjs). Both rows take no finger that is the same finger again (js/ui/day.js).
+    //
+    // MOVED ON PURPOSE (the third review of the hotfix): «בטל» and the foot held every finger for
+    // DOUBLE_TAP_GUARD_MS, and a deliberate tap inside it was swallowed (the suite after these).
+    // What they hold now is the same finger again - a press where the chip's press came down, less
+    // than WALK_BOUNCE_MS (300) after it on the presses' own clock (sameFingerAgain,
+    // js/ui/sheet.js). So a pair is judged only if the PAGE saw its presses under 300 ms apart (it
+    // was 700) with its first tap on the chip; otherwise it is made again in a fresh page, and a
+    // third such try fails.
+    async function lowAndDouble(one, fraction) {
+        const { page } = one;
+        for (let pass = 0; pass < 3; pass += 1) {
+            await page.evaluate(([find, fraction]) => { const node = (0, eval)(find)();
+                window.scrollTo(0, Math.max(0, scrollY + node.getBoundingClientRect().top - innerHeight * fraction)); }, [CHIP, fraction]);
+            await settle(page, 60);
+        }
+        await settle(page, 600);
+        const point = await page.evaluate(find => __centre((0, eval)(find)()), CHIP);
+        await page.touchscreen.tap(point.x, point.y);
+        await page.waitForTimeout(150);
+        const under = await page.evaluate(([x, y]) => __under(x, y), [point.x, point.y]);
+        await page.touchscreen.tap(point.x, point.y);
+        await settle(page, 400);
+        const hits = await page.evaluate(() => __hits);
+        const downs = await page.evaluate(() => __downs.slice(-2));
+        const pair = downs.length === 2 ? Math.round(downs[1] - downs[0]) : null;
+        const onChip = hits.length > 0 && /\bchip-usual\b/.test(hits[0].cls || '');
+        return { under, pair, ok: onChip && pair !== null && pair < WALK_BOUNCE, hits };
+    }
+    suite('a double tap on a usual chip low on a short phone: the undo bar\'s «בטל» under the second tap takes nothing back');
+    {
+        const N5 = ['עבד אל רחמן אבו חוסיין', 'מוחמד', 'יוסי', 'אבו', 'רון', 'דני', 'אבי בן שושן', 'משה'];
+        const onBar = [];
+        for (const names of [N1, N2, N3, N4, N5]) {
+            const tag = `375x667, ${names[0]}…, the chip at 85% of the screen`;
+            let judged = null;
+            for (let attempt = 1; attempt <= 3 && !judged; attempt += 1) {
+                const one = await crew(375, 667, names, [], 0);
+                const before = { day: await one.page.evaluate(() => __day()), paths: await one.page.evaluate(() => FarkadSync.pendingPaths().slice()) };
+                const tapped = await lowAndDouble(one, 0.85);
+                if (!tapped.ok) {
+                    if (attempt === 3) check(`${tag}: a double tap reached the chip in one of three fresh pages`, false, JSON.stringify(tapped.hits));
+                    await one.context.close();
+                    continue;
+                }
+                judged = { ...one, before, ...tapped };
+            }
+            if (!judged) continue;
+            const { page, context, chipOf, first, before, under, pair } = judged;
+            if (under && /undoBar/.test(under.bar || '')) onBar.push(tag);
+            const placed = JSON.parse(await page.evaluate(id => JSON.stringify(((State.schedule.days[State.date] || {}).actual || {})[id] || null), chipOf));
+            check(`${tag}: the man tapped is still on the site (the pair ${pair} ms apart, the finger then on «${bare(under && (under.aria || under.text))}»)`,
+                placed && placed.entries.length === 1 && placed.entries[0].placeId === 'p_01', JSON.stringify(placed));
+            same(`${tag}: nobody else's day moved`, await page.evaluate(id => __others(id), chipOf),
+                JSON.stringify(Object.entries(JSON.parse(before.day)).filter(([key]) => key !== chipOf).sort()));
+            same(`${tag}: his one path queued, and nothing else`,
+                (await page.evaluate(() => FarkadSync.pendingPaths().slice())).filter(path => !before.paths.includes(path)), [`days.${DAY}.actual.${chipOf}`]);
+            same(`${tag}: and the bar still offers his step`, bare(await undoSays(page)), `${first} נרשם ב${SITE}`);
+            // After the moment, «בטל» is «בטל».
+            await page.waitForTimeout(750);
+            const button = await page.evaluate(() => { const node = [...document.querySelectorAll('#undoBar button')].find(one => one.textContent === 'בטל');
+                if (!node) return null; const b = node.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+            if (button) await page.touchscreen.tap(button.x, button.y);
+            await settle(page);
+            same(`${tag}: and a deliberate «בטל» after the moment takes exactly his placement back`,
+                await page.evaluate(id => JSON.stringify((((State.schedule.days[State.date] || {}).actual || {})[id] || { entries: [] }).entries), chipOf), '[]');
+            await context.close();
+        }
+        check('the layouts measured it: «בטל» came under the second tap in at least one', onBar.length > 0, onBar.join(' / ') || 'never');
+    }
+
+    suite('the last man waiting, his chip double-tapped: the foot of the day under the second tap starts nothing');
+    {
+        const onFoot = [];
+        for (const [width, height] of [[375, 667], [360, 740], [390, 844], [412, 915], [430, 932], [440, 956]]) {
+            const tag = `${width}x${height}`;
+            let judged = null;
+            for (let attempt = 1; attempt <= 3 && !judged; attempt += 1) {
+                const one = await crew(width, height, ['אמיר', 'בסאם', 'גדי'], [], 0);
+                await one.page.evaluate(day => {
+                    State.commit(assignPlace(State.schedule, day, 'w_02', 'actual', 'p_01'));
+                    State.commit(assignPlace(State.schedule, day, 'w_03', 'actual', 'p_01'));
+                    hideUndo(); render();
+                    window.__keys = () => Object.keys(localStorage).filter(key => key !== 'farkad:openBuilds' && !/outbox|writeTick/.test(key)).sort();
+                }, DAY);
+                await frames(one.page);
+                const keys = await one.page.evaluate(() => __keys());
+                const tapped = await lowAndDouble(one, 0.5);
+                if (!tapped.ok) {
+                    if (attempt === 3) check(`${tag}: a double tap reached the chip in one of three fresh pages`, false, JSON.stringify(tapped.hits));
+                    await one.context.close();
+                    continue;
+                }
+                judged = { ...one, keys, ...tapped };
+            }
+            if (!judged) continue;
+            const { page, context, keys, under, pair } = judged;
+            if (under && /journey-day-row|daycheck-row/.test(under.row || '')) onFoot.push(`${tag} («${bare(under.text)}»)`);
+            same(`${tag}: he is placed (the pair ${pair} ms apart, the finger then on «${bare(under && (under.text || under.aria))}»)`,
+                await page.evaluate(() => entriesFor(State.schedule, State.date, 'w_01', 'actual').map(e => e.placeId)), ['p_01']);
+            same(`${tag}: the day screen is still on his day, with no journey under way and no dialog open`,
+                await page.evaluate(() => [State.date, typeof journeyLive === 'undefined' ? null : journeyLive,
+                    [...document.querySelectorAll('.modal')].filter(modal => modal.style.display === 'flex').map(modal => modal.id)]), [DAY, null, []]);
+            same(`${tag}: and no key was written but the record's own`, await page.evaluate(() => __keys()), keys);
+            await context.close();
+        }
+        check('the layouts measured it: a row at the foot came under the second tap in at least one', onFoot.length > 0, onFoot.join(' / ') || 'never');
+    }
+
+    // A DELIBERATE TAP IS A TAP (the third review of the hotfix). Round two made «בטל» take no
+    // finger for 700 ms after the bar came up, and the rows at the foot take none for 700 ms after
+    // a tray write: a man taken off a site by a mis-tapped ✕ and given back by a quick «בטל» stayed
+    // off his day, the bar still offering the step and nothing saying the tap had done nothing; and
+    // «בדיקת היום» or «חיפוש עובד», tapped right after the last man was placed, opened nothing
+    // (pace.mjs: at 350, 450, 500 and 650 ms every one swallowed on c2d315c; v190 took them all).
+    // Only the same finger again is ignored now - and a press on «בטל» or on the foot, made on
+    // purpose, is not. Judged on presses the page saw at least the bounce apart; one the driver's
+    // lag brought closer is made again in a fresh page.
+    async function pacedPair(page, first, second, gap) {
+        // A point on the glass, or null: a control off the screen is not reached by a finger.
+        const aimAt = find => page.evaluate(find => { const node = (0, eval)(find)(); if (!node) return null;
+            const point = __centre(node); return point.y > 0 && point.y < innerHeight ? point : null; }, find);
+        const one = await aimAt(first);
+        const started = Date.now();
+        await page.touchscreen.tap(one.x, one.y);
+        while (Date.now() - started < gap - 60) await page.waitForTimeout(20);
+        const two = await aimAt(second);
+        while (Date.now() - started < gap) await page.waitForTimeout(5);
+        if (two) await page.touchscreen.tap(two.x, two.y);
+        await settle(page, 500);
+        const downs = await page.evaluate(() => __downs.slice(-2));
+        return { reached: Boolean(two), seen: downs.length === 2 ? Math.round(downs[1] - downs[0]) : null };
+    }
+    const ROW_X = `() => [...document.querySelectorAll('#dayView .site-card .assign-row')].find(row => row.textContent.includes('בסאם')).querySelector('.btn-icon')`;
+    const BAR_UNDO = `() => [...document.querySelectorAll('#undoBar button')].find(node => node.textContent === 'בטל')`;
+    const AWAY_OF = `() => [...document.querySelectorAll('#dayView .tray-pending .chip')].find(chip => chip.querySelector('.chip-main').textContent.startsWith('אמיר')).querySelector('.chip-side')`;
+    const OFFER_OF = CHIP;
+    const FOOT = words => `() => [...document.querySelectorAll('#dayView .daycheck-row button')].find(node => node.textContent.includes('${words}'))`;
+    const shownNow = page => page.evaluate(() => [...document.querySelectorAll('.modal')].filter(modal => modal.style.display === 'flex').map(modal => modal.id));
+    const PACED = [
+        { what: 'a man\'s ✕ on his site, then «בטל» on the bar', first: ROW_X, second: BAR_UNDO, others: ['w_02', 'w_03'],
+            judge: async (page, tag) => same(`${tag}: he is back on his site`, await page.evaluate(day => entriesFor(State.schedule, day, 'w_02', 'actual').map(e => e.placeId), DAY), ['p_01']) },
+        { what: 'the last man waiting marked «נעדר», then «בדיקת היום»', first: AWAY_OF, second: FOOT('בדיקת'), others: ['w_02', 'w_03'],
+            judge: async (page, tag) => same(`${tag}: the day's check is open`, await shownNow(page), ['dayCheckModal']) },
+        { what: 'the last man waiting marked «נעדר», then «חיפוש עובד»', first: AWAY_OF, second: FOOT('חיפוש'), others: ['w_02', 'w_03'],
+            judge: async (page, tag) => same(`${tag}: the finder is open`, await shownNow(page), ['findModal']) },
+        { what: 'a man placed by his usual chip, others still waiting, then «בדיקת היום»', first: OFFER_OF, second: FOOT('בדיקת'), others: [],
+            judge: async (page, tag) => same(`${tag}: the day's check is open`, await shownNow(page), ['dayCheckModal']) }
+    ];
+    suite('a deliberate tap is a tap: «בטל» after a ✕, and «בדיקת היום» or «חיפוש עובד» after a tray write, at 350, 450 and 650 ms');
+    for (const paced of PACED) for (const gap of [350, 450, 650]) {
+        const tag = `${paced.what}, ${gap} ms later`;
+        let done = false;
+        for (let attempt = 1; attempt <= 3 && !done; attempt += 1) {
+            const one = await crew(390, 844, ['אמיר', 'בסאם', 'גדי'], [], 0);
+            const { page, context } = one;
+            await page.evaluate(([day, others]) => {
+                others.forEach(id => State.commit(assignPlace(State.schedule, day, id, 'actual', 'p_01')));
+                hideUndo(); render();
+            }, [DAY, paced.others]);
+            await settle(page, 200);
+            await centred(page, paced.first);
+            const result = await pacedPair(page, paced.first, paced.second, gap);
+            if (!(result.seen >= WALK_BOUNCE) && attempt < 3) {
+                console.log(`  ${tag}: the page saw the presses ${result.seen} ms apart - made again in a fresh page`);
+                await context.close();
+                continue;
+            }
+            done = true;
+            check(`${tag}: the second press reached the page at least ${WALK_BOUNCE} ms after the first`, result.reached && result.seen >= WALK_BOUNCE, String(result.seen));
+            await paced.judge(page, tag);
+            await context.close();
+        }
     }
 
     // ============================================================== the journey's first station

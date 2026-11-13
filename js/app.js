@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v191';
+const APP_VERSION = 'v192';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -91,6 +91,10 @@ function showView(view) {
         setWeekFromDate(State.date);
     }
     render();
+    // A box he was typing into on the page just left holds the midnight follow no longer
+    // (watchDayRollover, below): it is made after this tap, if one is owed and nothing else
+    // holds it.
+    if (typeof dayRolloverViewLeft === 'function') dayRolloverViewLeft();
 }
 
 // One render for the whole app. The state is small - a few hundred assignments at most -
@@ -319,36 +323,282 @@ function watchForCrashes() {
 // written to Wednesday, rate-stamped and queued for the cloud; Tuesday was left with
 // nothing, as if he had not worked. (The review of v189, c1 and c2.)
 //
-// So while anything that midEdit (js/ui/offline.js) counts is open - any dialog, a field
-// holding what somebody typed - the date stays where the screen says it is, and every write
-// lands on the day the surface named. The follow is owed, not dropped. It is made at the
+// So while a dialog is open or a field on the glass holds what somebody typed
+// (dayRolloverHeld, below) the date stays where the screen says it is, and every write lands
+// on the day the surface named. The follow is owed, not dropped. It is made at the
 // first moment nothing is open: the instant the last dialog closes, in that same turn, so
 // no frame of the old day is painted after the close; or the next time the page is brought
 // back. Never on a timer: a day changed at some moment nobody chose is a day changed under
 // a finger already on its way to the glass. And, exactly as before, only if the screen is
-// still on the old today - a day somebody moved to on purpose meanwhile is his choice.
+// still on the old today - a day somebody moved to on purpose meanwhile is his choice
+// (dayChosenByHand, below: even when the day he chose IS the old today).
 //
 // Nor is the day DRAWN again while something is being typed into it. The redraw a new day
 // asks for (the «היום» button, the drawer's today) takes a focused box out of the page, and
 // a box taken away by a redraw commits nothing (dayTearingDown, js/ui/day.js): the digits a
 // man was typing into a site's count when the phone locked were thrown away on unlocking.
 // They are kept; the redraw comes with the next one.
+
+// The follow owed: the old today the day screen is to leave once nothing is open over it,
+// or null when none is. Out here rather than inside watchDayRollover so that a day chosen by
+// hand can settle it.
+let dayRolloverLeaving = null;
+
+// Called by showView once the page has switched (set by watchDayRollover at boot).
+let dayRolloverViewLeft = null;
+
+// A DAY CHOSEN BY HAND SETTLES WHAT THE CALENDAR OWED. Every control that puts the day screen
+// on a date somebody picked - the arrows, the drawer, the date picker, a day of the week
+// screen or of a card's calendar - calls this as it sets State.date: the day on the screen is
+// his choice now, not the screen left sitting on yesterday, and no later moment takes it from
+// him. The follow could not tell the two apart when the day chosen was the very day it was
+// about to leave. A worker's card left open across midnight, its Tuesday tapped in the
+// morning: the card closed, Tuesday was set, and the close's own follow - the observer's
+// microtask, later in that same turn - put him on Wednesday under a header he had not asked
+// for. A site's card did the same (the review of the hotfix, R1).
+function dayChosenByHand() {
+    dayRolloverLeaving = null;
+}
+
+// WHAT HOLDS THE FOLLOW: a dialog open - each names its day once, when it is drawn, and may
+// write to State.date at a tap - or a box on the glass being TYPED INTO, which a redraw would
+// take off the page with what was typed. Not midEdit (js/ui/offline.js), whose question is
+// whether a RELOAD would throw something away. Its third reason, the advances page's «סידור»
+// draft, names no day, writes none, and a redraw draws it again as it was (renderAdvanceOrder,
+// js/ui/reports.js); counted here, a draft left open while he went back to the day held the
+// follow on every unlock until שמור or ביטול, and the morning's records landed on yesterday
+// (the review of the hotfix, R4). And a box in a page he has left is not being typed into: a
+// tab tapped on an iPhone takes no focus, so the box can go on being the focused element
+// under display:none - Chromium lets go of it only at the next frame - and it held the
+// follow for as long as he stayed away from that page.
+//
+// TYPED INTO, NOT MERELY HOLDING SOMETHING (the third review of the hotfix, BLOCKER). The
+// question was "a focused box with a value in it", and a site's count box holding a count stored
+// earlier is such a box from the moment it is tapped: tapped at 23:50 and never typed into, it
+// held the follow at the 07:10 unlock, the screen stayed on Tuesday, and the morning's first tap
+// - a man's usual site, «נעדר», a ✕ - wrote Tuesday; the follow its leaving owed came after it and
+// took its step off ↶ (leave-by-writer). Nothing typed is nothing a redraw can take away. A box is
+// being typed into from its first keystroke (`input`) after it took the focus. And the focus
+// going from such a box straight into another box - a tap on the next site's count, Tab, the
+// keyboard's «הבא» - takes the typing with it: he is still filling in the evening's counts, box
+// after box, and the day stays under him. On v190 it did; round two made the follow at the first
+// box's leaving and drew the day again under the box he had just tapped, and the digits he typed
+// next went nowhere (box-to-box). The focus anywhere else ends it.
+let dayRolloverTyping = false;
+// A box being typed into was left in this turn: the box the focus lands in now carries the typing.
+let dayRolloverCarry = false;
+
+function dayRolloverBox(node) {
+    if (!node || !node.tagName) return false;
+    if (node.tagName === 'TEXTAREA') return true;
+    if (node.tagName !== 'INPUT') return false;
+    return !/^(checkbox|radio|button|submit|reset|file|range|color|image|hidden)$/i.test(node.type || '');
+}
+
+function dayRolloverOnGlass(node) {
+    return dayRolloverBox(node) && node.isConnected && node.getClientRects().length > 0;
+}
+
+function dayRolloverDialogOpen() {
+    return [...document.querySelectorAll('.modal')]
+        .some(modal => modal.style.display && modal.style.display !== 'none');
+}
+
+function dayRolloverHeld() {
+    if (dayRolloverDialogOpen()) return true;
+    if (!dayRolloverOnGlass(document.activeElement)) {
+        dayRolloverTyping = false;
+        return false;
+    }
+    return dayRolloverTyping;
+}
+
+// THE MORNING FOLLOWS THE CALENDAR ONCE THE BOX IS LEFT (the second review of the hotfix), AND
+// THE TAP THAT LEAVES IT IS SPENT ON LEAVING IT (the third).
+//
+// A box being typed into holds the follow, and the box is LEFT - by a tap on anything else, by
+// the keyboard's own key, by Tab to something that is not a box - but nothing made the follow
+// then: he typed a site's count at 23:50, unlocked at 07:10, left the box, the day screen still
+// said Tuesday, and the morning's first man went to Tuesday. So the follow owed is made when the
+// box is left - its `change`, which a box commits on when it is left (and which may take the box
+// off the page with its own redraw, so that no blur ever reaches the document: measured), or its
+// `focusout` - and, for the phone whose tab takes no focus, when the page it was on is left; and
+// only if nothing else holds it then.
+//
+// NEVER UNDER A FINGER, and never AFTER it either. A box is left by the press of a tap whose click
+// has yet to come. Drawn at that press, the new day would be under the click, and the click would
+// land on whatever Wednesday put there. Round two waited for the click instead and let it land on
+// what it was aimed at - Tuesday's surface - and a writer wrote Tuesday, or opened a picker that
+// named Tuesday, and the follow that came after took the step off ↶ with the screen: yesterday
+// written by the morning's first tap, and nothing on the screen to take it back (the third review,
+// BLOCKER). So the follow due in a press is made AT ITS CLICK, before anything the click was aimed
+// at acts - and a click on what the follow draws again, the day screen, its dock or the undo bar
+// over them, is spent on it: it does nothing else. The day he then sees under his finger is the
+// new one, and his next tap is on the day it says. Chromium already loses such a tap on its own
+// whenever the box's commit redraws the day under it (the mouse press's target is gone, and no
+// click comes); this makes it so whatever was typed, wherever the tap came down. A click anywhere
+// else - a tab, the top bar, a page that is not the day - lands on what it was aimed at, on the
+// page as it was drawn, and the new day is drawn in the turn after it. What is known of a
+// tap, measured in Chromium (tests/midnight.browser.mjs): a finger's press and release come first,
+// each in its own turn, and the press, release and click it makes as a mouse come after, together
+// in ONE turn - in which the focus moves, at that press; a mouse presses in one turn and releases
+// and clicks in another. A press whose click never comes (the redraw above, a release that became
+// nothing) is over at the end of its mouse's turn, or a second after a finger's release, and the
+// follow is made then. With no press under way - the keyboard - it is made in the turn after.
+//
+// AND AN IPHONE'S TAP LEAVES THE BOX WITHOUT MOVING THE FOCUS. A button tapped there takes no
+// focus, and the box can stay focused under the keyboard while the tap lands somewhere else: the
+// box was never left, the follow was still held, and the tap wrote Tuesday; the day's redraw then
+// took the box away and the digits typed in it with it (the third review, simulated). So with a
+// follow owed, a finger's click outside the box being typed into - and not on another box, nor
+// on the box's own label - first lets go of the box: its `change` commits what was typed, on the
+// day the box was drawn for (renderSiteCountField, js/ui/day.js), and the click is then the
+// leaving tap above. Only with a follow owed: on any other morning the box is the iPhone's own.
+let dayRolloverPressDown = false;   // a press whose click's turn is not over
+let dayRolloverPressType = null;    // its pointerType
+let dayRolloverPending = false;     // a follow due inside that press: made at its click, or its end
+let dayRolloverPressTimer = null;
+
 function watchDayRollover() {
     let knownToday = todayStr();
-    // The old today the screen is to leave once nothing is open over it; null when no follow
-    // is owed.
-    let leaving = null;
-    const busy = () => typeof midEdit === 'function' && midEdit();
+    const busy = dayRolloverHeld;
 
     const follow = () => {
-        if (leaving === null || busy()) return false;
-        const from = leaving;
-        leaving = null;
+        if (dayRolloverLeaving === null || busy()) return false;
+        const from = dayRolloverLeaving;
+        dayRolloverLeaving = null;
         if (State.date !== from) return false;
         hideUndo();
         State.date = todayStr();
         return true;
     };
+
+    // What the follow draws again under a finger: the day screen, its dock and the undo bar.
+    // A target already gone was taken off the day by the box's own commit.
+    const redrawn = target => !target || !target.isConnected
+        || Boolean(target.closest && target.closest('#dayView, .day-actions, #undoBar'));
+
+    // The follow made now, if one is owed and nothing holds it. `click`: the click of the press
+    // it came due in, which is spent on it when it came down on what is drawn again.
+    const decide = click => {
+        dayRolloverPending = false;
+        if (dayRolloverLeaving === null || busy()) return;
+        const spent = Boolean(click) && currentView === 'day' && redrawn(click.target);
+        if (!follow()) return;
+        if (spent) {
+            render();
+            click.preventDefault();
+            click.stopPropagation();
+        } else if (click) {
+            // Anywhere else - a tab, the top bar, a page that is not the day: the click lands
+            // first, on the page as it was drawn, and the new day is drawn in the turn after it.
+            // Drawn here, the page was taken away under the click, and its button's own handler
+            // ran on a button no longer on the page.
+            setTimeout(render, 0);
+        } else {
+            render();
+        }
+    };
+
+    // A box left, or the page it was on: the follow is due - at the click of the press under
+    // way, or in the turn after.
+    const due = () => {
+        if (dayRolloverLeaving === null) return;
+        if (dayRolloverPressDown) dayRolloverPending = true;
+        else setTimeout(() => decide(null), 0);
+    };
+
+    const endPress = () => {
+        clearTimeout(dayRolloverPressTimer);
+        dayRolloverPressTimer = null;
+        dayRolloverPressDown = false;
+        if (dayRolloverPending) decide(null);
+    };
+    // The end of the turn being dispatched: for a tap, after its click has been handled.
+    const endPressSoon = () => {
+        clearTimeout(dayRolloverPressTimer);
+        dayRolloverPressTimer = setTimeout(endPress, 0);
+    };
+
+    // A tap on a box, or on the words of a box's own label (a site's count is one <label>): the
+    // focus is on its way INTO a box, and the typing goes with it - not a leaving.
+    const intoBox = target => {
+        if (!target) return false;
+        if (dayRolloverBox(target)) return true;
+        const label = target.closest ? target.closest('label') : null;
+        return Boolean(label && dayRolloverBox(label.control));
+    };
+
+    // An iPhone's tap that moves no focus: the box let go of first (above).
+    const letGoOfBox = click => {
+        const active = document.activeElement;
+        if (!dayRolloverTyping || !dayRolloverOnGlass(active) || dayRolloverDialogOpen()) return;
+        const target = click.target;
+        if (!target || target === active || (active.contains && active.contains(target)) || intoBox(target)) return;
+        active.blur();
+    };
+
+    // On the window and in the capture phase: seen before any control's own handler, and
+    // before any guard that stops a press at its surface (guardFingersOn, js/ui/sheet.js).
+    window.addEventListener('pointerdown', event => {
+        clearTimeout(dayRolloverPressTimer);
+        dayRolloverPressTimer = null;
+        dayRolloverPressDown = true;
+        dayRolloverPressType = event.pointerType || 'mouse';
+    }, true);
+    window.addEventListener('pointerup', () => {
+        if (dayRolloverPressType === 'mouse') return;
+        clearTimeout(dayRolloverPressTimer);
+        dayRolloverPressTimer = setTimeout(endPress, 1000);
+    }, true);
+    window.addEventListener('pointercancel', endPressSoon, true);
+    // The turn of the click: a finger's opens with its mouse press, a mouse's with its release.
+    window.addEventListener('mousedown', () => { if (dayRolloverPressType !== 'mouse') endPressSoon(); }, true);
+    window.addEventListener('mouseup', () => { if (dayRolloverPressType === 'mouse') endPressSoon(); }, true);
+    window.addEventListener('keydown', () => { if (dayRolloverPending) endPressSoon(); }, true);
+    window.addEventListener('click', event => {
+        if (dayRolloverLeaving !== null && event.detail > 0) {
+            // Into a box: the focus lands there after this click (a label's own default), and
+            // the follow is asked at the end of the tap, with the typing carried (below).
+            if (intoBox(event.target)) {
+                if (dayRolloverTyping && !dayRolloverCarry) {
+                    dayRolloverCarry = true;
+                    setTimeout(settleTyping, 0);
+                }
+                due();
+            } else {
+                letGoOfBox(event);
+                decide(event);
+            }
+        }
+        if (dayRolloverPressDown) endPressSoon();
+    }, true);
+
+    // The typing (dayRolloverHeld, above): begun by a keystroke, carried from box to box within
+    // the turn the first was left in, ended by the focus coming down anywhere else.
+    const settleTyping = () => {
+        dayRolloverCarry = false;
+        if (!dayRolloverOnGlass(document.activeElement)) dayRolloverTyping = false;
+    };
+    const left = event => {
+        if (!dayRolloverBox(event.target)) return;
+        if (dayRolloverTyping && !dayRolloverCarry) {
+            dayRolloverCarry = true;
+            setTimeout(settleTyping, 0);
+        }
+        due();
+    };
+    document.addEventListener('input', event => { if (dayRolloverBox(event.target)) dayRolloverTyping = true; }, true);
+    document.addEventListener('change', left, true);
+    document.addEventListener('focusout', left, true);
+    document.addEventListener('focusin', event => {
+        if (dayRolloverBox(event.target) && dayRolloverCarry) return;
+        dayRolloverTyping = false;
+    }, true);
+    // The page the box was on, left by a tab that took no focus: an iPhone's tap focuses
+    // nothing, and the box can stay the focused element under display:none. It holds nothing
+    // there (dayRolloverHeld); the page switch is the moment it was left.
+    dayRolloverViewLeft = due;
 
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState !== 'visible') return;
@@ -357,7 +607,7 @@ function watchDayRollover() {
         if (turned) {
             // Follow the calendar only if the screen was sitting on the old today. Someone
             // deliberately fixing a past date must not be yanked off it mid-correction.
-            if (State.date === knownToday) leaving = knownToday;
+            if (State.date === knownToday) dayRolloverLeaving = knownToday;
             knownToday = now;
             takeDailySnapshot();
         }

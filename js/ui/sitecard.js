@@ -487,12 +487,14 @@ function siteCardStep(months) {
 }
 
 // A day of the calendar NAVIGATES: the card closes and the day screen opens on that date -
-// what a day of the worker's card does. The date on screen is a choice in memory; nothing
-// is recorded by looking at a day.
+// what a day of the worker's card does, a follow still owed from midnight settled by his
+// choice as it is there (dayChosenByHand, js/app.js). The date on screen is a choice in
+// memory; nothing is recorded by looking at a day.
 function siteCardGoDay(date) {
     if (!siteCardIsOpen() || !isRealDate(date)) return;
     closeSiteCard();
     State.date = date;
+    if (typeof dayChosenByHand === 'function') dayChosenByHand();
     showView('day');
 }
 

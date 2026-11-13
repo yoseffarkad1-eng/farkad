@@ -1444,32 +1444,47 @@ function renderPayrollTable() {
     if (groups.length > 1) {
         const jump = el('nav', 'report-cycle-nav');
         jump.setAttribute('aria-label', 'מעבר בין קבוצות התשלום');
-        groups.forEach(group => jump.appendChild(button(
-            `${group.title} · ${crewOf(group)}`, 'btn-secondary', () => {
+        groups.forEach(group => {
+            const go = button(`${group.title} · ${crewOf(group)}`, 'btn-secondary', () => {
                 const target = document.getElementById(groupAnchor(group));
                 if (target) {
                     target.scrollIntoView({ block: 'start' });
                     target.focus({ preventScroll: true });
                 }
-            }, `${group.title} · ${countedIn(crewOf(group), 'עובד אחד', 'עובדים')} בדוח`)));
+            }, `${group.title} · ${countedIn(crewOf(group), 'עובד אחד', 'עובדים')} בדוח`);
+            // The way to a group wears the group's colour, like its heading (below).
+            go.setAttribute('data-cycle', group.cycle);
+            jump.appendChild(go);
+        });
         browse.appendChild(jump);
     }
     groups.forEach(group => {
         if (group.title) {
-            // ITS OWN DATES, in the heading itself (v189) - the heading is what the paper
-            // repeats and what the picture titles a table with (js/ui/printout.js), so a
-            // page holding two periods says which is which on every surface. Only where
-            // some group is NOT the range at the head of the page: a crew paid fortnightly
-            // has one period, the page already names it, and its heading is what it was.
-            // The dates are a piece of their own for the same reason the sentence's are
-            // (otherAccountParts): on a narrow phone they go under the title whole.
+            // THE CYCLE'S WORD, AND ON THE SCREEN NOTHING ELSE (the owner, 2026-11-11: no
+            // need for the weekly men's dates - «שבועי» or «דו־שבועי» is enough, told
+            // apart by colour). The colour is the stylesheet's, keyed on data-cycle - the
+            // heading, the group's cards and rows, and the way in above all wear it.
+            //
+            // ITS OWN DATES STAY IN THE HEADING (v189) for every surface that leaves the
+            // phone: the paper repeats the heading and the picture titles a table with its
+            // text (js/ui/printout.js reads textContent), and both are read by people who did
+            // not choose the range - so a page holding two periods still says which is which
+            // there. They are one part of the heading, .report-group-when, which the screen
+            // alone leaves out (css/app.css); the heading's text is v190's byte for byte.
+            // Only where some group is NOT the range at the head of the page: a crew paid
+            // fortnightly has one period, the page already names it, and its heading is
+            // what it was. The dates are a piece of their own for the same reason the
+            // sentence's are (otherAccountParts): on paper they go under the title whole.
             const heading = el('h3', ownDates ? 'report-group report-group-dated' : 'report-group',
-                ownDates ? `${group.title} · ` : group.title);
+                group.title);
             if (ownDates) {
-                heading.appendChild(el('span', 'report-dates',
+                const when = el('span', 'report-group-when', ' · ');
+                when.appendChild(el('span', 'report-dates',
                     dateRange(formatFullDate(parseLocalDate(group.span.from)),
                         formatFullDate(parseLocalDate(group.span.to)))));
+                heading.appendChild(when);
             }
+            heading.setAttribute('data-cycle', group.cycle);
             heading.id = groupAnchor(group);
             heading.setAttribute('tabindex', '-1');
             heading.setAttribute('data-workers', countedIn(crewOf(group), 'עובד אחד', 'עובדים'));
@@ -1486,10 +1501,14 @@ function renderPayrollTable() {
         // payable is -300 is the whole defect this section exists to prevent, so that cell
         // says «—» here and the reconciliation band below carries the number.
         if (group.rows.length) {
-            section.appendChild(payrollGroupTable(group.rows, financial
+            const table = payrollGroupTable(group.rows, financial
                 ? { bandLabel: 'סה״כ בטבלת העבודה', bandNet: false,
                     nameRows: group.rows.concat(group.finance) }
-                : {}));
+                : {});
+            // Its men's cards and rows wear the group's colour: one attribute on the
+            // group, read by the stylesheet and by nothing else.
+            table.setAttribute('data-cycle', group.cycle);
+            section.appendChild(table);
         } else {
             // hint-money, not plain .hint: a cycle whose men all have money and no days
             // would otherwise print a heading and a financial block with nothing saying
@@ -2603,10 +2622,16 @@ function renderPeriodClosure(worker) {
     };
     const chosenPlan = () => planPeriodClosure(State.schedule, worker.id,
         plan.from, plan.to, new Date().toISOString(), readChoice());
+    // What is left owed is said in the CONFIRMATION's words (closeAccountFor: «ויישאר חוב
+    // פתוח … ₪»), so the preview and the question that commits it name one figure one way.
+    // From v117 to v190 it read «יישארו» and then a word that began «בס» in Hebrew and
+    // ended in two ARABIC letters (LAM U+0644, FEH U+0641) - a broken word, on the one line
+    // that says what a man still owes. tests/reportnames.test.mjs pins this sentence and
+    // holds every file under js/ to words with no Arabic letter inside a Hebrew one.
     const paint = () => {
         const next = chosenPlan();
         preview.textContent = Number.isFinite(readChoice()) && next.canClose
-            ? `לתשלום לעובד: ${moneyText(next.gross - next.deducted)} ₪ · יישארו בסلف: ${moneyText(next.carriedForward)} ₪`
+            ? `לתשלום לעובד: ${moneyText(next.gross - next.deducted)} ₪ · יישאר חוב פתוח: ${moneyText(next.carriedForward)} ₪`
             : `שכר התקופה: ${moneyText(plan.gross)} ₪ · ניתן לקזז עד ${moneyText(plan.deducted)} ₪. בחר את הסכום בעצמך.`;
     };
     amount.addEventListener('input', paint); paint();

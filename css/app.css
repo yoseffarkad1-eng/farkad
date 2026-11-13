@@ -1985,6 +1985,12 @@ a[href]:focus-visible,
 .report-dates { display: inline-block; max-width: 100%; }
 #reportsView .report-group-dated { flex-wrap: wrap; row-gap: 2px; }
 #reportsView .report-group-dated .report-dates { min-width: 0; }
+/* A GROUP'S HEADING ON THE SCREEN IS ITS CYCLE'S WORD (the owner, 2026-11-11: «שבועי» or
+   «דו־שבועי» is enough, told apart by colour - css/design.css). The dates stay in the
+   heading for the paper and the picture, which are read by people who did not choose the
+   range: this hides them from the screen alone, so print shows them as v189 did and the
+   picture reads them in the heading's text. */
+@media screen { #reportsView .report-group-when { display: none; } }
 .report-other-account { margin: 6px 0 14px; }
 .report-other-account .hint { margin: 0 0 8px; }
 .report-other-account button { min-height: 44px; font-size: 16px; padding: 8px 14px; }

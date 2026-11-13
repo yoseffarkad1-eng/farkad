@@ -279,6 +279,13 @@ export const SCREENS = [
     { name: 'reports - the «כל העובדים» picker', scope: APP,
         open: async page => { await run(page, reportsDefault); await run(page, () => { REPORT_PICKER_OPEN = true; }); await view('reports')(page); },
         close: page => run(page, () => { REPORT_PICKER_OPEN = false; render(); }) },
+    // v192: a man whose pay cycle changes inside the fortnight has a group of his own for the
+    // part before it, so the page holds three groups and three buttons above them. In memory
+    // only: the record on the disk is not written, and the man is given back his cycle.
+    { name: 'reports - three groups (a cycle changed inside the fortnight)', scope: APP,
+        open: async page => { await run(page, reportsDefault);
+            await run(page, () => { State.schedule.workers[6].payCycles = '2026-08-07=weekly;2026-11-06=biweekly'; }); await view('reports')(page); },
+        close: page => run(page, () => { State.schedule.workers[6].payCycles = '2026-08-07=weekly'; render(); }) },
     { name: 'reports - a week left open, shown', scope: APP,
         open: async page => { await run(page, reportsDefault); await view('reports')(page);
             await run(page, () => {

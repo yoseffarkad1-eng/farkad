@@ -21,7 +21,7 @@
 // The version string below is the whole update mechanism. Bump it in the same commit as
 // any change to a cached file, or returning visitors keep running the old build.
 
-const VERSION = 'farkad-v191';
+const VERSION = 'farkad-v192';
 
 // A scheduled server push wakes this worker even with every app window closed.
 // Always display a visible notification; neither iOS nor Android needs a page timer.
@@ -533,10 +533,78 @@ function buildOfClient(id) {
         .catch(() => UNKNOWN);
 }
 
+// THE WINDOW THAT ARRIVED WHILE THIS WORKER WAS TAKING OVER, and that nobody wrote down.
+//
+// Two doors write a window's record: the navigation this worker answers, and the
+// enrollment at `activate`, which reads the list of open windows and writes them down
+// before it claims. Between them there was a gap, and on a FIRST visit a person can walk
+// straight into it. No worker controls the origin while this one installs, so a reload in
+// that stretch - a pull to refresh, a second tab - is navigated from the network by
+// nobody and recorded by nobody; and a window that is still arriving when `activate`
+// reads its list is not on the list. Measured, 2026-11-12, the worker logging its own
+// calls: the enrollment read an EMPTY list (the old window gone, the new one not yet
+// there) or a list holding only the window that was leaving; fourteen milliseconds after
+// the claim the new window was this worker's, with no record. From then on it was
+// refused everything it asked for - the cloud adapter js/app.js imports after boot, so
+// sync never started; the spreadsheet library; an icon - and the census called it a
+// foreign build, until somebody reloaded. v190, v191 and v192 alike, about one time in
+// three when the reload came 350ms after the first load; tests/whatsnew.browser.mjs opens
+// every phone it has exactly that way, and that is what failed the v192 gate.
+//
+// Reading the list a second time after the claim does not close it: a window can come
+// under this worker after ANY reading. So the question is answered when it is asked:
+//
+//   - only on a FIRST INSTALL. CLAIMED is true only when the enrollment's own rule
+//     (predecessorFor, read at `activate` while the pointer was still as this worker
+//     found it) said the windows being taken over are running THIS build: no pointer and
+//     no other shelf - one program on the device, the one just installed, so there is
+//     nothing a late window could be mixed with.
+//     On an UPGRADE the late window is refused, as it always was. It came past the
+//     outgoing worker (a hard reload), and what the origin handed it depends on whether
+//     it asked before the deploy or after - which nothing here can know. Writing it down
+//     as the outgoing build was tried and measured (2026-11-12,
+//     tests/firstvisit.browser.mjs): a hard reload that reached the origin after the
+//     deploy was handed the NEW page by the origin and the OUTGOING build's scripts by
+//     this worker - one build's page running another build's program, the one thing all
+//     of this exists to prevent. Writing it down as this build is the same mistake the
+//     other way round. A refusal costs that window a reload; a guess costs it a mixed
+//     build that nothing afterwards can see.
+//   - only in the process that ran `activate` and claimed. CLAIMED is null in every
+//     other process: a restarted worker late-enrolls nobody and refuses an unrecorded
+//     window at once, exactly as before.
+//   - only a window with NO record. One whose record cannot be read, or reads as
+//     damage, is UNKNOWN and is not touched.
+//   - never a window this worker itself refused to start (UNSTARTED): that one was
+//     handed the «cannot start» page, which is no build's program.
+//   - and when the claim did not happen, or the rule had no answer, CLAIMED resolves to
+//     false and the window stays refused.
+//
+// A window that was open when `activate` began needs no rule here. On a first install
+// the enrollment wrote each of them down as this build - or this worker did not claim -
+// and rememberClient put it in SERVED, which this process answers from before it ever
+// reads the disk; a record lost afterwards cannot bring one of them this far.
+//
+// The record is written through rememberClient - stored, read back, and only then
+// believed - so a write that is refused leaves the window refused.
+let CLAIMED = null;
+const UNSTARTED = new Set();
+
+function buildOfClaimed(id) {
+    return buildOfClient(id).then(build => {
+        if (build !== null || !CLAIMED || UNSTARTED.has(id)) return build;
+        return CLAIMED.then(firstInstall => {
+            if (!firstInstall) return null;
+            // Read again first: a record may have been written while this waited.
+            return buildOfClient(id).then(again => (again !== null ? again
+                : rememberClient(id, VERSION).then(stored => (stored ? VERSION : null))));
+        });
+    });
+}
+
 // Every build any open window is recorded as running, plus this one.
 function buildsInUse() {
     return self.clients.matchAll({ type: 'window' })
-        .then(clients => Promise.all(clients.map(client => buildOfClient(client.id))))
+        .then(clients => Promise.all(clients.map(client => buildOfClaimed(client.id))))
         .then(builds => {
             const held = new Set([VERSION]);
             let unknown = false;
@@ -719,15 +787,26 @@ function forgetClosedClients() {
 // makes its shelf collectable - and it must not become collectable until its windows have
 // somewhere else to be identified from.
 self.addEventListener('activate', event => {
+    // For the window that arrives too late to be on the enrollment's list (buildOfClaimed):
+    // what the windows being taken over are running, by the enrollment's own rule, read
+    // while the pointer is still as this worker found it. CLAIMED resolves only once the
+    // claim has landed - to true on a first install, where that answer is this build, and
+    // to false on an upgrade, when this worker did not claim, or when there was no answer.
+    let claimed = () => undefined;
+    CLAIMED = new Promise(resolve => { claimed = resolve; });
+    const predecessor = readActive().then(pointed => predecessorFor(pointed)).catch(() => null);
     event.waitUntil(
         enrollLegacyClients()
             .then(enrollment => {
                 if (!enrollment.ok) {
+                    claimed(false);
                     console.warn('[sw] not claiming: could not record the windows of the '
                         + 'build being replaced');
                     return undefined;
                 }
                 return self.clients.claim()
+                    .then(() => predecessor)
+                    .then(build => claimed(build === VERSION))
                     .then(() => writeActive(VERSION))
                     .then(() => (enrollment.predecessor
                         ? markShelf(enrollment.predecessor, 'retired')
@@ -735,7 +814,10 @@ self.addEventListener('activate', event => {
                     .then(() => reapUnusedCaches())
                     .then(() => forgetClosedClients());
             })
-            .catch(error => console.error('[sw] activate', error))
+            .catch(error => {
+                claimed(false);
+                console.error('[sw] activate', error);
+            })
     );
 });
 
@@ -778,7 +860,11 @@ self.addEventListener('fetch', event => {
                 ? rememberClient(event.resultingClientId, VERSION)
                 : Promise.resolve(false))
                 .then(stored => {
-                    if (!stored) return cannotStart(event.resultingClientId ? 'unwritable' : 'no-client-id');
+                    if (!stored) {
+                        // Not a window of any build, and never to be enrolled as one.
+                        if (event.resultingClientId) UNSTARTED.add(event.resultingClientId);
+                        return cannotStart(event.resultingClientId ? 'unwritable' : 'no-client-id');
+                    }
                     return caches.open(VERSION)
                         .then(cache => cache.match('./index.html'))
                         .then(hit => hit || timedFetch(request, DOCUMENT_TIMEOUT_MS)
@@ -810,7 +896,7 @@ self.addEventListener('fetch', event => {
     // inferences, and after a worker restart the first one was wrong for THIS build's own
     // window, which was then handed the oldest shelf on the device.
     if (event.clientId) {
-        event.respondWith(buildOfClient(event.clientId).then(build => {
+        event.respondWith(buildOfClaimed(event.clientId).then(build => {
             // Its own build, and only its own. The network is allowed here and nowhere
             // else below: for THIS build the origin is serving the same build, so a file
             // the shelf is missing comes back as itself.
@@ -849,9 +935,11 @@ self.addEventListener('fetch', event => {
             //
             // They are separated earlier now instead. A legacy window is written down at
             // activate, before the claim, while its build is still a fact (see
-            // enrollLegacyClients). What reaches here with no record is a window nothing
-            // on this device can identify, and refusing it costs nothing that was ever
-            // working.
+            // enrollLegacyClients), and one that arrived during a FIRST INSTALL's takeover
+            // is written down by the process that took over, the first time it asks
+            // (buildOfClaimed).
+            // What reaches here with no record is a window nothing on this device can
+            // identify, and refusing it costs nothing that was ever working.
             //
             // Every shelf and every stored record is left exactly where it is. Refusing
             // to serve is recoverable by a reload; serving the wrong build is not.

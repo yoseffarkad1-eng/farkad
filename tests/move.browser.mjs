@@ -210,6 +210,10 @@ async function tap(page, what, selector) {
 
 const pickerRow = id => `#workerPickerList .picker-row[data-worker-id="${id}"] button`;
 const siteAdd = index => `.site-grid > .site-card:nth-child(${index + 1}) .site-head-btn`;
+// MOVED ON PURPOSE (the review of the hotfix, R2): a site's picker opened by a tap on its «+»
+// takes no finger for DOUBLE_TAP_GUARD_MS (js/ui/sheet.js) - the second tap of a double tap on
+// the «+» used to land on a «+ הוסף» - so every opening below waits that moment out (800 ms,
+// where it waited 150) before the picker is touched. What is held is unchanged.
 
 // Counts the places a worker holds in the live record AND on the disk, and says whether
 // both agree - a disagreement is itself the answer to "why did it come back".
@@ -237,7 +241,7 @@ const holds = (snapshot, who, placeId) => ({
 
     // ---- step 1: record him at A, through the site's own ＋
     await page.click(siteAdd(A));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(800);
     const opened = await look(page);
     given('the ＋ on the first card opened the picker for that site',
         opened.picker.display === 'flex'
@@ -280,7 +284,7 @@ const holds = (snapshot, who, placeId) => ({
 
     // ---- step 2: the move - the TARGET site's ＋, one tap on his name
     await page.click(siteAdd(B));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(800);
     const atB = await look(page);
     given('the second card\'s ＋ opened the picker for the SECOND site',
         atB.picker.display === 'flex' && atB.picker.title.indexOf(SITES[B].name) !== -1,
@@ -362,7 +366,7 @@ const holds = (snapshot, who, placeId) => ({
     }, [DAY, W1.id, SITES[A].id]);
     await page.waitForTimeout(100);
     await page.click(siteAdd(B));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(800);
 
     const story = [];
     let dishonoured = 0;
@@ -429,7 +433,7 @@ const holds = (snapshot, who, placeId) => ({
         State.commit(assignPlace(State.schedule, day, w1, 'actual', site, 'normal'));
     }, [DAY, W1.id, SITES[A].id]);
     await page.click(siteAdd(B));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(800);
 
     // A BOUNDED synthetic delay on the durable write, inside this file only: 120ms of
     // real work in the same place a slow phone spends it. Nothing is faked into
@@ -507,7 +511,7 @@ const holds = (snapshot, who, placeId) => ({
         (two.live.one.places || []).length === 2, JSON.stringify(two.live.one));
 
     await page.click(siteAdd(C));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(800);
     const third = await tap(page, 'picker C: + הוסף (over the cap)', pickerRow(W1.id));
     given('the third site\'s button still offered to add him',
         third.promise && third.promise.text.indexOf('הוסף') !== -1,
@@ -574,7 +578,7 @@ const holds = (snapshot, who, placeId) => ({
         State.commit(assignPlace(State.schedule, day, w1, 'actual', site, 'normal'));
     }, [DAY, W1.id, SITES[A].id]);
     await page.click(siteAdd(B));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(800);
 
     // ONE refused journal write, injected here and nowhere else. This is the law-3 path:
     // an edit with nowhere durable to live must roll memory back and say so, never sit
@@ -650,7 +654,7 @@ const holds = (snapshot, who, placeId) => ({
 
     const page = await open();
     await page.click(siteAdd(A));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(800);
     const firstOpening = await look(page);
     given('nobody is recorded yet, so both men rank the same',
         firstOpening.picker.rows.length === 2 && firstOpening.live.one === null,
@@ -668,7 +672,7 @@ const holds = (snapshot, who, placeId) => ({
     // REOPENED, on the same site. What the picker says must come from the record, not
     // from whatever the last opening happened to be holding.
     await page.click(siteAdd(A));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(800);
     const reopened = await look(page);
     const row = reopened.picker.buttons.find(item => item.worker === W1.id) || {};
     check('the reopened picker reads the record back: the count, the button and the disk agree',
@@ -693,7 +697,7 @@ const holds = (snapshot, who, placeId) => ({
     await page.click('#workerPickerModal button:has-text("סגור")');
     await page.waitForTimeout(100);
     await page.click(siteAdd(A));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(800);
     const thrice = await look(page);
     check('a second reopen says exactly the same thing',
         thrice.picker.rows.join() === reopened.picker.rows.join()
@@ -714,7 +718,7 @@ const holds = (snapshot, who, placeId) => ({
 
     // ---- add to A, through the site's own ＋
     await page.click(siteAdd(A));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(800);
     const one = await tap(page, 'picker A: + הוסף', pickerRow(W1.id));
     given('he is at the first site', holds(one.after, 'one', SITES[A].id).live === true,
         placesOf(one.after, 'one'));
@@ -734,7 +738,7 @@ const holds = (snapshot, who, placeId) => ({
 
     // ---- add to B
     await page.click(siteAdd(B));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(800);
     const three = await tap(page, 'picker B: + הוסף', pickerRow(W1.id));
     check('and the add then puts him at the second site ALONE',
         placesOf(three.after, 'one') === SITES[B].id
@@ -829,7 +833,7 @@ const holds = (snapshot, who, placeId) => ({
 
     // ---- the man at A, by the site's own ＋
     await one.click(siteAdd(A));
-    await one.waitForTimeout(150);
+    await one.waitForTimeout(800);
     await tap(one, 'w1 window one: + הוסף at A', pickerRow(W1.id));
     await one.click('#workerPickerModal button:has-text("סגור")');
     await settle(one);
@@ -853,7 +857,7 @@ const holds = (snapshot, who, placeId) => ({
     check('the removal lands on the disk',
         diskOf(off.after, 'one') === '-', diskOf(off.after, 'one'));
     await one.click(siteAdd(B));
-    await one.waitForTimeout(150);
+    await one.waitForTimeout(800);
     const onto = await tap(one, 'window one: + הוסף at B', pickerRow(W1.id));
     await one.click('#workerPickerModal button:has-text("סגור")');
     await settle(one);
@@ -866,7 +870,7 @@ const holds = (snapshot, who, placeId) => ({
     // by real clicks. Its save writes the WHOLE schedule, and its whole schedule still
     // holds the first man at the site he was taken off.
     await two.click(siteAdd(A));
-    await two.waitForTimeout(150);
+    await two.waitForTimeout(800);
     const other = await tap(two, 'window two: + הוסף the OTHER man at A', pickerRow(W2.id));
     given('the second window recorded the other man',
         holds(other.after, 'two', SITES[A].id).live === true,
@@ -920,7 +924,7 @@ const holds = (snapshot, who, placeId) => ({
 
     // And the picker for the OLD site, reopened: it must not offer him as «✓ נמצא».
     await one.click(siteAdd(A));
-    await one.waitForTimeout(200);
+    await one.waitForTimeout(800);
     const pickerAgain = await look(one);
     check('the old site\'s picker, reopened, does not say he is there',
         (pickerAgain.picker.buttons.find(item => item.worker === W1.id) || {}).pressed === 'false',

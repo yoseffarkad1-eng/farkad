@@ -112,11 +112,14 @@ let usualDrawn = 0;
 
 function usualChipInto(chip, worker) {
     if (!chip || !worker) return null;
-    const placeId = usualSiteFor(State.schedule, State.date, State.layer, worker.id);
+    // The day the tray is drawn for: the chip is a suggestion for that day, and its tap
+    // writes into that day (usualAssign).
+    const at = { date: State.date, layer: State.layer };
+    const placeId = usualSiteFor(State.schedule, at.date, at.layer, worker.id);
     const place = placeId ? State.place(placeId) : null;
     if (!place) return null;
 
-    const offer = button('', 'chip-usual', () => usualAssign(worker.id, place.id),
+    const offer = button('', 'chip-usual', () => usualAssign(worker.id, place.id, at),
         USUAL_TEXT.aria(worker.name, place.name));
     const arrow = el('span', 'chip-usual-arrow', USUAL_TEXT.arrow);
     arrow.setAttribute('aria-hidden', 'true');
@@ -156,15 +159,20 @@ function usualNoteInto(tray, chips) {
 // a tap acts on the record as it is. A man who has a record by now, a site archived since,
 // a suggestion that is no longer this one - nothing is written, and the day is drawn again
 // so that the screen says what is true.
-function usualAssign(workerId, placeId) {
+//
+// On the day the chip was drawn for (`at`): asked again of THAT day, and written into it,
+// whatever State.date says by the time of the tap - as every surface on the day screen
+// writes (editWithUndo, js/ui/undo.js). Left out, the day on screen.
+function usualAssign(workerId, placeId, at) {
     if (trayTapTooSoon(true)) return false;
+    const day = at && at.date ? at : { date: State.date, layer: State.layer };
     const worker = State.worker(workerId);
     const place = State.place(placeId);
-    const waiting = Boolean(worker) && State.unrecorded().some(one => one.id === workerId);
+    const waiting = Boolean(worker) && unrecordedOn(day.date, day.layer).some(one => one.id === workerId);
     if (!waiting || !place
-        || usualSiteFor(State.schedule, State.date, State.layer, workerId) !== placeId) {
+        || usualSiteFor(State.schedule, day.date, day.layer, workerId) !== placeId) {
         render();
         return false;
     }
-    return sheetPickPlace(worker, place);
+    return sheetPickPlace(worker, place, day);
 }

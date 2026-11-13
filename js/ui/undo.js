@@ -38,9 +38,20 @@ function snapshotWorkerDay(date, layer, workerId) {
 // sheet advances to the next worker on the strength of this call, and an advance over a
 // refused commit moves the sheet to a different name behind the very dialog explaining
 // that nothing was recorded for this one.
-function editWithUndo(workerId, label, mutate) {
-    const date = State.date;
-    const layer = State.layer;
+//
+// `at`, THE DAY THE SURFACE NAMED: { date, layer }, read by the surface making this edit when
+// it was drawn - the sheet's meta line, the picker's context, the day screen's header - and
+// the edit is made on THAT day, whatever State.date has become by the time the finger lands.
+// The sheet's «שעות נוספות» box was the proof that reading it here was not enough: shut
+// after midnight with the box still holding the focus, the follow of the calendar (js/app.js)
+// moved State.date first, the box's `change` came after, and three hours typed on Tuesday
+// were taken off Tuesday and written onto Wednesday (the second review of the hotfix). So a
+// surface passes its day, and `mutate` is handed the same two - the change is built on the
+// very day the copy below was taken of, by construction rather than by the order of events.
+// Left out, the day on screen, as before.
+function editWithUndo(workerId, label, mutate, at) {
+    const date = at && at.date ? at.date : State.date;
+    const layer = at && at.layer ? at.layer : State.layer;
     const previous = snapshotWorkerDay(date, layer, workerId);
 
     // No undo bar for an edit that did not happen. commit() has already put the screen
@@ -50,7 +61,7 @@ function editWithUndo(workerId, label, mutate) {
     // app wrote the same day first, so the disk guard held this edit in the journal and
     // said so; it is owed to the cloud. ↶ still held the step before it, and pressed to
     // take this edit back it took back that one instead - another man's day.
-    if (!State.commit(mutate())) {
+    if (!State.commit(mutate(date, layer))) {
         if (State.lastCommitKept) hideUndo();
         return false;
     }
@@ -59,10 +70,41 @@ function editWithUndo(workerId, label, mutate) {
     // than being a guess at how to repeat it.
     const after = snapshotWorkerDay(date, layer, workerId);
 
+    // A step back is offered over the day it restores into, while that day is the one on
+    // the screen (hideUndo, below, says why). An edit that landed on its surface's day after
+    // the screen had moved on stood all the same - but no step is offered for it, and none
+    // older is left armed over it.
+    if (date !== State.date || layer !== State.layer) {
+        hideUndo();
+        return true;
+    }
+
     offerUndo(label,
         () => State.commit(setWorkerDay(State.schedule, date, workerId, layer, previous)),
         () => State.commit(setWorkerDay(State.schedule, date, workerId, layer, after)));
     return true;
+}
+
+// THE BAR COMES UP UNDER THE FINGER THAT MADE THE EDIT (the second review of the hotfix). On a
+// short phone a usual site's chip low on the screen places its man, and the bar appears where
+// the chip was: the second tap of a double tap, 150 ms later, landed on «בטל» and took the
+// placement straight back - two taps, no man, a stamped empty day left on the record.
+//
+// AND ONLY THAT FINGER IS IGNORED (the third review of the hotfix). Round two made «בטל» take no
+// finger at all for DOUBLE_TAP_GUARD_MS after the bar appeared, and a man taken off a site by a
+// mis-tapped ✕ and given back by a quick «בטל» - 350, 450, 650 ms later - stayed off his day, the
+// bar still offering the step, nothing saying the tap had done nothing. A deliberate «בטל» is a
+// press on «בטל»; the bounce is the press that made the edit coming down again, where it came
+// down, at once. So «בטל» ignores exactly that: the same finger again (sameFingerAgain,
+// js/ui/sheet.js) - a press inside the control the edit was pressed on, less than its bounce after
+// it. Anywhere else, or later, it is a tap. A keyboard's press (detail 0) is never a bounce and
+// acts at once; the header's ↶ holds the same step and is never under that finger.
+let undoBarPress = null;
+
+function undoBarTap(event) {
+    if (event && event.detail > 0 && typeof sameFingerAgain === 'function'
+        && sameFingerAgain(pressOf(event), undoBarPress)) return;
+    runUndo();
 }
 
 // `redo` is optional: a bulk action (emptying a site) passes only the way back.
@@ -76,9 +118,11 @@ function offerUndo(label, restore, replay) {
     if (bar) {
         clear(bar);
         bar.appendChild(el('span', null, label));
-        bar.appendChild(button('בטל', 'btn-secondary', runUndo));
+        bar.appendChild(button('בטל', 'btn-secondary', undoBarTap));
         bar.appendChild(button('✕', 'btn-icon', dismissUndoBar, 'סגור'));
         bar.style.display = '';
+        // The press of the tap that made this edit, where it came down; none for a keyboard's.
+        undoBarPress = typeof openPress === 'function' ? openPress() : null;
 
         clearTimeout(undoTimer);
         // Only the BAR expires. The step itself stays available behind the header

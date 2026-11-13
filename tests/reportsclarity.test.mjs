@@ -60,6 +60,25 @@ function v186Reports() {
     return V186_REPORTS;
 }
 
+// The build on the phones when the owner asked for the names and the groups' colours
+// (2026-11-11): origin/main, c33461b, v190. See section 6b.
+const V190 = 'c33461b';
+let V190_REPORTS = null;
+function v190Reports() {
+    if (V190_REPORTS === null) {
+        let code = '';
+        try {
+            code = execFileSync('git', ['-C', ROOT, 'show', `${V190}:js/ui/reports.js`],
+                { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+        } catch (error) { code = ''; }
+        given('the v190 commit is in this repository', code.length > 0, V190);
+        given('and its card is this card, before the colours', code.indexOf('report-tile-facts') !== -1
+            && code.indexOf('data-cycle') === -1);
+        V190_REPORTS = code;
+    }
+    return V190_REPORTS;
+}
+
 const TODAY = '2026-11-11';
 const FORT = { from: '2026-10-30', to: '2026-11-12' };
 const WEEK2 = { from: '2026-11-06', to: '2026-11-12' };
@@ -465,6 +484,37 @@ suite('the weekly fold: the hours of a man who has any, week by week, and their 
         [device.run(`weeklyBreakdownFor('w_b', '${FORT.from}', '${FORT.to}').complete`),
             device.run(`weeklyBreakdownFor('w_b', '${FORT.from}', '${FORT.to}').coveredTo`)], [true, FORT.to]);
 }
+
+// ---------------------------------------- 6b. the names and the groups' colours moved no figure
+//
+// The owner, 2026-11-11, on v190 (c33461b): the names clearer and in a colour, the two pay
+// groups told by their word and a colour. A change of LOOK, held here to the build he was
+// holding, out of Git, on this suite's crew: every card as a person reads it, every row and
+// band of every table, the whole text of the pay section, every sheet, every row of the
+// calculation and every statement, on the default and the three explicit ranges, under
+// both readings of the money gates. tests/account-view.test.mjs holds the same on its own.
+// (v190Reports, beside v186Reports at the top of this file, reads it.)
+[['gates shut', SHUT], ['gates open', OPEN]].forEach(([reading, flags]) => {
+    [['the default account view', null], ['the fortnight picked by hand', FORT],
+        ['a week picked by hand', WEEK2], ['the month', MONTH]].forEach(([view, span]) => {
+        suite(`${reading}, ${view}: every card and row is v190's, figure for figure`);
+        const now = phone(flags);
+        const old = phone(flags, v190Reports());
+        if (span) { byHand(now, span); byHand(old, span); }
+        const a = groupsWithCards(now);
+        const b = groupsWithCards(old);
+        given('the page has cards', a.length > 0 && a.every(group => group.cards.length > 0), String(a.length));
+        same('every card, as a person reads it', a.map(group => group.cards), b.map(group => group.cards));
+        same('every table\'s heads, rows and band', a.map(group => [group.heads, group.rows, group.foot]),
+            b.map(group => [group.heads, group.rows, group.foot]));
+        const text = device => device.run('renderPayrollTable()').textContent;
+        check('the whole text of the pay section', text(now) === text(old));
+        same('every sheet of the file', now.run('JSON.stringify(reportSheets())'), old.run('JSON.stringify(reportSheets())'));
+        same('every row of the calculation', now.run('JSON.stringify(payrollRows())'), old.run('JSON.stringify(payrollRows())'));
+        ['w_a', 'w_b', 'w_c', 'w_d', 'w_e', 'w_f', 'w_g'].forEach(id => same(`${id}: his statement`,
+            now.run(`workerStatementText('${id}')`), old.run(`workerStatementText('${id}')`)));
+    });
+});
 
 // ---------------------------------------------------------------- 7. it is a reading
 suite('drawing all of it writes nothing');

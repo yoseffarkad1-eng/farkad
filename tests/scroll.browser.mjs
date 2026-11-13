@@ -212,6 +212,11 @@ async function tap(page, find) {
     if (point) await page.touchscreen.tap(point.x, point.y);
     return point;
 }
+// MOVED ON PURPOSE (the review of the hotfix, R2 and R3): a writer a tap opens - a site's
+// picker, «לאן הלך» - takes no finger for DOUBLE_TAP_GUARD_MS (js/ui/sheet.js), so every
+// opening by a tap below waits that moment out before the surface is touched. What is held is
+// unchanged: where the list stands, and what the record says.
+const opened = page => page.waitForTimeout(800);
 
 // The first thing the person could see under the header BEFORE that is still on the page
 // AFTER, and where it is now - the honest question when something above the screen grew
@@ -340,6 +345,8 @@ try {
             }, [finger.x, finger.y]);
             same(`${tag}: what is under the finger now is still תל אביב`, under, 'תל אביב');
 
+            // MOVED BACK (the third review of the hotfix): «בטל» ignores only the same finger again
+            // (js/ui/undo.js); a press on it made on purpose acts at once, as on v190.
             await tap(page, `() => document.querySelector('#undoBar .btn-secondary')`);
             await settle(page);
             const undone = await view(page);
@@ -420,6 +427,7 @@ try {
             const before = await view(page);
             await tap(page, `() => __card('חולון').querySelector('.site-head-btn')`);
             await settle(page);
+            await opened(page);
             check(`${tag}: the picker is open`, await page.evaluate(() => document.getElementById('workerPickerModal').style.display === 'flex'));
             await tap(page, `() => [...document.querySelectorAll('#workerPickerList .picker-row')]
                 .find(row => row.querySelector('.picker-name').firstChild.textContent.trim() === '${SPARE}').querySelector('button')`);
@@ -443,6 +451,7 @@ try {
             before.marks = await page.evaluate(() => __marks(false));
             await tap(page, `() => document.querySelector('#dayView .tray-pending .chip-main')`);
             await settle(page);
+            await opened(page);
             check(`${tag}: the place picker is open`, await page.evaluate(() => document.getElementById('placePickerModal').style.display === 'flex'));
             await tap(page, `() => [...document.querySelectorAll('#placePickerList .place-btn')].find(node => node.textContent.includes('פרדסיה'))`);
             await settle(page);
@@ -573,6 +582,7 @@ try {
             const before = await view(page);
             await tap(page, `() => __card('חולון').querySelector('.site-head-btn')`);
             await settle(page);
+            await opened(page);
             await tap(page, `() => document.querySelector('#workerPickerModal button[onclick="closeWorkerPicker()"]')`);
             await settle(page);
             const after = await view(page);
@@ -664,6 +674,7 @@ try {
                 await bring(page, `() => __card('חולון').querySelector('.site-head')`, 0.45);
                 await tap(page, `() => __card('חולון').querySelector('.site-head-btn')`);
                 await settle(page);
+                await opened(page);
                 given(`${tag}: the picker is open, offering to add him`, (await pickedAt(page, SPARE, 'p4')).button === '+ הוסף',
                     JSON.stringify(await pickedAt(page, SPARE, 'p4')));
                 await pair(pickerButton(SPARE));
@@ -691,6 +702,7 @@ try {
                 await bring(page, `() => document.querySelector('#dayView .tray-pending')`, 0.55);
                 await tap(page, `() => document.querySelector('#dayView .tray-pending .chip-main')`);
                 await settle(page);
+                await opened(page);
                 const site = `() => [...document.querySelectorAll('#placePickerList .place-btn')].find(node => node.textContent.includes('פרדסיה'))`;
                 const placed = () => page.evaluate(([spare, find]) => {
                     const id = __idOf(spare), node = (0, eval)(find)();
@@ -847,6 +859,7 @@ try {
             const row = await page.evaluate(() => Math.round(document.querySelector('#dayView .assign-row').getBoundingClientRect().height));
             await tap(page, `() => document.querySelector('#dayView .tray-pending .chip-main')`);
             await settle(page);
+            await opened(page);
             await tap(page, `() => [...document.querySelectorAll('#placePickerList .place-btn')].find(node => node.textContent.includes('פרדסיה'))`);
             await settle(page, 300);
             const after = await view(page);

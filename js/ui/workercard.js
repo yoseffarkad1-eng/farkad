@@ -827,12 +827,16 @@ function workerCardStepMonth(months) {
 }
 
 // A day of the calendar NAVIGATES: the card closes and the day screen opens on that
-// date - what a cell of the week screen does, in the week screen's own two steps. The
-// date on screen is a choice in memory; nothing is recorded by looking at a day.
+// date - what a cell of the week screen does, in the week screen's own steps. The date on
+// screen is a choice in memory; nothing is recorded by looking at a day. And it is HIS
+// choice: a follow of the calendar still owed from midnight is settled by it
+// (dayChosenByHand, js/app.js), or the card's close would hand him the new day instead of
+// the one he tapped.
 function workerCardGoDay(date) {
     if (!isRealDate(date)) return;
     closeWorkerCard();
     State.date = date;
+    if (typeof dayChosenByHand === 'function') dayChosenByHand();
     showView('day');
 }
 

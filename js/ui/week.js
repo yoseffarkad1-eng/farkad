@@ -220,8 +220,12 @@ function renderWeekPhone(dates, workers) {
         counts.appendChild(el('span', null, `${n} ${label}`));
     });
     panel.appendChild(counts);
+    // A day chosen by hand: a follow still owed from midnight is settled by it
+    // (dayChosenByHand, js/app.js).
     panel.appendChild(button('פתיחת היום לעריכה', 'btn-primary week-phone-open', () => {
-        State.date = chosen; showView('day');
+        State.date = chosen;
+        if (typeof dayChosenByHand === 'function') dayChosenByHand();
+        showView('day');
     }));
     const labels = placeLabelsIn(State.schedule);
     const row = (worker, status) => {
@@ -388,7 +392,12 @@ function renderWeekCell(worker, date) {
     const who = `${isolate(worker.name)} · ${hebrewDayName(parseLocalDate(date))} `
         + `${formatFullDate(parseLocalDate(date))}`;
     cell.setAttribute('aria-label', said.length ? `${who} · ${said.join(' · ')}` : who);
-    const open = () => { State.date = date; showView('day'); };
+    // A day chosen by hand (dayChosenByHand, js/app.js), as «פתיחת היום לעריכה» above is.
+    const open = () => {
+        State.date = date;
+        if (typeof dayChosenByHand === 'function') dayChosenByHand();
+        showView('day');
+    };
     cell.addEventListener('click', open);
     cell.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }

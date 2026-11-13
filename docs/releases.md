@@ -1,6 +1,183 @@
-## v191 — «תצוגה גדולה»: a large display, per phone, for the one of the three who is far-sighted (candidate, not served)
+## v192 — «דוחות»: each man's name first on his card, the two pay groups told apart by their word and a colour, and one word (candidate, not served)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `f6cf5ff` (v191, served). It is the owner's change to the reports page - branch
+`owner-reports`, seven commits built on v190 (`c33461b`) up to `0861b62` - brought onto v191
+commit by commit and squashed into this one, with what the integration adds (below). Nothing
+in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`, `firestore.rules` or
+`functions` (two more parts were added before it was served, each under its own heading at the
+end of this entry: the day screen's writes, and `sw.js`); the app's files are `css/app.css`, `css/design.css`, `css/large.css`,
+`js/ui/reports.js`, `js/ui/printout.js` (a comment) and `js/ui/whatsnew.js` (this build's item).
+
+### What the owner said
+
+2026-11-11, on v190: could the names on «דוחות» show more and be clearer, maybe in another
+colour, so that he does not search for them; and the weekly men need no dates - «שבוע» or
+«דו שבועי» is enough, told apart by colours.
+
+### What it does
+
+- **His name is the first thing on his card.** Each man's card on «דוחות» ← «לפי עובד» opened
+  with his name at 21px/800, in the ink of every figure on it. It is 26px/900 now, the topmost
+  and heaviest text on the card, in his group's colour, and it wraps - a long name is never
+  cut. The amount to pay is still the largest type on the card (32px), and every figure stays
+  in the ink.
+- **Two groups, two colours.** Weekly is orange and fortnightly blue: the words in #7f3700 /
+  #0b4a8f and the edge #dc6400 / #2f7de1 in the light scheme, both #ffb066 / #86d0ff in the
+  dark one (`--group-weekly-ink`, `-mark`, and the same for `biweekly`, in `css/design.css`).
+  One attribute, `data-cycle`, written by `js/ui/reports.js` on a group's heading, on the group
+  (its cards and its rows) and on its button in the row above, is the whole of what the colour
+  is; the money's and the band's headings carry none and keep their look.
+- **Each group's heading is its cycle's word.** On the screen the heading says «שבועי» or
+  «דו־שבועי» (the app's own words, `PAY_CYCLE_LABELS`) in the group's ink beside an 8px edge in
+  its colour, and it may wrap. On v189's default range it also said the group's dates; they are
+  still in the heading's text (`.report-group-when`, hidden on the screen only), so the paper,
+  the shared picture and the file say each period's dates exactly as v190 did. On an explicit
+  range the heading is the word alone, as before, with the amber sentence under it.
+- **Every man in the group carries its edge.** Each card has an 8px edge in the group's colour
+  on the side the name starts, and so does each row of «תצוגה מפורטת» on a phone, whose name
+  is 22px/900 in the same colour and still underlined. The buttons to the groups carry the
+  edge and the colour too.
+- **One word.** The preview under «כמה לקזז מהשכר הפעם?» says «לתשלום לעובד: X ₪ · יישאר חוב
+  פתוח: Y ₪», in the words of the confirmation that commits the close («ויישאר חוב פתוח Y ₪»).
+  From v117 (`2a36474`) to v190 it said «יישארו» and a Hebrew word ending in two Arabic letters
+  (U+0644, U+0641). A scan of `js/` found no other such word, and a test now holds it so.
+- No figure moved: every card, row, band, heading text, sheet, calculation row and man's
+  statement is v190's on the seeded phones of `tests/account-view.test.mjs` and
+  `tests/reportsclarity.test.mjs`, on the default and on explicit ranges, under both gate
+  readings.
+
+### What the integration adds
+
+- **The buttons to the groups keep their words.** The 6px edge took 5px from the words beside
+  it: at 320px «דו־שבועי · 9» ran 3px past its button in a row of two, and in a row of three
+  (a man whose cycle changes inside the period has a group of his own) «שבועי» was cut to
+  «שבוע» and both «דו־שבועי» ran 28px past theirs (at 375, 10px). The padding beside the edge
+  gives the 5px back, and with three groups the buttons take a line of their own
+  (`css/design.css`). Measured on `0861b62` and on this build at 320, 375 and 440, two groups
+  and three, the mode off and on: every word inside its button here. Pinned in
+  `tests/reportnames.browser.mjs` - each button's words inside it at every size, and a block
+  with three groups at 320 and 375 in both schemes.
+- **«תצוגה גדולה».** The three sizes the change sets are said again in `css/large.css` block 3,
+  by its own rule (+3 over 20px, line-height 1.4 and more): a man's name 29px/900, a group's
+  heading 27px/900, the name of a row of «תצוגה מפורטת» 25px/900. The group colours needed no
+  token of the mode: they hold 7:1 on every ground they stand on, in both schemes, with the
+  mode on - measured by the walk on every reports screen. `tests/screens.mjs` opens the reports
+  with three groups as well, so the mode's floors (18px, 500, 1.4, 7:1, 52px, nothing cut, no
+  words past a control, no two controls over each other) and the app's own (4.5:1, 44px, 16px)
+  are held there on all three phones.
+
+### Held by
+
+`tests/reportnames.test.mjs` (new, in `npm test`) holds the preview word for word, the scan of
+`js/` for a word mixing Hebrew and Arabic letters (shown to catch v190's), the group keys, the
+headings' text against v190, the explicit range, and a man whose pay cycle changes inside the
+period. `tests/reportnames.browser.mjs` (new, in `test:all`) holds, at 320, 375 and 440 in both
+schemes and with every font doubled: the sizes; the words' colours at 7:1 and more on the page,
+the card and the card pressed; the edges at 3:1; the two colours ΔE2000 30 and more apart to
+normal, protan, deutan and tritan eyes, one warm and one cool; no edge within ΔE2000 15 of a
+site's colour; the six longest names the suites seed, wrapped at 320; every heading free to
+wrap; the paper (a real PDF), the picture and the file; the preview, typed into; and (this
+integration) each button's words inside it, with two groups and with three.
+`tests/account-view.test.mjs` and `tests/reportsclarity.test.mjs` hold every figure equal to
+v190's; `tests/mobile.test.mjs` found the heading that could not wrap (369px in 320, at 320
+with doubled text) and holds it.
+
+### How it was verified
+
+The branch was built to the owner's request and then read through two lenses on `0861b62`.
+**Regression: clean** - every suite of `npm test` and the browser suites its screens touch,
+v190 out of Git against the branch on 32 cases (the picture's data, the printed page, every
+card's and heading's text: no difference), every Hebrew literal of `js/` compared (one changed,
+the declared one), and the stylesheet read for leaks. **Asked: three minors**, each below or
+repaired here. This build's own gates ran on this commit (the counts are recorded by the next
+release).
+
+### Hebrew - PROPOSED, not read by the owner
+
+| where | words |
+|---|---|
+| the closing preview (`renderPeriodClosure`) | «לתשלום לעובד: X ₪ · יישאר חוב פתוח: Y ₪» (was «… יישארו בסلف: Y ₪») - pinned in `tests/reportnames.test.mjs` and `tests/reportnames.browser.mjs` |
+| «מה חדש», v192's item | «דוחות: שמות בולטים וצבע לכל קבוצה» · «בכרטיס של כל עובד השם גדול ובולט, השבועיים בכתום והדו־שבועיים בכחול, ובראש כל קבוצה כתוב רק שבועי או דו־שבועי.» · איפה: «דוחות ← לפי עובד» - pinned in `tests/whatsnew.test.mjs` |
+
+The headings use the existing «שבועי» / «דו־שבועי». No other string is new or changed.
+
+### Moved expectations
+
+- `tests/account-view.test.mjs`: `snap()`, which feeds the v186 node-for-node comparisons,
+  leaves `data-cycle` out - it is a look, held by `tests/reportnames.test.mjs`; every text and
+  every other attribute is still held to v186. «the weekly heading says the week» and «the
+  fortnightly heading says the fortnight» are pinned as before, now named as the heading's TEXT
+  (what the paper prints and the picture reads), with new pins beside them for the screen.
+- `tests/account-view.browser.mjs`: «the weekly group under its week…» renamed to what it reads,
+  a new «on the glass each group is its cycle's word, and nothing else»; «no pair of dates is
+  broken across lines» holds the dates that are on the glass, and new checks hold a heading's
+  dates off the glass and on the paper.
+- `tests/mobile.test.mjs`: the name cell of a «תצוגה מפורטת» card is held to the card's inside
+  edge exactly (±1) and to its outer edge within the measured border plus 13 (the group's edge
+  is 8px on that side now).
+- `tests/whatsnew.test.mjs`: v192's item at the top of `EXPECTED`; `tests/whatsnew.browser.mjs`:
+  192 at the head of the builds that have news.
+- `tests/largetext.browser.mjs`: in the pinned sample of the base's own sizes, a man's name on
+  his card is the owner's 26/900 (it was v189's 21/800); the mode draws it 29/900, and every
+  other number of the sample is as it was.
+- `tests/build.test.mjs`, `tests/gate.integrity.test.mjs`: nothing moved - the stamps moved with
+  the bytes, in this commit.
+- `package.json`: `test:reportnames` in `npm test`, `test:reportnames-browser` in `test:all`.
+
+### Known not covered
+
+- **Never tried on a real phone.** Chromium with emulated touch, whose test fonts draw weight
+  900 the same as 800, so no screenshot shows how much heavier the name is; on an iPhone, SF
+  Hebrew has a Black weight.
+- **Colour blindness was simulated** (Machado, Oliveira and Fernandes 2009, CIEDE2000), not
+  tried with people.
+- **Two groups under one word.** A man whose pay cycle changes inside the fortnight has a group
+  of his own (v189); on the screen it now reads «דו־שבועי» beside the crew's «דו־שבועי», in the
+  same colour, with no dates to tell them apart - the hint «תקופת מעבר» inside it is the only
+  sign on the glass (its dates are on paper and in the picture).
+- **The weekly men's dates are still on the screen** in one place: the «another open account»
+  sentence under their group and its button. The owner's words were about the headings.
+- In the light scheme the two words' colours are dark shades close in hue to site colours 5 and
+  1 (ΔE2000 6-7); they are only ever text, on a page that shows no site colour. The edges are
+  ΔE2000 20 and more from every site colour.
+- The days dialog's title and the «מקדמות» list were checked and left as they were.
+- Found by the builder, outside this change and not changed: several browser suites check
+  "nothing scrolls sideways" as `scrollWidth <= innerWidth`, which an emulated phone cannot
+  fail (its layout viewport grows to fit an overflow); `tests/reportnames.browser.mjs` reads
+  the root's `clientWidth` instead.
+
+### Also in v192: the day screen's writes across midnight and under quick fingers
+
+Files: `js/app.js`, `js/ui/day.js`, `js/ui/sheet.js`, `js/ui/undo.js`, `js/ui/usual.js`,
+`js/ui/week.js`, `js/ui/workercard.js`, `js/ui/sitecard.js`; branch `day-writes-r2` to `32d84b0`,
+three rounds of review. Day-screen writes across midnight and under quick fingers (found by review; on v190 and earlier unless said otherwise, and repaired over three rounds). WHAT WAS WRONG. (1) A write could land on a day other than the one its surface showed: hours typed into the sheet's «שעות נוספות» box on Tuesday, with the sheet shut after midnight while the box still had focus, were taken off Tuesday and written onto Wednesday (v189 and v190). (2) A box holding typing kept the midnight follow owed after it was left, so the morning's first record went to yesterday. Round two's first repair, never served, made the follow after the leaving tap: a count box merely tapped at 23:50 held the day, the morning's first tap (a usual-site chip, «נעדר», a man's ✕) wrote Tuesday, the screen then jumped to Wednesday, and ↶ no longer held the step. (3) The round-one hotfix's walking sheet, never served, silently swallowed a deliberate tap at a normal pace, so every later site went to the man before. On v190 itself a double tap on a tile of the walking sheet placed two men. (4) Round two, never served, made «בטל» on the undo bar and the foot of the day ignore any tap for 700 ms. WHAT A PERSON COULD HAVE SEEN ON v190: extra hours on the wrong day; the first man of the morning recorded on yesterday after a count typed late at night; two men placed by one double tap in the sheet. WHAT IS DONE. Every surface that names a day (the assign sheet and every control in it, «לאן הלך», a site's picker, «🧹 רוקן אתר», the trays, the רימא and יוסף גבס boxes) captures its date and layer when drawn and writes there, whatever the calendar did meanwhile. The follow is held only by an open dialog or by a box being typed into (from its first keystroke), never by a box only tapped. Focus going from a typed box to another box (a tap, Tab, the next box's label) carries the typing and the day stays. When the boxes are left, the digits are committed to their own day and the follow is made at that tap's click, before anything under the finger acts; a tap on the day screen is spent on it, so nothing is written on yesterday and the next tap is on the day the screen says. A guard now ignores only the same finger again in the same place: a press inside the control the earlier press hit, less than 300 ms later. That covers the walking sheet after it moves on, «בטל», and the day's foot rows; a tap anywhere else, or 350 ms or later, is always a tap. guardFingersOn covers writing controls only, never a surface's close button, search box or «נקה». No Hebrew changed; no data path, key or model code touched. WHICH TESTS HOLD IT: tests/midnight.browser.mjs (every writer open across midnight; a box only tapped holds no day; the leaving tap spent, by finger, mouse and an iPhone-style tap; box-to-box by tap, Tab and label; another page's control), tests/doubletap.browser.mjs (a pace of 350/400/600/800 ms places every man; a double tap at 100/150/250 ms places one; north-south at 150-250 ms gives each man his site; at 320x568, 375x667 and 440x956), tests/usual.browser.mjs («בטל» and the foot rows at 350/450/650 ms; the double taps still one man). WHAT IS NOT COVERED: nothing was tried on a real phone, and the iPhone's focus behaviour is simulated in Chromium. Four quick taps on the SAME tile of the walking sheet 200-250 ms apart, meant for four men, place two: on the glass they are the double tap, and the sheet's title names the man still showing (pinned so it stays visible). The first tap of a morning that leaves a typed box held across midnight does nothing but bring the screen to today.
+
+STILL WRONG, on v190, v191 and this build alike (found by the last review, not repaired here): a
+double tap whose first tap SHUTS a surface lets the second fall onto the day screen under it - on
+the walking sheet's last waiting man it can take another man off his site by the ✕ beneath the
+tile; on the sheet's «סגור» it lands on «מהיום הקודם» and copies the previous day into every
+waiting man; and in the sheet a man's row opens, after its opening window, a double tap on
+«נעדר» marks and unmarks him (his site is gone), on a site adds and removes it, and on «שעות
+נוספות» can land on «יום כפול». Each shows in the undo bar. Its own round is next.
+
+### Also in v192: the window that arrives while the service worker takes over (`sw.js`)
+
+**The window that arrives while the service worker is taking over (sw.js).** The v192 gate failed one check of `tests/whatsnew.browser.mjs` — «nothing went wrong on the page»: 503 "farkad: build identity unknown" — and it was the product, not the suite. On a first visit nothing controls the origin while the worker installs, so a reload in that stretch (a pull to refresh, a second tab) is navigated from the network and recorded by nobody; `activate` then read its list of windows without it (measured: an empty list, or only the window that was leaving), and a few milliseconds after the claim the reloaded window was this worker's with no record. Everything it asked for afterwards was refused `unrecorded`: `js/sync/firebase-adapter.js`, so sync never started in that window; the spreadsheet library, so the export fell back to CSV; an icon; and the census called it a foreign build — until a reload. v190 and v191 as served do the same (load, reload 350ms later, 40 phones each: 10, 13 and 15 refused on v190, v191 and v192); v191's head scripts did not cause it, and an update on a phone that already has the app does not meet it, because a worker that is in charge records every navigation. The repair is `buildOfClaimed`: in the process that ran `activate` and claimed, a window with no record that was not among the windows open when `activate` began is written down by the enrollment's own rule the first time anything asks about it — a fetch, the census, the reaper — through `rememberClient`, so a refused write still refuses the window. Nothing else moved: a restarted worker enrolls nobody late, an unreadable or damaged record is still unknown, a window that was open at `activate` and lost its record is still refused, a window this worker refused to start is never enrolled, and two shelves with no pointer is still no answer (`tests/swidentity`, `swrestart`, `handover`, `update` unchanged and green). `tests/firstvisit.browser.mjs` is the check that would have caught it: the race held open on an origin that can hold a request (red on the commit before: adapter, library and icon all refused), what is still refused once the worker's process is stopped and the records are gone, and twelve phones reloaded 0–600ms after their first load on the shipped worker. After: 0 of 80 phones refused, and `tests/whatsnew.browser.mjs` alone 12 runs of 12 green. KNOWN AND NOT CHANGED: a reload that lands just after the claim is nobody's window — it runs off the network until its next start and is refused nothing (about 1 phone in 40 here). Chromium only; not tried on a real phone or in Safari.
+
+NARROWED BEFORE IT WAS SERVED (second review): the late enrollment is for a FIRST INSTALL only.
+As first written it wrote a late window on an UPGRADE down as the outgoing build, and a hard
+reload that reached the origin after the deploy was measured running the new page with the
+outgoing build's scripts - law 7's one forbidden thing. On an upgrade the late window is refused
+`unrecorded`, as on every build before, and a reload repairs it; the `seen` set is gone with the
+case it served. `tests/firstvisit.browser.mjs` holds both orders of the upgrade, a disk that
+refuses the record, a restart, and the first install; the documents it holds are asked for under
+a query, because the precache's own `./index.html` made the first version of the suite stall on
+Chromium's cache lock about one run in fourteen.
+
+## v191 — «תצוגה גדולה»: a large display, per phone, for the one of the three who is far-sighted (served 2026-11-12)
+
+**Served.** Merged as `f6cf5ff` (PR #73) on 2026-11-12 after both gates exited 0 on `e5e1795` (this build's `4f5871b` and one docs commit that marked v190 served and listed what v190 still does wrong): `npm test` 11,276 of 11,276 checks; `npm run test:release` 27,359 of 27,359, 153 suites. The Pages deployment succeeded at 02:23 UTC.
 Built on `182ba97` (v190, the repair of five faults the review of v189 found). It was first
 built and measured on `9846d7f` (v186) and moved, whole, onto v187, v188, v189 and v190 as
 each was merged - the numbers it carried on the way went to builds main took first - and

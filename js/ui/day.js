@@ -134,8 +134,12 @@ function trayTapTooSoon(writes) {
     const last = lastTapAt.get('trays');
     const soon = last !== undefined && now - last < DOUBLE_TAP_GUARD_MS;
     if (writes || soon) lastTapAt.set('trays', now);
+    // Where and when the finger of a tray WRITE came down - for the rows that come up under it
+    // when the trays fold away (renderDay's foot, below; sameFingerAgain, js/ui/sheet.js).
+    if (writes && !soon) trayWritePress = typeof openPress === 'function' ? openPress() : null;
     return soon;
 }
+let trayWritePress = null;
 
 // TRUE WHILE THE DAY IS BEING TAKEN DOWN TO BE DRAWN AGAIN (v166).
 //
@@ -302,8 +306,10 @@ function buildDay(root) {
         return;
     }
     if (State.activePlaces().length === 0) {
+        // Of the day drawn here, not of State.date at the tap (markAllHoliday).
+        const drawnFor = State.date;
         root.appendChild(button('הכל חופש', 'btn-secondary day-holiday-action',
-            markAllHoliday, 'רשום חופש לעובדים בלי רישום ביום הנבחר'));
+            () => markAllHoliday(drawnFor), 'רשום חופש לעובדים בלי רישום ביום הנבחר'));
         root.appendChild(renderSetupCard(
             '🏗️',
             'עוד אין אתרי עבודה',
@@ -347,12 +353,31 @@ function buildDay(root) {
     // ABOVE that one - it is the evening's main tool and carries a whole date - and gives
     // none while its own row is in the dock. That row IS 62px, so the stylesheet does not
     // show it on a screen too short to afford it (css/design.css, the journey's second pass).
+    //
+    // BOTH ROWS COME UP UNDER THE FINGER THAT PLACED THE LAST MAN WAITING (the second review of the
+    // hotfix): the trays fold away above them, and the second tap of a double tap on his usual
+    // chip landed on «בניית סידור» and started the journey - the day screen moved to tomorrow and
+    // the journey's place was written. Round two gave the rows the trays' whole clock, and a
+    // deliberate «בדיקת היום» or «חיפוש עובד» 350-650 ms after placing the last man - the reading
+    // people go to next - did nothing and said nothing (the third review). What comes down on them
+    // there is the same finger again: a press inside the control of the tray's last write, less
+    // than its bounce after it (sameFingerAgain, js/ui/sheet.js). That press, and only it, stops
+    // at the row; the three buttons are untouched.
+    const trayClock = row => {
+        row.addEventListener('click', event => {
+            if (!(event.detail > 0) || typeof sameFingerAgain !== 'function'
+                || !sameFingerAgain(pressOf(event), trayWritePress)) return;
+            event.preventDefault();
+            event.stopPropagation();
+        }, true);
+        return row;
+    };
     const check = () => {
         const journey = typeof journeyDayEntry === 'function' ? journeyDayEntry() : null;
-        if (journey) root.appendChild(journey);
+        if (journey) root.appendChild(trayClock(journey));
         const foot = typeof dayCheckEntry === 'function' ? dayCheckEntry() : el('div', 'daycheck-row');
         if (typeof findEntry === 'function') foot.insertBefore(findEntry(), foot.firstChild);
-        if (foot.firstChild) root.appendChild(foot);
+        if (foot.firstChild) root.appendChild(trayClock(foot));
     };
 
     if (dayMode === 'workers') {
@@ -534,6 +559,17 @@ function anyRecordOn(date) {
         entriesFor(State.schedule, date, worker.id, State.layer).length > 0);
 }
 
+// State.unrecorded() for a NAMED day: every active man with no entry and no absence on
+// `date`. The surfaces that capture their day when they are drawn (the assign sheet, the two
+// pickers, the tray, the tally) ask it of THAT day, and State.unrecorded() answers only for
+// State.date. The same rule, word for word (js/state.js).
+function unrecordedOn(date, layer) {
+    return State.activeWorkers().filter(worker => {
+        if (isAbsent(State.schedule, date, worker.id, layer)) return false;
+        return entriesFor(State.schedule, date, worker.id, layer).length === 0;
+    });
+}
+
 function renderProgress() {
     const workers = State.activeWorkers();
     const left = State.unrecorded().length;
@@ -559,9 +595,12 @@ function renderProgress() {
         // and the two together were a row the 320px header could not spare; one tap on
         // the number that says how much is left opens the next man who is.
         const count = `נרשמו ${done} מתוך ${workers.length}`;
+        // The day this count is of, as drawn: the sheet it opens is that day's.
+        const drawn = { date: State.date, layer: State.layer };
         line.appendChild(button(count, 'now-count', () => {
-            const next = State.unrecorded()[0];
-            if (next) openAssignSheet(next.id);
+            const next = unrecordedOn(drawn.date, drawn.layer)[0];
+            // Opened by a tap that may have a twin (openAssignSheet, js/ui/sheet.js).
+            if (next) openAssignSheet(next.id, { tapped: true, date: drawn.date, layer: drawn.layer });
         }, `${count} - המשך אל הבא שטרם נרשם`));
     }
     // Announced politely on change - the day switch and the climbing count are the two
@@ -640,6 +679,8 @@ let bulkOpen = false;
 function renderBulkRow() {
     const remaining = State.unrecorded();
     if (remaining.length < 2) return el('span');
+    // The day the chips are drawn over: every chip writes into it (bulkAssign).
+    const date = State.date;
 
     const row = el('div', bulkOpen ? 'bulk-row' : 'bulk-row bulk-closed');
     row.id = 'bulkRow';
@@ -654,7 +695,7 @@ function renderBulkRow() {
     body.appendChild(el('span', 'bulk-label', `כל ה-${remaining.length} שנותרו ב:`));
 
     State.activePlaces().forEach(place => {
-        const chip = button('', 'bulk-chip', () => bulkAssign(place));
+        const chip = button('', 'bulk-chip', () => bulkAssign(place, date));
         appendSiteName(chip, place.id, place.name);
         paintSite(chip, place.id);
         body.appendChild(chip);
@@ -698,11 +739,12 @@ function bulkIcon() {
     return svg;
 }
 
-function bulkAssign(place) {
-    const workers = State.unrecorded();
+// `drawnFor`: the day the row of chips was drawn over; left out, the day on screen.
+function bulkAssign(place, drawnFor) {
+    const date = isRealDate(drawnFor) ? drawnFor : State.date;
+    const workers = unrecordedOn(date, 'actual');
     if (workers.length === 0) return;
 
-    const date = State.date;
     const changes = workers.map(worker =>
         assignPlace(State.schedule, date, worker.id, 'actual', place.id, RATE_NORMAL));
     // Kept in the journal by the disk guard, it is an edit all the same, and the step
@@ -789,12 +831,15 @@ function renderDayDrawer() {
 
     const today = todayStr();
 
-    // Straight back to today, from wherever the record-fixing wandered off to.
+    // Straight back to today, from wherever the record-fixing wandered off to. Every day
+    // this drawer opens is a day chosen by hand: a follow still owed from midnight is settled
+    // by it (dayChosenByHand, js/app.js).
     const back = button(`חזרה להיום · ${formatShortDate(parseLocalDate(today))}`,
         'btn-secondary drawer-today', () => {
             closeDayDrawer();
             hideUndo();
             State.date = today;
+            if (typeof dayChosenByHand === 'function') dayChosenByHand();
             render();
         });
     list.appendChild(back);
@@ -827,6 +872,7 @@ function drawerWeek(list, title, start, today) {
             closeDayDrawer();
             hideUndo();
             State.date = value;
+            if (typeof dayChosenByHand === 'function') dayChosenByHand();
             render();
         });
         if (value === State.date) row.classList.add('dd-on');
@@ -847,10 +893,14 @@ function drawerWeek(list, title, start, today) {
 
 function renderDayWorkerList() {
     const list = el('div', 'worker-list');
+    // The day this list is drawn for: its ✕ clears that day, and the sheet a row opens is of
+    // that day (sheetDate, js/ui/sheet.js) - never State.date as it stands at the tap.
+    const at = { date: State.date, layer: State.layer };
+    const { date, layer } = at;
 
-    State.workersForDay(State.date, State.layer).forEach(worker => {
-        const absent = isAbsent(State.schedule, State.date, worker.id, State.layer);
-        const entries = entriesFor(State.schedule, State.date, worker.id, State.layer);
+    State.workersForDay(date, layer).forEach(worker => {
+        const absent = isAbsent(State.schedule, date, worker.id, layer);
+        const entries = entriesFor(State.schedule, date, worker.id, layer);
         const empty = !absent && entries.length === 0;
 
         const row = el('div', empty ? 'wrow wrow-empty' : absent ? 'wrow wrow-absent' : 'wrow');
@@ -861,7 +911,8 @@ function renderDayWorkerList() {
         const main = document.createElement('button');
         main.type = 'button';
         main.className = 'wrow-main';
-        main.addEventListener('click', () => openAssignSheet(worker.id));
+        // Opened by a tap that may have a twin (openAssignSheet, js/ui/sheet.js).
+        main.addEventListener('click', () => openAssignSheet(worker.id, { tapped: true, date, layer }));
 
         const nameCell = el('span', 'wrow-name', worker.name);
         if (worker.active === false) nameCell.appendChild(el('span', 'badge', 'לא פעיל'));
@@ -898,7 +949,7 @@ function renderDayWorkerList() {
                 // One tap on one row out of twelve, on a phone, at night. It will be the
                 // wrong row sometimes, so it is undoable rather than guarded by a dialog.
                 editWithUndo(worker.id, `הרישום של ${isolate(worker.name)} נמחק`,
-                    () => clearWorkerDay(State.schedule, State.date, worker.id, State.layer));
+                    (date, layer) => clearWorkerDay(State.schedule, date, worker.id, layer), at);
             }, `נקה את ${isolate(worker.name)}`));
         }
 
@@ -968,8 +1019,14 @@ function renderDayHeader() {
     picker.addEventListener('change', () => {
         // hideUndo like every other way of leaving the day: the armed undo restores
         // into the day it was made on, and firing it while another day is on screen
-        // reads as "undo is broken" while it silently rewrites the day just left.
-        if (picker.value) { hideUndo(); State.date = picker.value; render(); }
+        // reads as "undo is broken" while it silently rewrites the day just left. A day
+        // chosen by hand, too (dayChosenByHand, js/app.js).
+        if (picker.value) {
+            hideUndo();
+            State.date = picker.value;
+            if (typeof dayChosenByHand === 'function') dayChosenByHand();
+            render();
+        }
     });
     header.appendChild(picker);
 
@@ -1053,8 +1110,10 @@ function appendModeSwitch(tools, bulkRow) {
     modes.appendChild(modeButton('workers', 'לפי עובדים'));
     modes.appendChild(modeButton('sites', 'לפי אתרים'));
     line.appendChild(modes);
+    // Of the day the header is drawn for, not of State.date at the tap (markAllHoliday).
+    const drawnFor = State.date;
     line.appendChild(button('הכל חופש', 'btn-secondary day-holiday-action',
-        markAllHoliday, 'רשום חופש לעובדים בלי רישום ביום הנבחר'));
+        () => markAllHoliday(drawnFor), 'רשום חופש לעובדים בלי רישום ביום הנבחר'));
     if (bulkRow && bulkRow.classList && bulkRow.classList.contains('bulk-row')) {
         line.appendChild(bulkToggle(bulkRow));
     }
@@ -1097,6 +1156,9 @@ function stepDay(days) {
         date.setDate(date.getDate() + (days < 0 ? -1 : 1));
     }
     State.date = toLocalDateStr(date);
+    // A day chosen by hand (dayChosenByHand, js/app.js): stepped away and back again, the
+    // old today is his, and a follow still owed from midnight does not take it from him.
+    if (typeof dayChosenByHand === 'function') dayChosenByHand();
     render();
 }
 
@@ -1141,7 +1203,9 @@ function siteActionIcon(add) {
 
 function renderSiteCard(place) {
     const card = el('div', 'site-card');
-    const workerIds = workersAtPlace(State.schedule, State.date, place.id, State.layer);
+    // The day this card is drawn for: its picker opens on it (pickerDate, js/ui/sheet.js).
+    const at = { date: State.date, layer: State.layer };
+    const workerIds = workersAtPlace(State.schedule, at.date, place.id, at.layer);
     if (workerIds.length === 0) card.classList.add('site-card-empty');
 
     // By-site view: here the card IS one site, so there is no ambiguity in colouring its
@@ -1164,8 +1228,9 @@ function renderSiteCard(place) {
     count.setAttribute('aria-label', `${workerIds.length} עובדים באתר`);
     tools.appendChild(count);
 
+    // Opened by a tap that may have a twin (openWorkerPicker, js/ui/sheet.js).
     const add = button('', 'btn-icon site-head-btn',
-        () => openWorkerPicker(place.id),
+        () => openWorkerPicker(place.id, { tapped: true, date: at.date, layer: at.layer }),
         `הוסף עובד ל${isolate(place.name)}`);
     add.appendChild(siteActionIcon(true));
     tools.appendChild(add);
@@ -1190,7 +1255,7 @@ function renderSiteCard(place) {
 
     const list = el('div', 'site-list');
     if (workerIds.length > 0) {
-        workerIds.forEach(workerId => list.appendChild(renderAssignmentRow(place, workerId)));
+        workerIds.forEach(workerId => list.appendChild(renderAssignmentRow(place, workerId, at)));
         card.appendChild(list);
     }
 
@@ -1337,9 +1402,12 @@ function renderSiteCountField(place, spec) {
 // word was made for it. The row keeps its place key (row:<site>:<man>, see renderDay) and
 // the ✕ its double-tap guard. The by-worker list is a row of its own
 // (renderDayWorkerList) and is not touched.
-function renderAssignmentRow(place, workerId) {
+function renderAssignmentRow(place, workerId, drawnFor) {
+    // The day his card is drawn for (renderSiteCard): the ✕ takes him off that day, and the
+    // sheet his name opens is that day's.
+    const at = drawnFor || { date: State.date, layer: State.layer };
     const worker = State.worker(workerId);
-    const entries = entriesFor(State.schedule, State.date, workerId, State.layer);
+    const entries = entriesFor(State.schedule, at.date, workerId, at.layer);
     const entry = entries.find(e => e.placeId === place.id);
     const rate = entryRate(entry);
 
@@ -1365,7 +1433,8 @@ function renderAssignmentRow(place, workerId) {
     // rate, regular or not: an eye is told a regular day by the missing tag, a screen reader
     // is not. Shaped like the ✕ beside it (הסר את <X> מ<Y>), both names isolated.
     if (worker) {
-        const main = button('', 'assign-main', () => openAssignSheet(workerId, { stay: true }),
+        const main = button('', 'assign-main',
+            () => openAssignSheet(workerId, { stay: true, date: at.date, layer: at.layer }),
             `${isolate(worker.name)} ב${isolate(place.name)} · ${RATE_LABELS[rate]}`);
         main.appendChild(name);
         row.appendChild(main);
@@ -1378,7 +1447,7 @@ function renderAssignmentRow(place, workerId) {
         // would take HIM off. It is the first tap again (secondTapTooSoon).
         if (secondTapTooSoon('row-remove')) return;
         editWithUndo(workerId, `${isolate(worker ? worker.name : '')} הוסר מ${isolate(place.name)}`,
-            () => unassignPlace(State.schedule, State.date, workerId, State.layer, place.id));
+            (date, layer) => unassignPlace(State.schedule, date, workerId, layer, place.id), at);
     }, `הסר את ${isolate(worker ? worker.name : '')} מ${isolate(place.name)}`));
 
     return row;
@@ -1400,13 +1469,16 @@ function renderUnassignedTray(unrecorded) {
         return tray;
     }
 
+    // The day the tray is drawn for. «נעדר» writes into it, and «לאן הלך» opens on it.
+    const at = { date: State.date, layer: State.layer };
     const chips = el('div', 'chips');
     unrecorded.forEach(worker => {
         const chip = el('div', 'chip');
         // Every control on this row reads the trays' one clock (trayTapTooSoon).
         chip.appendChild(button(worker.name, 'chip-main', () => {
             if (trayTapTooSoon(false)) return;
-            openPlacePicker(worker.id);
+            // Opened by a tap that may have a twin (openPlacePicker, js/ui/sheet.js).
+            openPlacePicker(worker.id, { tapped: true, date: at.date, layer: at.layer });
         }, `שבץ את ${isolate(worker.name)}`));
         // Through editWithUndo, in the words of the sheet's own «נעדר», like every other
         // write on this screen. It was a bare commit: no undo bar, and the header's ↶ left
@@ -1415,7 +1487,7 @@ function renderUnassignedTray(unrecorded) {
         chip.appendChild(button('נעדר', 'chip-side', () => {
             if (trayTapTooSoon(true)) return;
             editWithUndo(worker.id, `${isolate(worker.name)} נרשם כנעדר`,
-                () => markAbsent(State.schedule, State.date, worker.id, State.layer));
+                (date, layer) => markAbsent(State.schedule, date, worker.id, layer), at);
         }, `סמן את ${isolate(worker.name)} כנעדר`));
         // Where he usually works, as one chip after the two that were here (js/ui/usual.js):
         // a suggestion read off the record at this render, written by nobody until tapped.
@@ -1432,7 +1504,9 @@ function renderVehicleTray() {
     if (!vehiclesEnabled()) return null;
     const vehicles = (State.schedule.vehicles || []).filter(item => item.active !== false);
     if (!vehicles.length) return null;
-    const runs = (State.schedule.days[State.date] || {}).vehicleRuns || {};
+    // The day the tray is drawn for; a chip opens its departure on that day.
+    const drawnFor = State.date;
+    const runs = (State.schedule.days[drawnFor] || {}).vehicleRuns || {};
     const tray = el('div', 'tray');
     tray.appendChild(el('h4', null, 'רכבים — נרשמים בנפרד'));
     const missing = vehicles.filter(vehicle => !runs[vehicle.id]);
@@ -1444,9 +1518,9 @@ function renderVehicleTray() {
         const status = !run ? 'טרם נרשם' : run.out ? 'יצא' : 'לא יצא';
         const chip = el('div', run && run.out ? 'chip chip-vehicle' : 'chip chip-vehicle chip-absent');
         chip.appendChild(button(`${vehicle.name} · ${status}`, 'chip-main',
-            () => editVehicleDeparture(vehicle.id), `רישום נסיעה של ${isolate(vehicle.name)}`));
+            () => editVehicleDeparture(vehicle.id, drawnFor), `רישום נסיעה של ${isolate(vehicle.name)}`));
         if (run && run.out) {
-            const labels = placeLabelsIn(State.schedule, State.date, State.date);
+            const labels = placeLabelsIn(State.schedule, drawnFor, drawnFor);
             chip.appendChild(el('span', 'hint', run.siteIds.map(id => placeLabelFrom(labels, id)).join(' · ')));
         }
         chips.appendChild(chip);
@@ -1455,9 +1529,10 @@ function renderVehicleTray() {
     return tray;
 }
 
-async function editVehicleDeparture(vehicleId) {
+// `drawnFor`: the day the tray was drawn for; left out, the day on screen.
+async function editVehicleDeparture(vehicleId, drawnFor) {
     if (!vehiclesEnabled() || farkadWritesBlocked()) return;
-    const date = State.date;
+    const date = isRealDate(drawnFor) ? drawnFor : State.date;
     const vehicle = (State.schedule.vehicles || []).find(item => item.id === vehicleId && item.active !== false);
     if (!vehicle) return;
     const old = ((State.schedule.days[date] || {}).vehicleRuns || {})[vehicleId] || null;
@@ -1538,6 +1613,8 @@ function renderAbsentTray() {
         return tray;
     }
 
+    // The day the tray is drawn for: each ✕ cancels an absence on it.
+    const at = { date: State.date, layer: State.layer };
     const chips = el('div', 'chips');
     absent.forEach(worker => {
         const chip = el('div', 'chip chip-absent');
@@ -1549,7 +1626,7 @@ function renderAbsentTray() {
             // as «לא נרשמו» (trayTapTooSoon).
             if (trayTapTooSoon(true)) return;
             editWithUndo(worker.id, `ההיעדרות של ${isolate(worker.name)} בוטלה`,
-                () => clearWorkerDay(State.schedule, State.date, worker.id, State.layer));
+                (date, layer) => clearWorkerDay(State.schedule, date, worker.id, layer), at);
         }, `בטל היעדרות של ${isolate(worker.name)}`));
         chips.appendChild(chip);
     });
@@ -1559,8 +1636,10 @@ function renderAbsentTray() {
 
 // Holiday fills only missing records. The date and crew are captured before confirmation;
 // records are re-read afterwards so another phone's work is never replaced by this action.
-async function markAllHoliday() {
-    const date = State.date;
+// `drawnFor`: the day the button was drawn on, which its question names; left out, the day
+// on screen.
+async function markAllHoliday(drawnFor) {
+    const date = isRealDate(drawnFor) ? drawnFor : State.date;
     const ids = State.activeWorkers().map(worker => worker.id);
     const missing = id => {
         if (vehicleDateClosed(State.schedule, id, date)) return false;

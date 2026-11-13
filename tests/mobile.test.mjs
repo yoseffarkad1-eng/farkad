@@ -2732,6 +2732,11 @@ for (const width of WIDTHS) {
                 firstRight: cells[0] ? Math.round(rect(cells[0]).right) : null,
                 otherRights: cells.slice(1).map(c => Math.round(rect(c).right)),
                 rowRight: row ? Math.round(rect(row).right) : null,
+                // The card's inside edge: inside its border and its padding on the side a
+                // heading begins - an 8px edge in the group's colour since 2026-11-11.
+                rowInner: row ? Math.round(rect(row).right - parseFloat(getComputedStyle(row).borderRightWidth)
+                    - parseFloat(getComputedStyle(row).paddingRight)) : null,
+                rowEdge: row ? parseFloat(getComputedStyle(row).borderRightWidth) : null,
                 firstText: cells[0] ? cells[0].textContent.trim() : null
             };
         });
@@ -2748,9 +2753,14 @@ for (const width of WIDTHS) {
         // RIGHTMOST, which in an RTL card is where a heading begins. Measured rather than
         // assumed: `td:first-child` is given `order: 1` in a flex row, and an order that
         // stopped working would put the name in the middle of his own card.
+        // MOVED ON PURPOSE (the groups' colours, the owner, 2026-11-11): the tolerance was the
+        // card's 1px border and 12px padding, read off its outer edge. A group's card now has
+        // an 8px edge in the group's colour on this side, so the heading is held to the card's
+        // INSIDE edge instead - exactly, which is the stricter claim - and the edge is measured.
         check(`${width}px: and it reaches the right edge of the card`,
-            seen.firstRight !== null && Math.abs(seen.firstRight - seen.rowRight) <= 14,
-            JSON.stringify({ first: seen.firstRight, row: seen.rowRight }));
+            seen.firstRight !== null && Math.abs(seen.firstRight - seen.rowInner) <= 1
+            && seen.rowRight - seen.firstRight <= seen.rowEdge + 13,
+            JSON.stringify({ first: seen.firstRight, inner: seen.rowInner, row: seen.rowRight, edge: seen.rowEdge }));
         check(`${width}px: no cell of the card starts further right than the heading`,
             seen.otherRights.every(right => right <= seen.firstRight + 1),
             JSON.stringify({ first: seen.firstRight, others: seen.otherRights }));

@@ -481,6 +481,9 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     // A man placed by the day's own picker, by a finger.
     const queued = await page.evaluate(() => FarkadSync.pendingCount());
     await tapOnDay(page, page.locator('#dayView .tray .chip-main', { hasText: 'מחמוד' }));
+    // MOVED ON PURPOSE (the review of the hotfix, R2): «לאן הלך» opened by a tap takes no
+    // finger for DOUBLE_TAP_GUARD_MS (js/ui/sheet.js); the moment is waited out.
+    await page.waitForTimeout(800);
     await page.locator('#placePickerList button', { hasText: 'נתניה' }).tap();
     await page.locator('#placePickerModal button[onclick="closePlacePicker()"]').tap();
     await page.waitForTimeout(150);
@@ -1171,6 +1174,7 @@ for (const [width, height] of [[375, 667], [440, 956]]) {
     };
     await offSite('עלי');
     await tapOnDay(page, page.locator('#dayView .tray .chip-main', { hasText: 'עלי' }));
+    await page.waitForTimeout(800);
     await page.locator('#placePickerList button', { hasText: 'נתניה' }).tap();
     await page.locator('#placePickerModal button[onclick="closePlacePicker()"]').tap();
     await offSite('ראמי');
