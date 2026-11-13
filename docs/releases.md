@@ -1,4 +1,169 @@
-## v192 — «דוחות»: each man's name first on his card, the two pay groups told apart by their word and a colour, and one word (candidate, not served)
+## v193 — repairs from a read-only audit of v192: the update's shelf, the backup doors, the frame, a paste and two links (candidate, not served)
+
+**Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `ae6e1a0` (v192, served 2026-11-13: PR 74 merged, Pages run 94 succeeded; the served
+stamp could not be read from the build machine, whose network does not reach the site). Two
+branches integrated in one commit that moves the three stamps: `swfresh` (`sw.js`) and
+`auditfix-ui` (`index.html`, `js/ui/backup.js`, `js/ui/quickstart.js`, `js/ui/reports.js`,
+`js/ui/share.js`). Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`,
+`js/recovery.js`, `firestore.rules` or `functions`; no money figure moves. «מה חדש» has an
+entry with no item: nothing here is seen on a screen unless something goes wrong. The two
+parts below were written on their branches, before the stamps moved, and say so. STILL OPEN
+from the same audit and NOT in this build: ↶ pressed after another phone's newer record was
+adopted writes this phone's old copy over it (js/ui/undo.js, day.js, sheet.js - in repair);
+a restore on a nearly full disk can spend the restore points (js/store.js - the owner's
+approval); the cloud rules check order and not content, and a damaged cloud document is
+adopted by the snapshot door (firestore.rules, js/sync - the owner's approval).
+
+### The new build's shelf is filled from the origin, not from the phone's HTTP cache
+
+**Not served. The three stamps are NOT moved by this change; whoever integrates it moves
+them.** Built on `ae6e1a0` (v192). The app's files: `sw.js` and nothing else. Nothing in
+`js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js` or `firestore.rules`.
+
+### The fault
+
+Found by a read-only audit, by reading and then by a probe. The worker's install filled its
+shelf with `cache.add(url)`, which is `fetch(url)`, and a worker's fetch is answered out of
+the browser's HTTP cache while the entry is fresh. GitHub Pages answers every file with
+`Cache-Control: max-age=600`. So a new worker installing while the phone's HTTP cache still
+held fresh copies of the deploy before it put the OLD bytes on the NEW build's shelf:
+
+- every file still fresh: the shelf named for the new build holds the old build whole. The
+  banner comes and is pressed, and the phone goes on running the old program under the new
+  worker. `sw.js` is already the newest, so no later check finds anything, nothing is said,
+  and the phone stays there until the build after that one. A rollout rule of this file
+  ("every phone on vN before ...") is then believed met on a phone that is not.
+- some fresh and some not: one script of the new build beside the rest of the old, on one
+  shelf - law 7 broken with nothing to notice it, because the page's stamp and
+  `APP_VERSION` come from the same stale side and agree.
+
+The manifest is written from what is on the shelf, so the shelf called itself sound.
+
+**It existed in every served build** - every build whose worker precached its shell, v192
+included. No suite could see it: every server under `tests/` answers `no-store`.
+
+**Who was exposed.** Only a phone whose HTTP cache held the shell less than ten minutes old
+at the moment the next worker installed: two deploys landing within ten minutes of each
+other, or a phone that installed (or first visited) within the ten minutes before a deploy.
+A phone that took its last build more than ten minutes before the next deploy was never
+exposed. Whether any phone in the field is on such a shelf now is NOT measured; a phone that
+is, repairs itself at the install of this build, which fills its shelf from the origin.
+
+### What changed (`sw.js`)
+
+- **The install asks the origin.** Each shell file is added as
+  `new Request(url, { cache: 'reload' })`.
+- **The shelf must say it is this build before it is called complete** (`shelfIsThisBuild`).
+  `reload` gets past the phone's HTTP cache and not past the host's CDN, which can hand out a
+  new `sw.js` over the old page for a while. The cached `./index.html` and `./` are read for
+  their `farkad-build` meta and the cached `js/app.js` for `APP_VERSION`; if any of the three
+  is not this worker's `VERSION`, the install fails exactly as it does for a missing file:
+  the old build keeps serving, whole, and the browser tries again at the next update check.
+  It reads the two files that name the build and no others - a CDN handing out one old script
+  beside a new page and a new `app.js` still passes it.
+- **The two network fallbacks for this build's own shelf** (`serveFrom(VERSION, …, true)`,
+  and the cache-first branch for a request with no client, which WRITES what it fetched onto
+  the shelf) go through `pastHttpCache`: the same request with `cache: 'no-cache'`, so the
+  origin is asked whether the HTTP cache's copy is still the file.
+
+### Looked at and left as it was
+
+- `navigator.serviceWorker.register('sw.js')` (`js/ui/offline.js`): the default
+  `updateViaCache: 'imports'` already fetches `sw.js` itself past the HTTP cache (the probe
+  and the new suite both see `/sw.js` asked for on every check), and the worker has no
+  `importScripts`. `registration.update()` in `checkForUpdate` and on return to the
+  foreground is the same request.
+- The document's fallback when this build's shelf has no page (`timedFetch(request)` in the
+  navigate branch) is still a plain fetch: a navigation request cannot be rebuilt with
+  another cache mode, and what it fetches is never written to a shelf. A page fetched that
+  way inside the ten minutes can be the build before; its scripts then come off this build's
+  shelf and `checkBuildConsistency` stops the app from writing. Not changed, not measured.
+- The Firebase SDK is off-origin and the worker does not handle it.
+
+### Held by
+
+`tests/swfresh.test.mjs` (`npm run test:swfresh`, in `test:all`): a real Chromium with its
+HTTP cache on, a server that answers `max-age=600`, a deploy inside the window; every entry
+of the new shelf compared with the deployed file by SHA-256, whole-stale and mixed; the
+origin-behind install failing and then succeeding. Red on `ae6e1a0`: 12 of its 18 checks.
+
+### Known not covered
+
+- GitHub Pages' real headers and its CDN were not asked; the ten minutes are what Pages is
+  documented to send.
+- WebKit. `cache: 'reload'` in a service worker's `Request` is standard and is not measured
+  on an iPhone here.
+- A first install fetches every shell file twice (the page's own load, and the install),
+  as before; with `reload` the second can no longer be answered from the HTTP cache, so a
+  first visit costs the shell's bytes a second time. Measured only as: the suites that time
+  a first install still pass.
+### What the audit found on the backup doors, the frame, a paste and two links
+
+**Not a build yet: the three stamps are NOT moved by these commits.** Branch `auditfix-ui`,
+one commit per finding on `ae6e1a0` (v192) and one for these notes, each finding with the check that was red on
+v192 before its repair (`tests/auditfix.test.mjs` in `npm test`, `tests/auditfix.browser.mjs`
+in `test:all`). `index.html`, `js/ui/backup.js`, `js/ui/quickstart.js`, `js/ui/reports.js`
+and `js/ui/share.js` are cached files, so until the stamps move with them (law 5)
+`tests/build.test.mjs` fails one check - «and nothing in the shell has changed since» - and
+`npm test` stops there. Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`,
+`js/recovery.js`, `firestore.rules`, `sw.js`, `js/ui/day.js`, `js/ui/sheet.js` or
+`js/ui/undo.js`. «מה חדש» has no item for it yet; the release that moves the stamps adds one.
+
+- **The way back from «לשחזר את המצב שלפני הטעינה האחרונה»** (`js/ui/backup.js`). The button
+  asked `result.ok` and nothing else: where the restored state was already on the phone but
+  the transaction was not finished - no signal (`cloud`), or a full disk at `queue` or
+  `finalize` - it took the state just left off the stack and the slot and kept the state now
+  on screen, so the evening recorded since was on no key of the phone. It asks what happened
+  to the record: the entry for the state left goes only when nothing was replaced
+  (`invalid`, `prepare`, a cancelled `local`); a refused write whose intent could not be
+  cancelled keeps both. Every sentence it says was already true of its stage and is unchanged.
+- **The daily pruning of restore points** (`takeDailySnapshot`) removed whatever sorted
+  oldest past three without reading it, so a cut-off restore point - the only bytes of that
+  morning - went on the fourth day (law 10). It keeps the three newest it can read on the
+  disk and steps over one it cannot, as the reclaim ladder beside it does. Not repaired: a
+  restore point dated in the FUTURE (a morning with the clock wrong) still holds one of the
+  three places for good.
+- **Loading a backup file and the migration's open questions.** The file is the schedule
+  and nothing else; loading one wrote an empty list over the questions the phone was still
+  holding. A file that cannot speak for them now leaves the phone's list standing, written
+  again against the record now on the disk. THE FILE FORMAT IS NOT CHANGED, so every build
+  that loads a backup loads this one's; the file still does not CARRY the questions (a
+  backup taken on a phone with open questions and loaded on a phone with none brings none).
+- **«תוקן …»** in a correction's line (`correctionLine`, `js/ui/reports.js`) was cut from a
+  UTC timestamp: a correction written between midnight and 02:00/03:00 in Israel read as
+  written the day before. It is read on the phone's calendar. Words only, no figure.
+- **The frame** (`index.html`, the head's first inline script). This host can send no
+  `frame-ancestors`, so a page of another site could hold the app in an invisible frame, and
+  where a framed site's storage is not partitioned that frame is the app on the real record
+  (measured in Chromium as Playwright launches it: it booted on the record and wrote a
+  restore point). Framed by another origin the load is now stopped before any script of the
+  app, the disk is not opened, and the frame shows one sentence and one link. A frame of the
+  same origin, and a sandboxed one (`tests/embedded.html`, an opaque origin), open as they
+  did. Measured with two origins in Chromium only: `window.stop()` is what ends the load,
+  and WebKit, an iPhone and an old WebView were not tried - where it did not end the load
+  the cover would still lie over the whole page.
+- **Bounds.** «התחלה מהירה» refuses a paste of more than 500 lines or with a line over 200
+  characters, at both steps, with the words left in the box; the backup door refuses a file
+  over 64 MB (before reading it, where the picker says the size), over 3,000 workers or
+  3,000 sites, or with a name over 300 characters - a backup, a v1 file and a rescue file
+  alike. Refused whole and said; never cut down to fit. Not bounded: the number of days in
+  a file, a note's length, and a name typed into the worker's or the site's own form.
+- **`window.open` to wa.me** (`shareTextOut` in `js/ui/share.js`, `shareWorkerStatement` in
+  `js/ui/reports.js`) carries `noopener,noreferrer`, as the four wa.me anchors do in `rel`.
+  Neither caller reads the returned handle. Not tried on an iPhone's home-screen app.
+
+**Hebrew, all PROPOSED and pinned word for word** (`tests/auditfix.browser.mjs`,
+`tests/auditfix.test.mjs`): the frame - «פרקד לא נפתחת בתוך דף של אתר אחר, כדי לשמור על
+הרישום.» and «לפתיחת פרקד בחלון משלה»; a paste - «יש כאן N שורות - יותר מ-500. זו לא נראית
+רשימת שמות, ולכן לא נוסף כלום. בדוק מה הודבק ונסה שוב.» and «שורה N ארוכה מדי לשם: N תווים,
+יותר מ-200. לא נוסף כלום. בדוק מה הודבק ונסה שוב.»; a file - «הקובץ גדול מדי: N MB, יותר
+מ-64 MB. קובץ גיבוי של פרקד קטן מזה בהרבה, ולכן הוא לא נקרא. הנתונים הקיימים לא השתנו.»,
+«הקובץ חורג ממה שפרקד מקבלת, ולכן לא נטען. הנתונים הקיימים לא השתנו.», «N עובדים בקובץ -
+יותר מ-3000.», «N אתרים בקובץ - יותר מ-3000.», «שם של עובד באורך N תווים - יותר מ-300.»,
+«שם של אתר באורך N תווים - יותר מ-300.» (under the existing title «הקובץ לא נטען»).
+
+## v192 — «דוחות»: each man's name first on his card, the two pay groups told apart by their word and a colour, and one word (served 2026-11-13)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
 Built on `f6cf5ff` (v191, served). It is the owner's change to the reports page - branch

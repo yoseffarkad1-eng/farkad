@@ -73,6 +73,8 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    // v193: repairs found by an audit of v192 - nothing a foreman would see on a screen.
+    { build: 'v193', items: [] },
     { build: 'v192', items: [
         { title: 'דוחות: שמות בולטים וצבע לכל קבוצה',
             text: 'בכרטיס של כל עובד השם גדול ובולט, השבועיים בכתום והדו־שבועיים בכחול, ובראש כל קבוצה כתוב רק שבועי או דו־שבועי.',

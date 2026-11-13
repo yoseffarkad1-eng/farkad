@@ -11,6 +11,10 @@
 let quickStep = null;   // 'workers' | 'places' | null
 let quickWorkers = [];
 
+// See quickNext: what one paste may hold. A crew is tens of names of a few words each.
+const QUICK_MAX_LINES = 500;
+const QUICK_MAX_NAME = 200;
+
 function openQuickStart() {
     quickStep = 'workers';
     quickWorkers = [];
@@ -46,6 +50,23 @@ function quickNext() {
         problem.textContent = quickStep === 'workers'
             ? 'נא להזין לפחות שם אחד.'
             : 'נא להזין לפחות אתר אחד.';
+        return;
+    }
+
+    // THE BOUNDS OF A PASTE, asked at both steps and before anything is kept. The wrong
+    // clipboard - a whole WhatsApp chat - became one "worker" per line, committed and sent
+    // to the other phones, with the count said only afterwards. Both bounds are far above
+    // any list of names; a paste past one is refused whole, with the words still in the
+    // box, and never cut down to fit.
+    const tooLong = lines.findIndex(line => line.length > QUICK_MAX_NAME);
+    if (lines.length > QUICK_MAX_LINES) {
+        problem.textContent = `יש כאן ${lines.length} שורות - יותר מ-${QUICK_MAX_LINES}. ` +
+            'זו לא נראית רשימת שמות, ולכן לא נוסף כלום. בדוק מה הודבק ונסה שוב.';
+        return;
+    }
+    if (tooLong !== -1) {
+        problem.textContent = `שורה ${tooLong + 1} ארוכה מדי לשם: ${lines[tooLong].length} תווים, ` +
+            `יותר מ-${QUICK_MAX_NAME}. לא נוסף כלום. בדוק מה הודבק ונסה שוב.`;
         return;
     }
 

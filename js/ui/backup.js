@@ -118,7 +118,28 @@ function takeDailySnapshot() {
     // a new photograph is not worth the whole album.
     Store.set(SNAPSHOT_PREFIX + today, JSON.stringify(State.schedule), { optional: true });
 
-    snapshotDates().slice(SNAPSHOT_KEEP).forEach(date => Store.remove(SNAPSHOT_PREFIX + date));
+    // THREE IT CAN READ, and one it cannot read is never the one that goes. This removed
+    // whatever sorted oldest without looking inside it - the fault the ladder above was
+    // repaired for, left standing in the path that runs every morning: a cut-off restore
+    // point, the only bytes of that morning there are, was deleted on the fourth day with
+    // nothing copied and nobody told. Law 10 again. It is stepped over, exactly as the
+    // ladder steps over it, and it does not take one of the three places either.
+    snapshotDates().filter(date => snapshotReadsOnDisk(SNAPSHOT_PREFIX + date))
+        .slice(SNAPSHOT_KEEP).forEach(date => Store.remove(SNAPSHOT_PREFIX + date));
+}
+
+// The ladder's own test, for the pruning: whether the DISK's bytes under this key parse.
+// A key the disk does not hold at all (memory only) has nothing to lose and counts as
+// readable, as it does there.
+function snapshotReadsOnDisk(key) {
+    const raw = Store.durableGet(key);
+    if (raw === null) return true;
+    try {
+        JSON.parse(raw);
+        return true;
+    } catch (error) {
+        return false;
+    }
 }
 
 // A counted, collapsible row instead of a bare wall of dates - but OPEN by default.
@@ -1821,16 +1842,76 @@ function openBackupFile(parsed) {
     return {
         schedule,
         issues: [],
+        // An ordinary backup file is the schedule and nothing else: it does not carry the
+        // questions the migration left open, so its empty list is not "there were none" -
+        // the file simply cannot say. importBackup leaves this phone's own list standing.
+        issuesUnsaid: true,
         summary: `בקובץ ${schedule.workers.length} עובדים, ${schedule.places.length} אתרים ו-${counts.workDays} ימי עבודה.`
     };
+}
+
+// THE BOUNDS OF A FILE THIS DOOR TAKES. Nothing was asked: a name of three million
+// characters and a roster of five thousand were loaded after the ordinary confirm, became
+// the record, and were sent to the other phones - a record near the cloud's size limit and
+// a full disk, both from one wrong file. Every bound is far above any crew this app is
+// for, and a file past one is REFUSED whole, before anything is replaced, with the bound
+// named: cutting it down to fit would be a record that quietly says something else.
+const IMPORT_MAX_BYTES = 64 * 1024 * 1024;
+const IMPORT_MAX_ROSTER = 3000;
+const IMPORT_MAX_NAME = 300;
+
+function importTooLargeNotice(bytes) {
+    return {
+        title: 'הקובץ לא נטען',
+        message: `הקובץ גדול מדי: ${Math.round(bytes / (1024 * 1024))} MB, יותר מ-64 MB. ` +
+            'קובץ גיבוי של פרקד קטן מזה בהרבה, ולכן הוא לא נקרא. הנתונים הקיימים לא השתנו.'
+    };
+}
+
+// One line per bound the schedule in the file is past; empty when it is inside them all.
+function importBoundsProblems(schedule) {
+    const problems = [];
+    const workers = (schedule && Array.isArray(schedule.workers)) ? schedule.workers : [];
+    const places = (schedule && Array.isArray(schedule.places)) ? schedule.places : [];
+    const longest = list => list.reduce((most, row) =>
+        Math.max(most, String((row && row.name) || '').length), 0);
+
+    if (workers.length > IMPORT_MAX_ROSTER) {
+        problems.push(`${workers.length} עובדים בקובץ - יותר מ-${IMPORT_MAX_ROSTER}.`);
+    }
+    if (places.length > IMPORT_MAX_ROSTER) {
+        problems.push(`${places.length} אתרים בקובץ - יותר מ-${IMPORT_MAX_ROSTER}.`);
+    }
+    if (longest(workers) > IMPORT_MAX_NAME) {
+        problems.push(`שם של עובד באורך ${longest(workers)} תווים - יותר מ-${IMPORT_MAX_NAME}.`);
+    }
+    if (longest(places) > IMPORT_MAX_NAME) {
+        problems.push(`שם של אתר באורך ${longest(places)} תווים - יותר מ-${IMPORT_MAX_NAME}.`);
+    }
+    return problems;
 }
 
 function importBackup(event) {
     const file = event.target.files[0];
     if (!file) return;
 
+    // Asked BEFORE the read where the browser says the size: a file of hundreds of
+    // megabytes is not read into memory to be refused afterwards.
+    if (typeof file.size === 'number' && file.size > IMPORT_MAX_BYTES) {
+        event.target.value = '';
+        askTell(importTooLargeNotice(file.size));
+        return;
+    }
+
     const reader = new FileReader();
     reader.onload = async e => {
+        // And of what was actually read, for a picker that did not say.
+        if (typeof e.target.result === 'string' && e.target.result.length > IMPORT_MAX_BYTES) {
+            event.target.value = '';
+            askTell(importTooLargeNotice(e.target.result.length));
+            return;
+        }
+
         let loaded;
         try {
             loaded = readBackupFile(JSON.parse(e.target.result));
@@ -1856,6 +1937,19 @@ function importBackup(event) {
         }
 
         const incoming = loaded.schedule;
+
+        // Before the question is even asked: a file past the bounds is not offered.
+        const outOfBounds = importBoundsProblems(incoming);
+        if (outOfBounds.length > 0) {
+            event.target.value = '';
+            askTell({
+                title: 'הקובץ לא נטען',
+                message: 'הקובץ חורג ממה שפרקד מקבלת, ולכן לא נטען. הנתונים הקיימים לא השתנו.\n\n' +
+                    outOfBounds.join('\n')
+            });
+            return;
+        }
+
         // A rescue file says so, out loud, before anything is replaced. It is not a
         // backup somebody chose to keep - it is everything a phone was holding at the
         // moment it said it could not read its own records, and what comes out of it is
@@ -1891,7 +1985,16 @@ function importBackup(event) {
         const previousIssues = State.migrationIssues;
         // Decisions the migration refused to guess at come with the file. Losing them
         // here would leave work in the old file that the app now claims to have imported.
-        State.migrationIssues = loaded.issues;
+        //
+        // AND A FILE THAT CANNOT SPEAK FOR THEM CLEARS NOTHING. An ordinary backup holds
+        // no such list, and its `[]` was written over the questions this phone was still
+        // holding - answered by nobody, gone from the disk, and left only inside the way
+        // back. The rule restoreLocalBackup keeps for an entry that predates them: the
+        // list on the device stands, and is written again below against the record now
+        // on the disk so that the next open does not judge it stale.
+        const fileIssues = loaded.issuesUnsaid === true && Array.isArray(previousIssues)
+            ? previousIssues : loaded.issues;
+        State.migrationIssues = fileIssues;
 
         // The restore transaction normalises the replacement on its way to the disk,
         // and that run reports to Recovery too - before the write, which the report
@@ -1943,7 +2046,7 @@ function importBackup(event) {
         // The branch a person lands on is not a reason to tell them less.
         const opening = loaded.rescue ? rescueLoadedNotice(loaded) : 'הגיבוי נטען.';
 
-        const decisionsKept = writeIssues(loaded.issues,
+        const decisionsKept = writeIssues(fileIssues,
             { bound: loaded.issuesBound !== false });
 
         // NOW the phone is told, and held: the file's unreadable parts are on this disk,
@@ -1953,12 +2056,12 @@ function importBackup(event) {
         // would have refused. After the decisions are written for the same reason.
         Recovery.deliver((loaded.evidence || []).concat(replacing.reports));
 
-        if (!decisionsKept && loaded.issues.length > 0) {
-            State.migrationIssues = loaded.issues;
+        if (!decisionsKept && fileIssues.length > 0) {
+            State.migrationIssues = fileIssues;
             render();
             await askTell({
                 title: 'נטען, אבל ההחלטות לא נשמרו',
-                message: `${opening}\n\n${loaded.issues.length} רישומים שממתינים ` +
+                message: `${opening}\n\n${fileIssues.length} רישומים שממתינים ` +
                     'להחלטה לא הצליחו להישמר במכשיר, ולכן הם יימחקו כשתסגור את האפליקציה. ' +
                     'פנה מקום במכשיר וטען את הקובץ שוב, או ענה עליהם עכשיו.'
             });
@@ -2060,20 +2163,36 @@ async function restoreLocalBackup() {
         writeIssues(State.migrationIssues);
     }
 
-    if (result.ok) {
-        // Now, and only now. Dropping it before the transaction had proved itself meant
-        // a restore the app correctly REFUSED still destroyed the state it was refusing
-        // to restore: the entry left the stack, the single slot was overwritten with the
-        // state that had not moved, and the way back was gone with nothing said about it.
-        //
-        // Dropped after the push above, so pressing the button twice walks further back
-        // rather than flipping between the last two states forever.
-        dropUndoState(raw);
-    } else {
+    // WHAT HAPPENED TO THE RECORD decides which entry goes, not `result.ok`.
+    //
+    // This asked `ok` and nothing else, under a comment that said "Nothing was replaced".
+    // That is true of three answers - 'invalid', 'prepare', and a 'local' whose intent
+    // was cancelled. For 'queue', 'finalize' and 'cloud' the replacement is ALREADY ON
+    // THE DISK (js/sync/restore.js, replaceEverything; importBackup above draws the same
+    // line), and 'cloud' is simply a site with no signal: the entry for the state just
+    // left was taken off the stack and the slot, the entry for the state now on screen
+    // was kept, and the evening recorded since was on no key of the phone - with the
+    // restore then sent to the other phones when the signal came back.
+    const nothingReplaced = result.stage === 'invalid' || result.stage === 'prepare'
+        || (result.stage === 'local' && result.cancelled !== false);
+    if (nothingReplaced && !result.ok) {
         // Nothing was replaced, so the way back that was written a moment ago is a way
         // back to a state nothing moved away from. Taken off again, so the stack is
         // exactly what it was and the next press reaches the same entry as this one.
         dropUndoState(leaving);
+    } else if (!result.ok && result.stage === 'local') {
+        // The write was refused AND the note saying a restore is wanted could not be
+        // taken off the disk: the next session acts on it. Whether the record ends as
+        // the one or the other is not known here, so both entries stay.
+    } else {
+        // The replacement is on this phone - finished, or with the queue, the note or
+        // the cloud still owed. Now, and only now: dropping it before the transaction
+        // had proved itself meant a restore the app correctly REFUSED still destroyed
+        // the state it was refusing to restore.
+        //
+        // Dropped after the push above, so pressing the button twice walks further back
+        // rather than flipping between the last two states forever.
+        dropUndoState(raw);
     }
 
     tellRestoreResult(result, 'שוחזר.');

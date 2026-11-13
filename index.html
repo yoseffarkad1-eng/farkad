@@ -30,9 +30,62 @@
      file that would not parse - is heard here, in the order it happened, and kept for the
      sentinel, which says the first of it in its banner exactly as it says everything else.
      Like the sentinel this depends on nothing and never touches the disk; once the sentinel
-     has taken what it heard, it hears nothing more. -->
+     has taken what it heard, it hears nothing more.
+
+     AND FIRST OF ALL, THE FRAME. This host can send no frame-ancestors header, so a page
+     of ANOTHER site could hold the app in an invisible frame over its own buttons - and
+     where the browser does not partition a framed site's storage, that frame is the app
+     on the real record, with every tap made on the outer page landing in it. So before
+     anything else is loaded: when this document is inside a frame, has an origin of its
+     own, and the window at the top (or the one holding it) is not of that origin, the
+     load is stopped where it stands - no script of the app is fetched or run, the disk is
+     not opened - and the frame is covered by one sentence and one link that opens the app
+     in a window of its own. A frame of this origin is not touched, and neither is a
+     sandboxed one (tests/embedded.html): its origin is opaque, its storage throws, and
+     there is nothing in it to reach. Like the ear it calls nothing the app defines and
+     never touches the disk (tests/auditfix.browser.mjs, two origins in a real browser). -->
 <script>
 (function () {
+    var framed = false;
+    try { framed = window.top !== window.self; } catch (error) { framed = true; }
+    if (framed && String(window.origin) !== 'null') {
+        var ours = false;
+        try {
+            ours = window.top.location.origin === window.location.origin
+                && window.parent.location.origin === window.location.origin;
+        } catch (error) { ours = false; }
+        if (!ours) {
+            window.farkadFramed = true;
+            try { window.stop(); } catch (error) { /* covered below either way */ }
+            var cover = document.createElement('div');
+            cover.id = 'farkadFramedCover';
+            cover.setAttribute('role', 'alert');
+            // NOT a fixed layer: every fixed layer of this page is made by a stylesheet rule,
+            // so that the stuck iPhone frame can bring each one down exactly once
+            // (tests/bars.stale.browser.mjs counts them). Nothing else of the page is drawn
+            // here - the load was stopped in the head - so a block the height of the window
+            // at the top of the document covers as much.
+            cover.style.cssText = 'position:absolute;top:0;right:0;left:0;min-height:100vh;box-sizing:border-box;z-index:2147483647;'
+                + 'background:#ffffff;color:#111111;font:600 18px/1.5 system-ui,sans-serif;'
+                + 'padding:24px 16px;text-align:center;overflow:auto;direction:rtl';
+            var says = document.createElement('p');
+            says.style.cssText = 'margin:0 0 16px';
+            says.textContent = 'פרקד לא נפתחת בתוך דף של אתר אחר, כדי לשמור על הרישום.';
+            var out = document.createElement('a');
+            out.href = window.location.href;
+            out.target = '_blank';
+            out.rel = 'noopener noreferrer';
+            out.style.cssText = 'display:inline-block;min-height:44px;min-width:44px;line-height:44px;'
+                + 'padding:0 16px;font-size:18px;color:#0b4a8f;text-decoration:underline';
+            out.textContent = 'לפתיחת פרקד בחלון משלה';
+            cover.appendChild(says);
+            cover.appendChild(out);
+            var holder = document.body || document.createElement('body');
+            if (!holder.parentNode) document.documentElement.appendChild(holder);
+            holder.appendChild(cover);
+            return;
+        }
+    }
     var heard = [];
     window.farkadBootEar = heard;
     window.addEventListener('error', function (event) {
@@ -53,7 +106,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v192">
+<meta name="farkad-build" content="v193">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
