@@ -106,7 +106,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v194">
+<meta name="farkad-build" content="v195">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -1104,6 +1104,11 @@
      card, the sheet and the advances screen - all above it - only when a door is pressed,
      and day.js asks for its entry by name when the day is drawn. -->
 <script src="js/ui/find.js"></script>
+<!-- «מי חייב כסף», «שים לב» and «סגירות שנרשמו»: readings of the money record. After
+     reports.js (the pay sheet's own functions and words, which ask for it by name through
+     typeof when «מקדמות» and «דוחות» are drawn) and share.js (the two doors a closure's text
+     leaves by). It runs nothing at load and writes nothing, ever. -->
+<script src="js/ui/owes.js"></script>
 <script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>
 <script src="js/ui/migration.js"></script>

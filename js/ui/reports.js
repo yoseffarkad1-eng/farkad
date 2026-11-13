@@ -191,6 +191,9 @@ function renderAdvances() {
     if (root.querySelector('.advance-form')) return;
     clear(root);
     if (ADVANCE_ORDER_DRAFT) { renderAdvanceOrder(root); return; }
+    // «סגירות שנרשמו» (js/ui/owes.js) is a page of this view, like a man's advances: when
+    // one is open it is drawn instead of the list. A reading; it writes nothing.
+    if (typeof renderOwesPage === 'function' && renderOwesPage(root)) return;
     const worker = ADVANCE_WORKER && State.worker(ADVANCE_WORKER);
     if (worker) {
         root.appendChild(button('חזרה לכל העובדים', 'btn-secondary', () => showWorkerAdvances(null)));
@@ -247,6 +250,9 @@ function renderAdvances() {
         appendNoWorkersYet(root);
         return;
     }
+    // «מי חייב כסף» (js/ui/owes.js): what is owed in all and the men who owe, before the
+    // list of everybody. A reading of the ledger; the list under it is untouched.
+    if (typeof renderOwesInto === 'function') renderOwesInto(root);
     if (State.schedule.workers.length > 1) {
         root.appendChild(button('סידור', 'btn-secondary', openAdvanceOrder, 'סידור עמוד המקדמות'));
     }
@@ -476,6 +482,9 @@ function renderReports() {
     if (REPORT_SECTION === 'workers') controls.appendChild(renderReportWorkerPicker());
     root.appendChild(controls);
     renderOverCapNotice(root);
+    // «שים לב» (js/ui/owes.js): one row, shut, above the pay sheet and OUTSIDE its section,
+    // so the paper, the picture and the file are what they were.
+    if (REPORT_SECTION === 'workers' && typeof renderOwesWarningsInto === 'function') renderOwesWarningsInto(root);
 
     // Both sections are built and both are in the DOM, whichever is chosen; the one not
     // being looked at carries .report-offscreen, which the print block hides as well.
