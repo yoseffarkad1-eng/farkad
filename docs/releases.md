@@ -1,4 +1,230 @@
-## v194 — «הכל חופש» behind «עוד ⋯» and a question, ↶ that does not write over another phone's newer record, a tap that no longer falls through a surface that shut, and men taken off a site one after another (candidate, not served)
+## v195 — «מי חייב כסף», «שים לב» and «סגירות שנרשמו»: readings of the advances that write nothing (candidate, not served)
+
+**Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `1be3987` (v194, served 2026-11-13: PR 76 merged, Pages run 96 succeeded; the served
+stamp could not be read from the build machine). One branch in one commit that moves the three stamps: `money-readings` (seven commits on
+`f2e79ed`, v193), squashed onto v194, with the cost of its readings repaired before release
+(below). The app's files: `js/ui/owes.js` (new), `js/ui/reports.js` (three calls: two in
+`renderAdvances`, one in `renderReports`), `index.html` (one script tag and the stamp),
+`css/app.css` (one print rule), `css/design.css` (one block, the last), `css/large.css` (the
+sizes said again), `js/ui/whatsnew.js` for its item; `sw.js` changes in its `VERSION` line and
+in ONE line of the shell list, `./js/ui/owes.js`. Nothing in `js/sync`, `js/model`,
+`js/state.js`, `js/store.js`, `js/recovery.js`, `firestore.rules` or `functions`; no money
+figure moves, and nothing new is written anywhere - no Store key, no field of the record,
+nothing queued, nothing synced.
+
+**Why, and the root cause it exists to show.** The owner, 2026-11-13: he loses money to a
+deduction that was not made and to an advance that is forgotten, and the first thing he wants
+to see is the men who owe. A read-only probe of v193 found why two screens of one record
+disagree: A PERIOD NOBODY CLOSED IS PRESUMED FULLY DEDUCTED BY THE NEXT SHEET, WHILE THE LEDGER
+KEEPS THE DEBT. The pay sheet reads an unclosed period, from the next period on, as though the
+full possible deduction had come off that wage (`advanceWalk`, `js/model/schema.js`); the
+ledger - which only a CLOSE writes a deduction to - goes on showing what was handed over.
+2,000 handed over, the fortnight left open, the man keeps working: «דוחות» opens the next
+fortnight on 0, «מקדמות» says 2,000, and until this build nothing said they differ. v195 does
+not change either reading. It shows the LEDGER's figure, names the period that was left open
+and what the sheet presumed there, and points at the existing closing button. It closes
+nothing itself.
+
+**The owner's decisions, 2026-11-13** (he saw pictures of a mock-up, not these words on a
+phone):
+- **Warn after 2 periods without a deduction** - two of a man's OWN periods (weeks for a
+  weekly man, fortnights otherwise) ended with nothing taken off and nothing handed back
+  (`OWES_QUIET_PERIODS`, one line of `js/ui/owes.js`).
+- **Old unclosed periods are closed by hand, man by man, oldest first.** Nothing closes them
+  in bulk and nothing closes them for him: each warning names a man's OLDEST open account,
+  counts the ones after it, says «סוגרים מהישן לחדש», and its one button only NAVIGATES - the
+  pay sheet narrowed to that man and pointed at that period, where the closing button already
+  is.
+
+**What it is: three READINGS, in one new file, `js/ui/owes.js`.**
+- **«מי חייב כסף»**, on top of «מקדמות», above the list it does not replace: the total owed,
+  and one row per man who owes, largest debt first - the LEDGER's figure
+  (`openAdvanceBalance`, which is `workerAdvanceSummary(id).left`, the figure of the list under
+  it), since when (his oldest advance with money left), the last recorded deduction, and flags:
+  N of his own periods ended with nothing taken and nothing handed back (from 2), an earlier
+  account not closed, not working (no day in his current period and none in the last seven
+  days), «כבוי», «דורש בדיקה». A row opens his advances. A man who owes nothing is not on it; a
+  phone on which nobody owes shows one sentence.
+- **«שים לב»**, the same findings as sentences: open under the board on «מקדמות», and ONE shut
+  row at the head of «דוחות» ← «לפי עובד» (outside the report's section: not on paper, not in
+  the picture, not in the file). An unclosed account is named with its dates, with what the
+  sheet PRESUMED came off the wage there (`advanceAccount(...).deducted` on that open period)
+  beside what the ledger holds, how many more are open after it, and the one button above.
+- **«סגירות שנרשמו»**, a page of «מקדמות» with one button into it (drawn when a closure is on
+  the record): every close already in the ledger, grouped by the moment and the phone that
+  wrote it (`at` + `by`), newest first; one close shows who and when and, per account, what was
+  deducted, what was left to pay and what remained (`advanceAccount` on the closed period) and
+  the totals; it leaves as text by `shareTextOut` / `copyTextOut`. No picture door.
+
+**The gate.** With the carry shut, or open on a record whose migration nobody approved, the
+board is the sum handed over under «מקדמות רשומות» (what the archive sentence and the worker's
+card say there) and NOTHING of the new arithmetic: no age, no period, no flag, no warning, no
+closures (`tests/approval.test.mjs`).
+
+### The cost, repaired before release
+
+**What was measured on the branch as written** (`js/ui/owes.js` of `money-readings` on v194;
+Node 22, the suites' devices; a crew of 15 over 26 weeks, 16 advances on ten men, three men with
+closes, the migration approved; medians; "questions" are calls of `carryMigrationSettled`):
+
+| | with the board | without it |
+|---|---|---|
+| one question of the gate (`carryReportingEnabled`) | 45 ms | |
+| one reading (`owesRead`) | 78 ms, 1 question | |
+| a draw of «מקדמות» | 84 ms, 1 question | 0.9 ms, none |
+| a draw of «דוחות» ← «לפי עובד» | 1,020 ms, 19 questions | 899 ms, 18 questions |
+
+THE SAME CREW WITH ONE MAN WHO HAS A DEBT AND NO DAILY RATE: one question 2.6 s, one reading
+2.7 s, a draw of «מקדמות» 2.6 s (1.0 ms without the board), a draw of «דוחות» 50.9 s with the
+board and 47.1 s without it.
+
+In Chromium, CPU throttled 4x (`Emulation.setCPUThrottlingRate`), on a season-size record - 30
+men, 8 sites, a year of days, 16 advances, 6 repayments and 128 closes, 799 kB of record, the
+migration approved - medians of five:
+
+| | with the board | without it |
+|---|---|---|
+| one question of the gate | 198 ms | |
+| one reading | 505 ms, 1 question | |
+| a draw of «מקדמות» | 533 ms, 1 question | 4 ms |
+| a draw of «מקדמות», the record having moved | 454 ms | |
+| a draw of «דוחות» ← «לפי עובד» | 6,989 ms, 28 questions | 6,667 ms, 27 questions |
+| a draw of «דוחות», the record having moved | 6,646 ms | |
+
+With one debtor's daily rate set to 0 in memory and a fresh 1,000 handed to him (one run each):
+one question 500 ms, one reading 661 ms, a draw of «מקדמות» 678 ms. The seconds of the Node
+crew did not reproduce on this record in Chromium; why was not measured.
+
+**Why a man with no rate costs seconds - the cause, profiled.** The gate's question is not a
+lookup: `carryReportingEnabled` -> `carryMigrationSettled` -> `planCarryMigration` ->
+`planAdvanceCarry` (`js/model/schema.js`) walks every man's account fortnight by fortnight
+until `balance <= 0` and his last advance is behind it, under a ceiling of 4,000 steps. A wage
+nobody can price deducts nothing, so his balance never clears and the walk runs to the ceiling:
+**4,000 calls of `advanceWalk`, each of which asks `payrollReport` for the pay sheet of the
+WHOLE crew for that fortnight - the last one ending 2180-01-27** (counted: 1 call of each for
+the same man with a rate, 4,000 of each without). It is in the model, it is every reader's
+cost and not the board's, and this build does not touch it. **«דוחות» itself asks that question
+18 times a draw and has since before this build** (v193 measured the same: 18 questions, 930
+ms a draw on this crew) - which is the 47.1 s above, with no board on the page at all. That is
+NOT repaired here: see what remains.
+
+**What the board costs now** (`js/ui/owes.js`; each line counted by `tests/owes.test.mjs`):
+- **The plan is not run at all on a record that carries the approval, and once on any
+  other.** `carryReportingEnabled` is `advanceCarryEnabled() && (!plan.needed ||
+  carryMigrationApproved(schedule, plan))`, and the approval reads one thing of the plan, its
+  id, which is a constant: so with the flag shut the answer is false and on an approved record
+  it is true, whatever the plan says (`owesGateAnswer`). Only an unapproved record is planned,
+  by the gate's own function, once per reading. The suite holds the short answer equal to the
+  gate on every fixture and seeded record in all four states, and pins the model's three lines
+  it is read from, so a gate that changes fails there by name. (`saveFinancialAction` records
+  the approval with the first financial action on a phone, so a phone that has ever closed a
+  period or taken a repayment carries it.)
+- **One pass of each reader per reading** (`owesOnce`): for the length of one reading the pay
+  sheet is asked once per range and a man's closed periods are folded once per man, however
+  many readers ask (39 pay sheets and 15 folds for 15 men over 26 weeks; none twice). The real
+  functions are put back, throw or no throw.
+- **A draw of a record that did not move reads nothing.** The last reading is kept under a key
+  that IS the record: the write tick (`Store.tick`), today, both gates of the build, and the
+  whole record as text, compared and never hashed. The tick alone would not do - it is best
+  effort by its own account and does not move on a disk that refuses the counter - and a key
+  made of counts is what `tests/labelcache.test.mjs` exists for. So a kept figure cannot be a
+  figure of another record: after an advance, a close, a repayment, a change in memory that no
+  write carried, the day turning and the approval going and coming back, the suite compares
+  the kept reading with one made from nothing.
+- **«דוחות» does not wait for it.** The row at its head is drawn in the draw only when the
+  record has not moved since the last reading; otherwise the pay sheet is drawn and painted
+  first and the record is read after the frame. Until then nothing stands in the row's place
+  but the room the row last took - no word and no figure of the reading before - so nothing
+  stale is shown and the sheet does not jump when the row arrives; a draw that was replaced
+  meanwhile reads nothing. «מקדמות» draws its board in the draw: the board is that page's
+  first content.
+
+**The same measurements after** (same machines, same records):
+
+| Node | with the board | without it |
+|---|---|---|
+| one reading (`owesRead`) | 16 ms, no question | |
+| a draw of «מקדמות», record not moved | 2.5 ms, no question | 0.9 ms |
+| a draw of «דוחות» ← «לפי עובד» | 904 ms, 18 questions | 825 ms, 18 questions |
+| no daily rate: one reading / a draw of «מקדמות» | 20 ms / 3.3 ms, no question | 1.1 ms |
+| no daily rate: a draw of «דוחות» | 46.9 s, 18 questions | 47.4 s, 18 questions |
+
+| Chromium, 4x throttled | with the board | without it |
+|---|---|---|
+| one reading | 85 ms, no question | |
+| a draw of «מקדמות», record not moved | 55 ms, no question | 3 ms |
+| a draw of «מקדמות», the record having moved | 107 ms | |
+| a draw of «דוחות» ← «לפי עובד» | 6,554 ms, 27 questions | 6,377 ms, 27 questions |
+| a draw of «דוחות», the record having moved: the draw / until the row is there | 6,673 / 6,749 ms | |
+| no daily rate (as above): one reading / a draw of «מקדמות» | 134 ms / 47 ms, no question | |
+
+So the board's own share of a draw is now no question of the gate and, on «מקדמות», tens of
+milliseconds where it was half a second throttled; on «דוחות» the difference with and without
+it is inside the run-to-run spread of the page itself, whose own 27 questions are the cost.
+
+**Checks added.** In `tests/owes.test.mjs`: the plan counted (0 approved, 1 unapproved, 1 on a
+record with nothing to approve and no approval, 0 with the carry shut); the gate's short answer
+against the gate in every state and on the 24 seeded records, and the model's lines it rests
+on; no pay sheet and no fold asked twice in a reading; the first draw of «מקדמות» one reading,
+the second none; «דוחות» with the row asking exactly what «דוחות» asks without it; fresh after
+each of six ways a record moves; «דוחות» with the board, the record having moved, within 1.5x
+of «דוחות» without it on the season (measured about 1.0x; the reading is made INSIDE the draw
+there, which is the worst case). In `tests/owes.browser.mjs`: a redraw of an unmoved record
+draws the row at once and reads nothing; after a real repayment the draw reads nothing and
+shows only the row's place, empty, with the sheet where it was; the record is then read once,
+after a frame, though the page was drawn twice; the row and the board say the record as it is.
+MOVED ON PURPOSE in `tests/owes.test.mjs`: "one reading asks the gate once" is now none on an
+approved record and one on an unapproved one; and the scan for a writer lets the file name the
+Store in ONE expression, the read of its tick.
+
+### Known, and said rather than hidden
+
+- **«דוחות» asks the gate 18 times a draw, with or without the board, as it has since before
+  v193** (`js/ui/reports.js` and the model's readers, each asking for itself). On a record with
+  a man who has a debt and no daily rate that is tens of seconds a draw in Node (47.1 s on the
+  crew above) on v193, v194 and this build alike. `js/ui/workercard.js`, `js/ui/payslips.js`
+  and `js/ui/monthsummary.js` already ask once per reading; «דוחות» does not. Not touched here:
+  it is a change to the pay sheet's own page and deserves its own round. The walk to the year
+  2180 behind it is in `js/model/schema.js` (`planAdvanceCarry`) and is the owner's approval.
+- **On a record nobody approved** each reading still plans once (seconds, once per change of
+  the record, if a man there has a debt and no rate), and the board is drawn in the draw of
+  «מקדמות» - a page that cost 1 ms without it.
+- A record with nothing to approve on which no financial button was ever pressed carries no
+  approval, so each reading of it plans once too (44 ms on the crew above).
+- The row at the head of «דוחות» arrives a frame after the sheet when the record moved. The
+  FIRST time it arrives on a phone no room was kept for it and the sheet moves down by its
+  height; and when the last warning goes, the room kept for it closes after the frame.
+- Writing the record out as text for the key costs every draw of the two pages (1-3 ms in
+  Node on 180 kB; 22-24 ms in Chromium throttled 4x on 799 kB - most of the 55 ms above).
+- On an unapproved record the board says the sum handed over while the list under it - which
+  has read the fold since before this branch - says what is left. Two figures on one page,
+  each the existing reader's own; the sentence under the total says the balances need checking.
+- "Not working" is a rule of this file (no day in his period and none in seven days), chosen so
+  that the first morning of a week does not flag the whole crew. Proposed, like the words.
+- What a close SKIPPED cannot be known from the record and the page says so.
+- A man with credit and no debt is not on the board; an over-settled account that still owes
+  is, with «דורש בדיקה».
+- The unsent-record warning of the proposal (W5) is not built: it belongs with the closing pass.
+- The warnings name only the OLDEST unclosed account of a man and count the rest.
+- **The closing pass itself is not here**: nothing in this build closes a period, in bulk or
+  singly, that the existing button did not close before.
+
+**The Hebrew** is PROPOSED - the owner saw a mock-up, not these words on a phone - in one
+block (`OWES_TEXT`), pinned word for word in `tests/owes.test.mjs`. Reused as they are:
+«מקדמות רשומות», «כבוי», «דורש בדיקה», «חזרה לכל העובדים», «לתשלום», «הצג את החשבון»,
+«שבועי» / «דו־שבועי», «💬 שלח בוואטסאפ», «העתק», and the advances page's sentence about
+checking the balances. «מה חדש» has one item, «מקדמות: מי חייב כסף», whose «הראה לי» opens
+«מקדמות»; its sentence is the author's less one word («כסף»), because the suite holds a
+sentence to 120 characters and his was 122.
+
+**Tests.** `tests/owes.test.mjs`, `tests/owes.browser.mjs` (`tests/owes.seed.mjs` is its
+record); four screens added to `tests/screens.mjs`; the sizes restated in `css/large.css`.
+NOT tried on a real phone; nobody far-sighted has looked at it; no emulator suite was run for
+it and nothing it touches is the emulator's. Every timing above is Node or headless Chromium on
+the build machine, not a phone.
+
+## v194 — «הכל חופש» behind «עוד ⋯» and a question, ↶ that does not write over another phone's newer record, a tap that no longer falls through a surface that shut, and men taken off a site one after another (served 2026-11-13)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
 Built on `f2e79ed` (v193, served 2026-11-13: PR 75 merged, Pages run 95 succeeded; the served

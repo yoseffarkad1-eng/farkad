@@ -191,6 +191,36 @@ function migrationQuestions() {
     openMigrationModal();
 }
 
+// A record with something for «שים לב» and «סגירות שנרשמו» to say: סאמר ח'טיב - paid by the
+// week - took 1,500 two weeks ago; that week of his and רון לוי's were closed at one moment,
+// and his week since was left open. IN MEMORY ONLY: the model's own writers on the
+// live schedule, nothing committed, and owesRecordBack puts back what was there. Both run in
+// the page.
+function owesRecord() {
+    if (window.__owesKept) return;
+    window.__owesKept = JSON.stringify({ advances: State.schedule.advances || {}, ledger: State.schedule.ledger || null });
+    const at = '2026-10-29T15:40:00.000Z';
+    addAdvance(State.schedule, 'w06', '2026-10-26', 1500, '');
+    State.schedule.workers[5].payCycles = '2026-08-07=weekly';
+    closePeriodChanges(State.schedule, 'w06', '2026-10-23', '2026-10-29', at, syncDeviceId(), 300);
+    closePeriodChanges(State.schedule, 'w07', '2026-10-23', '2026-10-29', at, syncDeviceId(), 0);
+    closePeriodChanges(State.schedule, 'w08', '2026-10-23', '2026-10-29', '2026-10-30T07:05:00.000Z', 'd_other_phone', 0);
+    OWES_PAGE = null;
+    render();
+}
+
+function owesRecordBack() {
+    if (!window.__owesKept) return;
+    const kept = JSON.parse(window.__owesKept);
+    window.__owesKept = null;
+    State.schedule.advances = kept.advances;
+    if (kept.ledger) State.schedule.ledger = kept.ledger; else delete State.schedule.ledger;
+    delete State.schedule.workers[5].payCycles;
+    OWES_PAGE = null;
+    ADVANCE_WORKER = null;
+    render();
+}
+
 // The pay sheet as it opens: «לפי עובד», the cards, the default range (v189: each group read
 // over its own period). Runs in the page.
 function reportsDefault() {
@@ -273,6 +303,32 @@ export const SCREENS = [
         open: async page => { await run(page, () => showWorkerAdvances('w05')); await pause(page);
             await byText(page, '#advancesView', 'תיקון טעות'); await pause(page); },
         close: page => run(page, () => showWorkerAdvances(null)) },
+
+    // «מי חייב כסף», «שים לב» and «סגירות שנרשמו» (js/ui/owes.js). The seeded record has two
+    // men who owe and nothing to warn of - that is 'advances - list', above. These four are
+    // drawn on a record with a debt two weeks old, a week left open and two closes on
+    // it: IN MEMORY ONLY (owesRecord), never written to the disk, and taken back on leaving.
+    { name: 'advances - who owes, with the warnings', scope: APP,
+        open: async page => { await run(page, owesRecord); await run(page, () => { ADVANCE_WORKER = null; OWES_PAGE = null; }); await view('advances')(page); },
+        close: page => run(page, owesRecordBack) },
+    { name: 'advances - the closures on record', scope: APP,
+        open: async page => { await run(page, owesRecord); await view('advances')(page); await run(page, () => owesOpenPage('closures')); await pause(page); },
+        close: page => run(page, owesRecordBack) },
+    { name: 'advances - one closure', scope: APP,
+        open: async page => { await run(page, owesRecord); await view('advances')(page);
+            await run(page, () => owesOpenPage(owesClosures(State.schedule).filter(group => group.items.length > 1)[0].key)); await pause(page); },
+        close: page => run(page, owesRecordBack) },
+    { name: 'reports - «שים לב», opened', scope: APP,
+        open: async page => { await run(page, reportsDefault); await run(page, owesRecord); await view('reports')(page);
+            // The row is read after the page has painted when the record moved since the
+            // last reading (js/ui/owes.js): wait until nothing is pending.
+            await page.waitForFunction(() => !document.querySelector('.owes-pending'));
+            await run(page, () => {
+                const fold = document.querySelector('#reportsView .owes-warnings');
+                if (!fold) throw new Error('no «שים לב» at the head of the reports');
+                fold.open = true;
+            }); await pause(page); },
+        close: page => run(page, () => { OWES_HEAD_OPEN = false; owesRecordBack(); }) },
 
     { name: 'reports - by worker', scope: APP,
         open: async page => { await run(page, reportsDefault); await view('reports')(page); } },

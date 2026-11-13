@@ -1995,6 +1995,9 @@ a[href]:focus-visible,
 .report-other-account .hint { margin: 0 0 8px; }
 .report-other-account button { min-height: 44px; font-size: 16px; padding: 8px 14px; }
 @media print { .report-other-account button { display: none !important; } }
+/* «מי חייב כסף» and «שים לב» (js/ui/owes.js) are the screen's: a reading of who owes is
+   not part of the pay sheet somebody is handed. */
+@media print { .owes, .owes-warnings, .owes-pending, .owes-closures, .owes-closure, .owes-closures-entry { display: none !important; } }
 
 /* THE FINANCIAL SECTION (renderFinanceBlock): the men whose money moved in this period
    and who worked no day in it. One line each, inside the pay sheet's own section so the

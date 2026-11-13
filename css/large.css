@@ -152,6 +152,11 @@
 :root.display-large #siteCardBody .scard-cal-saturday { min-width: 96px !important; }
 :root.display-large .find-head button { min-width: 64px !important; }
 :root.display-large .find-field button { min-width: 56px !important; }
+/* «מי חייב כסף» and «סגירות שנרשמו» (js/ui/owes.js): a row of the board, a close's card and
+   the field a close's text is read in. */
+:root.display-large .owes-row,
+:root.display-large .owes-closure-card { min-height: 64px !important; }
+:root.display-large .owes-closure textarea { min-height: 160px !important; }
 @media (max-width: 700px) {
     :root.display-large .week-phone-date { min-height: 58px !important; }
 }
@@ -904,6 +909,30 @@
 :root.display-large #reportsView .invoice-picker button { font-size: 20px; }
 :root.display-large .daycheck-row .day-more-action { font-size: 20px; font-weight: 600; }
 :root.display-large .day-more-row .day-more-action { font-size: 20px; font-weight: 600; }
+/* «מי חייב כסף», «שים לב», «סגירות שנרשמו» (js/ui/owes.js), one rule for one rule. */
+:root.display-large .owes-none { font-size: 21px; font-weight: 500; line-height: 1.45; }
+:root.display-large .owes-total-label { font-size: 21px; font-weight: 600; }
+:root.display-large .owes-total-amount { font-size: 37px; font-weight: 900; line-height: 1.4; }
+:root.display-large .owes-total-count { font-size: 21px; font-weight: 700; line-height: 1.4; }
+:root.display-large .owes-head h3 { font-size: 23px; font-weight: 800; }
+:root.display-large .owes-order { font-size: 20px; font-weight: 500; }
+:root.display-large .owes-name { font-size: 23px; font-weight: 800; line-height: 1.4; }
+:root.display-large .owes-amount { font-size: 25px; font-weight: 900; }
+:root.display-large .owes-line { font-size: 20px; font-weight: 500; line-height: 1.4; }
+:root.display-large .owes-flag { font-size: 20px; font-weight: 700; line-height: 1.4; }
+:root.display-large .owes-warnings-head { font-size: 22px; font-weight: 800; line-height: 1.4; }
+:root.display-large .owes-warnings-count { font-size: 20px; font-weight: 600; }
+:root.display-large .owes-warning-title { font-size: 22px; font-weight: 800; line-height: 1.4; }
+:root.display-large .owes-warning-line { font-size: 20px; font-weight: 500; line-height: 1.45; }
+:root.display-large .owes-show { font-size: 21px; }
+:root.display-large .owes-closures-entry { font-size: 21px; }
+:root.display-large .owes-closure-card strong { font-size: 22px; font-weight: 800; }
+:root.display-large .owes-closure-card span { font-size: 20px; font-weight: 500; line-height: 1.4; }
+:root.display-large .owes-closure-meta { font-size: 20px; font-weight: 500; line-height: 1.4; }
+:root.display-large .owes-figure small { font-size: 20px; font-weight: 500; }
+:root.display-large .owes-figure b { font-size: 22px; font-weight: 800; }
+:root.display-large .owes-closure textarea { font-size: 20px; line-height: 1.5; }
+:root.display-large .owes-doors button { font-size: 20px; }
 
 /* ---- 4. THE SHAPES ------------------------------------------------------------------ */
 

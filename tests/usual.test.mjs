@@ -739,12 +739,16 @@ await block('the shell: on the page after the files it calls, in the offline she
     // MOVED AGAIN (the owner, 2026-11-11): «הכל חופש» at the foot of the day is one more
     // block after that one, and the last - so the blocks after this one are those two, named.
     // Round two: that block is «עוד ⋯»'s now, «הכל חופש» behind it - the same block, renamed.
+    // AND AGAIN (js/ui/owes.js): the readings of who owes money are one more block after
+    // «עוד ⋯»'s, and the last - three blocks after this one, named in their order.
     const next = css.indexOf('/* ---- ', from + 10);
     const holiday = css.indexOf('/* ---- «עוד ⋯» at the foot of the day, «הכל חופש» behind it');
+    const owes = css.indexOf('/* ---- «מי חייב כסף», «שים לב»');
     check('the last block of the screen layer but for the ones added since', css.trimEnd().endsWith('}')
         && (next === -1 || (css.indexOf('/* ---- the reports say the account') === next
             && css.indexOf('/* ---- ', next + 10) === holiday && holiday > next
-            && css.indexOf('/* ---- ', holiday + 10) === -1)));
+            && css.indexOf('/* ---- ', holiday + 10) === owes && owes > holiday
+            && css.indexOf('/* ---- ', owes + 10) === -1)));
     const block = next === -1 ? css.slice(from) : css.slice(from, next);
     check('48px and 18px, written there', /min-height: 48px/.test(block) && /font-size: 18px/.test(block));
     same('css/readability.css does not name it', /chip-usual|usual-note/.test(source('css/readability.css')), false);

@@ -1512,5 +1512,60 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 }
 .day-more-row { display: flex; justify-content: flex-end; margin: 24px 0 4px; }
 .day-more-row .day-more-action { margin: 0; min-height: 48px; padding: 10px 18px; font-size: 16px; font-weight: 600; }
+/* ---- «מי חייב כסף», «שים לב», «סגירות שנרשמו» (js/ui/owes.js) -------------------------
+   Readings of the money record, on top of «מקדמות» and at the head of «דוחות». The total is
+   the page's largest figure; a man's row is his name and what he owes, then one line, then
+   his flags - each flag is INK on a tinted ground with a ring in the warning's colour, so
+   it reads at 7:1 in both schemes and is not told by colour alone. The edge of a row is
+   his pay group's colour (v192's two tokens, keyed by the same data-cycle). */
+.owes { margin-block: 12px 18px; }
+.owes-none { margin: 8px 0 14px; color: var(--ink-2); font-size: 17px; font-weight: 500; line-height: 1.45; }
+.owes-total { padding: 18px 20px; border-radius: 16px; background: var(--accent-soft); color: var(--ink); }
+.owes-total-label { display: block; color: var(--ink-2); font-size: 17px; font-weight: 600; }
+.owes-total-amount { display: block; margin-block: 6px; color: var(--ink); font-size: 34px; font-weight: 900; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.owes-total-count { margin: 0; font-size: 17px; font-weight: 700; line-height: 1.4; }
+.owes-legacy { margin: 10px 0 0; }
+.owes-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin: 18px 0 8px; }
+.owes-head h3 { margin: 0; font-size: 20px; font-weight: 800; }
+.owes-order { color: var(--ink-2); font-size: 16px; font-weight: 500; }
+.owes-list { display: grid; background: var(--surface); border-radius: 14px; overflow: hidden; }
+.owes-row { display: grid !important; gap: 6px; width: 100%; min-height: 64px; padding: 14px 16px !important; text-align: start; white-space: normal !important; background: transparent !important; border: 0 !important; border-bottom: 1px solid var(--line-soft) !important; border-inline-start: 8px solid transparent !important; border-radius: 0 !important; }
+.owes-row[data-cycle="weekly"] { border-inline-start-color: var(--group-weekly-mark) !important; }
+.owes-row[data-cycle="biweekly"] { border-inline-start-color: var(--group-biweekly-mark) !important; }
+.owes-row-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
+.owes-name { min-width: 0; color: var(--ink); font-size: 20px; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; }
+.owes-amount { color: var(--ink); font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.owes-line { display: block; color: var(--ink-2); font-size: 16px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+.owes-flags { display: flex; flex-wrap: wrap; gap: 6px; }
+.owes-flag { padding: 4px 12px; border-radius: 999px; background: var(--warn-bg); box-shadow: inset 0 0 0 2px var(--warn); color: var(--ink); font-size: 16px; font-weight: 700; line-height: 1.4; }
+.owes-flag-bad { background: var(--danger-bg); box-shadow: inset 0 0 0 2px var(--danger); }
+.owes-warnings { margin: 14px 0; }
+/* The row's place at the head of «דוחות» while the record is read after the page has painted
+   (renderOwesWarningsInto): the row's own margins, and the height the row last had, written
+   on it by the script. Empty - no word and no figure - and hidden when no row was there. */
+.owes-pending { margin: 14px 0; }
+.owes-warnings-head { box-sizing: border-box; min-height: 48px; padding: 12px 14px; border-radius: 12px; background: var(--warn-bg); color: var(--ink); cursor: pointer; font-size: 18px; font-weight: 800; line-height: 1.4; }
+.owes-warnings-count { margin-inline-start: 10px; color: var(--ink); font-size: 16px; font-weight: 600; }
+.owes-warning { margin-top: 8px; padding: 12px 14px; border-inline-start: 4px solid var(--warn); border-radius: 12px; background: var(--warn-bg); color: var(--ink); }
+.owes-warning-quiet { border-inline-start-color: var(--danger); background: var(--danger-bg); }
+.owes-warning-title { display: block; font-size: 18px; font-weight: 800; line-height: 1.4; overflow-wrap: anywhere; }
+.owes-warning-line { margin: 4px 0 0; color: var(--ink); font-size: 16px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.owes-show { width: 100%; min-height: 48px; margin-top: 10px; font-size: 17px; white-space: normal; }
+.owes-closures-entry { width: 100%; min-height: 48px; margin: 0 0 14px; font-size: 17px; }
+.owes-closure-list { display: grid; gap: 10px; margin-block: 14px; }
+.owes-closure-card { display: grid !important; gap: 4px; width: 100%; min-height: 64px; padding: 14px 16px; text-align: start; white-space: normal !important; }
+.owes-closure-card strong { color: var(--ink); font-size: 19px; font-weight: 800; overflow-wrap: anywhere; }
+.owes-closure-card span { color: var(--ink-2); font-size: 16px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+.owes-closure-meta { margin: 0 0 12px; color: var(--ink-2); font-size: 16px; font-weight: 500; line-height: 1.4; }
+.owes-closure-rows { margin-bottom: 12px; padding: 4px 16px; border-radius: 14px; background: var(--surface); }
+.owes-closure-row { display: grid; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+.owes-closure-sum { border-bottom: 0; border-top: 2px solid var(--ink); }
+.owes-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.owes-figure { display: grid; gap: 2px; min-width: 0; align-content: start; }
+.owes-figure small { color: var(--ink-2); font-size: 16px; font-weight: 500; }
+.owes-figure b { color: var(--ink); font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.owes-closure textarea { box-sizing: border-box; width: 100%; min-height: 160px; margin-top: 12px; font-size: 16px; line-height: 1.5; }
+.owes-doors { margin-top: 10px; }
+.owes-doors button { font-size: 16px; }
 
 }
