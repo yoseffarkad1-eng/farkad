@@ -211,7 +211,10 @@ function shareTextOut(text, status, done) {
     // No share sheet at all (desktop): the wa.me link is opened inside the click,
     // where the browser still allows it.
     status.textContent = 'פותח וואטסאפ…';
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    // 'noopener,noreferrer', as the app's wa.me anchors carry in `rel`: the page that opens
+    // gets no window.opener to navigate this one by. Nothing here reads the handle
+    // window.open returns (with noopener it is null).
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
     done();
 }
 

@@ -1056,9 +1056,20 @@ function twoTabsRace(shared, tabA, tabB, path) {
     given('the import happened',
         Boolean((whole.State.schedule.days || {})['2026-01-01']),
         JSON.stringify(Object.keys(whole.State.schedule.days || {})));
-    given('and the imported file brought no questions of its own',
-        whole.State.migrationIssues.length === 0,
+    // MOVED with the audit repair (tests/auditfix.test.mjs, section 3). This setup used to
+    // read «the imported file brought no questions of its own» and expect an EMPTY list -
+    // which was the fault: a backup file cannot speak for the questions, and its silence
+    // was written over the one this phone was holding. The question stands now. It is
+    // answered here, by the app's own function, so that what the way back returns below
+    // is still something only the way back could have returned.
+    given('the imported file brought no questions of its own, and the open one stands',
+        whole.State.migrationIssues.length === 1,
         JSON.stringify(whole.State.migrationIssues));
+    whole.call('dismissIssue', whole.State.migrationIssues[0]);
+    given('the question is answered before the way back is taken',
+        whole.State.migrationIssues.length === 0
+        && !String(whole.raw('scheduleData:migrationIssues')).includes('שאלה'),
+        String(whole.raw('scheduleData:migrationIssues')));
 
     await whole.call('restoreLocalBackup');
     await settle(80);

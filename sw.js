@@ -21,7 +21,7 @@
 // The version string below is the whole update mechanism. Bump it in the same commit as
 // any change to a cached file, or returning visitors keep running the old build.
 
-const VERSION = 'farkad-v192';
+const VERSION = 'farkad-v193';
 
 // A scheduled server push wakes this worker even with every app window closed.
 // Always display a visible notification; neither iOS nor Android needs a page timer.
@@ -164,7 +164,18 @@ self.addEventListener('install', event => {
             .then(() => caches.open(VERSION))
             .then(cache =>
                 Promise.all(SHELL.map(url =>
-                    cache.add(url).catch(error => {
+                    // From the ORIGIN, never from the browser's HTTP cache. A bare
+                    // cache.add(url) is fetch(url), and a fetch is answered out of the
+                    // HTTP cache while the entry is fresh - the host sends max-age=600
+                    // on every file. So a phone that had fetched the shell less than ten
+                    // minutes before a deploy was handed the PREVIOUS build's bytes for
+                    // every file still fresh, and stored them on THIS build's shelf: a
+                    // shelf named for one build holding another whole, or one script of
+                    // this build beside the rest of the last. The manifest below hashes
+                    // what is on the shelf, so the shelf called itself sound; sw.js was
+                    // already the newest, so no later check found anything; no banner.
+                    // 'reload' asks the origin and takes no answer from the HTTP cache.
+                    cache.add(new Request(url, { cache: 'reload' })).catch(error => {
                         console.error('[sw] could not cache', url, error);
                         return url;
                     })
@@ -173,11 +184,57 @@ self.addEventListener('install', event => {
                     if (missing.length > 0) {
                         throw new Error('shell incomplete, keeping the old version: ' + missing.join(', '));
                     }
-                    return writeManifest(VERSION, cache);
-                }))
+                    return shelfIsThisBuild(cache);
+                }).then(() => writeManifest(VERSION, cache)))
             .then(() => markShelf(VERSION, 'complete'))
     );
 });
+
+// Is what was just put on the shelf THIS build? Asked before the shelf is called complete.
+//
+// 'reload' above gets past the phone's own HTTP cache and past nothing else. Between the
+// phone and the origin there is still the host's CDN, and a deploy does not reach every
+// file of it in the same instant: this sw.js can arrive while the page or the scripts
+// behind it are still the last build's. Every file then downloads, nothing is missing,
+// and the shelf named for this build holds the other one - the same fault by the one
+// route the fetch mode does not cover.
+//
+// The three stamps move together (tests/build.test.mjs), so two of them are read off the
+// shelf and held against the third, which is this file's own. A shelf that says another
+// build fails the install exactly as a missing file does: the old build keeps serving,
+// whole, and the browser tries again at the next update check, when the origin has
+// caught up. It reads only the two files that name the build, so a script of the last
+// build beside a page and an app.js of this one still passes it: it narrows that route,
+// it does not close it.
+function shelfIsThisBuild(cache) {
+    const stamp = VERSION.replace(/^farkad-/, '');
+    const text = url => cache.match(url).then(hit => (hit ? hit.text() : ''));
+    return Promise.all([text('./index.html'), text('./'), text('./js/app.js')])
+        .then(([page, root, app]) => {
+            const meta = body => (/<meta name="farkad-build" content="([^"]*)">/.exec(body) || [])[1];
+            const said = {
+                './index.html': meta(page),
+                './': meta(root),
+                './js/app.js': (/const APP_VERSION = '([^']*)';/.exec(app) || [])[1]
+            };
+            const other = Object.keys(said).filter(url => said[url] !== stamp);
+            if (other.length > 0) {
+                throw new Error('shell is not ' + stamp + ', keeping the old version: '
+                    + other.map(url => url + ' says ' + said[url]).join(', '));
+            }
+        });
+}
+
+// A request that is answered with the origin's current bytes, for the two places below
+// where this build's own shelf has no copy and the network is asked instead. A plain
+// fetch there is answered from the HTTP cache for ten minutes after a deploy, and what
+// the HTTP cache holds then is the build BEFORE this one - handed to a page of this
+// build, and by the second of the two written onto this build's shelf to stay.
+// 'no-cache' makes the browser ask the origin whether its copy is still the file; an
+// unchanged file costs a 304. A request that cannot be rebuilt goes as it came.
+function pastHttpCache(request) {
+    try { return new Request(request, { cache: 'no-cache' }); } catch { return request; }
+}
 
 // ---------------------------------------------------------------- the shelf registry
 //
@@ -955,7 +1012,7 @@ self.addEventListener('fetch', event => {
         caches.open(VERSION).then(cache => cache.match(request)).then(hit => {
             if (hit) return hit;
 
-            return fetch(request).then(response => {
+            return fetch(pastHttpCache(request)).then(response => {
                 if (response && response.status === 200) {
                     const copy = response.clone();
                     caches.open(VERSION).then(cache => cache.put(request, copy));
@@ -1023,7 +1080,7 @@ function serveFrom(cacheName, request, allowNetwork) {
         .then(cache => cache.match(request))
         .then(hit => {
             if (hit) return hit;
-            if (allowNetwork) return fetch(request);
+            if (allowNetwork) return fetch(pastHttpCache(request));
             return failClosed(request, 'shelf-gap:' + cacheName);
         });
 }

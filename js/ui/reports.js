@@ -3354,8 +3354,17 @@ function correctionLine(entry) {
     // is dated into the account and can be a different one. A migrated entry carries no
     // `at` at all (there is no timestamp on an old advance), and then nothing is said
     // rather than a date invented.
-    const stamp = String(entry.at || '').slice(0, 10);
-    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(stamp) ? parseLocalDate(stamp) : null;
+    //
+    // ON THIS PHONE'S CALENDAR. `at` is a UTC timestamp, and this cut its first ten
+    // characters: a correction written at 01:30 in Israel is 23:30 UTC the day before,
+    // and was shown as written the day before. js/dates.js has the rule - never
+    // toISOString for a day - and it holds for reading one back. A bare day is taken as
+    // that day; anything that is not a time says nothing, as before.
+    const at = String(entry.at || '');
+    const moment = /^\d{4}-\d{2}-\d{2}T/.test(at) ? new Date(at) : null;
+    const stamp = moment && !isNaN(moment.getTime()) ? toLocalDateStr(moment) : at.slice(0, 10);
+    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(stamp)
+        && (moment ? !isNaN(moment.getTime()) : stamp === at) ? parseLocalDate(stamp) : null;
     const tail = [
         parsed ? `תוקן ${formatShortDate(parsed)}` : '',
         entry.by ? `נרשם במכשיר ${isolate(String(entry.by))}` : '',
@@ -3805,7 +3814,10 @@ function shareWorkerStatement(workerId) {
         return;
     }
     // Inside the click, where the browser still allows a new tab.
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    // 'noopener,noreferrer', as the app's wa.me anchors carry in `rel`: the page that opens
+    // gets no window.opener to navigate this one by. Nothing here reads the handle
+    // window.open returns (with noopener it is null).
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
 }
 
 function renderWorkerDayRow(day, worker) {
