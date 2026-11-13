@@ -54,6 +54,7 @@ import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
+import { tapsAtAPersonsPace, aPersonsPause } from './pace.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import { censusOnly } from './census.mjs';
@@ -114,6 +115,9 @@ async function open(width, height, scheme) {
     // touch input to dispatch and every "drag" below would be a mouse.
     const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, hasTouch: true, isMobile: true });
     const page = await context.newPage();
+    // v194: this suite walks the screens and is not about double taps - its taps come at a
+    // person's pace (tests/pace.mjs says why).
+    tapsAtAPersonsPace(page);
     const errors = [];
     const away = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -188,7 +192,9 @@ const recordBytes = page => page.evaluate(() => {
 // ------------------------------------------------------------------ a finger
 
 const at = (x, y) => [{ x: Math.round(x), y: Math.round(y), id: 1 }];
-const down = (cdp, p) => cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(p.x, p.y) });
+// (v194: a finger that comes down to carry a man does so at a person's pace after the last tap -
+// tests/pace.mjs.)
+const down = async (cdp, p) => { await aPersonsPause(); return cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(p.x, p.y) }); };
 const up = cdp => cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 const abandon = cdp => cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
 async function glide(cdp, page, from, to, steps = 12) {
@@ -1386,6 +1392,10 @@ async function evening(width, height, scheme) {
         [(await tray(page)).includes('w_12'), await text(page, '#transportAway > summary'), await page.evaluate(() => document.getElementById('transportAway').open)],
         [false, 'לא בהסעה שלנו (1)', false]);
     await page.evaluate(() => { document.getElementById('transportChips').scrollLeft = 0; });
+    // MOVED ON PURPOSE (v194): a person's pace. The quiet control stands under where the
+    // question's answer was, and a tap there less than 300 ms after the answer is that tap
+    // again (the page's rule, js/ui/sheet.js) - the driver's came 60 ms later.
+    await page.waitForTimeout(350);
     await page.locator('#transportNotRiding').tap();
     const whoAway = await question(page);
     same('the control alone asks who first', [whoAway.title, whoAway.choices.includes('נביל · נתניה'), whoAway.choices[0]],

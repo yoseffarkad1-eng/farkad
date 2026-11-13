@@ -147,16 +147,85 @@ function pressArea(node, x, y) {
     return { left: x, top: y, right: x, bottom: y };
 }
 
+// A PRESS THAT COMES DOWN ON WHAT WAS NOT THERE IS THE PRESS BEFORE IT, AGAIN (v194).
+//
+// Every guard above and in js/ui/day.js is a surface saying «I have just come up under a finger».
+// None of them is the page saying «what was under the finger has just GONE» - and the second tap
+// of a double tap fell through every surface a first tap shut. Measured in Chromium with a touch
+// screen, 150 ms apart (docs/releases.md, v192, STILL WRONG): the walking sheet's last waiting man
+// placed, the sheet shut, and the second tap took another man off his site by the ✕ that was
+// under the tile; the sheet's «סגור», and the second tap on «מהיום הקודם» copied the previous day
+// into every waiting man; and in the sheet a man's row opens, once its opening window was over,
+// «נעדר» marked and unmarked him (his site gone), a site was added and taken off again, and
+// «שעות נוספות» - the row redrawn with the hours box in it - landed on «יום כפול».
+//
+// They are one fault, and it is not about sheets: the first tap REPLACED what was under the
+// finger - shut the surface, or redrew the control - and the second press came down, in the same
+// place and at once, on something the person had never seen there. Nobody aims at what appeared
+// under their finger less than a third of a second ago. So the rule is the page's, in one place,
+// and names no surface: a press that comes down on the same spot again (sameSpotAgain, below -
+// inside the rectangle the control the press before it hit stood in, less than WALK_BOUNCE_MS
+// after it, on the presses' own clock) and on a control that is NOT the one that press came down
+// on is spent. Its whole tap - press, release, the mouse events made of it, the click - stops at
+// the document and reaches no control, no backdrop and no drag. It covers every surface that
+// shuts and every one that opens (the dialogs of js/ui/modal.js and js/ui/ask.js, the sheets, ⋯,
+// the cards, the menus, the undo bar, a row that slides up under a ✕) because it asks none of them.
+//
+// WHAT IT LEAVES ALONE. A press on the SAME control, still there: a text box (a double tap
+// selects a word), a seat. A press on that control DRAWN AGAIN AS IT WAS - the same rectangle to
+// the pixel and the same markup, word for word (sameControlAgain): the day's arrows and a card's
+// month arrows are built anew by every render, and two quick taps on one are two days, as they
+// always were. A press anywhere else, whatever its time. A press WALK_BOUNCE_MS or more after
+// the one before, wherever it is. A keyboard's click and a click from code have no press and are
+// never spent. And a spent press is not a press to repeat: the next one is measured from the
+// last press that was let through, so a burst is one tap and the tap after the burst is a tap.
+//
+// WHAT IT DOES NOT SEE, said plainly: a mouse's double click (below, at the press). And a
+// control that stays the same node, or is drawn again with the same words in the same
+// rectangle, and means something else under the finger - the next man's tile in the walking
+// sheet, the next man's «נעדר» in a tray. Those are the surfaces' own guards (the walk's bounce,
+// the trays' clock), which stay exactly as they are.
+//
+// The surfaces' own guards stay as they are - they are wider (DOUBLE_TAP_GUARD_MS, a whole
+// tray) where a surface asked for more.
+let tapBefore = null;
+
 if (typeof window !== 'undefined' && window && typeof window.addEventListener === 'function') {
     window.addEventListener('pointerdown', event => {
-        lastPress = { stamp: event.timeStamp, x: event.clientX, y: event.clientY,
-            area: pressArea(event.target, event.clientX, event.clientY), open: true };
+        const target = event.target;
+        const control = target && target.closest ? target.closest(PRESSED_CONTROL) : null;
+        const press = { stamp: event.timeStamp, x: event.clientX, y: event.clientY,
+            area: pressArea(target, event.clientX, event.clientY), open: true,
+            node: control || target || null, markup: control ? control.outerHTML : null, spent: false };
+        lastPress = press;
+        // A second finger of a pinch is nobody's double tap.
+        if (event.isPrimary === false) return;
+        // A FINGER'S RULE (and a pen's). A mouse is not spent and is not a press to repeat: its
+        // pointer is seen where it stands, it has no bounce, and its double click is covered,
+        // as before, where a surface has its own guard (guardFingersOn, secondTapTooSoon).
+        if (event.pointerType === 'mouse') { tapBefore = null; return; }
+        if (tapBefore && press.node !== tapBefore.node && sameSpotAgain(press, tapBefore)
+            && !sameControlAgain(press, tapBefore)) press.spent = true;
+        else tapBefore = press;
     }, true);
     window.addEventListener('pointercancel', () => { if (lastPress) lastPress.open = false; }, true);
     window.addEventListener('click', () => {
         const press = lastPress;
         if (press) setTimeout(() => { press.open = false; }, 0);
     }, true);
+    // The spent press's events stop HERE: on the document, in the capture phase - after every
+    // listener of the window has seen them (the press's own clock above, the calendar's follow in
+    // js/app.js, the bars), before any control, any surface's guard and the backdrop's closer.
+    // The touch itself is not prevented: a finger that goes on to swipe still scrolls the page.
+    const spend = event => {
+        const press = lastPress;
+        if (!press || !press.spent || !press.open || !(event.detail > 0 || event.type.startsWith('pointer'))) return;
+        event.stopImmediatePropagation();
+        if (event.type !== 'pointerdown' && event.type !== 'pointerup') event.preventDefault();
+    };
+    if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {
+        ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click'].forEach(type => document.addEventListener(type, spend, true));
+    }
 }
 // The press of the tap whose click is being handled now, or null (a keyboard, code).
 function openPress() {
@@ -181,6 +250,36 @@ function sameFingerAgain(press, before) {
     const area = before.area;
     return press.x >= area.left - BOUNCE_REACH && press.x <= area.right + BOUNCE_REACH
         && press.y >= area.top - BOUNCE_REACH && press.y <= area.bottom + BOUNCE_REACH;
+}
+
+// THE SAME SPOT AGAIN, for the page's rule (tapBefore, above): less than WALK_BOUNCE_MS after
+// `before`, and either INSIDE the rectangle the control it hit stood in - no reach around it, so
+// a quick tap on the control NEXT to that one, which was there all along, is never taken for it -
+// or within a finger's jitter (BOUNCE_REACH) of the very point. And not when one of the two
+// controls is inside the other and the earlier one is still on the page: a box and its own
+// label, a row and its button - the pressed control is still what is under the finger.
+function sameSpotAgain(press, before) {
+    if (!press || !before || !before.area) return false;
+    const after = press.stamp - before.stamp;
+    if (!(after >= 0 && after < WALK_BOUNCE_MS)) return false;
+    const area = before.area;
+    const inside = press.x >= area.left && press.x <= area.right && press.y >= area.top && press.y <= area.bottom;
+    const near = Math.abs(press.x - before.x) <= BOUNCE_REACH && Math.abs(press.y - before.y) <= BOUNCE_REACH;
+    if (!inside && !near) return false;
+    const a = before.node, b = press.node;
+    if (a && b && a.isConnected && typeof a.contains === 'function' && (a.contains(b) || b.contains(a))) return false;
+    return true;
+}
+
+// THE SAME CONTROL, DRAWN AGAIN AS IT WAS: both presses came down on a control, the two controls
+// stand in the same rectangle (to the pixel) and their markup is the same, word for word - what
+// a render leaves of a control it did not change.
+function sameControlAgain(press, before) {
+    if (!press || !before || press.markup === null || before.markup === null) return false;
+    if (press.markup !== before.markup) return false;
+    const a = press.area, b = before.area;
+    return Math.abs(a.left - b.left) < 1 && Math.abs(a.top - b.top) < 1
+        && Math.abs(a.right - b.right) < 1 && Math.abs(a.bottom - b.bottom) < 1;
 }
 
 // The guard on one surface, installed the first time it opens: capture, on the surface
@@ -740,10 +839,11 @@ async function clearWorkerPicker() {
         return;
     }
 
-    offerUndo(`${leaving.length} עובדים הוסרו מ${isolate(place.name)}`, () => {
-        State.commitMany(previous.map(item =>
-            setWorkerDay(State.schedule, date, item.workerId, layer, item.record)));
-    });
+    // The way back puts back only a day that still holds what this step left on it: a man
+    // another phone has recorded since keeps that phone's answer (undoRows, js/ui/undo.js).
+    const rows = previous.map(item => ({ workerId: item.workerId, left: snapshotWorkerDay(date, layer, item.workerId),
+        back: () => setWorkerDay(State.schedule, date, item.workerId, layer, item.record) }));
+    offerUndo(`${leaving.length} עובדים הוסרו מ${isolate(place.name)}`, () => undoRows(date, layer, rows));
 
     renderWorkerPicker();
 }

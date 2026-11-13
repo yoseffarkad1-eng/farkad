@@ -87,6 +87,17 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    { build: 'v194', items: [
+        { title: 'הכל חופש: מאחורי «עוד ⋯» ועם שאלה',
+            text: 'הכפתור הכל חופש עבר אל «עוד ⋯» בתחתית רשימת היום, ולפני הרישום יש שאלה עם שמות כל העובדים שיירשם להם חופש.',
+            where: 'היום ← בתחתית הרשימה ← עוד ⋯', go: 'day' },
+        { title: 'תיקון: ביטול לא דורס רישום ממכשיר אחר',
+            text: 'ביטול פעולה (↶) כבר לא כותב רישום ישן מעל רישום שהשתנה בינתיים ממכשיר אחר, אלא אומר שהפעולה לא בוצעה.',
+            where: 'היום ← בטל או ↶', go: 'day' },
+        { title: 'תיקון: הסרת עובדים בזה אחר זה',
+            text: 'אפשר להסיר עובדים מאתר, ולבטל היעדרויות, בזה אחר זה בקצב רגיל בלי שלחיצה תיבלע, וסרגל הביטול כבר לא עולה מתחת לאצבע.',
+            where: 'היום ← ✕ ליד שם העובד', go: 'day' }
+    ] },
     { build: 'v193', items: [] },
     { build: 'v192', items: [
         { title: 'דוחות: שמות בולטים וצבע לכל קבוצה',

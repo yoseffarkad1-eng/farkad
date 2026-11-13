@@ -28,6 +28,19 @@
 // own and does what its button says. The same for a site in the tray's «לאן הלך» and the ✕
 // on a chip in «נעדרים». And coming back to the day from the week keeps the
 // window where it was - pinned on purpose: the top it used to land on was the clamp's doing.
+//
+// A ROW'S ✕ MOVED OUT OF THAT WINDOW, ON PURPOSE. The owner could not take two men off a
+// site: the 700 ms were time alone and began again at every tap that was dropped, so a
+// steady pace under them took off one man however many times he tapped. A row's ✕ now
+// ignores a press made less than 300 ms after the press of the removal before it, or before
+// that removal was drawn (rowRemoveTooSoon, js/ui/day.js) - and nothing else: two taps 120 and 200 ms apart take
+// off one man, and two taps 400 ms apart take off TWO, where this suite used to pin one.
+// Man after man at a person's pace is tests/removepace.browser.mjs.
+//
+// AND SO DID THE ✕ OF «נעדרים», IN THE SAME RELEASE AND FOR THE SAME REASON: its 700 ms were the
+// same clock, and absences cancelled one after another at a person's pace were one absence.
+// The same act again on the next man is judged as a row's ✕ is (trayTapTooSoon, js/ui/day.js):
+// 120 and 200 ms apart cancel one absence, 400 and 900 ms apart cancel two.
 
 import { chromium, webkit } from 'playwright';
 import { launchLocalBrowser } from './network-guard.mjs';
@@ -123,8 +136,15 @@ async function open(browser, width, height, mode = 'sites', away = AWAY) {
         window.__rima = site => { const card = __card(site); return card ? card.querySelector('.rima-input') : null; };
         // Every click the page dispatches, on the page's own clock - the one the double-tap
         // guard reads (secondTapTooSoon, js/ui/day.js).
+        // MOVED ON PURPOSE (v194): heard on the WINDOW. The page's own rule now stops the second
+        // tap of a double tap at the document when it comes down on a control that was not there
+        // (tapBefore, js/ui/sheet.js) - before a listener on the document, added after it, hears
+        // it. The window hears every click the page dispatches, spent or not.
         window.__clicks = [];
-        document.addEventListener('click', () => window.__clicks.push(performance.now()), true);
+        window.addEventListener('click', () => window.__clicks.push(performance.now()), true);
+        // And every press, on the presses' own clock - the one a row's ✕ reads (rowRemoveTooSoon).
+        window.__downs = [];
+        window.addEventListener('pointerdown', event => window.__downs.push(event.timeStamp), true);
         // Everything a person reads on the day, by what it IS rather than by where it is:
         // each site's head, each man's row, each רימא box, each row of the by-worker list.
         // Visible under the sticky header only, unless asked for all of them.
@@ -262,6 +282,8 @@ async function screenAgrees(page) {
 
 // The double-tap guard's window, DOUBLE_TAP_GUARD_MS in js/ui/day.js.
 const WINDOW = 700;
+// A row's ✕: a press at once after the last, WALK_BOUNCE_MS in js/ui/sheet.js (rowRemoveTooSoon, js/ui/day.js).
+const ROW_BOUNCE = 300;
 class OutOfWindow extends Error {}
 
 // A case built on two taps at one point, `gap` ms apart. The guard decides by the PAGE's
@@ -270,17 +292,21 @@ class OutOfWindow extends Error {}
 // measured, and a case is judged only on a pair the page saw on the intended side of the
 // window. A pair that landed on the other side is tried again in a fresh page, twice at
 // most, and a third such pair is a failure, never a pass.
-async function pairScenario(browser, tag, name, size, gap, body) {
+//
+// `limit`, when given, is another window than WINDOW, read on the PRESSES' clock: a row's ✕
+// (ROW_BOUNCE, above).
+async function pairScenario(browser, tag, name, size, gap, body, limit) {
+    const WINDOW = limit || 700;
     const inside = gap < WINDOW;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
         const { context, page, errors } = await open(browser, size[0], size[1]);
         const pair = async find => {
-            await page.evaluate(() => { window.__clicks.length = 0; });
+            await page.evaluate(() => { window.__clicks.length = 0; window.__downs.length = 0; });
             const point = await tap(page, find);
             await page.waitForTimeout(gap);
             await page.touchscreen.tap(point.x, point.y);
             await settle(page, 250);
-            const clicks = await page.evaluate(() => window.__clicks.slice());
+            const clicks = await page.evaluate(byPress => (byPress ? window.__downs : window.__clicks).slice(), Boolean(limit));
             const seen = clicks.length === 2 ? Math.round(clicks[1] - clicks[0]) : null;
             const ok = seen !== null && (inside ? seen < WINDOW : seen >= WINDOW);
             if (!ok && attempt < 3) throw new OutOfWindow(String(seen));
@@ -643,11 +669,14 @@ try {
                 [at(after.marks, 'רון ביטון'), at(after.marks, 'אבי פרץ')], [at(before.marks, 'רון ביטון'), at(before.marks, 'אבי פרץ')]);
         }, 'workers');
 
-        // 12. A double tap on one ✕, 120 ms and 400 ms apart: the man below has slid up under
+        // 12. A double tap on one ✕, 120 ms and 200 ms apart: the man below has slid up under
         //     the finger, and the second tap is the first one again. Then the same two taps
-        //     900 ms apart: the second is a decision of its own.
-        for (const gap of [120, 400, 900]) {
-            const twice = gap < 700;
+        //     400 ms and 900 ms apart: the second is a decision of its own. MOVED ON PURPOSE:
+        //     400 ms was pinned as one man, inside a 700 ms window of time alone, and that
+        //     window is what kept the owner from taking two men off a site (the head of this
+        //     file). A bounce is a press inside ROW_BOUNCE of the one before.
+        for (const gap of [120, 200, 400, 900]) {
+            const twice = gap < ROW_BOUNCE;
             await pairScenario(browser, tag, `two taps on ✕ ${gap} ms apart`, size, gap, async (page, pair) => {
                 await bring(page, `() => __card('תל אביב').querySelector('.site-head')`, 0.27);
                 const was = await dayRecord(page);
@@ -662,7 +691,7 @@ try {
                     same(`${tag}: and the undo bar names him (${gap} ms)`, await undoSays(page), 'רון ביטון הוסר מתל אביב');
                 }
                 same(`${tag}: after two taps ${gap} ms apart every count is the record's`, await screenAgrees(page), []);
-            });
+            }, ROW_BOUNCE);
         }
 
         // 13. «+ הוסף» in a site's picker tapped twice: inside 700 ms he stays added - the
@@ -723,10 +752,13 @@ try {
         }
 
         // 13c. The ✕ on a chip in «נעדרים»: the next man's chip slides into its place, under
-        //     the finger - measured: two taps cancelled two absences. Inside 700 ms the second
-        //     is the first again; at 900 ms it cancels the next man's absence, as a tap should.
-        for (const gap of [120, 400, 900]) {
-            const twice = gap < 700;
+        //     the finger - measured: two taps cancelled two absences. A press inside ROW_BOUNCE
+        //     of the one before is the first again; at 400 and 900 ms it cancels the next man's
+        //     absence, as a tap should. MOVED ON PURPOSE (v194): 400 ms was pinned as one
+        //     absence, inside the 700 ms of time alone that kept a person from cancelling two
+        //     absences one after another - the fault repaired for a row's ✕, on the same clock.
+        for (const gap of [120, 200, 400, 900]) {
+            const twice = gap < ROW_BOUNCE;
             await pairScenario(browser, tag, `two taps on a «נעדרים» ✕ ${gap} ms apart`, size, gap, async (page, pair) => {
                 await bring(page, `() => document.querySelector('#dayView .tray-absent')`, 0.45);
                 const was = await dayRecord(page);
@@ -740,7 +772,7 @@ try {
                     same(`${tag}: and the undo bar names him (${gap} ms, «נעדרים»)`, await undoSays(page), 'ההיעדרות של מאיר כהן בוטלה');
                 }
                 same(`${tag}: after two taps on «נעדרים» ${gap} ms apart every count is the record's`, await screenAgrees(page), []);
-            });
+            }, ROW_BOUNCE);
         }
 
         // 14. A render that arrives while a box on the day has the focus. The swap takes the

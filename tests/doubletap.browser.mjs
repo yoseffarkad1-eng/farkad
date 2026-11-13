@@ -38,6 +38,11 @@
 // take back is pinned, so that it is seen: one tile tapped four times 200 ms apart is two double
 // taps, two men placed.
 //
+// v194: A TAP FALLS THROUGH A SURFACE THAT JUST SHUT. All of the above is a surface coming up under
+// a finger; the last section is the other half - a first tap that shuts a surface or redraws its
+// control, and the second tap on what was underneath - held by one rule of the page's, with each
+// sweep's control, and what that rule must never take.
+//
 // NOT a real phone: Chromium with emulated touch.
 
 import { chromium } from 'playwright';
@@ -145,8 +150,11 @@ async function doubleTap(page, point, gap, between) {
 // (MOVED ON PURPOSE, the second review of the hotfix: the walking sheet opened by a tap is held
 // by the bounce from its opener's press, WALK_BOUNCE_MS, not by a deadline) - and its own closer
 // (js/ui/sheet.js).
-const UNGUARD = { placePickerModal: 'placePickerGuardUntil = 0', workerPickerModal: 'workerPickerGuardUntil = 0',
-    assignSheet: 'sheetGuardUntil = 0; sheetBounceFrom = null' };
+// MOVED ON PURPOSE (v194): the page's own rule now spends the second tap of each of these too -
+// the same finger again on a control that was not there (tapBefore, js/ui/sheet.js) - so the
+// control puts that aside as well; a surface's own guard is still what is measured as shipped.
+const UNGUARD = { placePickerModal: 'placePickerGuardUntil = 0; tapBefore = null', workerPickerModal: 'workerPickerGuardUntil = 0; tapBefore = null',
+    assignSheet: 'sheetGuardUntil = 0; sheetBounceFrom = null; tapBefore = null' };
 const CLOSER = { placePickerModal: 'closePlacePicker()', workerPickerModal: 'closeWorkerPicker()', assignSheet: 'closeAssignSheet()' };
 const run = (page, code) => page.evaluate(code => (0, eval)(code), code);
 
@@ -603,6 +611,341 @@ suite('inside the window: «סגור», the search box and «נקה» are taps; 
     await page.locator('#assignSheetFoot .sheet-actions button', { hasText: 'סגור' }).tap();
     await page.waitForTimeout(100);
     same('his sheet: «סגור» tapped inside its window closes it', [held, await shown(page)], [true, []]);
+    await context.close();
+}
+
+// ================================================================== a tap falls through a surface that just shut
+// A TAP FALLS THROUGH A SURFACE THAT JUST SHUT (v194; docs/releases.md, v192, STILL WRONG). Every
+// guard above is a surface that has just come UP under a finger. A first tap that SHUTS one - or
+// redraws the control it hit - left the second tap of the double tap to whatever was underneath:
+// another man's ✕ under the walking sheet's last tile, «מהיום הקודם» under the sheet's «סגור»,
+// and in a man's own sheet, past its opening window, «נעדר» twice, a site twice, «שעות נוספות» and
+// then «יום כפול». The page's own rule (js/ui/sheet.js, tapBefore): the same finger again, in the
+// same place, on a control that was not there at the press before, is spent.
+//
+// Each case is made twice in every layout, as the sweeps above are: as the build has it, and - the
+// control - with the rule's memory emptied between the two taps (`tapBefore = null`), which is the
+// build before it and must write in at least one layout, so each sweep is shown stopping a write.
+// And then what the rule must never take: a tap somewhere else at once, and a tap in the same
+// place a deliberate moment later.
+const FORGET = "typeof tapBefore !== 'undefined' && (tapBefore = null)";
+// Every man's day but the last man's, in memory and on the disk.
+const others = page => page.evaluate(day => { const strip = days => { const copy = JSON.parse(JSON.stringify((days || {})[day] || {}));
+    Object.values(copy).forEach(layer => { if (layer && typeof layer === 'object') delete layer.w_14; }); return copy; };
+    return JSON.stringify([strip(State.schedule.days), strip(JSON.parse(localStorage.getItem('scheduleData:v2') || '{}').days)]); }, DAY);
+
+// (a) The walking sheet on the LAST waiting man: his tile places him, the sheet shuts, and the
+// day's rows are under the finger. Thirteen men on two sites, one waiting; the sheet is opened on
+// him, a tile is found whose width covers the rows' ✕ column, and the day is scrolled until a ✕
+// stands exactly under that point.
+async function lastMan(size) {
+    const { context, page } = await phone(size, 5);
+    await page.evaluate(day => {
+        State.schedule.workers.slice(0, 13).forEach((worker, at) => {
+            if (entriesFor(State.schedule, day, worker.id, 'actual').length) return;
+            State.commit(assignPlace(State.schedule, day, worker.id, 'actual', at % 2 ? 'p_02' : 'p_01'));
+        });
+        hideUndo(); render();
+    }, DAY);
+    const open = () => page.evaluate(() => { openAssignSheet('w_14'); });
+    await open();
+    await page.waitForTimeout(350);
+    // The ✕ column of the day's rows, and the tile over it.
+    const point = await page.evaluate(() => {
+        const cross = [...document.querySelectorAll('#dayView .assign-row > .btn-icon')];
+        if (!cross.length) return null;
+        const column = cross[0].getBoundingClientRect();
+        const x = column.left + column.width / 2;
+        // The topmost such tile: the undo bar comes up at the foot of the screen, in the same column.
+        const tile = [...document.querySelectorAll('#assignSheetBody .sheet-place')].map(node => node.getBoundingClientRect())
+            .filter(box => box.left + 6 < x && box.right - 6 > x).sort((a, b) => a.top - b.top)[0];
+        return tile ? { x, y: tile.top + tile.height / 2 } : null;
+    });
+    if (!point) { await context.close(); return null; }
+    await page.evaluate(() => closeAssignSheet());
+    await page.waitForTimeout(100);
+    // A ✕ the page can bring under the point, and the man it would take off.
+    const victim = await page.evaluate(y => {
+        const most = document.documentElement.scrollHeight - window.innerHeight;
+        const node = [...document.querySelectorAll('#dayView .assign-row > .btn-icon')].find(cross => {
+            const box = cross.getBoundingClientRect();
+            const to = window.scrollY + box.top + box.height / 2 - y;
+            return to >= 0 && to <= most;
+        });
+        if (!node) return null;
+        const box = node.getBoundingClientRect();
+        window.scrollTo(0, window.scrollY + box.top + box.height / 2 - y);
+        return node.getAttribute('aria-label');
+    }, point.y);
+    if (!victim) { await context.close(); return null; }
+    await page.waitForTimeout(250);
+    await page.evaluate(() => hideUndo());
+    await open();
+    await page.waitForTimeout(GUARD + 100);
+    return { context, page, point, victim };
+}
+suite('the walking sheet\'s last man: the tile places him, the sheet shuts, and the second tap takes nobody off his site');
+{
+    const unguarded = [];
+    let runs = 0, clean = 0;
+    for (const size of WALK_SIZES) for (const forget of [false, true]) for (let attempt = 0; attempt < 3; attempt++) {
+        const made = await lastMan(size);
+        if (!made) break;
+        const { context, page, point } = made;
+        const before = await others(page);
+        const hit = await doubleTap(page, point, 150, forget ? () => run(page, FORGET) : null);
+        const seen = await lastGap(page);
+        if (!(seen < WALK_BOUNCE) && attempt < 2) { await context.close(); continue; }
+        const untouched = (await others(page)) === before;
+        if (forget) {
+            if (!untouched) unguarded.push(`${size.join('x')} (${hit}; ${bare(await undoSays(page))})`);
+        } else {
+            runs++;
+            const fine = untouched && (await sites(page, 'w_14')).length === 1 && (await shown(page)).length === 0
+                && /^דוגמה 14 נרשם ב/.test(bare(await undoSays(page)));
+            if (fine) clean++;
+            else console.log(`  ${size.join('x')}: under the second tap ${hit}; ↶ says ${bare(await undoSays(page))}`);
+            if (size[0] === 375) check('375x667: the second tap came down on a row\'s ✕', /btn-icon\|✕/.test(hit), hit);
+        }
+        await context.close();
+        break;
+    }
+    given('the sweep ran at three phones', runs === WALK_SIZES.length, String(runs));
+    same('in every layout the last man is on his site with his step on ↶, every other man is where he was, and the sheet is shut', clean, runs);
+    check('and with the rule\'s memory emptied between the two taps, the second tap took a man off his site in at least one of them',
+        unguarded.length > 0, unguarded.join(' / '));
+}
+
+// (b) The sheet's «סגור» over «מהיום הקודם»: the day's dock is under the sheet's foot. Yesterday
+// has a record and today has men waiting, so the dock's button copies a day.
+async function overCopy(size) {
+    const { context, page } = await phone(size, 2);
+    await page.evaluate(() => {
+        ['w_01', 'w_02', 'w_03'].forEach(id => State.commit(assignPlace(State.schedule, '2026-11-10', id, 'actual', 'p_02')));
+        hideUndo(); render();
+    });
+    await page.evaluate(() => { openAssignSheet('w_10', { stay: true }); });
+    await page.waitForTimeout(GUARD + 150);
+    // A point inside both «סגור» and the dock's copy button, when the two overlap.
+    const point = await page.evaluate(() => {
+        const close = document.querySelector('#assignSheetFoot .sheet-close').getBoundingClientRect();
+        const copy = document.getElementById('copyDayBtn').getBoundingClientRect();
+        const left = Math.max(close.left, copy.left) + 4, right = Math.min(close.right, copy.right) - 4;
+        const top = Math.max(close.top, copy.top) + 4, bottom = Math.min(close.bottom, copy.bottom) - 4;
+        return left < right && top < bottom ? { x: (left + right) / 2, y: (top + bottom) / 2 } : null;
+    });
+    return { context, page, point };
+}
+suite('the sheet\'s «סגור» over «מהיום הקודם»: the sheet shuts, and no day is copied');
+{
+    const unguarded = [], skipped = [];
+    let runs = 0, clean = 0;
+    for (const size of [[320, 568], [375, 667], [390, 844], [440, 956]]) for (const forget of [false, true]) for (let attempt = 0; attempt < 3; attempt++) {
+        const { context, page, point } = await overCopy(size);
+        if (!point) { skipped.push(size.join('x')); await context.close(); break; }
+        const before = await written(page);
+        const hit = await doubleTap(page, point, 150, forget ? () => run(page, FORGET) : null);
+        const seen = await lastGap(page);
+        if (!(seen < WALK_BOUNCE) && attempt < 2) { await context.close(); continue; }
+        const nothing = (await written(page)) === before;
+        if (forget) { if (!nothing) unguarded.push(`${size.join('x')} (${hit})`); }
+        else {
+            runs++;
+            if (nothing && (await shown(page)).length === 0) clean++;
+            else console.log(`  ${size.join('x')}: under the second tap ${hit}`);
+        }
+        await context.close();
+        break;
+    }
+    if (skipped.length) console.log(`  («סגור» does not stand over the copy button at ${[...new Set(skipped)].join(', ')})`);
+    given('«סגור» stands over the copy button on at least two phones', runs >= 2, String(runs));
+    same('in every one of them the sheet is shut and the day, the disk and the queue are what they were', clean, runs);
+    check('and with the rule\'s memory emptied between the two taps, the second tap copied the previous day in at least one of them',
+        unguarded.length > 0, unguarded.join(' / '));
+}
+
+// (c) A man's own sheet, its opening window over: a control that turns into its opposite under
+// the finger, or moves another one there.
+async function ownSheet(size) {
+    const { context, page } = await phone(size, 3);
+    await page.locator('#dayView .assign-row .assign-main', { hasText: 'דוגמה 10' }).first().tap();
+    await page.waitForTimeout(GUARD + 150);
+    return { context, page };
+}
+const centre = async locator => { const box = await locator.boundingBox(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; };
+const OWN = [
+    {
+        what: '«נעדר»', find: page => page.locator('#assignSheetFoot .sheet-actions button', { hasText: 'נעדר' }).first(),
+        after: page => page.evaluate(day => [isAbsent(State.schedule, day, 'w_10', 'actual'), entriesFor(State.schedule, day, 'w_10', 'actual').length], DAY),
+        expected: [true, 0], says: 'he is away, once', undo: 'דוגמה 10 נרשם כנעדר', control: true
+    },
+    {
+        what: 'a second site', find: page => page.locator('#assignSheetBody .sheet-place', { hasText: 'אתר דרום' }),
+        after: page => sites(page, 'w_10'), expected: ['p_01', 'p_02'], says: 'he has it, once', undo: 'דוגמה 10 נרשם באתר דרום', control: true
+    },
+    {
+        what: 'his own site', find: page => page.locator('#assignSheetBody .sheet-place', { hasText: 'אתר צפון' }),
+        after: page => sites(page, 'w_10'), expected: [], says: 'it is taken off, once', undo: 'דוגמה 10 הוסר מאתר צפון'
+    }
+];
+suite('a man\'s own sheet, after its opening window: a double tap on a control that turns into its opposite is one tap');
+for (const own of OWN) {
+    const unguarded = [];
+    for (const size of WALK_SIZES) {
+        const tag = `${size.join('x')}, ${own.what}`;
+        for (const forget of [false, true]) for (let attempt = 0; attempt < 3; attempt++) {
+            const { context, page } = await ownSheet(size);
+            const point = await centre(own.find(page));
+            const hit = await doubleTap(page, point, 150, forget ? () => run(page, FORGET) : null);
+            const seen = await lastGap(page);
+            if (!(seen < WALK_BOUNCE) && attempt < 2) { await context.close(); continue; }
+            if (forget) {
+                if (JSON.stringify(await own.after(page)) !== JSON.stringify(own.expected)) unguarded.push(`${size.join('x')} (${hit})`);
+            } else {
+                same(`${tag}: ${own.says}`, await own.after(page), own.expected);
+                same(`${tag}: ↶ holds that step`, bare(await undoSays(page)), own.undo);
+                same(`${tag}: and the sheet is still his`, [await shown(page), bare(await page.locator('#assignSheetTitle').textContent())], [['assignSheet'], 'דוגמה 10']);
+            }
+            await context.close();
+            break;
+        }
+    }
+    if (own.control) check(`${own.what}: with the rule's memory emptied between the two taps, the second tap undid the first in at least one layout`,
+        unguarded.length > 0, unguarded.join(' / '));
+}
+suite('a man\'s own sheet: «שעות נוספות» draws the row again, and the second tap is never «יום כפול»');
+{
+    // The row is drawn again with the hours box in it, and its buttons move: the finger is swept
+    // across «שעות נוספות» so that wherever «יום כפול» comes to stand, one point is under it.
+    const unguarded = [];
+    let runs = 0, clean = 0;
+    const rateOf = page => page.evaluate(day => entryRate(entriesFor(State.schedule, day, 'w_10', 'actual')[0]), DAY);
+    for (const size of WALK_SIZES) for (const part of [0.15, 0.5, 0.85]) for (const forget of [false, true]) for (let attempt = 0; attempt < 3; attempt++) {
+        const { context, page } = await ownSheet(size);
+        const box = await page.locator('#assignSheetBody .sheet-rate-row button', { hasText: 'שעות נוספות' }).boundingBox();
+        const point = { x: box.x + box.width * part, y: box.y + box.height / 2 };
+        const hit = await doubleTap(page, point, 150, forget ? () => run(page, FORGET) : null);
+        const seen = await lastGap(page);
+        if (!(seen < WALK_BOUNCE) && attempt < 2) { await context.close(); continue; }
+        const rate = await rateOf(page);
+        if (forget) { if (rate !== 'extra') unguarded.push(`${size.join('x')} at ${part} (${hit} -> ${rate})`); }
+        else {
+            runs++;
+            if (rate === 'extra') clean++;
+            else console.log(`  ${size.join('x')} at ${part}: under the second tap ${hit}, the day is ${rate}`);
+        }
+        await context.close();
+        break;
+    }
+    given('the sweep ran', runs === WALK_SIZES.length * 3, String(runs));
+    same('in every layout the day is «שעות נוספות»', clean, runs);
+    check('and with the rule\'s memory emptied between the two taps, the second tap made it another kind of day in at least one of them',
+        unguarded.length > 0, unguarded.join(' / '));
+}
+
+// EVERY SURFACE THAT SHUTS, asked nothing: the rule names none of them. Each is opened by the
+// app's own function, its own way out is double tapped, and the clicks that reach the page are
+// counted - one, the way out's.
+suite('every surface that shuts: a double tap on its way out is one click on the page');
+{
+    const SURFACES = [
+        { what: 'the app\'s question (askConfirm), «ביטול»', open: "void askConfirm({ title: 'בדיקה', message: 'בדיקה' })", out: '#askModal button' },
+        { what: 'the WhatsApp dialog', open: 'showDayMessage()', out: '#shareModal button[onclick="closeShareModal()"]' },
+        { what: '«חיפוש עובד»', open: 'openFind()', out: '#findModal button[onclick="closeFind()"]' },
+        { what: '«בדיקת היום»', open: 'openDayCheck()', out: '#dayCheckModal button[onclick="closeDayCheck()"]' },
+        { what: '«כרטיס עובד»', open: "openWorkerCard('w_10')", out: '#workerCardModal button[onclick="closeWorkerCard()"]' },
+        { what: '«כרטיס אתר»', open: "openSiteCard('p_01')", out: '#siteCardModal button[onclick="closeSiteCard()"]' },
+        { what: '«לאן הלך»', open: "openPlacePicker('w_01')", out: '#placePickerModal button[onclick="closePlacePicker()"]' },
+        { what: 'a site\'s picker', open: "openWorkerPicker('p_01')", out: '#workerPickerModal button[onclick="closeWorkerPicker()"]' },
+        { what: 'the ⋯ sheet', open: 'openSettings()', out: '#settingsPanel button[onclick="closeSettings()"]' },
+        { what: 'the day drawer', open: 'openDayDrawer()', out: '#dayDrawer button[onclick="closeDayDrawer()"]' }
+    ];
+    for (const surface of SURFACES) for (let attempt = 0; attempt < 3; attempt++) {
+        const { context, page } = await phone([375, 667], 2);
+        await run(page, surface.open);
+        await page.waitForTimeout(GUARD + 150);
+        const out = page.locator(surface.out).filter({ visible: true }).last();
+        given(`${surface.what}: its way out is on the screen`, await out.count() === 1);
+        await out.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(100);
+        const point = await centre(out);
+        await page.evaluate(() => { window.__clicks = []; document.addEventListener('click', event => {
+            const hit = event.target.closest && event.target.closest('button, a, input, label');
+            window.__clicks.push(hit ? (hit.id || hit.textContent.trim().slice(0, 16)) : event.target.tagName); }); });
+        const before = await written(page);
+        const hit = await doubleTap(page, point, 150);
+        const seen = await lastGap(page);
+        if (!(seen < WALK_BOUNCE) && attempt < 2) { await context.close(); continue; }
+        const clicks = await page.evaluate(() => window.__clicks);
+        same(`${surface.what}: one click reached the page (under the second tap: ${hit})`, clicks.length, 1);
+        same(`${surface.what}: and nothing was written`, await written(page), before);
+        await context.close();
+        break;
+    }
+}
+
+// WHAT THE RULE NEVER TAKES.
+suite('a deliberate second tap is a tap: somewhere else at once, or in the same place a moment later');
+for (let attempt = 0; attempt < 3; attempt++) {
+    // The sheet shut by «סגור», and 150 ms later a ✕ of a row somewhere else on the screen.
+    const { context, page } = await phone([375, 667], 2);
+    await page.evaluate(() => { openAssignSheet('w_10', { stay: true }); });
+    await page.waitForTimeout(GUARD + 150);
+    const close = await centre(page.locator('#assignSheetFoot .sheet-close'));
+    const cross = await page.evaluate(() => {
+        const box = [...document.querySelectorAll('#dayView .assign-row')].find(row => /דוגמה 11/.test(row.textContent)).querySelector(':scope > .btn-icon').getBoundingClientRect();
+        return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    });
+    given('the ✕ is nowhere near «סגור»', Math.abs(cross.y - close.y) > 60, JSON.stringify([close, cross]));
+    const started = Date.now();
+    await page.touchscreen.tap(close.x, close.y);
+    const wait = started + 150 - Date.now();
+    if (wait > 0) await page.waitForTimeout(wait);
+    await page.touchscreen.tap(cross.x, cross.y);
+    await page.waitForTimeout(250);
+    const seen = await lastGap(page);
+    if (!(seen < WALK_BOUNCE) && attempt < 2) { await context.close(); continue; }
+    check('the page saw the two presses under the bounce apart', seen < WALK_BOUNCE, String(seen));
+    same('«סגור», and at once a ✕ elsewhere: the sheet is shut and the man is off his site', [await shown(page), await sites(page, 'w_11')], [[], []]);
+    same('with his own step on ↶', bare(await undoSays(page)), 'דוגמה 11 הוסר מאתר צפון');
+    await context.close();
+    break;
+}
+for (const pace of [350, 450]) for (let attempt = 0; attempt < 3; attempt++) {
+    // The same place, a deliberate moment later: «סגור» over the copy button, then the copy.
+    const { context, page, point } = await overCopy([375, 667]);
+    given('«סגור» stands over the copy button at 375x667', Boolean(point));
+    const before = await written(page);
+    await doubleTap(page, point, pace);
+    const seen = await lastGap(page);
+    if (!(seen >= WALK_BOUNCE) && attempt < 2) { await context.close(); continue; }
+    check(`${pace} ms: the page saw the two presses at least the bounce apart`, seen >= WALK_BOUNCE, String(seen));
+    check(`«סגור», and ${pace} ms later the button that was under it: the previous day is copied`, (await written(page)) !== before);
+    same(`${pace} ms: three men, each from yesterday`, [await sites(page, 'w_01'), await sites(page, 'w_02'), await sites(page, 'w_03')], [['p_02'], ['p_02'], ['p_02']]);
+    await context.close();
+    break;
+}
+for (let attempt = 0; attempt < 3; attempt++) {
+    // The same control, drawn again as it was: the day's arrow, twice, is two days.
+    const { context, page } = await phone([375, 667], 2);
+    const arrow = await centre(page.locator('#dayView .nav-fwd, .nav-fwd').filter({ visible: true }).first());
+    const from = await page.evaluate(() => State.date);
+    await doubleTap(page, arrow, 150);
+    const seen = await lastGap(page);
+    if (!(seen < WALK_BOUNCE) && attempt < 2) { await context.close(); continue; }
+    check('the page saw the two presses under the bounce apart', seen < WALK_BOUNCE, String(seen));
+    same('«יום הבא» twice, 150 ms apart: two days on, as it always was', await page.evaluate(() => State.date), from === DAY ? '2026-11-13' : null);
+    await context.close();
+    break;
+}
+{
+    // A text box: the second tap of a double tap is the box's own (it selects a word).
+    const { context, page } = await phone([375, 667], 2);
+    await page.evaluate(() => { openWorkerPicker('p_01'); document.getElementById('workerPickerSearch').value = 'דוגמה'; });
+    await page.waitForTimeout(GUARD + 150);
+    await page.evaluate(() => { window.__boxClicks = 0; document.getElementById('workerPickerSearch').addEventListener('click', () => window.__boxClicks++); });
+    await doubleTap(page, await centre(page.locator('#workerPickerSearch')), 150);
+    same('a search box tapped twice takes both taps', await page.evaluate(() => window.__boxClicks), 2);
     await context.close();
 }
 

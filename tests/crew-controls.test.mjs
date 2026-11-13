@@ -5,7 +5,9 @@ import { makeDevice, makeCloud, settle } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 function device(id='d_controls') {
     const d = makeDevice({ deviceId:id });
-    for (const file of ['js/ui/day.js','js/ui/reports.js'])
+    // undo.js before day.js, as index.html loads them: «הכל חופש» offers its ↶ through it
+    // since the owner's ruling of 2026-11-11 (tests/holiday.test.mjs).
+    for (const file of ['js/ui/undo.js','js/ui/day.js','js/ui/reports.js'])
         vm.runInContext(readFileSync(new URL('../'+file, import.meta.url),'utf8'),d.ctx,{filename:file});
     d.setToday('2026-10-02'); d.State.date='2026-10-02';
     d.State.schedule.workers = [

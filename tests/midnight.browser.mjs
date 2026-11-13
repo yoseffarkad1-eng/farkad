@@ -307,9 +307,17 @@ for (const [what, change, keeps] of [
 suite('«הכל חופש»: asked before midnight, answered after it');
 {
     const { context, page } = await phone([[TUE, 'w_01', 'p_01']]);
-    await page.locator('#dayView .day-holiday-action').first().tap();
+    // MOVED (round two of the owner's «הכל חופש», 2026-11-11): the question is reached through
+    // the day's menu, «עוד ⋯» at the foot of the day; the menu hands straight on to it, the
+    // dialog never shut between the two, so the day cannot follow the calendar in the gap.
+    await page.locator('#dayView .day-more-action').first().tap();
+    await page.waitForTimeout(100);
+    check('the menu names Tuesday', (await textOf(page, 'askTitle')).includes('10/11/2026'), await textOf(page, 'askTitle'));
+    await page.waitForFunction(() => { const first = document.querySelector('#askChoices button'); return Boolean(first) && !first.disabled; });
+    await page.locator('#askChoices button').first().tap();
     await page.waitForTimeout(100);
     check('the question names Tuesday', (await textOf(page, 'askTitle')).includes('10/11/2026'), await textOf(page, 'askTitle'));
+    await page.waitForFunction(() => !document.getElementById('askOk').disabled);
     await lockUntil(page, AFTER);
     await page.locator('#askOk').tap();
     await page.waitForTimeout(150);
@@ -791,7 +799,16 @@ const surfaceCases = [
         expect: [['w_01', '']], wed: [['w_01', 'p_01']] },
     { what: '«הכל חופש»', seed: [[TUE, 'w_01', 'p_01']],
         open: async () => {},
-        act: async page => { await page.locator('#dayView .day-holiday-action').first().tap(); await page.waitForTimeout(100); await page.locator('#askOk').tap(); },
+        // MOVED (v194, round two of «הכל חופש» brought onto v192): reached through «עוד ⋯» at the
+        // foot of the day and its menu - the door drawn for Tuesday names Tuesday all the way.
+        act: async page => {
+            await page.locator('#dayView .day-more-action').first().tap();
+            await page.waitForFunction(() => { const first = document.querySelector('#askChoices button'); return Boolean(first) && !first.disabled; });
+            await page.locator('#askChoices button').first().tap();
+            await page.waitForFunction(() => document.getElementById('askOk').style.display !== 'none' && !document.getElementById('askOk').disabled);
+            check('«הכל חופש»: the question names Tuesday', (await textOf(page, 'askTitle')).includes('10/11/2026'), await textOf(page, 'askTitle'));
+            await page.locator('#askOk').tap();
+        },
         expect: [['w_02', 'absent'], ['w_03', 'absent'], ['w_04', 'absent']], wed: [['w_02', null], ['w_03', null], ['w_04', null]] },
     { what: 'the bulk row: a site\'s chip', seed: [],
         open: async page => { await page.locator('#dayView .bulk-toggle').first().tap(); await page.waitForTimeout(100); },

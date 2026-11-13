@@ -3066,6 +3066,10 @@ body.kbd-open .sheet-foot { padding-bottom: 16px; }
    form is open, a confirmation over the migration list. Same z-index as those and it
    opens behind them: a question nobody can answer and a screen that looks frozen. */
 #askModal { z-index: 60; }
+/* A question's title keeps a line break it is given: «בטוח שכולם בחופש?» on one line and
+   the day it is about on the next (markAllHoliday, js/ui/day.js), never the day name split
+   from its date by wherever the width ran out. A title with no break wraps as before. */
+#askTitle { white-space: pre-line; }
 /* Every text-like field in a dialog, listed by type: an unqualified `input` would
    also catch the buttons and the file picker. A field left off this list is not a
    cosmetic slip - it falls back to 13px, which is under the zoom threshold below. */
@@ -4259,7 +4263,58 @@ body.writes-blocked .day-actions .btn-success { opacity: 1; }
    and "leave without saving" was one thumb-slip, and the modal is top-anchored on a
    phone, so the bottom row is the NEAREST one to a thumb coming off the tab bar. */
 .ask-choices button + button { margin-top: 14px; }
+/* A held menu's answers (askChoice's `apart` and `from`, js/ui/ask.js): a finger's width apart
+   - 48px, the 8px gap and the 14px margin above replaced by one gap - and turned round or laid
+   side by side so that the first one is not where the finger that opened the menu was
+   (askChoiceAway). Layout only: no size, weight or line here (css/large.css says them again
+   for the sizes it has). */
+#askChoices.ask-apart { gap: 48px; }
+#askChoices.ask-apart button + button,
+#askChoices.ask-across button + button { margin-top: 0; }
+#askChoices.ask-flip { flex-direction: column-reverse; }
+#askChoices.ask-across { flex-direction: row; align-items: stretch; }
+#askChoices.ask-across.ask-flip { flex-direction: row-reverse; }
+#askChoices.ask-across button { flex: 1 1 0; width: auto; min-width: 0; }
 .ask-footer { margin-top: 10px; }
+
+/* A held question's names (askConfirm's `names`, js/ui/ask.js): every man it is about, one
+   to a line, the size a name is read at on the day. The box scrolls inside the dialog once
+   it is longer than four tenths of the screen, so with any crew the two answers stay on the
+   glass under it - the list is never what pushes them off a phone.
+   At twice the text size on a 320 or a 375 the dialog is taller than the screen all the
+   same and scrolls too, opening at its top (askShowTop). The list does NOT hold the finger
+   at its end, then: a drag that starts on it once it is at its last name moves the dialog on
+   to the answers. Holding it (overscroll-behavior: contain) left a finger on the names - most
+   of the glass there - with nowhere to go. The dialog itself still holds it
+   (.modal-content), so the day behind never moves. */
+.ask-list {
+    list-style: none;
+    margin: 8px 0 4px;
+    padding: 2px 14px;
+    max-height: 40vh;
+    max-height: 40dvh;
+    overflow-y: auto;
+    border-radius: 12px;
+    background: var(--surface-2);
+}
+.ask-list li {
+    padding: 8px 0;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.35;
+    color: var(--ink);
+    border-bottom: 1px solid var(--line-soft);
+    overflow-wrap: anywhere;
+}
+.ask-list li:last-child { border-bottom: 0; }
+/* The four places askKeepAway (js/ui/ask.js) tries for the two answers, so the confirming
+   one is never where the finger that opened the question was. Side by side it is first - on
+   the right - as on every question; `ask-swap` puts it on the left; `ask-stack` puts the two
+   one above the other, the confirming one on top, and both together put it underneath. */
+#askModal .modal-actions.ask-swap { flex-direction: row-reverse; }
+#askModal .modal-actions.ask-stack { flex-direction: column; align-items: stretch; gap: 14px; }
+#askModal .modal-actions.ask-stack.ask-swap { flex-direction: column-reverse; }
+#askModal .modal-actions.ask-stack button { flex: none; width: 100%; }
 
 /* The auto-scroll bands, visible only mid-drag: thin gradients at the list's edges
    naming the zone where a held row scrolls the rest into reach. */
@@ -4381,7 +4436,8 @@ body.reorder-dragging .reorder-list::after {
    day name, its date and the two arrows, because the one input error that actually costs
    money is a day recorded against the wrong date, and halfway down a list of names nothing
    else on screen says what day this is. What goes is undo, redo, "היום", the switcher, the
-   fold's button, «הכל חופש» and the progress line's TEXT.
+   fold's button and the progress line's TEXT. («הכל חופש» went with them until the owner
+   moved it off the header altogether, 2026-11-11: it is at the foot of the day now.)
 
    The 4px track stays. It is already the header's own bottom edge (absolute - see
    `.day-header .progress-bar` above), so it costs no row and still says how much of the
@@ -4419,6 +4475,41 @@ body.day-compact .day-header .progress .progress-line {
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+}
+/* THE PAGE IS NEVER TOO SHORT TO STAY COMPACT. The two thresholds in js/ui/day.js
+   (COMPACT_ON 72, COMPACT_OFF 12) were set when the collapse took about fifty pixels out of
+   the page; it takes 97 now (a 148px header to 51, at 320, 375 and 440 alike) and 107 to 190
+   at twice the text size - more than the 60px between them. So a day that ended between 72
+   and about 110px below the glass could not be scrolled to its end: past 72 the header
+   compacted, the page lost 97px under the scroll, the browser pulled the scroll back to 0-11,
+   the header opened again, and the last of the day stayed behind the dock - on v190 at 440,
+   2 sites and 5 men, «בדיקת היום» 17px under it; on the first build of «הכל חופש» at the foot,
+   that button half under the dock, 0px from «מהיום הקודם». A wider gap would only move the
+   band: what the collapse removes depends on the size of the text.
+   So while the header is compact the page is at least the screen and 72px (COMPACT_ON) tall.
+   The collapse can then never pull the scroll back under COMPACT_OFF, whatever it takes away,
+   and the end of every day is reached - with the header compact and, on such a day, some
+   empty page under the end. lvh, the LARGEST the viewport gets, so the page is never shorter
+   than the screen with the browser's bars put away; vh first, for a browser without lvh. On
+   the screen only: paper has no scroll. tests/holiday.browser.mjs scrolls days of every
+   length to their end.
+   THE DAY'S OWN FLOOR, NOT THE PAGE'S. Its first build put it on <body>, and nothing takes
+   `day-compact` off <body> when another screen is opened: after a day scrolled to its end, a
+   tap on «דוחות», «שבוע» or «מקדמות» found a page still 72px taller than the screen, the
+   browser had no reason to pull the scroll back, and each of them opened 72px down with the
+   top bar wholly above the glass (the verifier, 375x667, both schemes). On #dayView a floor
+   is only a floor while the day is the screen drawn: hidden, a section is no height at all.
+   The section is the screen and 72px LESS what the page is sure to add under it - the
+   .app's bottom padding is never under the two bars and 24px - so the page is the screen and
+   72px, as before, plus whatever stands above the day. js/ui/day.js keeps the class itself
+   to the day (readDayScroll). Another screen opens where v192 opened it - the window's own
+   scroll, clamped by the browser to that screen's length and by nothing of the day's
+   (tests/scroll.browser.mjs holds the week and back; tests/holiday.browser.mjs, nothing leaks). */
+@media screen {
+    body.day-compact #dayView {
+        min-height: calc(100vh + 72px - var(--bars-h, 0px) - 24px);
+        min-height: calc(100lvh + 72px - var(--bars-h, 0px) - 24px);
+    }
 }
 
 /* ---------------------------------------------------------------- the compact day (v93)
@@ -4820,7 +4911,8 @@ body.day-tight .topbar { margin-bottom: 2px; }
     border-radius: 24px; background: #eef1f4; color: #283343; font-weight: 700; padding: 8px 12px; }
 .worker-active-toggle.is-active { background: #16713b; border-color: #16713b; color: #fff; }
 .worker-active-toggle:focus-visible { outline: 3px solid #2962ff; outline-offset: 3px; }
-.day-holiday-action { margin: 0; min-height: 44px; padding: 6px; flex-shrink: 0; }
+/* (`.day-holiday-action` was here: «הכל חופש» on the header's switch line, v116 to v190. It is
+   on no screen now - behind «עוד ⋯» at the foot of the day, whose look is css/design.css's.) */
 
 @media (max-width: 360px) { .day-tools .mode-prefix { display: none; } }
 

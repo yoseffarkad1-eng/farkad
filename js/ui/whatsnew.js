@@ -73,6 +73,17 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    { build: 'v194', items: [
+        { title: 'הכל חופש: מאחורי «עוד ⋯» ועם שאלה',
+            text: 'הכפתור הכל חופש עבר אל «עוד ⋯» בתחתית רשימת היום, ולפני הרישום יש שאלה עם שמות כל העובדים שיירשם להם חופש.',
+            where: 'היום ← בתחתית הרשימה ← עוד ⋯', go: 'day' },
+        { title: 'תיקון: ביטול לא דורס רישום ממכשיר אחר',
+            text: 'ביטול פעולה (↶) כבר לא כותב רישום ישן מעל רישום שהשתנה בינתיים ממכשיר אחר, אלא אומר שהפעולה לא בוצעה.',
+            where: 'היום ← בטל או ↶', go: 'day' },
+        { title: 'תיקון: הסרת עובדים בזה אחר זה',
+            text: 'אפשר להסיר עובדים מאתר, ולבטל היעדרויות, בזה אחר זה בקצב רגיל בלי שלחיצה תיבלע, וסרגל הביטול כבר לא עולה מתחת לאצבע.',
+            where: 'היום ← ✕ ליד שם העובד', go: 'day' }
+    ] },
     // v193: repairs found by an audit of v192 - nothing a foreman would see on a screen.
     { build: 'v193', items: [] },
     { build: 'v192', items: [

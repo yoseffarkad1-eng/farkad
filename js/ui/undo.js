@@ -79,10 +79,73 @@ function editWithUndo(workerId, label, mutate, at) {
         return true;
     }
 
-    offerUndo(label,
-        () => State.commit(setWorkerDay(State.schedule, date, workerId, layer, previous)),
-        () => State.commit(setWorkerDay(State.schedule, date, workerId, layer, after)));
+    // Each direction is written only over what this phone's own step left there (undoStands).
+    let left = after;
+    const put = record => () => {
+        if (!undoStands(date, layer, workerId, left)) return UNDO_STALE;
+        const stood = State.commit(setWorkerDay(State.schedule, date, workerId, layer, record));
+        if (stood) left = snapshotWorkerDay(date, layer, workerId);
+        return stood;
+    };
+    offerUndo(label, put(previous), put(after));
     return true;
+}
+
+// A STEP IS TAKEN BACK ONLY OVER WHAT THIS PHONE'S OWN STEP LEFT THERE (v194).
+//
+// The step is two copies of a man's day, taken at the edit, and ↶ stays lit until the day is
+// left - long after its bar has gone. Meanwhile another phone corrects the same man: this phone
+// adopts the correction, shows it, says «מסונכרן» - and ↶, pressed then, wrote this phone's OLD
+// copy over the other phone's newer record, on every phone and in the cloud, each saying
+// «מסונכרן»; ↷ put back this phone's own edit, never the correction (the audit of v192, measured
+// with two devices: placed on site 1 here, corrected there to another site with 3 extra hours,
+// ↶ here - an empty day everywhere). Copy-a-day already knew the rule (copyDayInto,
+// js/ui/sheet.js): a row another phone edited in between is that phone's answer.
+//
+// So every step asks first whether the day it would write over still holds what this phone's
+// last step left on it - read from the live record at the press, compared field for field. If it
+// does not, NOTHING is written, both directions are forgotten, and the person is told
+// (UNDO_TEXT.stale). A step over several men (a site filled, a site emptied, «הכל חופש») goes
+// back man by man: each one still standing is put back, each one changed since is left as it
+// is, and how many were left is said (UNDO_TEXT.partial); none standing is the same sentence as
+// the single step's, and nothing written.
+//
+// PROPOSED, not read by the owner; pinned in tests/undo-stale.test.mjs.
+const UNDO_TEXT = {
+    stale: 'הרישום הזה השתנה מאז, אולי ממכשיר אחר. הפעולה לא בוצעה ושום רישום לא שונה.',
+    partial: count => (count === 1
+        ? 'רישום אחד השתנה מאז, אולי ממכשיר אחר, ונשאר כמו שהוא.'
+        : `${count} רישומים השתנו מאז, אולי ממכשיר אחר, ונשארו כמו שהם.`)
+};
+// What a step answers when it found the record changed under it (runUndo, runRedo).
+const UNDO_STALE = 'stale';
+
+// One record as text, its keys in order: a copy that came back from the cloud is the same
+// record whatever order its fields arrived in.
+function undoCanonical(value) {
+    if (Array.isArray(value)) return `[${value.map(undoCanonical).join(',')}]`;
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value).sort().filter(key => value[key] !== undefined)
+            .map(key => `${JSON.stringify(key)}:${undoCanonical(value[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value === undefined ? null : value);
+}
+
+// Whether the man's day still holds `left` - what this phone's step left there.
+function undoStands(date, layer, workerId, left) {
+    return undoCanonical(snapshotWorkerDay(date, layer, workerId)) === undoCanonical(left);
+}
+
+// The way back of a step over several men. `rows`: [{ workerId, left, back }] - what the step
+// left on each man's day, and the change that takes it back, built at the press. `open(row)`,
+// when given, is one more thing a row must pass (an account still open). Answers UNDO_STALE when
+// no row stands; otherwise writes the standing rows in one commit and says how many were left.
+function undoRows(date, layer, rows, open) {
+    const standing = rows.filter(row => undoStands(date, layer, row.workerId, row.left) && (!open || open(row)));
+    if (!standing.length) return UNDO_STALE;
+    const stood = State.commitMany(standing.map(row => row.back()));
+    if (stood && standing.length < rows.length) askTell(UNDO_TEXT.partial(rows.length - standing.length));
+    return stood;
 }
 
 // THE BAR COMES UP UNDER THE FINGER THAT MADE THE EDIT (the second review of the hotfix). On a
@@ -105,6 +168,36 @@ function undoBarTap(event) {
     if (event && event.detail > 0 && typeof sameFingerAgain === 'function'
         && sameFingerAgain(pressOf(event), undoBarPress)) return;
     runUndo();
+}
+
+// AND UNDER THE FINGER THAT IS TAKING MEN OFF A SITE THE BAR IS NOT PUT UP AT ALL.
+//
+// The owner, from his phone: several men taken off one after another, and "one of the two
+// removals does not happen and things get mixed up". Measured: the bar stands on the lowest
+// rows of the list the page shows, and the ✕ of a row is on the same side of the screen as the
+// bar's own «בטל» and ✕. A man low on the screen taken off, the bar came up over the place his
+// ✕ had been - and the next tap there, at any pace, landed on the bar and not on the next man:
+// measured at 320x568, 375x667 and 390x844 on the lowest row a finger reaches, it landed on the
+// bar's own ✕ - the bar went away, the man stayed, and nothing said so. The bounce above is a
+// press made at once; this one is made on purpose, at the next man, and no window of time
+// answers it.
+//
+// So a row's ✕ asks, once its edit stood: does the bar stand where this finger came down
+// (HALF_A_FINGER around it)? Then the bar is put away again in the same turn, before it was ever
+// drawn. The step is not: it is held by the header's ↶, by name, exactly as it is after the bar's
+// twelve seconds - and the next man's ✕ is what stands under the finger. Anywhere else on the
+// screen the bar comes up as it always did. A keyboard's press has no finger and keeps its bar.
+const HALF_A_FINGER = 22;     // CSS px: half of the 44px a target is promised
+
+function undoBarAwayFromPress() {
+    const bar = document.getElementById('undoBar');
+    const press = undoBarPress;
+    if (!bar || !press || bar.style.display === 'none' || typeof bar.getBoundingClientRect !== 'function') return;
+    const box = bar.getBoundingClientRect();
+    if (!(box.height > 0)) return;
+    if (press.y < box.top - HALF_A_FINGER || press.y > box.bottom + HALF_A_FINGER
+        || press.x < box.left - HALF_A_FINGER || press.x > box.right + HALF_A_FINGER) return;
+    dismissUndoBar();
 }
 
 // `redo` is optional: a bulk action (emptying a site) passes only the way back.
@@ -143,7 +236,10 @@ function runUndo() {
     const replay = restore._replay;
 
     dismissUndoBar();
-    restore();
+    if (restore() === UNDO_STALE) {
+        undoRefused();
+        return;
+    }
 
     undoAction = null;
     redoAction = replay || null;
@@ -156,12 +252,22 @@ function runRedo() {
     if (!replay) return;
     const restore = replay._replay;
 
-    replay();
+    if (replay() === UNDO_STALE) {
+        undoRefused();
+        return;
+    }
 
     redoAction = null;
     undoAction = restore || null;
     if (undoAction) undoAction._replay = replay;
     renderUndoButton();
+}
+
+// The record changed under the step: both directions are forgotten - neither is this phone's to
+// take any more - and the person is told that nothing was written.
+function undoRefused() {
+    hideUndo();
+    askTell(UNDO_TEXT.stale);
 }
 
 // Takes the toast off the screen and leaves the step itself standing.

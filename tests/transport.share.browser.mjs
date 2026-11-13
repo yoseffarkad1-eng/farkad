@@ -30,6 +30,7 @@
 import { chromium } from 'playwright';
 import { serve } from './serve.mjs';
 import { launchLocalBrowser } from './network-guard.mjs';
+import { tapsAtAPersonsPace } from './pace.mjs';
 import { verifyServedAssets, expectedShaFor } from './treecheck.mjs';
 import { makeTransportCloud } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
@@ -87,6 +88,8 @@ async function phone(options) {
     // «תצוגה גדולה» (v191, js/ui/display.js): the one per-phone key, there before the app reads it.
     if (large) await context.addInitScript(() => { try { localStorage.setItem('farkadDisplay:large', '1'); } catch (error) { /* no disk */ } });
     const page = await context.newPage();
+    // v194: this suite is not about double taps - its taps come at a person's pace (tests/pace.mjs).
+    tapsAtAPersonsPace(page);
     const errors = [];
     const dialogs = [];
     page.on('pageerror', error => errors.push(error.message));

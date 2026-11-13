@@ -143,11 +143,13 @@ const box = (page, selector) => page.evaluate(selector => {
     same('relabelled, it reads what it was given', copy.after, '↧ מיום שישי 06/11');
     same('and is dressed again, once', [copy.glyphs, copy.kept], [1, 1]);
 
+    // MOVED (round two of the owner's «הכל חופש», 2026-11-11): that button is on no screen now;
+    // the plain button read here is the one in its place at the foot of the day, «עוד ⋯».
     const plain = await page.evaluate(() => {
-        const node = document.querySelector('.day-holiday-action');
+        const node = document.querySelector('.day-more-action');
         return { text: node.textContent, glyphs: node.querySelectorAll('svg.btn-ico').length };
     });
-    same('a button with no emoji is left exactly alone', plain, { text: 'הכל חופש', glyphs: 0 });
+    same('a button with no emoji is left exactly alone', plain, { text: 'עוד ⋯', glyphs: 0 });
 
     await page.evaluate(() => showDayMessage());
     await page.waitForTimeout(250);

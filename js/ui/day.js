@@ -30,11 +30,24 @@ function setDayMode(mode) {
 // ---------------------------------------------------------------- the header on scroll
 //
 // Above ON the header is one row; back below OFF it is two. Two numbers rather than one,
-// because collapsing the header takes about fifty pixels out of the page and everything
-// under it moves up by that much - with a single threshold the page can land back on the
-// wrong side of it and toggle again on the next frame, which is a header that flickers
-// while a thumb is trying to hit something. The gap between them is wider than the height
-// the collapse removes.
+// because collapsing the header takes height out of the page and everything under it moves
+// up by that much - with a single threshold the page can land back on the wrong side of it
+// and toggle again on the next frame, which is a header that flickers while a thumb is
+// trying to hit something.
+//
+// THE GAP BETWEEN THEM IS NO LONGER WIDER THAN THE COLLAPSE, and is not what holds it. When
+// these were set the collapse took about fifty pixels; it takes 97 now, and 107 to 190 at
+// twice the text size. On a day whose end was 72 to about 110px below the glass, the page
+// scrolled to its end lost that much under the scroll, the browser pulled the scroll back
+// under OFF, and the header opened again - three times in one drag, measured on v190 - with
+// the end of the day out of reach behind the dock: «בדיקת היום» 17px under it at 440 on
+// v190, and «הכל חופש» half under it on its first build at the foot of the day. What holds
+// it now is the page: while the header is compact it is never shorter than the screen and
+// ON more (css/app.css, body.day-compact #dayView - the DAY's floor: on <body>, where it
+// was first put, every other screen opened after a scrolled day inherited it and opened 72px
+// down), so the collapse can never pull the scroll under OFF, whatever height it takes out.
+// Still from scrollY and from nothing else (below): the page's height is the stylesheet's,
+// and nothing here measures it.
 const COMPACT_ON = 72;
 const COMPACT_OFF = 12;
 
@@ -52,6 +65,15 @@ function readDayScroll() {
     if (typeof document === 'undefined' || !document.body) return;
     const body = document.body;
     const compact = body.classList.contains('day-compact');
+    // THE DAY'S HEADER, AND ONLY WHILE THE DAY IS THE SCREEN. This listener hears every scroll
+    // of the window, whichever screen is on it, and its class used to stay on <body> after the
+    // day was left: with the page's floor under it (css/app.css), «דוחות», «שבוע» and
+    // «מקדמות» opened 72px down, their top bar above the glass. Not a measurement - which
+    // screen is drawn - and the class comes off the moment it is another one.
+    if (typeof currentView !== 'undefined' && currentView !== 'day') {
+        if (compact) body.classList.remove('day-compact');
+        return;
+    }
     const y = typeof window.scrollY === 'number' ? window.scrollY
         : (document.documentElement ? document.documentElement.scrollTop : 0);
     // Idempotent on purpose: this runs on every scroll event, and a classList write per
@@ -85,9 +107,10 @@ function watchDayScroll() {
 // place picker «לאן הלך», which also turns into its own opposite in place, so a double tap
 // put the man on the site and took him off again, leaving him unplaced.
 //
-// So a row's ✕ that comes less than DOUBLE_TAP_GUARD_MS after the previous row ✕, a
-// «נעדרים» ✕ after the previous one, and a picker row or a «לאן הלך» site tapped again
-// within it, do NOTHING: no commit, no undo bar, no redraw.
+// So a picker row or a «לאן הלך» site tapped again less than DOUBLE_TAP_GUARD_MS after the
+// previous tap on it does NOTHING: no commit, no undo bar, no redraw. (A row's ✕ and the ✕
+// of «נעדרים» had this window too, until the owner could not take two men off a site:
+// rowRemoveTooSoon and trayTapTooSoon, below.)
 // Measured from the previous activation whether or not that one was let through, so a
 // burst of taps is one tap. 700 ms is longer than any double tap or bounce and shorter
 // than seeing what the first tap did and deciding on a second man.
@@ -105,6 +128,105 @@ function secondTapTooSoon(key) {
     const last = lastTapAt.get(key);
     lastTapAt.set(key, now);
     return last !== undefined && now - last < DOUBLE_TAP_GUARD_MS;
+}
+
+// A ROW'S ✕ IS HELD BY PLACE AND BY WHAT WAS SEEN, NOT BY 700 ms.
+//
+// The owner, from his phone: taking several men off a site one after another, "one of the
+// two removals does not happen and things get mixed up - I wait about five seconds between
+// them". Measured on v193 in Chromium with a touch screen, the finger kept where the first ✕
+// was: six taps 150, 250, 320, 350, 400, 500 and 650 ms apart took off ONE man, every time -
+// the window above was 700 ms of time alone, counted from the last tap WHETHER OR NOT IT WAS
+// LET THROUGH, so a steady pace under it never got a second man off at all; and it was one
+// clock for every row, so a ✕ aimed at another man, on another site, was dropped the same
+// way. Six taps 750 ms apart took off six. Nothing said a tap had been dropped.
+//
+// What the window was for is the second tap of a double tap, or a bounce: the man below
+// slides up under the finger and would go too. That is a press made at once - less than
+// WALK_BOUNCE_MS (js/ui/sheet.js, the walk's own bounce) after the press of the removal
+// before it, on the presses' own clock, which is when the fingers came down and not when
+// a busy page got round to them. Wherever it comes down: every ✕ under the man taken off
+// has just changed hands, so a press that quick was aimed at rows that have since moved.
+// And one thing more is ignored: a press that came down BEFORE THE REMOVAL BEFORE IT WAS
+// DRAWN, however long after. On a slow phone the commit and the redraw take longer than a
+// bounce, a press made meanwhile waits for them, and is then handed to whatever the redraw
+// put under it - a man the person has not seen there. Nobody aims at a screen that has
+// not been shown (measured with the processor slowed twenty times: a ✕ three rows down,
+// pressed while the first removal was still being written, took off the man who had slid
+// into that row).
+//
+// Everything else is a tap: the next man's ✕ where the last one was, or any other man's,
+// WALK_BOUNCE_MS later or more, once the removal before it is on the glass. A keyboard's
+// press and a click from code have no finger, are never a bounce, and act at once. A press
+// that was ignored is not a press to repeat - the next is measured from the last one LET
+// THROUGH - so a burst is one man and the tap after the burst is a tap. What this gives
+// up, said plainly: two taps on one ✕ 300-700 ms apart took off one man and now take off
+// two (tests/scroll.browser.mjs moved with it, on purpose), each with its own step on ↶
+// and the bar naming the last.
+let lastRowRemove = null;       // { press, shown, shownAt } of the last row ✕ let through
+let lastTrayWrite = null;       // the same of the last write on a tray a finger made, and its `kind` (trayTapTooSoon)
+let lastHeardPress = null;      // { stamp, early, earlyTray, sameClock } of the press the page heard last
+
+// `done` once the frame after the work under way has been drawn. Asked for from inside the
+// tap's own handler, with the commit and the redraw still ahead of it.
+function afterNextFrame(done) {
+    let called = false;
+    const once = () => { if (!called) { called = true; done(); } };
+    // After the frame, not in it: the callback of requestAnimationFrame runs before the
+    // paint, and the turn after it is the first one the new rows can have been seen in.
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(once, 0));
+    // A page that is not being drawn (in the background) gets no frame; it is not being
+    // tapped either. The timer is the bound, so that nothing is held for good - and it is
+    // started a turn from now, when the handler is over: counted from here it would run
+    // out inside the commit on the very phone this is for.
+    setTimeout(() => setTimeout(once, 500), 0);
+}
+
+function dayNow() {
+    return typeof performance !== 'undefined' && performance && typeof performance.now === 'function'
+        ? performance.now() : Date.now();
+}
+
+// Every press, as the page hears it. TWO READINGS OF «BEFORE IT WAS DRAWN», because neither is
+// enough alone. `early`: the removal before it had not been drawn when this press was HEARD -
+// true on any clock, but a browser may draw the waiting frame first and hand over the press
+// after it. `sameClock`: the press's own time (when the finger came down) can be set against
+// the time the frame was drawn - it can wherever a press is stamped on the page's clock, which
+// is asked here, of each press, and not assumed: a press heard before it was made, or half a
+// minute after, is on some other clock, and then only `early` is read.
+if (typeof window !== 'undefined' && window && typeof window.addEventListener === 'function') {
+    window.addEventListener('pointerdown', event => {
+        const late = dayNow() - event.timeStamp;
+        lastHeardPress = { stamp: event.timeStamp, early: Boolean(lastRowRemove && !lastRowRemove.shown),
+            earlyTray: Boolean(lastTrayWrite && !lastTrayWrite.shown), sameClock: late > -5 && late < 30000 };
+    }, true);
+}
+
+// Whether `press` follows the write `before` too soon to be a tap of its own: it came down before
+// that write was drawn (`early` names the reading of it taken when the press was heard), or less
+// than WALK_BOUNCE_MS after the press that made it.
+function pressFollowsTooSoon(press, before, early) {
+    const heard = lastHeardPress && lastHeardPress.stamp === press.stamp ? lastHeardPress : null;
+    if (heard && (heard[early] || (heard.sameClock && press.stamp < before.shownAt))) return true;
+    const after = press.stamp - before.press.stamp;
+    return after >= 0 && after < (typeof WALK_BOUNCE_MS === 'number' ? WALK_BOUNCE_MS : 300);
+}
+
+// A press let through, as the one the next is measured from; `shown` once its write is on the glass.
+function pressLetThrough(press, kind) {
+    const mine = { press, kind: kind || null, shown: false, shownAt: Infinity };
+    afterNextFrame(() => { mine.shown = true; mine.shownAt = dayNow(); });
+    return mine;
+}
+
+// True when the ✕ being handled now is to be ignored: a press made at once after the last
+// removal's, or before that removal was drawn. Otherwise this press becomes the one measured from.
+function rowRemoveTooSoon() {
+    const press = typeof openPress === 'function' ? openPress() : null;
+    if (!press) return false;
+    if (lastRowRemove && pressFollowsTooSoon(press, lastRowRemove, 'early')) return true;
+    lastRowRemove = pressLetThrough(press);
+    return false;
 }
 
 // THE TWO TRAYS HAVE ONE CLOCK.
@@ -129,14 +251,39 @@ function secondTapTooSoon(key) {
 // dropped inside the window starts it again, so a burst is one tap. The window is time and
 // not place, as for every key above: a second man the person MEANS, inside 700 ms, is
 // ignored too.
-function trayTapTooSoon(writes) {
+//
+// EXCEPT THE SAME ACT AGAIN, ON THE NEXT MAN (v194). The owner could not take two men off a
+// site at a person's pace, because a row's ✕ was held by 700 ms of time alone that began again
+// at every tap it dropped (rowRemoveTooSoon, above) - and the trays' clock is that clock.
+// Measured in Chromium with a touch screen, with what follows taken out: six taps on the ✕ of
+// «נעדרים», 350 and 400 ms apart, cancelled ONE absence, and five on «נעדר» marked one man
+// (tests/removepace.browser.mjs). So a finger on
+// a control that writes, when the last tray write let through was made by the SAME KIND of
+// control (`kind`: the usual chip, «נעדר», the ✕ of «נעדרים»), is judged as a row's ✕ is and
+// not by the window: ignored when it came down less than WALK_BOUNCE_MS after the press of
+// that write - on the presses' own clock, measured from the last press LET THROUGH - or before
+// that write was drawn; otherwise it is a tap. A double tap is still one man.
+//
+// AND ONLY THE SAME ACT. What the window was put on the trays for (above) is a DIFFERENT
+// control coming up under the finger - a man nobody touched marked absent under a finger that
+// placed another, an absence cancelled, «לאן הלך» opened. A control of another kind, and a
+// man's name, are held for the whole window after any tap on the trays, exactly as they were.
+// So is a press with no finger (a keyboard, a click from code): the window, as before.
+function trayTapTooSoon(writes, kind) {
     const now = tapClock();
     const last = lastTapAt.get('trays');
-    const soon = last !== undefined && now - last < DOUBLE_TAP_GUARD_MS;
+    let soon = last !== undefined && now - last < DOUBLE_TAP_GUARD_MS;
+    const press = typeof openPress === 'function' ? openPress() : null;
+    if (press && writes && kind && lastTrayWrite && lastTrayWrite.kind === kind) {
+        soon = pressFollowsTooSoon(press, lastTrayWrite, 'earlyTray');
+    }
     if (writes || soon) lastTapAt.set('trays', now);
-    // Where and when the finger of a tray WRITE came down - for the rows that come up under it
-    // when the trays fold away (renderDay's foot, below; sameFingerAgain, js/ui/sheet.js).
-    if (writes && !soon) trayWritePress = typeof openPress === 'function' ? openPress() : null;
+    if (writes && !soon) {
+        // Where and when the finger of a tray WRITE came down - for the rows that come up under it
+        // when the trays fold away (renderDay's foot, below; sameFingerAgain, js/ui/sheet.js).
+        trayWritePress = press;
+        lastTrayWrite = press ? pressLetThrough(press, kind) : null;
+    }
     return soon;
 }
 let trayWritePress = null;
@@ -232,22 +379,34 @@ function dayAnchor(root) {
     return seen.length ? seen : null;
 }
 
-// The first of them still on the page goes back to where it was. One that is gone - a
-// man taken off by ✕, or by the other phone - is passed over, and the next one is held
-// where IT was. Found through a map of the new nodes, not a selector built from the key,
-// so no site or worker id ever has to be escaped into CSS.
+// The first of them still on the page goes back to where it was. Found through a map of
+// the new nodes, not a selector built from the key, so no site or worker id ever has to be
+// escaped into CSS.
+//
+// ONE THAT IS GONE LEAVES ITS PLACE TO THE NEXT. A man taken off by ✕, or by the other
+// phone, is passed over - and when he was the FIRST row showing under the header, the one
+// after him used to be held where IT was. So the page scrolled back by his row's height
+// instead: everything above came down, and the man from under the header - a man who had
+// not been on the screen - stood under the finger, where every other ✕ on this screen puts
+// the man BELOW. Measured at 375x667 with the site's head scrolled off: the page moved 59px
+// the wrong way, and a second tap in the same place took off the man above. The first row
+// still there takes the place of the first one that went, as it does everywhere else on
+// the page: what is above the screen stays above it.
 function keepDayAnchor(root, anchor) {
     pendingDayAnchor = null;
     const now = new Map();
     root.querySelectorAll('[data-anchor]').forEach(node => {
         if (!now.has(node.dataset.anchor)) now.set(node.dataset.anchor, node);
     });
+    let vacated = null;
     for (const item of anchor) {
         const node = now.get(item.key);
-        if (!node) continue;
-        const box = node.getBoundingClientRect();
-        if (box.height === 0) continue;
-        const delta = box.top - item.top;
+        const box = node ? node.getBoundingClientRect() : null;
+        if (!box || box.height === 0) {
+            if (vacated === null) vacated = item.top;
+            continue;
+        }
+        const delta = box.top - (vacated === null ? item.top : vacated);
         if (Math.abs(delta) < 1) return;
         const want = window.scrollY + delta;
         window.scrollBy(0, delta);
@@ -306,10 +465,6 @@ function buildDay(root) {
         return;
     }
     if (State.activePlaces().length === 0) {
-        // Of the day drawn here, not of State.date at the tap (markAllHoliday).
-        const drawnFor = State.date;
-        root.appendChild(button('הכל חופש', 'btn-secondary day-holiday-action',
-            () => markAllHoliday(drawnFor), 'רשום חופש לעובדים בלי רישום ביום הנבחר'));
         root.appendChild(renderSetupCard(
             '🏗️',
             'עוד אין אתרי עבודה',
@@ -317,6 +472,13 @@ function buildDay(root) {
             '+ הוסף אתר',
             () => { showView('roster'); showAddPlaceModal(); }
         ));
+        // «עוד ⋯», and «הכל חופש» behind it, UNDER the card, never above it (the owner,
+        // 2026-11-11 - see HOLIDAY_TEXT): above, «הכל חופש» stood straight under the date, the
+        // one thing on this screen that is pressed. The card's own button is what this screen
+        // is for.
+        const row = el('div', 'day-more-row');
+        row.appendChild(dayMoreEntry());
+        root.appendChild(row);
         return;
     }
 
@@ -372,12 +534,19 @@ function buildDay(root) {
         }, true);
         return row;
     };
+    // «עוד ⋯» ENDS that row - the day's menu, «הכל חופש» in it (the owner, 2026-11-11 - see
+    // HOLIDAY_TEXT): the last thing in the day, on a line of its own at the row's far end -
+    // and on a screen 580px tall or less, where that line and its margins would cost the last
+    // man his place, wherever the row's own wrap puts it, beside the two or under them
+    // (css/design.css). Like the two, it writes nothing.
     const check = () => {
         const journey = typeof journeyDayEntry === 'function' ? journeyDayEntry() : null;
         if (journey) root.appendChild(trayClock(journey));
         const foot = typeof dayCheckEntry === 'function' ? dayCheckEntry() : el('div', 'daycheck-row');
         if (typeof findEntry === 'function') foot.insertBefore(findEntry(), foot.firstChild);
-        if (foot.firstChild) root.appendChild(trayClock(foot));
+        foot.appendChild(dayMoreEntry());
+        foot.classList.add('day-foot-more');
+        root.appendChild(trayClock(foot));
     };
 
     if (dayMode === 'workers') {
@@ -754,10 +923,11 @@ function bulkAssign(place, drawnFor) {
         return;
     }
 
-    offerUndo(`${workers.length} עובדים נרשמו ב${isolate(place.name)}`, () => {
-        State.commitMany(workers.map(worker =>
-            clearWorkerDay(State.schedule, date, worker.id, 'actual')));
-    });
+    // The way back clears only a day that still holds what this step left on it: a man another
+    // phone has corrected since keeps that phone's answer (undoRows, js/ui/undo.js).
+    const rows = workers.map(worker => ({ workerId: worker.id, left: snapshotWorkerDay(date, 'actual', worker.id),
+        back: () => clearWorkerDay(State.schedule, date, worker.id, 'actual') }));
+    offerUndo(`${workers.length} עובדים נרשמו ב${isolate(place.name)}`, () => undoRows(date, 'actual', rows));
 }
 
 // ---------------------------------------------------------------- days drawer
@@ -944,12 +1114,14 @@ function renderDayWorkerList() {
 
         if (!empty) {
             row.appendChild(button('✕', 'btn-icon', () => {
-                // The second tap of a double tap is the first one again (secondTapTooSoon).
-                if (secondTapTooSoon('row-remove')) return;
+                // The second tap of a double tap is the first one again (rowRemoveTooSoon).
+                if (rowRemoveTooSoon()) return;
                 // One tap on one row out of twelve, on a phone, at night. It will be the
                 // wrong row sometimes, so it is undoable rather than guarded by a dialog.
-                editWithUndo(worker.id, `הרישום של ${isolate(worker.name)} נמחק`,
-                    (date, layer) => clearWorkerDay(State.schedule, date, worker.id, layer), at);
+                // And the bar is not left standing where this finger works (undoBarAwayFromPress).
+                if (editWithUndo(worker.id, `הרישום של ${isolate(worker.name)} נמחק`,
+                    (date, layer) => clearWorkerDay(State.schedule, date, worker.id, layer), at)
+                    && typeof undoBarAwayFromPress === 'function') undoBarAwayFromPress();
             }, `נקה את ${isolate(worker.name)}`));
         }
 
@@ -1105,15 +1277,15 @@ function appendModeSwitch(tools, bulkRow) {
     // 320px screen that pushed the whole page six pixels sideways, which the mobile suite
     // measures at exactly that size. A wrapper takes the line by being one item, and what
     // is inside it is free to shrink.
+    //
+    // «הכל חופש» stood on this line from v116 to v190, between «לפי אתרים» and the fold's
+    // button. It is behind «עוד ⋯» at the foot of the day now (HOLIDAY_TEXT): the owner,
+    // 2026-11-11.
     const line = el('div', 'day-switch');
     const modes = el('div', 'layer-toggle mode-toggle mode-quiet');
     modes.appendChild(modeButton('workers', 'לפי עובדים'));
     modes.appendChild(modeButton('sites', 'לפי אתרים'));
     line.appendChild(modes);
-    // Of the day the header is drawn for, not of State.date at the tap (markAllHoliday).
-    const drawnFor = State.date;
-    line.appendChild(button('הכל חופש', 'btn-secondary day-holiday-action',
-        () => markAllHoliday(drawnFor), 'רשום חופש לעובדים בלי רישום ביום הנבחר'));
     if (bulkRow && bulkRow.classList && bulkRow.classList.contains('bulk-row')) {
         line.appendChild(bulkToggle(bulkRow));
     }
@@ -1443,11 +1615,15 @@ function renderAssignmentRow(place, workerId, drawnFor) {
     }
 
     row.appendChild(button('✕', 'btn-icon', () => {
-        // The man below slides up into this row; a second tap inside DOUBLE_TAP_GUARD_MS
-        // would take HIM off. It is the first tap again (secondTapTooSoon).
-        if (secondTapTooSoon('row-remove')) return;
-        editWithUndo(workerId, `${isolate(worker ? worker.name : '')} הוסר מ${isolate(place.name)}`,
-            (date, layer) => unassignPlace(State.schedule, date, workerId, layer, place.id), at);
+        // The man below slides up into this row; a finger coming down again at once
+        // would take HIM off. It is the first tap again (rowRemoveTooSoon) - and the next
+        // man's ✕, tapped here a moment later, is a tap.
+        if (rowRemoveTooSoon()) return;
+        // And the bar is not left standing where this finger works: the next tap here is the
+        // next man's ✕, not the bar's «בטל» (undoBarAwayFromPress, js/ui/undo.js).
+        if (editWithUndo(workerId, `${isolate(worker ? worker.name : '')} הוסר מ${isolate(place.name)}`,
+            (date, layer) => unassignPlace(State.schedule, date, workerId, layer, place.id), at)
+            && typeof undoBarAwayFromPress === 'function') undoBarAwayFromPress();
     }, `הסר את ${isolate(worker ? worker.name : '')} מ${isolate(place.name)}`));
 
     return row;
@@ -1485,7 +1661,7 @@ function renderUnassignedTray(unrecorded) {
         // holding the step before it - often a man just placed by his chip - so ↶ pressed
         // to take this absence back took HIS placement back and left this man absent.
         chip.appendChild(button('נעדר', 'chip-side', () => {
-            if (trayTapTooSoon(true)) return;
+            if (trayTapTooSoon(true, 'absent')) return;
             editWithUndo(worker.id, `${isolate(worker.name)} נרשם כנעדר`,
                 (date, layer) => markAbsent(State.schedule, date, worker.id, layer), at);
         }, `סמן את ${isolate(worker.name)} כנעדר`));
@@ -1623,8 +1799,9 @@ function renderAbsentTray() {
             // The next man's chip slides into this one's place, under the finger: a second
             // tap inside DOUBLE_TAP_GUARD_MS is this one again. And this tray comes up under
             // a finger that placed the last man waiting above it, so it reads the same clock
-            // as «לא נרשמו» (trayTapTooSoon).
-            if (trayTapTooSoon(true)) return;
+            // as «לא נרשמו» (trayTapTooSoon). The next man's ✕, tapped here a moment later
+            // and once this one is drawn, is a tap (the same act again, there).
+            if (trayTapTooSoon(true, 'back')) return;
             editWithUndo(worker.id, `ההיעדרות של ${isolate(worker.name)} בוטלה`,
                 (date, layer) => clearWorkerDay(State.schedule, date, worker.id, layer), at);
         }, `בטל היעדרות של ${isolate(worker.name)}`));
@@ -1634,31 +1811,183 @@ function renderAbsentTray() {
     return tray;
 }
 
-// Holiday fills only missing records. The date and crew are captured before confirmation;
-// records are re-read afterwards so another phone's work is never replaced by this action.
-// `drawnFor`: the day the button was drawn on, which its question names; left out, the day
-// on screen.
-async function markAllHoliday(drawnFor) {
+// ---------------------------------------------------------------- «הכל חופש»
+//
+// The owner, 2026-11-11: "the place of «כולם בחופש» is dangerous, it can be pressed by
+// mistake; and if possible, after I press it, let it ask me whether I am sure that all of
+// them are on holiday".
+//
+// THE PLACE. From v116 to v190 it stood on the header's switch line, between «לפי אתרים» and
+// the fold's button - measured on v190 at 320, 375 and 440: 4px from the date (which opens
+// the date picker), 5px from the count (which opens the next man's sheet), 6px from the
+// fold's button and 8px from «לפי אתרים», the controls this screen is pressed by all
+// evening. Its first move put it at the end of the day, on a line of its own under «חיפוש
+// עובד» and «בדיקת היום» - and a button at the end of a day stands wherever that day's length
+// puts it. Swept on that build (round two, every day of 1-16 men on 1-4 sites in both views,
+// at 320x568, 375x667, 440x956, 667x375 and 568x320, the large display off and on, both
+// schemes: 2,560 days): as the day opens, 420 of them had it on the glass within 48px of the
+// dock or across its edge, 0px from «מהיום הקודם» on a by-worker day just longer than the
+// glass; scrolled to the end, every one had something nearer than 48px - those two at 11 to
+// 27px, the last man's row at 17 on a phone turned sideways.
+//
+// NO PLACE IN THE DAY DOES BETTER ON EVERY LENGTH. As the day opens, the end of it is wherever
+// its length puts it, so a button there stands on the dock's edge on some length whatever
+// space is put under it - unless every short day is made to scroll. And sideways there is no
+// room for 48px on both sides of it under the last man: at 568x320 the compact header ends at
+// 49 and the dock begins at 196, and the last man's row (56) must keep his centre on the glass
+// (tests/mobile.test.mjs) - 77 + 48 + 48 + 48 = 221, past 196; with the large display on, 240
+// past 188.
+//
+// SO IT IS ON NO SCREEN. The day's foot ends with «עוד ⋯» - the crew rows' own words for
+// "more" (js/ui/roster.js) - which writes nothing, where «הכל חופש» stood on its first move
+// (css/design.css). It opens a menu named for the day it is about, «הכל חופש» and «סגור» in
+// it a finger's width apart, nothing in it answering for DOUBLE_TAP_GUARD_MS, «הכל חופש» kept
+// 48px from the finger that opened it (askChoice's held menu, js/ui/ask.js); and «הכל חופש»
+// goes STRAIGHT ON to the question below, in the same dialog, never shut between the two -
+// a moment with nothing open is the moment the day follows the calendar (watchDayRollover,
+// js/app.js), and a menu opened before midnight would have asked about the morning. Where a
+// finger meant for anything else lands on «עוד ⋯», what it gets is that menu.
+//
+// THE QUESTION asks what he asked: is he sure that ALL of them are on holiday - which day,
+// how many, and every man by name - and that it is a day off without pay. It is the app's
+// own askConfirm with three things only this question asks for (js/ui/ask.js): the
+// confirming button is the destructive kind and the dialog opens on «ביטול» - and at its
+// top, the question, the day and the count first, however tall the names make it at twice
+// the text size (askShowTop; its first build opened 395-514px down there); nothing answers
+// it for DOUBLE_TAP_GUARD_MS after it opens - the second tap of a double tap neither
+// confirms it nor closes it unread; and the confirming button is put where the finger that
+// pressed «הכל חופש» was not. Measured on v190: the question's buttons came up 8px under
+// that finger, and at 440 a second tap closed the dialog before it could be read.
+//
+// AFTER IT, one step of ↶ takes the whole holiday back - each man's own day as it was,
+// the way «🧹 רוקן אתר» puts a site back (clearWorkerPicker, js/ui/sheet.js).
+//
+// Every word of it in one block, PROPOSED and pinned in tests/holiday.test.mjs. The menu's
+// «הכל חופש», its accessible name, the sentence when nobody is missing and the sentence about
+// what is kept are v116's, unchanged; «עוד ⋯» and «סגור» are the crew screen's own
+// (js/ui/roster.js), and the menu's title is the day as the question's second line says it.
+const HOLIDAY_TEXT = {
+    entry: 'הכל חופש',
+    entryLabel: 'רשום חופש לעובדים בלי רישום ביום הנבחר',
+    nobody: 'לכל העובדים כבר יש רישום ביום הזה. שום רישום לא שונה.',
+    // Two lines (#askTitle keeps a line break, css/app.css): the question, then the day.
+    title: (dayName, date) => `בטוח שכולם בחופש?\n${dayName} ${date}`,
+    message: count => (count === 1
+        ? 'לעובד אחד בלי רישום יירשם יום חופש ללא שכר:'
+        : `ל-${count} העובדים בלי רישום יירשם יום חופש ללא שכר:`),
+    kept: 'עבודה, היעדרויות וחשבונות סגורים יישמרו.',
+    ok: 'כן, כולם בחופש',
+    undo: count => (count === 1 ? 'חופש נרשם לעובד אחד' : `חופש נרשם ל-${count} עובדים`),
+    // The foot's door and its menu (round two).
+    more: 'עוד ⋯',
+    moreLabel: (dayName, date) => `אפשרויות עבור ${dayName} ${date}`,
+    menuTitle: (dayName, date) => `${dayName} ${date}`,
+    close: 'סגור'
+};
+
+function dayMoreEntry() {
+    // Of the day drawn here, not of State.date at the tap (v192: every surface that names a
+    // day captures it when drawn, and writes there).
+    const drawnFor = State.date;
+    const day = parseLocalDate(drawnFor);
+    const entry = button(HOLIDAY_TEXT.more, 'btn-secondary day-more-action', event => openDayMore(event, drawnFor),
+        HOLIDAY_TEXT.moreLabel(hebrewDayName(day), formatFullDate(day)));
+    entry.id = 'dayMoreEntry';
+    entry.setAttribute('aria-haspopup', 'dialog');
+    return entry;
+}
+
+// Where the finger that pressed a button of this block was: the tap itself, or - a key, or a
+// call with no event - the middle of the button. Null when there is neither (no page to measure).
+function holidayTapPoint(event, id) {
+    if (event && event.detail !== 0 && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
+        && (event.clientX !== 0 || event.clientY !== 0)) return { x: event.clientX, y: event.clientY };
+    const entry = typeof document !== 'undefined' && document.getElementById
+        ? document.getElementById(id || 'dayMoreEntry') : null;
+    if (!entry || typeof entry.getBoundingClientRect !== 'function') return null;
+    const box = entry.getBoundingClientRect();
+    return box.width > 0 && box.height > 0
+        ? { x: box.left + box.width / 2, y: box.top + box.height / 2 } : null;
+}
+
+// «עוד ⋯»: the day's menu. The day it names is the day its «הכל חופש» asks about - the one on
+// the screen when it was opened, and the dialog stays open into the question (askChoice's
+// `next`), so the day cannot follow the calendar between the two. Answers true when a holiday
+// was recorded through it, false when it was shut or the question was answered no.
+function openDayMore(event, drawnFor) {
     const date = isRealDate(drawnFor) ? drawnFor : State.date;
-    const ids = State.activeWorkers().map(worker => worker.id);
+    const day = parseLocalDate(date);
+    let asked = null;
+    const chosen = askChoice({
+        title: HOLIDAY_TEXT.menuTitle(hebrewDayName(day), formatFullDate(day)),
+        choices: [
+            { label: HOLIDAY_TEXT.entry, aria: HOLIDAY_TEXT.entryLabel, next: point => {
+                // The question is about the day the menu named, and the holiday is written there
+                // (markAllHoliday's `drawnFor`), whatever the calendar did meanwhile.
+                asked = markAllHoliday(null, point, date);
+            } },
+            HOLIDAY_TEXT.close
+        ],
+        apart: true,
+        hold: DOUBLE_TAP_GUARD_MS,
+        from: holidayTapPoint(event, 'dayMoreEntry')
+    });
+    // Shut - «סגור», Escape, beside it - or displaced by the question it went on to.
+    return chosen.then(() => (asked ? asked : false));
+}
+
+// Holiday fills only missing records. The date and the men are captured before the
+// question, and the question names them; after the answer the men it named are read
+// again, so another phone's work is never replaced by this action - and a man the
+// question did not name is never marked by it. `at` is where the finger was when it came
+// from the menu (askChoice gives it); otherwise the event's own point.
+async function markAllHoliday(event, at, drawnFor) {
+    const date = isRealDate(drawnFor) ? drawnFor : State.date;
+    const layer = 'actual';
+    const from = at || holidayTapPoint(event, 'dayMoreEntry');
     const missing = id => {
         if (vehicleDateClosed(State.schedule, id, date)) return false;
-        const record = workerDay(State.schedule, date, id, 'actual');
+        const record = workerDay(State.schedule, date, id, layer);
         return !record || (!record.absent && !(record.entries || []).length);
     };
-    const count = ids.filter(missing).length;
-    if (!count) {
-        await askTell('לכל העובדים כבר יש רישום ביום הזה. שום רישום לא שונה.');
+    const named = State.activeWorkers().filter(worker => missing(worker.id));
+    if (!named.length) {
+        await askTell(HOLIDAY_TEXT.nobody);
         return false;
     }
+    const day = parseLocalDate(date);
     const yes = await askConfirm({
-        title: `הכל חופש · ${formatFullDate(parseLocalDate(date))}`,
-        message: `לרשום חופש ל-${count} עובדים בלי רישום? חופש ללא שכר. עבודה, היעדרויות וחשבונות סגורים יישמרו.`,
-        ok: 'רשום חופש'
+        title: HOLIDAY_TEXT.title(hebrewDayName(day), formatFullDate(day)),
+        message: HOLIDAY_TEXT.message(named.length),
+        names: named.map(worker => worker.name),
+        footer: HOLIDAY_TEXT.kept,
+        ok: HOLIDAY_TEXT.ok,
+        danger: true,
+        hold: DOUBLE_TAP_GUARD_MS,
+        from
     });
     if (!yes) return false;
-    const changes = ids.filter(id => State.worker(id) && State.worker(id).active !== false && missing(id))
-        .map(id => markAbsent(State.schedule, date, id, 'actual'));
-    if (!changes.length) return false;
-    return State.commitMany(changes);
+    const marking = named.map(worker => worker.id)
+        .filter(id => State.worker(id) && State.worker(id).active !== false && missing(id));
+    if (!marking.length) return false;
+    // Taken BEFORE markAbsent: it changes the record the moment it is called.
+    const previous = marking.map(workerId => ({ workerId, record: snapshotWorkerDay(date, layer, workerId) }));
+    // Kept in the journal by the disk guard, it is an edit all the same - see editWithUndo.
+    if (!State.commitMany(marking.map(id => markAbsent(State.schedule, date, id, layer)))) {
+        if (State.lastCommitKept) hideUndo();
+        return false;
+    }
+    // The way back puts back only a day that still holds what this holiday left on it, in an
+    // account still open: a man another phone has since put on a site keeps that day, and a
+    // closed account is not reopened by ↶ (undoRows, js/ui/undo.js - which says how many were
+    // left, or that nothing was written).
+    const rows = previous.map(item => ({ workerId: item.workerId, left: snapshotWorkerDay(date, layer, item.workerId),
+        back: () => setWorkerDay(State.schedule, date, item.workerId, layer, item.record) }));
+    const step = () => undoRows(date, layer, rows, row => !vehicleDateClosed(State.schedule, row.workerId, date));
+    // Offered over the day it restores into, while that day is on the screen - as editWithUndo
+    // offers its own; written on the day the menu named after the screen moved on, it stood all
+    // the same, and no older step is left armed over it.
+    if (date === State.date && layer === State.layer) offerUndo(HOLIDAY_TEXT.undo(marking.length), step);
+    else hideUndo();
+    return true;
 }
