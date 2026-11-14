@@ -237,6 +237,12 @@ async function openWeeklyCloseScreen(page) {
     await pause(page);
 }
 
+async function openAdvanceResetScreen(page) {
+    await run(page, () => openAdvanceReset());
+    await page.waitForFunction(() => typeof ADVANCE_RESET !== 'undefined' && ADVANCE_RESET && ADVANCE_RESET.read !== null);
+    await pause(page);
+}
+
 export const SCREENS = [
     { name: 'day - by site', scope: APP, open: async page => { await home(page); } },
     { name: 'day - by worker', scope: APP,
@@ -357,6 +363,15 @@ export const SCREENS = [
     { name: 'reports - «סגירת שבוע», the summary', scope: ['#weeklyCloseModal'],
         open: async page => { await openWeeklyCloseScreen(page); await run(page, () => weeklyCloseGo()); await pause(page); },
         close: page => run(page, () => closeWeeklyClose()) },
+    // «איפוס מקדמות» (js/ui/advancereset.js): the check and the summary, on the seeded record
+    // as it is - opened the way its one row in ⋯ opens it, and never confirmed here (its last
+    // button asks first, and writes only after; the page after it is tests/advancereset.browser.mjs').
+    { name: 'settings - «איפוס מקדמות», the check', scope: ['#advanceResetModal'],
+        open: async page => { await openAdvanceResetScreen(page); },
+        close: page => run(page, () => closeAdvanceReset()) },
+    { name: 'settings - «איפוס מקדמות», the summary', scope: ['#advanceResetModal'],
+        open: async page => { await openAdvanceResetScreen(page); await run(page, () => advanceResetGo()); await pause(page); },
+        close: page => run(page, () => closeAdvanceReset()) },
 
     { name: 'reports - by worker', scope: APP,
         open: async page => { await run(page, reportsDefault); await view('reports')(page); } },

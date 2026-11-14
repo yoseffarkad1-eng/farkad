@@ -5153,9 +5153,13 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // v191: A TENTH, and the list moves because that is the change: «תצוגה גדולה», in the
   // first section straight before the rides' switch - the other thing a phone turns on
   // for itself (js/ui/display.js). The nine that were here are in the order they were.
-  check('the sheet has the ten groups, including the phone reminders, the transport switch and the large display, in the board order',
+  // v198 (candidate): AN ELEVENTH, and the list moves because that is the change: «איפוס
+  // מקדמות», last in «גיבוי ושחזור» - the owner's one-time reset of the advances, put out of
+  // easy reach at his word (js/ui/advancereset.js). The ten that were here are in the order
+  // they were.
+  check('the sheet has the eleven groups, including the phone reminders, the transport switch, the large display and the advances reset, in the board order',
     JSON.stringify(heads) === JSON.stringify(
-      ['ענן וסנכרון', 'תזכורות בטלפון', 'תצוגה גדולה', 'הסעות', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום',
+      ['ענן וסנכרון', 'תזכורות בטלפון', 'תצוגה גדולה', 'הסעות', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'איפוס מקדמות',
                 'עדכון וגרסה', 'מצב המכשיר', 'מידע טכני']),
     JSON.stringify(heads));
 

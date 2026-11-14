@@ -106,7 +106,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v197">
+<meta name="farkad-build" content="v198">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -395,6 +395,18 @@
                 <div class="settings-fold-body">
                     <p class="hint">לשחזור חירום בלבד.</p>
                     <button type="button" class="btn-secondary" onclick="exportRecoveryData()">💾 ייצא נתונים גולמיים</button>
+                </div>
+            </details>
+            <!-- «איפוס מקדמות» (js/ui/advancereset.js): a one-time tool that writes MONEY, so it
+                 is out of easy reach on purpose (the owner, 2026-11-14: "somewhere not within
+                 easy reach, for example in the settings page"). A row that is shut at every
+                 opening and has NO reason to open by itself (settingsFoldReasons does not name
+                 it); nowhere else in the app opens the tool. Its words are that file's. -->
+            <details class="settings-group settings-fold" id="settingsFoldAdvanceReset">
+                <summary class="settings-card-head"><span class="settings-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 8v4l3 2"/></svg></span><div><h3>איפוס מקדמות</h3><p class="hint">פעם אחת: כל העובדים לאפס</p></div></summary>
+                <div class="settings-fold-body">
+                    <p class="hint">סוגר כל חשבון ישן בלי ניכוי, ורושם שכל עובד החזיר את מה שהוא עוד חייב. לפני שמאשרים רואים הכל, ואפשר לדלג על עובד.</p>
+                    <button type="button" class="btn-secondary advance-reset-entry" onclick="openAdvanceReset()">איפוס מקדמות</button>
                 </div>
             </details>
         </section>
@@ -870,6 +882,27 @@
     </div>
 </div>
 
+<!-- «איפוס מקדמות» (js/ui/advancereset.js): once, every man to zero on the advances side -
+     his old periods closed with nothing taken, what he still owes recorded as handed back
+     today. The same frame as «סגירת שבוע» above it: the status line and the foot live
+     outside the body, which is redrawn. -->
+<div class="modal" id="advanceResetModal">
+    <div class="modal-content weekly-close-content advance-reset-content">
+        <h3 id="advanceResetTitle" tabindex="-1"></h3>
+        <p id="advanceResetMeta" class="weekly-close-meta"></p>
+        <div id="advanceResetSteps" class="weekly-close-steps"></div>
+        <p id="advanceResetStatus" class="weekly-close-status" role="status" aria-live="polite" hidden></p>
+        <div id="advanceResetBody" class="weekly-close-body"></div>
+        <div class="weekly-close-foot">
+            <div id="advanceResetTotals" class="weekly-close-totals" hidden></div>
+            <div class="weekly-close-foot-actions">
+                <button type="button" class="weekly-close-go advance-reset-go" id="advanceResetGo" onclick="advanceResetGo()" hidden></button>
+                <button type="button" class="btn-secondary weekly-close-back" id="advanceResetBack" onclick="advanceResetBack()"></button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- «בדיקת היום»: what may have been forgotten on the day on screen, read off the record
      and compared with the working day before it. Entered from the one button at the foot
      of the day's list. It only shows: nothing in it writes, and a name or a site in it
@@ -1136,6 +1169,10 @@
      words and constants). Runs nothing at load; reports.js and owes.js ask for its button
      by name, through typeof. -->
 <script src="js/ui/weeklyclose.js"></script>
+<!-- «איפוס מקדמות»: after weeklyclose.js (its memory scope, its may-this-phone-close question
+     and its words) and backup.js is below it but asked for only when a button is pressed.
+     Runs nothing at load; owes.js asks for its button by name, through typeof. -->
+<script src="js/ui/advancereset.js"></script>
 <script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>
 <script src="js/ui/migration.js"></script>

@@ -73,6 +73,17 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    { build: 'v198', items: [
+        { title: 'סגירת שבוע: רק מי שעבד, ותלוש לכל עובד',
+            text: 'בסגירת שבוע מופיעים רק עובדים שעבדו בתקופה, ואחרי הסגירה יש לכל עובד כפתור שפותח את התלוש שלו בוואטסאפ.',
+            where: 'דוחות ← לפי עובד ← סגירת שבוע', go: 'payReport' },
+        { title: 'תיקון: סוגרים חשבונות מהישן לחדש',
+            text: 'האפליקציה כבר לא סוגרת חשבון חדש של עובד לפני חשבון ישן שלו שעבר בו חוב, כדי שאותה מקדמה לא תנוכה פעמיים.',
+            where: 'מקדמות', go: 'advances' },
+        { title: 'איפוס מקדמות',
+            text: 'כלי לפעם אחת: סוגר כל חשבון ישן בלי ניכוי ורושם שכל עובד החזיר את מה שהוא עוד חייב, ורואים הכל לפני האישור.',
+            where: 'הגדרות ← גיבוי ושחזור ← איפוס מקדמות', go: 'advanceReset' }
+    ] },
     { build: 'v197', items: [
         { title: 'סגירת שבוע',
             text: 'כל העובדים שהתקופה שלהם הסתיימה נסגרים בפעם אחת: הניכוי כבר ממולא ואפשר לשנות אותו, ושום דבר לא נסגר לפני הסיכום.',
@@ -533,7 +544,11 @@ const WHATSNEW_GO = Object.freeze({
     // v191: «תצוגה גדולה» - the row in ⋯ where it is turned on, opened and shown, and NOT
     // pressed. The mode is one man's choice for his own phone (js/ui/display.js): being told
     // about it is no reason for anybody's screen to change size.
-    display: () => whatsNewSettings('displayLargeCard', 'settingsDaily')
+    display: () => whatsNewSettings('displayLargeCard', 'settingsDaily'),
+    // v198: «איפוס מקדמות» - its row in ⋯ ← «גיבוי ושחזור», opened and shown, and its button
+    // NOT pressed. The tool writes money for every man (js/ui/advancereset.js); it is opened
+    // only by a person's own tap on that button, never by being told about it.
+    advanceReset: () => whatsNewSettings('settingsFoldAdvanceReset', 'settingsBackups')
 });
 
 // The card steps aside first (which is also "seen"), and the settings sheet with it when

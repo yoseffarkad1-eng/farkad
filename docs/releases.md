@@ -1,6 +1,333 @@
-## v197 — «סגירת שבוע»: every man's ended period closed in one pass (candidate, not served)
+## v198 — «סגירת שבוע» as the owner answered, three money repairs he approved, and «איפוס מקדמות» (candidate, not served)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `b4a905b` (v197, served 2026-11-14: PR 79 merged it into main as `b4a905b`, whose tree is
+`50d4b86`'s; Pages run 99). ONE commit that moves the three stamps to v198 and combines three
+branches, applied in this order: `weekly-close-2` (two commits on `50d4b86`), `money-model-fixes`
+(three commits on `b48ac44`, v195) and `reset-tool` (one commit on `b4a905b`). The merge
+conflicts were in `package.json` alone (each branch's suites added to the chains);
+`js/ui/reports.js` merged clean, and the places where the branches meet in meaning were
+repaired in this commit and are listed under «Where the three meet» below.
+
+**THIS RELEASE TOUCHES `js/model` AND `js/sync`, WITH THE OWNER'S EXPLICIT APPROVAL OF
+2026-11-14 FOR EXACTLY THE THREE MONEY REPAIRS BELOW** ("نعم نعم نعم", to the three questions of
+the write-up he was sent). He approved «איפוס מקדמות» the same day: the men really paid the
+money back or it was settled outside the app, and every old open period was paid in full.
+
+**THE ROLLOUT RULE. EVERY PHONE - ALL THREE - ON v198 BEFORE ANYBODY CLOSES AN ACCOUNT OR RUNS
+«איפוס מקדמות». UNTIL THEN, ACCOUNTS ARE CLOSED ONLY FROM THE OWNER'S PHONE. THERE ARE NO RULES
+TO PASTE: `firestore.rules` IS NOT TOUCHED. A v197-OR-OLDER PHONE THAT LOSES A SAME-SECOND CLOSE
+IS STILL STUCK EXACTLY AS BEFORE (repair (b) works on the phone that LOSES, so it helps only once
+that phone has it), AND A v197-OR-OLDER PHONE CAN STILL CLOSE OUT OF ORDER (it does not have
+repair (a)'s refusal). A v197 phone and a v198 phone closing the same period write different
+bytes under one id (repair (c)), as at v180.**
+
+The app's files: `js/model/ledger.js`, `js/model/schema.js` (repairs (a), (c), (b));
+`js/sync/sync.js`, `js/sync/receive.js`, `js/sync/send.js` (repair (b)); `js/ui/reports.js` (three
+proposed sentences, a box that says why it will not close); `js/ui/weeklyclose.js`, `js/ui/owes.js`,
+`js/ui/payslips.js` (the owner's answers); `js/ui/advancereset.js` (new), `js/ui/modal.js` (its
+closer), `js/app.js` (`renderAdvanceResetIfOpen` in `render()`, and the stamp), `index.html` (the
+row in ⋯, the dialog, one script tag after `js/ui/weeklyclose.js`, and the stamp), `css/design.css`
+and `css/large.css` (the new rows, said again); `js/ui/whatsnew.js` for its three items; `sw.js`
+in its `VERSION` line and ONE line of the shell list, `./js/ui/advancereset.js`. Nothing in
+`js/state.js`, `js/store.js`, `js/recovery.js`, `firestore.rules` or `functions`. No new entry
+kind or field. One new Store key, on the phone that loses a close race only
+(`farkad:closureAside:<man>_<from>`: never the record, the outbox, the cloud or a backup).
+
+**«מה חדש» has three items, all PROPOSED:** «סגירת שבוע: רק מי שעבד, ותלוש לכל עובד» (go
+'payReport'); «תיקון: סוגרים חשבונות מהישן לחדש» (go 'advances'); «איפוס מקדמות» (go
+'advanceReset', a NEW way: ⋯ opened on «גיבוי ושחזור» with the tool's row open and its button
+on the glass - NOT pressed; the tool writes money for every man and is opened only by a
+person's own tap on its button; `tests/whatsnew.browser.mjs` holds no dialog open and the disk
+unmoved).
+
+### Where the three meet (repaired in this commit)
+
+- **«סגירת שבוע» and repair (a).** The pass already refused a man with an earlier open period
+  that money ran through (its own walk, `weeklyCloseEarlier` - BROADER than the model's rule,
+  which asks only for a period that handed a debt on). It is left broader (the owner's D5:
+  old periods by hand, oldest first). The model's two new reasons are now named by the pass in
+  the model's own words, so the two can never disagree in what is said: `earlierOpen` is held
+  as the pass's «חשבון קודם שלו לא נסגר» on the period the MODEL names, with v195's button to
+  it; `laterClosed` in the per-man box's own sentence (`CLOSURE_ORDER_TEXT`). Never «אי אפשר
+  לסגור אותו כאן». `tests/weeklyclose.test.mjs` W7 MOVED ON PURPOSE: it reproduced finding L7 on
+  the per-man writer (the box closing P2 at 1,390 in front of an open P1, then P1 at 1,220 -
+  2,610 against 2,000); on this build the box refuses P2 naming P1, `closePeriodChanges` writes
+  nothing, a record an OLDER build wrote out of order cannot be completed (P1 refused,
+  `laterClosed`), the pass still says «earlierBehind», and 1,390 stays all that is recorded. Two
+  new checks hold the pass's held kinds and words for the model's two reasons.
+- **«סגירת שבוע»'s periods with no day of work and repair (a)** (the owner's decision of
+  2026-11-14, added to this release; section 1, answer 1). Repair (a) refuses a man's own period
+  in front of an open period that handed a debt on - which is exactly what a week off with a
+  debt is. The pass closes those weeks off FIRST, oldest first, at 0, in the same write, and
+  plans his own period on a copy of the record with them closed, so the model's answer is the
+  one the write meets; a week off the writer will not close holds him by name. W13.1 holds the
+  record, the second calculator and the by-hand twin.
+- **The v196 byte comparison and repair (a).** `tests/reports.speed.test.mjs` holds every
+  reading of «דוחות» equal to v195's screens over THIS tree's model. Where the model now refuses
+  a close for its order, v195's box drew nothing and this build's draws the box with one of the
+  two sentences; that box - and only a `period-closure` box whose first line is one of the two
+  sentences - is taken out of the comparison, COUNTED, and must have been there to take out.
+  Everything else is still v195's byte for byte.
+- **«איפוס מקדמות» and repair (a).** The reset closes each man's ended open periods OLDEST
+  FIRST from the period of his first advance, so the model's `earlierOpen` can never be met; it
+  already asked `laterClosed` (it was written for this planner), and holds that man, named.
+  `tests/advancereset.test.mjs` is green on the combined tree, the oracle agreeing period by
+  period.
+
+### 1. «סגירת שבוע» as the owner answered (branch `weekly-close-2`)
+
+The app's files: `js/ui/weeklyclose.js` (who is on the list), `js/ui/owes.js` (the warning from one
+period, a partial deduction, and the close's page: a door and a way to the advances per man),
+`js/ui/payslips.js` (its reading opened to periods somebody else names, and one man's door for
+the close's page), `css/design.css` and `css/large.css` (the new rows, said again). No new
+entry kind, field, Store key or writer.
+
+**The owner answered ten questions about the pass on 2026-11-14.** Each answer, and what this
+branch did with it:
+
+1. **«Only men who WORKED in the period.»** DONE. A man is in the pass only with at least one
+   day of work in his last finished period (`row.attendanceDays > 0`, `weeklyCloseMan`). v197
+   also listed a man on his money alone (a debt carried in, an advance in the period) and
+   closed his period with nothing taken. The consequence was put to the owner: a period with a
+   debt in it and no day of work was left open by the pass, so the NEXT pass held him («חשבון
+   קודם שלו לא נסגר») until somebody closed it by hand. **THE OWNER DECIDED (2026-11-14, «1 =
+   (b)»): THE PASS CLOSES SUCH A PERIOD ITSELF, WITH NOTHING TAKEN - there is no wage in it -
+   so the debt carries on and he is not held.** Built inside the confirmed write and nowhere
+   else: when the pass closes a man's period, every earlier period of his that a debt ran
+   through, that has NO day of work, and that is still open is closed first, oldest first,
+   through the same writer (`closePeriodChanges` at 0: one frozen payslip, no deduction), in the
+   same commit; his card says it before the press («שבוע בלי ימי עבודה (…) ייסגר קודם, בלי
+   ניכוי.» / «תקופה בלי ימי עבודה (…) תיסגר קודם, בלי ניכוי.») and the summary names him under
+   «ייסגרו קודם, בלי ניכוי - תקופות שלא היו בהן ימי עבודה:» (PROPOSED, pinned in W11). It is
+   planned on a COPY of the record with those periods closed, so what can come off his own
+   period is the model's answer after them (fix (a)'s `earlierOpen` names exactly the period the
+   pass closes first, and is satisfied by closing it oldest first). A period WITH a day of work
+   is NEVER closed by the pass: while one is open behind him he is held exactly as before (D5
+   stands - old periods with work are closed by hand). A period with no day of work that the
+   writer will not close (behind a later close that took a carried debt - fix (a)'s
+   `laterClosed`, an older build's out-of-order close - or no daily rate) holds him on it, by
+   name, as before. A period no money ran through is not touched: it holds nobody. A man who did
+   not work at all in his LAST period is still not on the pass (answer 1); the week he works
+   again, the empty one before it is closed with him. Measured (W13.1): the week off closed at 0
+   and the week of work at 500 in one write, the ledger owing nothing, nothing impossible, the
+   second calculator agreeing on both periods and on the balance, and the entries those a person
+   would have made by hand oldest first; a week with one day of work in it held and nothing
+   closed; a week off behind an out-of-order close held and nothing closed. MOVED ON PURPOSE:
+   W13.1's last line pinned the hold; it now pins the close, and W11's «one writer» check counts
+   `closePeriodChanges` twice on the record inside the write and once on the planner's copy.
+2. **«Weekly men every week; the fortnightly men with them every other week.»** CHECKED, no
+   change: the pass already lists every man whose own period ended. W13.2 holds both weeks -
+   the week between (the weekly man alone, the fortnight not ended) and the week after (both,
+   each in his own period, ending the same Thursday, in two groups).
+3. (Not asked of this branch.)
+4. **«A deferred deduction is warned about EVERY period.»** DONE on v195's board and «שים לב»
+   (`js/ui/owes.js`). `OWES_QUIET_PERIODS` is 1 (it was 2, the owner's own number of
+   2026-11-13): one period of his ended with nothing taken and nothing handed back is flagged,
+   in the singular - «שבוע אחד בלי ניכוי» / «תקופה אחת בלי ניכוי» (PROPOSED; «1 שבועות» is not
+   Hebrew). AND «less than the maximum while debt remains»: his last ended period CLOSED with
+   something taken, a debt left, and room in the wage for more is flagged «ניכוי חלקי», with
+   one sentence - «בסגירה של … נוכו X ₪ מתוך Y ₪ שאפשר היה לנכות, והשאר נשאר חוב.» (PROPOSED).
+   Read off the close's own frozen record (`frozenPeriodFor`: what came off, the wage it was
+   closed on, the debt it left; the most is the smaller of the wage and the debt before the
+   deduction - `advanceWalk`'s own rule), so it costs no walk. A close of everything the sheet
+   could take is never flagged; a close of nothing is the quiet count, never «חלקי». Pinned
+   expectations moved with the reason "the owner, 2026-11-14": tests/owes.test.mjs (500 off a
+   1,500 wage each week now says «ניכוי חלקי»; the number 1) and tests/owes.browser.mjs.
+5. **«No cap beyond what he earned.»** CHECKED, no change: the most is `planPeriodClosure`'s own
+   `deducted`, the smaller of his wage and his debt; all of it can be typed and not an agora
+   more (W13.5).
+6. **«Record HOW he was paid (cash / transfer / cheque) on the same page.»** NOT BUILT, AND NOT
+   NEEDED: asked what it would take (below), **the owner decided on 2026-11-14 («2 = (b)») that
+   the payment method is not needed.** Nothing was done for it; the note below stays only as the
+   record of what it would have cost.
+7. **«After confirm: the general record AND a WhatsApp statement per man.»** DONE. The close's
+   own page («סגירות שנרשמו», already the pass's third step) now ends with «תלוש לכל עובד»: one
+   block per man of the close, his name and period, and v188's door unchanged
+   (`payslipsClosedNode`, js/ui/payslips.js) - his statement `workerStatementText` BYTE FOR BYTE
+   with the report pointed at HIS closed period, the sheet's own «לתשלום» cell held against it
+   (a row whose two figures differ has no door), his own number, opened in WhatsApp by his own
+   tap and marked «נפתח בוואטסאפ» in the payslips' own key (`farkadPayslipsProgress`, per period
+   and man) - never "sent". A man with no number gets «העתק». It is on EVERY close's page, not
+   only the one just made: iOS kills a home-screen app while WhatsApp is in front, and the way
+   back to the doors must not be a pass already written. W13.7 holds each door's link equal to
+   `sederUrl(his number, his statement)` and the statement's «נותר לתשלום» equal to the close's
+   «לתשלום»; drawing writes nothing, a tap writes the mark and no byte of the record.
+8. **«A mistake after confirm is fixed by a correction recorded later, the original kept.»**
+   CHECKED, and the way to it added (navigation only). Each `deducted` entry a close writes can
+   be corrected by the existing path (`eventReversalProblems` / «תיקון» in the man's history on
+   his advances page): the correction names the deduction, is dated on it, and puts the debt
+   back up, the deduction kept (iron law 1). On the close's page each man a deduction was taken
+   from has one button, «המקדמות של …» (PROPOSED), which only opens his advances. **WHAT IS
+   MISSING (model): a correction is ALL of a deduction or nothing** - 500 taken where 300 was
+   meant cannot be corrected to 300; the whole 500 goes back on the debt, and the frozen payslip
+   keeps saying the «לתשלום» it was closed with (the sheet then names the difference as money
+   that arrived after the close). Correcting to a different amount needs a new entry kind (a
+   corrected deduction on a closed period, or a re-close) with its validator, fold and rules -
+   not built.
+9. **«A man who stopped working with debt: only on «מי חייב כסף».»** DONE with answer 1: he is
+   not in the pass; the board lists him with «לא עבד השבוע / בתקופה» as v195 did.
+10. **«Close from his phone AND the other phones.»** LEFT on this branch, and answered in part by
+    repair (b) of this release: the pass still refuses a phone that is not «מסונכרן בין
+    המכשירים» (D4); two phones closing the same account in the same seconds no longer leave the
+    LOSING phone stuck - once that phone is on v198 it adopts the close that landed first (2,
+    below). No server rule was needed or added.
+
+**What recording the payment method would need (answer 6) - NOT NEEDED, the owner, 2026-11-14.** Today the
+method lives only on an ADVANCE's movements: `given` and `repaid` entries carry an optional
+`method` ('cash' | 'transfer', «מקדמה במזומן» / «מקדמה בהעברה»; tests/method.test.mjs). A close
+writes a `closed` artifact (the frozen payslip) and one `deducted` entry per advance; neither
+has a method, `closePeriodChanges` / `recordPeriodArtifact` take none, and the wage paid out is
+not an entry at all. Neither the validator (`ledgerEntryProblems`) nor `firestore.rules`
+refuses an unknown field on a ledger entry, so a field WOULD travel - which is exactly why it
+must be designed and not slipped in:
+- **the entry**: an optional `payMethod` on the `closed` artifact only ('cash' | 'transfer' |
+  'cheque'), taken by `closePeriodChanges` and `recordPeriodArtifact`, written by the per-man box
+  and the pass alike; `ledgerEntryProblems` refusing any other value; `closedPeriods` carrying it;
+- **the same fact on two phones**: the artifact's id is the man and the period, so two phones
+  closing one account with two methods write one id in two shapes and one is held aside (as two
+  amounts are today, v197's (B)) - the method must either be part of the one close or recorded
+  as its own later entry (a «paid» entry naming the artifact, appended, never edited);
+- **older builds**: every v197-or-older phone must be shown to carry the field through merge,
+  restore, backup and the rescue file untouched, on their real bytes out of Git, before the
+  first one is typed - a rollout rule like v166's;
+- **the words**: «מזומן» / «העברה» exist; «צ׳ק» is new; where it is said (the close's page, the
+  statement, the workbook) is the owner's;
+- **firestore.rules**: nothing needs to move for the field itself, but if a separate `paid`
+  kind is chosen the rules' kind list and the emulator suites move with it.
+
+**Tests.** tests/weeklyclose.test.mjs W13.1, .2, .5, .7, .8 (new) and W7 (the man in P3 given a
+day of work, since a man with none is no longer listed); tests/owes.test.mjs (one period, the
+partial close, the words); tests/weeklyclose.browser.mjs (ג'מאל, who did not work, is out of the
+list, the summary and the close; the close's page with a door per man, a real tap marking him,
+«המקדמות של …» navigating; every man of the seed has an invented number);
+tests/owes.browser.mjs (the board's flags from one period). Every new Hebrew string PROPOSED and
+pinned. NOT TRIED ON A REAL PHONE.
+
+### 2. Three money repairs the owner approved (branch `money-model-fixes`)
+
+Each is a permanent check in a new suite that is red on v195's model and green here:
+`tests/closeorder.test.mjs` (a), `tests/closuresize.test.mjs` (c), `tests/closerace.test.mjs` (b).
+The full write-up the owner was sent (in Arabic) and its technical twin were written on the
+branch; what follows is what a reader of this file needs.
+
+**(a) A close is refused OUT OF ORDER** (`planPeriodClosure` + `closureOrderFacts`,
+js/model/ledger.js - the planner only). A period nobody closed is read by the walk as if the
+full possible deduction came off its wage. Measured on v195's own bytes (closeorder O1): one
+day (610) and 2,000 handed over in P1, P1 left open, P2 closed by hand at the sheet's 1,390;
+then a forgotten day typed into P1 and P1 closed as the box offered, 1,220 - **2,610 recorded
+as deducted against an advance of 2,000**, the extra 610 read as his credit: taken off two
+wages, and nothing refused it. Now a NEW close is refused, and named, when
+- `earlierOpen`: it opens owing, and an earlier period of his that money ran through and that
+  HANDED A DEBT ON (the walk presumed less came off it than he owed) is still open and settled
+  by no closure over its days - the plan names it (`earlierOpen: {from, to}`); or
+- `laterClosed`: money runs through it, and a later period of his is already closed with a
+  deduction taken from a balance carried into it.
+A period that opens owing nothing, a period no money ran through, and a man with no advance are
+never refused for this (the broader rule first written refused v180's own documented case,
+tests/overpayment.test.mjs 1b, and was narrowed). `closureProblems` - the judge of closures
+already on the record, here and from other phones - is NOT touched: a close an older build
+wrote out of order is never rewritten or condemned and reads figure for figure as on v195
+(closeorder O4). `advanceAccount` takes the opening position as an optional sixth argument,
+so the planner walks once. The box (`renderPeriodClosure`, js/ui/reports.js) says why in one of
+two sentences, PROPOSED and pinned in closeorder, and offers no field; for `earlierOpen` it
+carries v189's «הצג את החשבון <dates>», which only navigates:
+- «חשבון קודם של העובד הזה עדיין פתוח. סוגרים מהישן לחדש: סגור קודם את החשבון ההוא.»
+- «תקופה מאוחרת יותר של העובד הזה כבר נסגרה עם ניכוי, והחשבון הזה עדיין פתוח. סגירה שלו
+  עכשיו עלולה לנכות את אותה מקדמה פעמיים - לכן היא חסומה. בדוק את עמוד המקדמות שלו.»
+The second calculator (tests/oracle.mjs) was taught the same rule from its statement and agrees
+on every close of 240 seeded records. MOVED ON PURPOSE: tests/paycycle.completion.test.mjs C1
+closed a transition period in front of two open weeks a 3,000 advance ran through; it now
+closes those two weeks first. WHAT THE OWNER WILL NOTICE: on a record that ALREADY has the
+out-of-order shape the older period cannot be closed at all (no amount the app can compute is
+right without a person; a correction is still possible on the advances page), and its payslip
+stays live. NOT FIXED, reasoned from the code and NOT measured: a later period closed in front
+of an open one that presumed the WHOLE debt (allowed - it cannot double-deduct) can still lay
+that later deduction on the oldest advance, so a later close of the old period can over-settle
+ONE advance while the totals stay right («דורש בדיקה»); that is v195's per-advance split,
+unchanged.
+
+**(c) A close writes its payslip ONCE** (`recordPeriodClosed`, js/model/ledger.js). Each
+`deducted` entry of a close used to carry the whole frozen payslip again (`basis` and `days`).
+Now a deduction leaves both off when the period's own `closed` record in the same close carries
+them (every close the app writes; a deduction written by any other route still carries its
+own; the money fields stay - the judge reads the wage off the deduction), and a frozen day
+leaves `"absent": false` out (every reader since v101 reads `Boolean(day.absent)`). Measured,
+bytes of JSON for a fortnight of 12 days: a close with no advance 1,525 -> 1,345; touching one
+advance 3,106 -> 1,688; touching two 4,684 -> 2,028. Six men, Aug-Nov, 70 closes: 150,907 ->
+96,087 bytes. Every reader reads the same figures (closuresize S2), v195 reads this build's
+record exactly as its own and holds nothing aside (S3), and a v195 record opened and saved here
+keeps every ledger byte (S4). MOVED ON PURPOSE: tests/overpayment.test.mjs «an ordinary account
+closed by the two builds is the same bytes» now names exactly these two differences and checks
+they exist. IT DOES NOT STOP GROWTH: every close still adds its payslip once (about 0.75 KB a
+man-week); fourteen men closed weekly reach the cloud's 1 MiB in roughly a year. The cure is
+structural (closed payslips in documents of their own, as הסעות did) and is NOT built.
+
+**(b) Two phones closing one period in the same second: the loser adopts the winner** (client
+only). The server's compare-and-set already kept the first close and refused the second; the
+damage was all on the losing phone, which held its own close as a dispute - status error, a
+record held aside, a write queued for ever, every write blocked until a backup was exported;
+with the amounts the other way round its own screen said the advance was paid off while the
+cloud said it was owed. Now (`closureGroupKey`, `closureGroupsOf`, `closureLostTo` in
+js/model/ledger.js; `mergeLedgerInto(..., lost)`) a close of this phone's that meets a
+DIFFERENT close of the same man and period in a document that speaks the protocol has lost,
+WHOLE - the `closed` record and every `deducted` of it. `settleLostClosures` (js/sync/sync.js)
+retires the losing operations with the existing retirement key (never sent, never replayed),
+drops any hold mark, keeps the losing bytes aside on this phone only
+(`farkad:closureAside:<man>_<from>`) and tells the person once per period, PROPOSED: «החשבון
+הזה כבר נסגר בטלפון אחר, באותו זמן. נשמרה הסגירה שהגיעה ראשונה, והסגירה מהטלפון הזה לא נרשמה.
+בדוק את הסכומים בחשבון שלו.» If a retirement cannot be written the close is held exactly as
+before. js/sync/receive.js settles it before `reapplyPending`; js/sync/send.js takes a losing
+close out whole in the pre-pass and the refused-write branch, and a flush that finds nothing
+owed while the line says «שולח» asks the line again. Same numbers stay one fact
+(`sameLedgerFact`, unchanged); anything that is not a closure is untouched (two repayments under
+one id still hold). A legacy (pre-protocol) document is excluded on purpose. NO RULES: the
+server already orders the writes, and a MapDiff guard over a prefix of the ledger map would
+freeze the whole map. Measured (closerace, harness cloud): the loser ends synced, nothing
+held, queued or blocked, holding the cloud's close; across builds THIS build losing to v195 is
+cured, and **v195 losing to this build is stuck exactly as before** (R6, printed).
+
+### 3. «איפוס מקדמות» (branch `reset-tool`)
+
+The owner, 2026-11-14: "Clean all the workers - no worker owes money now. Set every worker to
+zero on the advances side, and close all the old accounts." Why: the men really paid it back or
+it was settled outside the app (a repayment), and every man was paid his full wage for the old
+open periods (each closed with nothing taken). He runs it ONCE, from his phone.
+
+js/ui/advancereset.js, through the two writers that exist and nothing else:
+`closePeriodChanges(..., 0)` - each chosen man's ended open periods, OLDEST FIRST from the period
+of his first advance, each a payslip and no deduction entry, so no ledger balance moves; then
+`recordAdvanceRepaid(..., today, 'cash', «איפוס - הוחזר מחוץ לאפליקציה»)` - what
+`openAdvanceBalance` (the «מי חייב כסף» figure) still holds, laid on his advances oldest first,
+never more than one has left. One man whole in one commit (`saveFinancialAction` ->
+`State.commitMany`), men packed into as few commits as `MAX_PATHS_PER_WRITE` allows; a refused
+commit stops the pass and says how many were done, and a re-read offers exactly the rest. Read
+back: every period closed by this write and the man zero on the ledger, or he is not reported
+done. It refuses a phone not «מסונכרן בין המכשירים» or with a write pending or held
+(`weeklyCloseReadyWord`), a record that moved since the look (every man re-read at the press -
+the whole pass stops), and per man, named and left: over-settled, a period overlapping a closed
+one, no daily rate, `laterClosed`, too many entries for one commit; and the gates shut.
+
+WHERE: ONLY a row of ⋯, «גיבוי ושחזור» ← «איפוס מקדמות», SHUT at every opening and never
+opened by itself (the owner: "somewhere not within easy reach, for example in the settings
+page"); its button puts ⋯ away and opens the dialog. The dialog is «סגירת שבוע»'s frame:
+«בדיקה» (a strong line to make a backup with the backup's own button, every man with his
+periods and his amount, a man can be skipped), «סיכום», then the app's own `askConfirm`
+(destructive, the count, the total, the names), then «נרשם» with the repayments by name and
+what «מי חייב כסף» says now. MOVED ON PURPOSE for it: tests/settings-order.browser.mjs (ORDER,
+POSTURE, FOLD, the every-reason posture, the inventory and ten rows -> eleven cards) and
+tests/smoke.mjs; two screens added to tests/screens.mjs; sizes restated in css/large.css. All
+Hebrew PROPOSED, pinned in tests/advancereset.test.mjs.
+
+### Gates
+
+Not written here: a count belongs to the commit it was measured on and is reported with it. NOT
+TRIED ON A REAL PHONE - none of the three parts, and the close race was measured only on the
+harness cloud and the emulator.
+
+## v197 — «סגירת שבוע»: every man's ended period closed in one pass (served 2026-11-14)
+
+**Served 2026-11-14: PR 79 merged it into main as `b4a905b`, whose tree is `50d4b86`'s; Pages run 99.** The note below was written before it was served:
 Built on `5cab7b9` (v196, served 2026-11-14: PR 78 merged it into main as `8083f99`, whose tree is
 `5cab7b9`'s; the Pages run and the served stamp were not read from the build machine). One commit that
 moves the three stamps: branch `weekly-close` (nine commits on `b48ac44`, stamps unmoved)

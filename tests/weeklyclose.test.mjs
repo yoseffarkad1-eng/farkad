@@ -8,7 +8,7 @@
 //
 //   W1  WHO IS ON IT: each man in his own last finished period (weekly, fortnightly, a
 //       period that ends today only once today is recorded for him), nobody whose period
-//       is closed or empty; the groups oldest first.
+//       is closed or has no day of work in it (v198); the groups oldest first.
 //   W2  EVERY FIGURE IS THE CLOSE'S OWN: the wage, what can come off, the debt, and for
 //       every amount tried what is left to pay and what stays owed - planPeriodClosure's,
 //       advanceAccount's and the per-man box's preview, word for word.
@@ -23,9 +23,10 @@
 //   W6  NOT SYNCED (the owner's D4): the real predicate on real sync states, the two
 //       sentences, and nothing written; the predicate held to the deletion's own.
 //   W7  AN EARLIER PERIOD LEFT OPEN (D5): refused and named, with v195's button that only
-//       navigates; and the finding behind it (L7, problem (a)) reproduced - the per-man
-//       writer would close the later period, and a day typed afterwards takes the same
-//       money twice - with the pass refusing at every step of it.
+//       navigates; and the finding behind it (L7, problem (a)) - since v198 the per-man
+//       writer refuses it too (planPeriodClosure 'earlierOpen' / 'laterClosed'), a record an
+//       older build wrote out of order cannot be completed into a double deduction, and the
+//       pass says the model's two order reasons in the model's own words.
 //   W8  THE GATES: the button and the reading under the carry shut, an unapproved record,
 //       and the writer shut.
 //   W9  THE SCREEN: the prefilled field (D2), «בלי ניכוי», «דלג על העובד» (D3: no reason
@@ -34,6 +35,12 @@
 //       looking.
 //   W10 WHAT IT COSTS: fourteen men on a season of days, read and written inside a bound.
 //   W11 THE WORDS: every new string word for word; every borrowed one in its owner's source.
+//   W13 THE OWNER'S ANSWERS (2026-11-14, v198): only a man who worked is in the pass, and
+//       his earlier periods with a debt and no day of work closed first at 0 in the same
+//       write (his decision on what that left open), a period with work never (1, 9); weekly men every week and the fortnightly men with
+//       them every other week (2); no cap beyond his wage (5); after the close one door per
+//       man to his own statement, byte for byte, never "sent" (7); and the way to a
+//       correction of a closed deduction - navigation only, and all of it or nothing (8).
 //
 // Synthetic names and money throughout. No browser, no emulator.
 
@@ -43,6 +50,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeDevice, makeCloud, settle, settleUntil } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
+import * as oracle from './oracle.mjs';
 
 process.env.TZ = 'Asia/Jerusalem';
 
@@ -147,6 +155,9 @@ function makeDom() {
             }
         });
         Object.defineProperty(self, 'firstChild', { get: () => self.children[0] || null });
+        // v198: the pay sheet's table, drawn for a man's door on the close's page, asks these.
+        Object.defineProperty(self, 'firstElementChild', { get: () => self.children[0] || null });
+        Object.defineProperty(self, 'lastElementChild', { get: () => self.children[self.children.length - 1] || null });
         Object.defineProperty(self, 'isConnected', { get: () => true });
         return self;
     }
@@ -201,7 +212,9 @@ function phone({ today = '2026-11-13', deviceId = 'd_office', storage = null, fl
     d.doc = doc;
     d.ctx.document = doc;
     d.run = code => vm.runInContext(code, d.ctx, { filename: 'weeklyclose-suite' });
-    ['js/ui/sitecolor.js', 'js/ui/reports.js', 'js/ui/daycheck.js', 'js/ui/owes.js'].forEach(file => d.run(source(file)));
+    // v198: seder.js and payslips.js too - the close's page draws each man's door from them.
+    ['js/ui/sitecolor.js', 'js/ui/reports.js', 'js/ui/daycheck.js', 'js/ui/seder.js', 'js/ui/owes.js', 'js/ui/payslips.js']
+        .forEach(file => d.run(source(file)));
     d.run(WEEKLY);
     // The two buttons of the foot, wired as index.html wires them (onclick on the global scope).
     doc.getElementById('weeklyCloseGo').addEventListener('click', () => d.run('weeklyCloseGo()'));
@@ -630,19 +643,56 @@ async function movedBetween(change) {
     const P2 = ['2026-08-21', '2026-09-03'];
     same('P1 (one day, 2,000 handed over) left open: the pass will not close P2 in front of it',
         manOf(readOf(p), 'w_1').held, { kind: 'earlier', from: P1[0], to: P1[1] });
+    // MOVED ON PURPOSE (v198, the owner's fix (a), 2026-11-14): the per-man writer now refuses
+    // the same close, by the model's own rule (planPeriodClosure 'earlierOpen'), naming P1 - so
+    // the pass and the box agree, and the finding can no longer be completed on this build.
+    // v197's lines here showed the box closing P2 at 1,390 and P1 afterwards at 1,220 (2,610
+    // recorded against 2,000).
     const box = p.call('planPeriodClosure', p.State.schedule, 'w_1', P2[0], P2[1], '2026-09-04T10:00:00.000Z');
-    same('the per-man writer (the shipped box) would: canClose, at the sheet\'s 1,390', [box.canClose, box.deducted], [true, 1390]);
+    same('the per-man writer (the shipped box) now refuses too, naming the same P1 - and the sheet\'s figure is still 1,390',
+        [box.canClose, box.reasons.indexOf('earlierOpen') !== -1, box.earlierOpen, box.deducted], [false, true, { from: P1[0], to: P1[1] }, 1390]);
+    same('and closePeriodChanges writes nothing for it', p.call('closePeriodChanges', p.State.schedule, 'w_1', P2[0], P2[1], '2026-09-04T10:00:00.000Z', 'd_hand').length, 0);
+    // A record an OLDER build wrote out of order (v197 and before had no such refusal): P2
+    // closed in front of P1 at the sheet's 1,390. Written here with the planner's order
+    // question stood aside in memory for exactly that one write, then put back.
+    p.run('globalThis.__orderFacts = closureOrderFacts; closureOrderFacts = function () { return Object.assign(__orderFacts.apply(null, arguments), { earlierOpen: null }); }; 1');
     p.State.commitMany(p.call('closePeriodChanges', p.State.schedule, 'w_1', P2[0], P2[1], '2026-09-04T10:00:00.000Z', 'd_hand'));
+    p.run('closureOrderFacts = __orderFacts; delete globalThis.__orderFacts; 1');
+    check('(the older build\'s close of P2 is on the record)', p.call('frozenPeriodFor', p.State.schedule, 'w_1', P2[0], P2[1]) !== undefined);
     p.State.commit(p.call('assignPlace', p.State.schedule, '2026-08-10', 'w_1', 'actual', 'p_01'));
     const P1plan = p.call('planPeriodClosure', p.State.schedule, 'w_1', P1[0], P1[1], '2026-09-05T10:00:00.000Z');
-    same('closed by hand in front of it, then a day typed into P1: the box would now take 1,220 off P1', [P1plan.canClose, P1plan.deducted], [true, 1220]);
+    same('a day typed into P1 behind that close: the box no longer offers 1,220 - it refuses, «laterClosed»',
+        [P1plan.canClose, P1plan.reasons.indexOf('laterClosed') !== -1], [false, true]);
+    same('and closePeriodChanges writes nothing for P1', p.call('closePeriodChanges', p.State.schedule, 'w_1', P1[0], P1[1], '2026-09-05T10:00:00.000Z', 'd_hand').length, 0);
     p.setToday('2026-09-18');
+    // MOVED ON PURPOSE (v198, the owner's answer 1, 2026-11-14): only a man who worked in his
+    // period is in the pass, so he is given a day of work in P3 - v197 listed him on his debt.
+    p.State.commit(p.call('assignPlace', p.State.schedule, '2026-09-07', 'w_1', 'actual', 'p_01'));
     same('and the pass, for P3, refuses - naming P1 and the closed period after it', manOf(readOf(p), 'w_1').held,
         { kind: 'earlierBehind', from: P1[0], to: P1[1] });
-    p.State.commitMany(p.call('closePeriodChanges', p.State.schedule, 'w_1', P1[0], P1[1], '2026-09-05T10:00:00.000Z', 'd_hand'));
     const recorded = Object.values(p.State.schedule.ledger.advances).filter(entry => entry.kind === 'deducted')
         .reduce((sum, entry) => sum + entry.amount, 0);
-    same('closed by hand as the box offers: 2,610 recorded as deducted against a 2,000 advance - the finding, still in the box', recorded, 2610);
+    same('recorded as deducted: the older build\'s 1,390 and nothing more - never 2,610 against a 2,000 advance', recorded, 1390);
+
+    // THE PASS AND THE MODEL SAY THE SAME THING (v198): should the planner refuse for its order
+    // where this screen's own walk did not, the man is held in the model's words, never
+    // «אי אפשר לסגור אותו כאן». Asked by standing the planner's answer in for one reading.
+    const q = phone();
+    q.State.schedule.workers = [{ id: 'w_1', name: 'סמיר', active: true, dailyRate: 500, hourlyRate: 0 }];
+    q.State.schedule.places = PLACES;
+    weekdays('2026-10-30', '2026-11-12').forEach(date => day(q, 'w_1', date));
+    approve(q); kept(q); shared(q);
+    given('(a man the pass would close)', manOf(readOf(q), 'w_1').held === null);
+    const stood = (reasons, earlierOpen) => {
+        q.run(`globalThis.__plan = planPeriodClosure; planPeriodClosure = function () { return Object.assign(__plan.apply(null, arguments), { canClose: false, reasons: ${JSON.stringify(reasons)}, earlierOpen: ${JSON.stringify(earlierOpen)} }); }; 1`);
+        try { return manOf(readOf(q), 'w_1').held; } finally { q.run('planPeriodClosure = __plan; delete globalThis.__plan; 1'); }
+    };
+    const early = stood(['earlierOpen'], { from: '2026-10-16', to: '2026-10-29' });
+    same('the model\'s «earlierOpen» is held as this screen\'s «earlier», on the period the MODEL names', early, { kind: 'earlier', from: '2026-10-16', to: '2026-10-29' });
+    const late = stood(['laterClosed'], null);
+    same('the model\'s «laterClosed» is held as «laterClosed»', late, { kind: 'laterClosed' });
+    same('and said in the per-man box\'s own sentence', q.call('weeklyCloseHeldText', { held: late }), q.run('CLOSURE_ORDER_TEXT.laterClosed'));
+    check('which is the box\'s, in js/ui/reports.js', source('js/ui/reports.js').indexOf("'תקופה מאוחרת יותר של העובד הזה כבר נסגרה עם ניכוי, והחשבון הזה עדיין פתוח. '") !== -1);
 }
 
 // ================================================================== W8 the gates
@@ -778,9 +828,10 @@ async function movedBetween(change) {
 // ================================================================== W12 two phones
 //
 // The owner's D4 is "close only when synced, and from one phone". Here, two phones on the
-// harness's cloud, both synced: what the pass guarantees, and - measured and PRINTED, not
-// pinned as a behaviour - what it cannot: a phone that is synced by every test it can make
-// and has not yet heard a close the other phone sent a second ago.
+// harness's cloud, both synced: what the pass guarantees, and what it cannot - a phone that is
+// synced by every test it can make and has not yet heard a close the other phone sent a
+// second ago. The server keeps the first close; since v198 (repair (b)) the phone that lost
+// adopts it and is not stuck, and that is pinned below (it was printed and not pinned in v197).
 {
     suite('W12 two phones: a close the other phone has heard is never written twice; the race D4 cannot close, measured');
     const one = await twoPhonesOnOneCloud();
@@ -813,11 +864,299 @@ async function movedBetween(change) {
     await settle(3000);
     const cloudCloses = Object.values(two.cloud.doc.ledger.advances).filter(entry => (entry.kind === 'closed' || entry.kind === 'deducted')
         && entry.workerId === 'w_g' || (entry.kind === 'deducted' && entry.at === ra.at)).map(entry => [entry.kind, entry.by, entry.amount]);
-    console.log(`        MEASURED, NOT FIXED (problem (b)): phone B reported synced (${stillShared}) and wrote 0 (${raced.saved}); `
+    console.log(`        MEASURED (problem (b), repaired in v198): phone B reported synced (${stillShared}) and wrote 0 (${raced.saved}); `
         + `afterwards B is '${two.b.Sync.status}', holds ${two.b.Sync.heldRecords().length} record(s) aside, owes ${two.b.Sync.pendingCount()}, `
         + `writes blocked: ${two.b.call('farkadWritesBlocked')}; the cloud: ${j(cloudCloses)}`);
     same('the server keeps the first close and only it', cloudCloses.filter(entry => entry[0] === 'deducted').map(entry => [entry[1], entry[2]]), [['d_A', 900]]);
+    // v198, REPAIR (b) (the owner approved it 2026-11-14): the phone that lost is no longer
+    // stuck. It adopts the close that landed first, holds nothing, owes nothing, writes, and
+    // keeps its own losing close aside on itself only. Pinned now that it is the behaviour;
+    // tests/closerace.test.mjs holds the repair in every shape.
+    same('the phone that lost the race is not stuck: synced, nothing held, nothing owed, writes not blocked',
+        [two.b.Sync.status, two.b.Sync.heldRecords().length, two.b.Sync.pendingCount(), two.b.call('farkadWritesBlocked')], ['synced', 0, 0, false]);
+    same('and it holds the close that landed first, phone A\'s', Object.values(two.b.State.schedule.ledger.advances)
+        .filter(entry => entry.workerId === 'w_g' && (entry.kind === 'closed' || entry.kind === 'deducted') && entry.periodTo === '2026-11-12')
+        .map(entry => [entry.kind, entry.by, entry.kind === 'deducted' ? entry.amount : null]).sort(), [['closed', 'd_A', null], ['deducted', 'd_A', 900]]);
+    check('its own close kept aside on itself only (farkad:closureAside:*)', Object.keys(two.b.dump()).some(key => key.indexOf('farkad:closureAside:') === 0));
     two.a.Sync.disconnect(); two.b.Sync.disconnect();
+}
+
+// ================================================================== W13 the owner's answers
+//
+// The owner answered ten questions about this screen on 2026-11-14. What each answer moved,
+// or was checked to leave where it was, is held here; docs/releases.md (v198) says the
+// answers and what was and was not done.
+{
+    suite('W13.1 only a man who WORKED in his period is in the pass (the owner, answers 1 and 9)');
+    // Two weekly men with a debt: one worked last week, one did not come at all.
+    const d = phone({ today: '2026-11-13' });
+    const W = '2026-10-16=weekly';
+    d.State.schedule.workers = [
+        { id: 'w_a', name: 'עאמר', active: true, dailyRate: 400, hourlyRate: 0, payCycles: W },
+        { id: 'w_b', name: 'באסם', active: true, dailyRate: 400, hourlyRate: 0, payCycles: W }];
+    d.State.schedule.places = PLACES;
+    weekdays('2026-10-30', '2026-11-05').forEach(date => { day(d, 'w_a', date); day(d, 'w_b', date); });
+    weekdays('2026-11-06', '2026-11-12').forEach(date => day(d, 'w_a', date));
+    advance(d, 'w_a', '2026-11-02', 700);
+    advance(d, 'w_b', '2026-11-02', 900);
+    advance(d, 'w_b', '2026-11-09', 300);            // handed over in a week he did not work
+    approve(d);
+    byHand(d, 'w_a', '2026-10-30', '2026-11-05', 0, '2026-11-06T16:00:00.000Z');
+    byHand(d, 'w_b', '2026-10-30', '2026-11-05', 0, '2026-11-06T16:01:00.000Z');
+    kept(d); shared(d);
+    const read = readOf(d);
+    same('the man who worked is on it; the man with a debt, an advance in the week and no day of work is not',
+        read.men.map(man => man.id), ['w_a']);
+    same('the one who did not come still owes on «מי חייב כסף» - where the owner looks for him (answer 9)',
+        d.run('owesRead(State.schedule, todayStr()).rows.map(row => [row.workerId, row.amount])'), [['w_b', 1200], ['w_a', 700]]);
+    // Before: v197 listed him on his money alone. The rule is the one line, measured by
+    // giving him one day of work in the week.
+    day(d, 'w_b', '2026-11-10'); kept(d);
+    same('one day of work in it, and he is on it', readOf(d).men.map(man => man.id), ['w_a', 'w_b']);
+
+    // THE CONSEQUENCE, AND THE OWNER'S ANSWER TO IT (2026-11-14, «1 = (b)»): a week with a debt
+    // and no day of work is left open by the pass that week (he is not on it). The next pass
+    // no longer holds him for it: it closes that week first, with nothing taken, in the same
+    // write. MOVED ON PURPOSE: before this answer the next pass held him («earlier», the week
+    // off named) until it was closed by hand.
+    const n = phone({ today: '2026-11-20' });
+    n.State.schedule.workers = [{ id: 'w_c', name: 'כמאל', active: true, dailyRate: 400, hourlyRate: 0, payCycles: W }];
+    n.State.schedule.places = PLACES;
+    weekdays('2026-10-30', '2026-11-05').forEach(date => day(n, 'w_c', date));
+    weekdays('2026-11-13', '2026-11-19').forEach(date => day(n, 'w_c', date));
+    advance(n, 'w_c', '2026-11-02', 2500);
+    approve(n);
+    byHand(n, 'w_c', '2026-10-30', '2026-11-05', 2000, '2026-11-06T16:00:00.000Z');
+    kept(n); shared(n);
+    const OFF = ['2026-11-06', '2026-11-12'];
+    const ON = ['2026-11-13', '2026-11-19'];
+    const before = JSON.parse(j(n.State.schedule));
+    const plain0 = n.call('planPeriodClosure', n.State.schedule, 'w_c', ON[0], ON[1], '2026-11-20T10:00:00.000Z');
+    same('the model on the record as it is: the week of work is refused in front of the week off (fix (a), «earlierOpen»)',
+        [plain0.canClose, plain0.reasons.indexOf('earlierOpen') !== -1, plain0.earlierOpen], [false, true, { from: OFF[0], to: OFF[1] }]);
+    same('and so is the second calculator', oracle.closePlan(before, 'w_c', ON[0], ON[1]).reasons.indexOf('earlierOpen') !== -1, true);
+    same('the week off itself may be closed, by both', [n.call('planPeriodClosure', n.State.schedule, 'w_c', OFF[0], OFF[1], '2026-11-20T10:00:00.000Z', 0).canClose,
+        oracle.closePlan(before, 'w_c', OFF[0], OFF[1], 0).reasons], [true, []]);
+    const man = manOf(readOf(n), 'w_c');
+    same('a week off with 500 still owed, then a week of work: NOT held - the week off is closed first, with nothing taken',
+        [man.held, man.empties, man.from, man.to, man.max, man.balance], [null, [{ from: OFF[0], to: OFF[1] }], ON[0], ON[1], 500, 500]);
+    same('his card says so', n.call('weeklyCloseEmptyLines', man).map(plain), ['שבוע בלי ימי עבודה (06/11 - 12/11) ייסגר קודם, בלי ניכוי.']);
+    same('and reading it wrote nothing', j(n.State.schedule), j(before));
+    const disk0 = n.dump();
+    const wrote = n.call('weeklyCloseWrite', [{ man, x: man.max }]);
+    same('the write: saved, him closed', [wrote.saved, wrote.closed, wrote.failure, wrote.moved], [true, ['w_c'], null, []]);
+    const off = n.call('periodArtifactFor', n.State.schedule, 'w_c', OFF[0]);
+    const on = n.call('periodArtifactFor', n.State.schedule, 'w_c', ON[0]);
+    same('the week off: its one frozen payslip, at this write\'s moment, no wage, nothing taken, the 500 carried',
+        [off.at === wrote.at && off.by === wrote.by, off.gross, off.balanceAfter], [true, 0, 500]);
+    same('and no deduction recorded on it', Object.values(n.State.schedule.ledger.advances)
+        .filter(entry => entry.kind === 'deducted' && entry.workerId === 'w_c' && entry.periodFrom === OFF[0]).length, 0);
+    same('the week of work: closed in the same write, 500 taken, nothing left owed', [on.at === wrote.at, on.balanceAfter,
+        Object.values(n.State.schedule.ledger.advances).filter(entry => entry.kind === 'deducted' && entry.periodFrom === ON[0])
+            .reduce((sum, entry) => sum + entry.amount, 0)], [true, 0, 500]);
+    same('nothing impossible on the record, and the ledger owes nothing', [n.call('impossibleClosures', n.State.schedule).length,
+        n.call('openAdvanceBalance', n.State.schedule, 'w_c') ? n.call('openAdvanceBalance', n.State.schedule, 'w_c').total : 0], [0, 0]);
+    const after = JSON.parse(j(n.State.schedule));
+    same('THE SECOND CALCULATOR agrees: the week off closed taking 0, the week of work taking 500, nothing open by rule',
+        [oracle.accountOf(after, 'w_c', OFF[0], OFF[1]).closed, oracle.accountOf(after, 'w_c', OFF[0], OFF[1]).deducted,
+            oracle.accountOf(after, 'w_c', ON[0], ON[1]).closed, oracle.accountOf(after, 'w_c', ON[0], ON[1]).deducted,
+            oracle.openBalance(after, 'w_c').total], [true, 0, true, 50000, 0]);
+    same('and it is the record a person would have made by hand, oldest first: the week off at 0, then the week at 500',
+        (() => {
+            const twin = phone({ today: '2026-11-20', storage: disk0 });
+            twin.State.commitMany(byHand(twin, 'w_c', OFF[0], OFF[1], 0, wrote.at));
+            twin.State.commitMany(byHand(twin, 'w_c', ON[0], ON[1], 500, wrote.at));
+            const strip = record => Object.values(record.ledger.advances).filter(entry => entry.workerId === 'w_c' && entry.at === wrote.at)
+                .map(entry => j(Object.assign({}, entry, { id: null, by: null }))).sort();
+            // Two payslips and one deduction, the same entries in both but for their ids and device.
+            return j(strip(JSON.parse(j(twin.State.schedule)))) === j(strip(after)) && strip(after).length === 3;
+        })(), true);
+
+    // A WEEK OFF WITH A DAY OF WORK IN IT is not a week off: never closed by the pass (D5).
+    const w = phone({ today: '2026-11-20' });
+    w.State.schedule.workers = [{ id: 'w_c', name: 'כמאל', active: true, dailyRate: 400, hourlyRate: 0, payCycles: W }];
+    w.State.schedule.places = PLACES;
+    weekdays('2026-10-30', '2026-11-05').forEach(date => day(w, 'w_c', date));
+    day(w, 'w_c', '2026-11-09');
+    weekdays('2026-11-13', '2026-11-19').forEach(date => day(w, 'w_c', date));
+    advance(w, 'w_c', '2026-11-02', 2500);
+    approve(w);
+    byHand(w, 'w_c', '2026-10-30', '2026-11-05', 2000, '2026-11-06T16:00:00.000Z');
+    kept(w); shared(w);
+    same('one day of work in the week behind: held, that week named, nothing closed for him', [manOf(readOf(w), 'w_c').held, manOf(readOf(w), 'w_c').empties],
+        [{ kind: 'earlier', from: OFF[0], to: OFF[1] }, []]);
+
+    // A week off BEHIND A LATER CLOSE that took a carried debt (an older build's close, out of
+    // order): the writer will not close it (fix (a), «laterClosed»), so neither does the pass -
+    // he is held on it, by name, exactly as before.
+    const b = phone({ today: '2026-11-27' });
+    b.State.schedule.workers = [{ id: 'w_c', name: 'כמאל', active: true, dailyRate: 400, hourlyRate: 0, payCycles: W }];
+    b.State.schedule.places = PLACES;
+    weekdays('2026-10-30', '2026-11-05').forEach(date => day(b, 'w_c', date));
+    weekdays('2026-11-13', '2026-11-26').forEach(date => day(b, 'w_c', date));
+    advance(b, 'w_c', '2026-11-02', 2500);
+    approve(b);
+    byHand(b, 'w_c', '2026-10-30', '2026-11-05', 2000, '2026-11-06T16:00:00.000Z');
+    b.run('globalThis.__orderFacts = closureOrderFacts; closureOrderFacts = function () { return Object.assign(__orderFacts.apply(null, arguments), { earlierOpen: null }); }; 1');
+    byHand(b, 'w_c', ON[0], ON[1], 300, '2026-11-20T16:00:00.000Z');
+    b.run('closureOrderFacts = __orderFacts; delete globalThis.__orderFacts; 1');
+    kept(b); shared(b);
+    same('(the week off is refused by the writer: «laterClosed»)', b.call('planPeriodClosure', b.State.schedule, 'w_c', OFF[0], OFF[1], '2026-11-27T10:00:00.000Z', 0).reasons.indexOf('laterClosed') !== -1, true);
+    same('so the pass holds him on it, behind the closed week, and closes nothing of his', [manOf(readOf(b), 'w_c').held, manOf(readOf(b), 'w_c').empties],
+        [{ kind: 'earlierBehind', from: OFF[0], to: OFF[1] }, []]);
+}
+
+{
+    suite('W13.2 weekly men every week, the fortnightly men with them every other week (answer 2)');
+    const d = phone({ today: '2026-11-06' });
+    d.State.schedule.workers = [
+        { id: 'w_w', name: 'ואליד', active: true, dailyRate: 400, hourlyRate: 0, payCycles: '2026-10-16=weekly' },
+        { id: 'w_f', name: 'פואד', active: true, dailyRate: 500, hourlyRate: 0 }];
+    d.State.schedule.places = PLACES;
+    weekdays('2026-10-16', '2026-11-12').forEach(date => ['w_w', 'w_f'].forEach(id => day(d, id, date)));
+    advance(d, 'w_w', '2026-11-02', 600);
+    advance(d, 'w_f', '2026-11-03', 900);
+    approve(d);
+    // Every earlier period closed, the way the passes before would have left it.
+    byHand(d, 'w_f', '2026-10-16', '2026-10-29', 0, '2026-10-30T16:00:00.000Z');
+    byHand(d, 'w_w', '2026-10-16', '2026-10-22', 0, '2026-10-23T16:00:00.000Z');
+    byHand(d, 'w_w', '2026-10-23', '2026-10-29', 0, '2026-10-30T16:01:00.000Z');
+    kept(d); shared(d);
+    // Friday 6 November: a week ended, the fortnight did not.
+    let read = readOf(d);
+    same('the week between: the weekly man alone, in his week', read.groups.map(group => [group.cycle, group.from, group.to, group.men.map(man => man.id)]),
+        [['weekly', '2026-10-30', '2026-11-05', ['w_w']]]);
+    d.State.commitMany(byHand(d, 'w_w', '2026-10-30', '2026-11-05', 600, '2026-11-06T16:00:00.000Z'));
+    // Friday 13 November: the week AND the fortnight ended on the same Thursday.
+    d.setToday('2026-11-13');
+    read = readOf(d);
+    same('the week after: both, each in his own period, ending the same day',
+        read.groups.map(group => [group.cycle, group.from, group.to, group.men.map(man => man.id)]),
+        [['biweekly', '2026-10-30', '2026-11-12', ['w_f']], ['weekly', '2026-11-06', '2026-11-12', ['w_w']]]);
+}
+
+{
+    suite('W13.5 no cap on the deduction beyond what he earned - the existing most, checked (answer 5)');
+    const d = shared(threeInOrder());
+    const read = readOf(d);
+    const wrong = read.men.filter(man => !man.held).filter(man =>
+        man.max !== Math.min(man.gross, man.balance)
+        || d.call('weeklyCloseParse', String(man.max), man.max).ok !== true
+        || d.call('weeklyCloseParse', String(man.max + 0.01), man.max).ok !== false);
+    given('there are men to read', read.men.filter(man => !man.held).length === 3, j(read.men.map(man => man.id)));
+    check('the most is the smaller of the wage and the debt, all of it can be typed, and not an agora more',
+        wrong.length === 0, j(wrong.map(man => [man.id, man.max, man.gross, man.balance])));
+    same('and a man owing more than his wage can have all of the wage taken', (() => {
+        const big = phone({ today: '2026-11-13' });
+        big.State.schedule.workers = [{ id: 'w_x', name: 'זיאד', active: true, dailyRate: 300, hourlyRate: 0, payCycles: '2026-10-16=weekly' }];
+        big.State.schedule.places = PLACES;
+        weekdays('2026-11-06', '2026-11-12').forEach(date => day(big, 'w_x', date));
+        advance(big, 'w_x', '2026-11-09', 5000);
+        approve(big); kept(big); shared(big);
+        const man = manOf(readOf(big), 'w_x');
+        return [man.gross, man.max, man.balance];
+    })(), [1800, 1800, 5000]);
+}
+
+{
+    suite('W13.7 after the close, each closed man\'s own statement, one door each (answer 7)');
+    const d = shared(threeInOrder());
+    d.State.schedule.workers.forEach((worker, i) => { worker.phone = ['050-1234567', '052-7654321', ''][i]; });
+    kept(d);
+    const disk = diskOf(d);
+    d.run('openWeeklyClose()');
+    press(openCard(d, 'w_w').querySelector('.weekly-close-none'));
+    press(goOf(d));
+    press(goOf(d));
+    await idle(d);
+    const key = d.run('WEEKLY_CLOSE_LAST.key');
+    given('the pass wrote, and its page is open', d.run('OWES_PAGE') === key, d.run('OWES_PAGE'));
+    const after = diskOf(d);
+    d.dom = d.doc;
+    d.run('renderAdvances()');
+    const root = d.doc.getElementById('advancesView');
+    const slips = root.querySelectorAll('.owes-closure-slip');
+    const order = d.run(`owesClosures(State.schedule).filter(g => g.key === ${j(key)})[0].items.map(i => i.workerId)`);
+    same('one block per closed man, in the close\'s own order', slips.map(node => node.dataset.worker), order);
+    same('under the heading «תלוש לכל עובד»', root.querySelectorAll('.owes-closure-slips h3').map(node => node.textContent), ['תלוש לכל עובד']);
+    // His statement, read here the way «שלח לעובד» reads it: the report pointed at his
+    // closed period, narrowed to him, and put back.
+    const statement = (id, from, to) => d.run(`(function () {
+        const held = { from: REPORT_RANGE.from, to: REPORT_RANGE.to, workers: REPORT_WORKERS };
+        try { REPORT_RANGE.from = ${j(from)}; REPORT_RANGE.to = ${j(to)}; REPORT_WORKERS = new Set([${j(id)}]);
+            return workerStatementText(${j(id)}); }
+        finally { REPORT_RANGE.from = held.from; REPORT_RANGE.to = held.to; REPORT_WORKERS = held.workers; }
+    })()`);
+    const items = d.run(`owesClosures(State.schedule).filter(g => g.key === ${j(key)})[0].items`);
+    const doors = [];
+    items.forEach(item => {
+        const block = slips.filter(node => node.dataset.worker === item.workerId)[0];
+        const door = block ? block.querySelector('a.payslips-door') || block.querySelector('.payslips-door') : null;
+        const text = statement(item.workerId, item.from, item.to);
+        const number = d.call('sederWaNumber', d.State.schedule.workers.filter(w => w.id === item.workerId)[0].phone);
+        doors.push([item.workerId, Boolean(door), door ? door.href === d.call('sederUrl', number, text) : null,
+            door ? plain(door.textContent) : null, block.querySelectorAll('textarea')[0].value === text]);
+    });
+    same('a door for each man with a number: his number, his statement byte for byte, his name on it', doors, items.map(item => {
+        const name = NAMES[item.workerId];
+        return item.workerId === 'w_g' ? [item.workerId, false, null, null, true]
+            : [item.workerId, true, true, `💬 פתח בוואטסאפ: ${name}`, true];
+    }));
+    check('the statement says what the close froze: «נותר לתשלום» is the close\'s own «לתשלום»', items.every(item => {
+        const text = statement(item.workerId, item.from, item.to);
+        return item.net === null || plain(text).indexOf(`נותר לתשלום: ${item.net}`) !== -1;
+    }), j(items.map(item => [item.workerId, item.net, plain(statement(item.workerId, item.from, item.to)).split('\n').filter(l => l.indexOf('נותר') !== -1)])));
+    const noNumber = slips.filter(node => node.dataset.worker === 'w_g')[0];
+    if (noNumber) {
+        same('a man with no number: the list\'s own words and the copy', [noNumber.querySelectorAll('.payslips-warn').map(node => node.textContent),
+            noNumber.querySelectorAll('.payslips-copy').map(node => node.textContent)], [['אין מספר טלפון תקין'], ['העתק']]);
+    }
+    check('no word of «נשלח» anywhere on the page', plain(root.textContent).indexOf('נשלח') === -1);
+    // The page reads the doors inside the pass's scope (weeklyCloseOnce), for its cost; the
+    // answers are the answers with no memory at all.
+    same('the doors read inside the pass\'s scope are the doors read with no memory', d.run(`JSON.stringify(weeklyCloseOnce(() => payslipsClosedFacts(${j(items)})))`),
+        d.run(`JSON.stringify(payslipsClosedFacts(${j(items)}))`));
+    same('drawing the page wrote nothing', diskOf(d), after);
+    // A door pressed: the payslips' own mark, and nothing else.
+    const withDoor = slips.filter(node => node.querySelector('.payslips-door'))[0];
+    press(withDoor.querySelector('.payslips-door'));
+    const marks = JSON.parse(d.raw('farkadPayslipsProgress') || 'null');
+    const keyOf = items.filter(item => item.workerId === withDoor.dataset.worker)[0];
+    check('the tap marks him opened in the payslips\' own key, for his period', Boolean(marks && marks.periods
+        && marks.periods[`${keyOf.from}~${keyOf.to}`] && marks.periods[`${keyOf.from}~${keyOf.to}`].opened[keyOf.workerId]), d.raw('farkadPayslipsProgress'));
+    same('and the record is the record the close wrote', d.raw('scheduleData:v2'), JSON.parse(after)['scheduleData:v2']);
+    d.run('renderAdvances()');
+    same('drawn again: «נפתח בוואטסאפ» under him', d.doc.getElementById('advancesView').querySelectorAll('.owes-closure-slip')
+        .filter(node => node.dataset.worker === keyOf.workerId)[0].querySelectorAll('.payslips-state').map(node => node.textContent), ['✓ נפתח בוואטסאפ']);
+    check('the pass itself changed the disk (the precondition of everything above)', disk !== after);
+
+    suite('W13.8 a mistake after confirm: a correction recorded later, the deduction kept - the way to it is on the page (answer 8)');
+    const fixes = root.querySelectorAll('.owes-closure-fix');
+    const taken = items.filter(item => item.deducted > 0);
+    given('some men had a deduction taken by the pass', taken.length >= 1, j(items));
+    same('one button per man a deduction was taken from, naming him', fixes.map(node => plain(node.textContent)),
+        slips.map(node => node.dataset.worker).filter(id => taken.some(item => item.workerId === id)).map(id => `המקדמות של ${NAMES[id]}`));
+    const man = taken[0];
+    const before = diskOf(d);
+    d.views.length = 0;
+    press(fixes.filter(node => plain(node.textContent) === `המקדמות של ${NAMES[man.workerId]}`)[0]);
+    same('it only navigates: his advances, nothing written', [d.run('ADVANCE_WORKER'), d.views.slice(-1)[0], diskOf(d) === before], [man.workerId, 'advances', true]);
+    // And there the deduction this close wrote can be corrected, by the existing path.
+    const deductions = Object.values(d.State.schedule.ledger.advances).filter(entry => entry.kind === 'deducted'
+        && entry.at === key.split('|')[0] && String(entry.periodFrom) === man.from
+        && d.State.schedule.advances[entry.advanceId] && d.State.schedule.advances[entry.advanceId].workerId === man.workerId);
+    given('the close wrote his deduction', deductions.length >= 1);
+    same('each is open to correction, all of it (eventReversalRoom), and a correction with a reason is accepted',
+        deductions.map(entry => [d.call('eventReversalRoom', d.State.schedule, entry.id) === entry.amount,
+            d.call('eventReversalProblems', d.State.schedule, entry.id, entry.amount, 'נוכה בטעות')]),
+        deductions.map(() => [true, []]));
+    same('but only all of it: a part of a deduction is refused (the model has no event for it - docs/releases.md, v198)',
+        d.call('eventReversalProblems', d.State.schedule, deductions[0].id, Math.round(deductions[0].amount / 2), 'חלק'),
+        ['a correction of part of a transaction, which strands the rest']);
+    d.run('renderAdvances()');
+    check('his page offers «תיקון» on that deduction in his history', d.doc.getElementById('advancesView').querySelectorAll('button')
+        .some(node => node.textContent === 'תיקון'), plain(d.doc.getElementById('advancesView').textContent).slice(0, 400));
+    same('and still nothing was written', diskOf(d), before);
 }
 
 // ================================================================== W11 the words
@@ -842,6 +1181,10 @@ async function movedBetween(change) {
         [T.heldEarlier('DR'), 'חשבון קודם שלו לא נסגר (DR). סוגרים מהישן לחדש: סגור קודם את החשבון ההוא, ידנית.'],
         [T.heldEarlierBehind('DR'), 'חשבון קודם שלו לא נסגר (DR), ותקופה מאוחרת יותר שלו כבר נסגרה. סגירה של החשבון ההוא עלולה לנכות את אותה מקדמה פעמיים - בדוק את עמוד המקדמות שלו לפני שסוגרים אותו.'],
         [T.heldOther, 'אי אפשר לסגור אותו כאן. סגור אותו מהחשבון שלו בדוח.'],
+        // v198, the owner's answer of 2026-11-14 (PROPOSED words): a period with no day of work closed first.
+        [T.emptyNote('DR', true), 'שבוע בלי ימי עבודה (DR) ייסגר קודם, בלי ניכוי.'],
+        [T.emptyNote('DR', false), 'תקופה בלי ימי עבודה (DR) תיסגר קודם, בלי ניכוי.'],
+        [T.emptyList, 'ייסגרו קודם, בלי ניכוי - תקופות שלא היו בהן ימי עבודה:'],
         [T.footDeduct, 'ינוכה'], [T.next, 'המשך לסיכום'], [T.back, 'חזרה'],
         [T.willClose(1), 'ייסגר חשבון אחד'], [T.willClose(4), 'ייסגרו 4 חשבונות'], [T.worker, 'עובד'],
         [T.zeroList, 'בלי ניכוי הפעם, והחוב עובר הלאה:'], [T.skippedList, 'לא נסגר עכשיו (דילגת):'],
@@ -875,8 +1218,16 @@ async function movedBetween(change) {
     check('the file is loaded after owes.js and is in the shell', html.indexOf('<script src="js/ui/weeklyclose.js">') > html.indexOf('<script src="js/ui/owes.js">')
         && source('sw.js').indexOf("'./js/ui/weeklyclose.js'") !== -1);
     const code = WEEKLY.split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
-    check('the ONE writer: closePeriodChanges is called once in the code, and no repayment, no commit of its own, no key',
-        (code.match(/closePeriodChanges\(/g) || []).length === 1 && code.indexOf('recordAdvanceRepaid') === -1
+    // MOVED ON PURPOSE (v198, the owner's answer of 2026-11-14): the pass also closes a man's
+    // periods with no day of work, first, with nothing taken - through the SAME writer. So
+    // closePeriodChanges is called three times: twice on the record, both inside the write
+    // (the period with no work, then his own), and once on the planner's COPY of the record.
+    const writer = (code.match(/closePeriodChanges\([^,]*,/g) || []);
+    const write = code.slice(code.indexOf('function weeklyCloseWrite('), code.indexOf('\n}\n', code.indexOf('function weeklyCloseWrite(')));
+    check('the ONE writer: closePeriodChanges, twice on the record inside the write and once on the planner\'s copy - and no repayment, no commit of its own, no key',
+        writer.length === 3 && writer.filter(call => call === 'closePeriodChanges(State.schedule,').length === 2
+        && (write.match(/closePeriodChanges\(State\.schedule,/g) || []).length === 2
+        && writer.filter(call => call === 'closePeriodChanges(copy,').length === 1 && code.indexOf('recordAdvanceRepaid') === -1
         && code.indexOf('State.commit') === -1 && code.indexOf('Store.set') === -1 && code.indexOf('localStorage') === -1);
     check('no browser dialog (law 11)', !/(^|[^.\w])(alert|confirm|prompt)\(/.test(code));
 }

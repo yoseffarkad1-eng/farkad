@@ -58,7 +58,7 @@ const SINCE = 'מה שנוסף מאז העדכון האחרון שראית, מה
 const ALL = 'כל מה שנוסף לאחרונה, מהחדש לישן.';
 const SHOW = 'הראה לי';
 // The builds that have news, newest first (tests/whatsnew.test.mjs pins the block).
-const NEWS = [197, 196, 195, 194, 192, 191, 190, 189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
+const NEWS = [198, 197, 196, 195, 194, 192, 191, 190, 189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
 
 // SYNTHETIC. Fourteen invented men on three invented sites.
 const NAMES = ['אחמד', 'מוחמד', 'יוסי', 'סמיר', 'עלי', 'Ali Hassan', 'ראמי', 'דוד', 'עבד אל-רחמן', 'מחמוד', 'חאלד', 'נביל', 'זיאד', 'כרים'];
@@ -424,7 +424,7 @@ for (const rides of [false, true]) {
     if (rides) await page.evaluate(() => transportSetEnabled(true));
     given(`הסעות is ${rides ? 'on' : 'off'}`, await page.evaluate(() => transportEnabled()) === rides);
     const ways = await page.evaluate(() => Object.keys(WHATSNEW_GO).sort());
-    same('the ways there are', ways, ['advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'display', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
+    same('the ways there are', ways, ['advanceReset', 'advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'display', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
     const reset = () => page.evaluate(() => {
         [...document.querySelectorAll('.modal')].filter(node => node.style.display === 'flex').forEach(node => {
             const close = MODAL_CLOSERS[node.id];
@@ -465,7 +465,9 @@ for (const rides of [false, true]) {
         rides: s => (rides ? s.transport && s.view === 'day' && !s.settings
             : s.settings && s.folds.includes('transportSwitchCard') && !s.transport),
         // v191: the row of «תצוגה גדולה», open on the sheet - and the mode NOT turned on.
-        display: s => s.settings && s.folds.includes('displayLargeCard') && s.modals.length === 0 && !s.transport
+        display: s => s.settings && s.folds.includes('displayLargeCard') && s.modals.length === 0 && !s.transport,
+        // v198: the row of «איפוס מקדמות», open on the sheet - and the tool NOT opened.
+        advanceReset: s => s.settings && s.folds.includes('settingsFoldAdvanceReset') && s.modals.length === 0 && !s.transport
     };
     // Each way once from the card as ⋯ opens it; a first disk reading is taken after the
     // phone has seen the build, so the note is not a difference either.
@@ -507,6 +509,11 @@ for (const rides of [false, true]) {
                 [await page.evaluate(() => document.documentElement.classList.contains('display-large')),
                     await page.evaluate(() => localStorage.getItem('farkadDisplay:large')),
                     await page.locator('#displayLargeSwitch').isVisible()], [false, null, true]);
+        }
+        if (way === 'advanceReset') {
+            same('advanceReset: he is shown the row with its button on the glass, and the tool is NOT opened - no dialog, nothing written',
+                [await page.locator('#settingsFoldAdvanceReset .advance-reset-entry').isVisible(),
+                    await page.evaluate(() => document.getElementById('advanceResetModal').style.display || 'none')], [true, 'none']);
         }
         if (way === 'rides' && rides) {
             same('rides, with הסעות on: the screen itself, for the day on the screen',

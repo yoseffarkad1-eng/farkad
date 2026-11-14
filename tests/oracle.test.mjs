@@ -838,6 +838,9 @@ function compareCloses(made, tally) {
         }
         if (close.plan.reasons.length > 0) {
             tally['closes refused'] = (tally['closes refused'] || 0) + 1;
+            ['earlierOpen', 'laterClosed'].forEach(reason => {
+                if (close.plan.reasons.indexOf(reason) !== -1) tally[reason] = (tally[reason] || 0) + 1;
+            });
             if (close.written.length > 0) say(`${where}: refused and still wrote ${close.written.length}`);
             return;
         }
@@ -1382,7 +1385,7 @@ const records = [];
         `${tally.accounts} accounts, ${tally['closed accounts']} of them closed, ${tally['accounts with movement after the close']} with movement after the close. ${few(split.accounts)}`);
     check('a close writes the payslip and the deductions the rules say, oldest advance first',
         closes.length === 0 && tally['closes written'] > 300 && tally['deductions written'] > 60,
-        `${tally['closes written']} closes, ${tally['deductions written']} deductions, ${tally['closes refused']} refused for a reason both name. ${few(closes)}`);
+        `${tally['closes written']} closes, ${tally['deductions written']} deductions, ${tally['closes refused']} refused for a reason both name (${tally.earlierOpen || 0} for an earlier open period, ${tally.laterClosed || 0} behind a later close). ${few(closes)}`);
     check('the app\'s writers leave the days and the stamps iron law 2 says they leave',
         writers.length === 0 && tally['days written twice'] > 10000,
         `${tally['days written twice']} days. ${few(writers)}`);

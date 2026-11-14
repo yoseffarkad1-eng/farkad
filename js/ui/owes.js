@@ -90,6 +90,14 @@ const OWES_TEXT = Object.freeze({
     // --- the flags on a row
     quietWeeks: count => `${count} שבועות בלי ניכוי`,
     quietPeriods: count => `${count} תקופות בלי ניכוי`,
+    // v198: the flag stands from ONE period (the owner, 2026-11-14), and «1 שבועות» is not
+    // Hebrew. PROPOSED.
+    quietWeek: 'שבוע אחד בלי ניכוי',
+    quietPeriod: 'תקופה אחת בלי ניכוי',
+    // v198: a period CLOSED with less taken than the sheet could take, while a debt was
+    // left (the owner, 2026-11-14: "or less than the maximum"). PROPOSED.
+    short: 'ניכוי חלקי',
+    shortLine: (dates, taken, most) => `בסגירה של ${dates} נוכו ${taken} ₪ מתוך ${most} ₪ שאפשר היה לנכות, והשאר נשאר חוב.`,
     idleWeek: 'לא עבד השבוע',
     idlePeriod: 'לא עבד בתקופה',
     unclosed: 'חשבון קודם לא נסגר',
@@ -127,6 +135,10 @@ const OWES_TEXT = Object.freeze({
     sum: 'סה״כ',
     noWage: 'בלי שכר יומי',
     history: 'כל ניכוי כאן רשום גם בהיסטוריה של העובד בעמוד המקדמות שלו - ושם אפשר לרשום תיקון לצידו.',
+    // v198: the way to that history from the close, one button per man a deduction was
+    // taken from (the owner's answer 8: a mistake is fixed by a correction recorded later).
+    // It only navigates. PROPOSED.
+    advancesOf: name => `המקדמות של ${name}`,
     textLabel: 'הסגירה כטקסט'
 });
 
@@ -147,8 +159,9 @@ const OWES_REUSED = Object.freeze({
 });
 
 // After how many of a man's own periods with no deduction and no repayment he is flagged.
-// The owner's decision, 2026-11-13: two.
-const OWES_QUIET_PERIODS = 2;
+// The owner's decision, 2026-11-13, was two; on 2026-11-14 he said EVERY period: a
+// deduction put off is to be seen the week it is put off, not the week after. So one.
+const OWES_QUIET_PERIODS = 1;
 // A walk driven by dates on a record is a walk a damaged date could send forever
 // (accountsBefore's own ceiling).
 const OWES_WALK_CEILING = 4000;
@@ -254,6 +267,7 @@ function owesFacts(schedule, worker, today, rowIn, entries) {
         lastDeducted: null,
         lastRepaid: null,
         quiet: 0,
+        short: null,
         unclosed: [],
         presumed: 0,
         idle: false,
@@ -286,6 +300,24 @@ function owesFacts(schedule, worker, today, rowIn, entries) {
             if (moves.some(date => date >= period.from && date <= period.to)) break;
             facts.quiet += 1;
         }
+        // HIS LAST ENDED PERIOD, CLOSED WITH LESS TAKEN THAN COULD BE (v198). Read off the
+        // close's own frozen record (closedPeriods, through frozenPeriodFor): what came
+        // off, the wage it was closed on, and the debt it left. The most that could come
+        // off is what the sheet would have taken - the smaller of the wage and what he
+        // owed before the deduction (advanceWalk) - so a close is short exactly when
+        // something came off, a debt was left, and the wage had room for more. A close
+        // with NOTHING taken is not short: it is a quiet period, counted above.
+        const last = ended.length ? ended[ended.length - 1] : null;
+        const frozen = last ? frozenPeriodFor(schedule, worker.id, last.from, last.to) : undefined;
+        if (frozen !== undefined && frozen.gross !== undefined && frozen.gross !== null
+            && Number.isFinite(Number(frozen.gross)) && frozen.balanceAfter !== undefined) {
+            const taken = agoraRound(Number(frozen.deducted) || 0);
+            const left = agoraRound(Number(frozen.balanceAfter) || 0);
+            const most = agoraRound(Math.min(agoraRound(taken + left), Math.max(0, Number(frozen.gross))));
+            if (taken > 0 && left > 0 && Math.round(taken * 100) < Math.round(most * 100)) {
+                facts.short = { from: last.from, to: last.to, cycle: last.cycle, taken, most };
+            }
+        }
         // The ended periods that hold a record and that nobody closed.
         facts.unclosed = ended.filter(period => {
             if (frozenPeriodFor(schedule, worker.id, period.from, period.to) !== undefined) return false;
@@ -316,7 +348,7 @@ function owesFacts(schedule, worker, today, rowIn, entries) {
 }
 
 function owesNeedsAttention(row) {
-    return row.quiet >= OWES_QUIET_PERIODS || row.idle === true || row.active === false
+    return row.quiet >= OWES_QUIET_PERIODS || Boolean(row.short) || row.idle === true || row.active === false
         || (row.unclosed || []).length > 0 || row.review === true;
 }
 
@@ -362,6 +394,7 @@ function owesWarnings(read) {
     });
     read.rows.forEach(row => {
         if (row.quiet >= OWES_QUIET_PERIODS) out.push({ kind: 'quiet', row });
+        else if (row.short) out.push({ kind: 'short', row });
     });
     read.rows.forEach(row => {
         if (row.idle || row.active === false) out.push({ kind: 'idle', row });
@@ -459,6 +492,7 @@ function owesCountLine(read) {
 }
 
 function owesQuietText(row) {
+    if (row.quiet === 1) return row.cycle === 'weekly' ? OWES_TEXT.quietWeek : OWES_TEXT.quietPeriod;
     return row.cycle === 'weekly' ? OWES_TEXT.quietWeeks(row.quiet) : OWES_TEXT.quietPeriods(row.quiet);
 }
 
@@ -475,6 +509,7 @@ function owesRowLine(row, today) {
 function owesFlags(row) {
     const flags = [];
     if (row.quiet >= OWES_QUIET_PERIODS) flags.push([owesQuietText(row), 'bad']);
+    else if (row.short) flags.push([OWES_TEXT.short, 'bad']);
     if (row.unclosed.length) flags.push([OWES_TEXT.unclosed, 'warn']);
     if (row.active === false) flags.push([OWES_REUSED.off, 'warn']);
     else if (row.idle) flags.push([row.cycle === 'weekly' ? OWES_TEXT.idleWeek : OWES_TEXT.idlePeriod, 'warn']);
@@ -503,6 +538,10 @@ function owesWarningWords(warning, today) {
         return { title: `${owesQuietText(row)}: ${who}`,
             lines: [last && last >= row.since ? OWES_TEXT.sinceMove(owesDate(last, today))
                 : OWES_TEXT.sinceAdvance(owesDate(row.since, today))] };
+    }
+    if (warning.kind === 'short') {
+        return { title: `${OWES_TEXT.short}: ${who}`,
+            lines: [OWES_TEXT.shortLine(owesSpanText(row.short), moneyText(row.short.taken), moneyText(row.short.most))] };
     }
     const title = row.active === false ? OWES_TEXT.offTitle
         : (row.cycle === 'weekly' ? OWES_TEXT.idleWeekTitle : OWES_TEXT.idlePeriodTitle);
@@ -864,6 +903,47 @@ function owesDrawClosures(root, groups) {
     root.appendChild(page);
 }
 
+// EACH MAN OF THE CLOSE, HIS OWN MESSAGE AND HIS OWN HISTORY (v198, the owner's answers 7
+// and 8). The message is «תלוש לכל עובד»'s door, unchanged (payslipsClosedNode,
+// js/ui/payslips.js): his statement for the period this close shut, opened in WhatsApp by
+// his tap, never "sent". The second button opens his advances, where each deduction of
+// this close stands in his history with «תיקון» beside it - a correction recorded later,
+// the deduction itself kept (iron law 1). Both only open something: nothing is written
+// from here. Under the closure's own text, so the rows and the text above are as v197
+// drew them.
+function owesClosureSlips(group) {
+    // Read inside «סגירת שבוע»'s scope where it is on the build, as owesClosures is: each man's
+    // statement walks his whole account, and a close of fourteen men on a season of days
+    // took 3.8 s to read here without it and 0.11 s with it in Chromium, the same answers
+    // (tests/weeklyclose.test.mjs W13.7 holds the two readings equal).
+    const read = () => payslipsClosedFacts(group.items);
+    const facts = typeof payslipsClosedFacts !== 'function' ? null
+        : (typeof weeklyCloseOnce === 'function' ? weeklyCloseOnce(read) : read());
+    const box = el('section', 'owes-closure-slips');
+    box.appendChild(el('h3', null, typeof PAYSLIPS_TEXT === 'object' ? PAYSLIPS_TEXT.title : ''));
+    let any = false;
+    group.items.forEach(item => {
+        const row = facts ? facts[item.workerId] || null : null;
+        const door = row && typeof payslipsClosedNode === 'function' ? payslipsClosedNode(row) : null;
+        const fix = Number(item.deducted) > 0;
+        if (!door && !fix) return;
+        any = true;
+        const man = el('div', 'owes-closure-slip');
+        man.dataset.worker = item.workerId;
+        const head = el('div', 'owes-closure-slip-head');
+        head.appendChild(el('strong', 'owes-name', item.name));
+        head.appendChild(el('span', 'owes-line', owesSpanText(item)));
+        man.appendChild(head);
+        if (door) man.appendChild(door);
+        if (fix) {
+            man.appendChild(button(OWES_TEXT.advancesOf(isolate(item.name)), 'btn-secondary owes-closure-fix',
+                () => showWorkerAdvances(item.workerId)));
+        }
+        box.appendChild(man);
+    });
+    return any ? box : null;
+}
+
 function owesDrawClosure(root, group) {
     const page = el('section', 'owes-closure');
     page.appendChild(button(OWES_TEXT.backToClosures, 'btn-secondary', () => owesOpenPage('closures')));
@@ -901,6 +981,8 @@ function owesDrawClosure(root, group) {
     list.appendChild(sum);
     page.appendChild(list);
     page.appendChild(el('p', 'hint', OWES_TEXT.history));
+    const slips = owesClosureSlips(group);
+    if (slips) page.appendChild(slips);
 
     // The text and its two doors. A read-only field, because copyTextOut selects what it
     // copies and a person may want to read what is about to leave.

@@ -45,6 +45,12 @@ function work(d, date) {
         { from: '2026-09-25', to: '2026-10-01' }
     ]));
     same('October owes 1050, not 1700', d.call('advanceAccount', d.State.schedule, 'w_x', '2026-10-02', '2026-10-15').carriedIn, 1050);
+    // The two weeks before it first, oldest first: money ran through both (the 3,000), and
+    // a close is refused in front of an earlier period like that left open (planPeriodClosure,
+    // 'earlierOpen'; tests/closeorder.test.mjs). MOVED ON PURPOSE with that refusal - this
+    // suite is about the transition period's own closure, which is what follows.
+    before.slice(0, 2).forEach(period => given(`the week ${period.from} closed first`, d.State.commitMany(
+        d.call('closePeriodChanges', d.State.schedule, 'w_x', period.from, period.to, '2026-10-02T11:00:00.000Z', d.id)) === true));
     const closing = d.call('closePeriodChanges', d.State.schedule, 'w_x', range.from, range.to, '2026-10-02T12:00:00.000Z', d.id);
     given('transition closure committed', d.State.commitMany(closing) === true);
     const reopened = makeDevice({ storage: d.dump(), flags: OPEN }); reopened.State.load();

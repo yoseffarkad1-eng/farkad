@@ -254,8 +254,10 @@ for (const [width, height] of [[320, 568], [375, 667], [440, 956]]) {
         }));
         same(`${label}: opened at its title`, list.focus, 'weeklyCloseTitle');
         same(`${label}: the fortnight that opened first, then the week`, list.groups, ['דו־שבועי · 30/10 - 12/11', 'שבועי · 06/11 - 12/11']);
-        same(`${label}: every man in his own group, the field full or the reason he is held`, list.men, [
-            ['w_r', 'biweekly', 'הכל'], ['w_j', 'biweekly', 'אין שכר'], ['w_w', 'biweekly', 'בלי מקדמות'],
+        // MOVED ON PURPOSE (v198, the owner's answer 1, 2026-11-14): ג'מאל, with a debt and no
+        // day of work in the fortnight, is no longer in the pass - v197 listed him «אין שכר».
+        same(`${label}: every man who worked, in his own group, the field full or the reason he is held`, list.men, [
+            ['w_r', 'biweekly', 'הכל'], ['w_w', 'biweekly', 'בלי מקדמות'],
             ['w_m', 'weekly', 'הכל'], ['w_s', 'weekly', 'הכל'], ['w_y', 'weekly', 'הכל'], ['w_a', 'weekly', 'בלי מקדמות'], ['w_k', 'weekly', 'לא ייסגר']]);
         check(`${label}: the two groups' edges are told apart`, list.edge);
         same(`${label}: synced, nothing said at the top`, list.status, true);
@@ -288,11 +290,12 @@ for (const [width, height] of [[320, 568], [375, 667], [440, 956]]) {
             go: document.getElementById('weeklyCloseGo').textContent
         }));
         same(`${label}: the summary, from its top`, [summary.step, summary.top], [2, 0]);
-        same(`${label}: it names the man left owing with nothing taken, the man skipped and the man held`, summary.named, [
-            'בלי ניכוי הפעם, והחוב עובר הלאה:ג\'מאל בשארה · יישאר חוב 3000 ₪',
+        // MOVED ON PURPOSE (v198): with ג'מאל out of the pass nobody closes owing with nothing
+        // taken, so that box is not drawn and «סגור» is one account less.
+        same(`${label}: it names the man skipped and the man held`, summary.named, [
             'לא נסגר עכשיו (דילגת):יוסף נסאר · סה״כ חוב 1000 ₪',
             'לא נסגר עכשיו - צריך לבדוק קודם:כרים סלאמה · חשבון קודם שלו לא נסגר (30/10 - 05/11). סוגרים מהישן לחדש: סגור קודם את החשבון ההוא, ידנית.']);
-        same(`${label}: «סגור» says how many`, summary.go, 'סגור 6 חשבונות');
+        same(`${label}: «סגור» says how many`, summary.go, 'סגור 5 חשבונות');
         holdFloors(`${label} the summary`, await page.evaluate(measureWeekly, DIALOG), FLOOR);
         check(`${label}: nothing written by any of it`, (await disk(page)) === before);
         await page.close();
@@ -322,10 +325,47 @@ for (const [width, height] of [[320, 568], [375, 667], [440, 956]]) {
             again: weeklyCloseRead(State.schedule, todayStr(), new Date().toISOString()).men.map(man => man.id) };
     });
     same('the dialog is gone and «מקדמות» shows the close', [after.view, after.open], ['advances', 'none']);
-    same('six closed at one moment, once', after.closed, ['w_a', 'w_j', 'w_m', 'w_r', 'w_s', 'w_w']);
+    same('five closed at one moment, once (v198: not ג\'מאל, who did not work)', after.closed, ['w_a', 'w_m', 'w_r', 'w_s', 'w_w']);
     check('the close\'s page names the two not closed in it', after.page.indexOf('לא נסגרו בסגירה הזאת:יוסף נסאר, כרים סלאמה') !== -1, after.page.slice(0, 400));
     same('and only they are left to close', after.again.sort(), ['w_k', 'w_y']);
     holdFloors('375 light the result', await page.evaluate(measureWeekly, ['#advancesView .owes-closure']), FLOOR);
+
+    // v198, the owner's answer 7: one door per closed man, to HIS statement, by his tap.
+    const doors = await page.evaluate(() => {
+        const at = WEEKLY_CLOSE_LAST.key;
+        const group = owesClosures(State.schedule).filter(one => one.key === at)[0];
+        return [...document.querySelectorAll('#advancesView .owes-closure-slip')].map(node => {
+            const item = group.items.filter(one => one.workerId === node.dataset.worker)[0];
+            const worker = State.schedule.workers.filter(one => one.id === node.dataset.worker)[0];
+            const held = { from: REPORT_RANGE.from, to: REPORT_RANGE.to, workers: REPORT_WORKERS };
+            let text;
+            try { REPORT_RANGE.from = item.from; REPORT_RANGE.to = item.to; REPORT_WORKERS = new Set([worker.id]); text = workerStatementText(worker.id); }
+            finally { REPORT_RANGE.from = held.from; REPORT_RANGE.to = held.to; REPORT_WORKERS = held.workers; }
+            const door = node.querySelector('a.payslips-door');
+            // The attribute as written: the parsed href percent-encodes the ' of ח'ורי.
+            return [worker.id, Boolean(door) && door.getAttribute('href') === sederUrl(sederWaNumber(worker.phone), text),
+                door ? door.target : null, node.querySelectorAll('.owes-closure-fix').length === (item.deducted > 0 ? 1 : 0)];
+        });
+    });
+    same('a door per closed man: his number, his statement byte for byte, a new window; his advances where a deduction was taken',
+        doors.map(row => row[0]).sort(), ['w_a', 'w_m', 'w_r', 'w_s', 'w_w']);
+    check('every door is his own', doors.every(row => row[1] === true && row[2] === '_blank' && row[3] === true), JSON.stringify(doors));
+    check('the page never says «נשלח»', !(await page.evaluate(() => document.getElementById('advancesView').textContent)).includes('נשלח'));
+    const recordBefore = await page.evaluate(() => localStorage.getItem('scheduleData:v2'));
+    await page.evaluate(() => { window.__opened = []; window.open = (...args) => { window.__opened.push(args); return null; }; });
+    await page.evaluate(() => document.querySelectorAll('#advancesView a.payslips-door').forEach(door =>
+        door.addEventListener('click', event => event.preventDefault())));
+    await tap(page, '#advancesView .owes-closure-slip a.payslips-door');
+    await page.waitForTimeout(1700);
+    const marked = await page.evaluate(() => ({ state: [...document.querySelectorAll('#advancesView .owes-closure-slip')]
+        .map(node => (node.querySelector('.payslips-state') || {}).textContent || ''), record: localStorage.getItem('scheduleData:v2'),
+        marks: localStorage.getItem('farkadPayslipsProgress') !== null }));
+    same('a tap marks the first man «נפתח בוואטסאפ», in the payslips\' own key, and moves no byte of the record',
+        [marked.state.filter(Boolean), marked.marks, marked.record === recordBefore], [['✓ נפתח בוואטסאפ'], true, true]);
+    holdFloors('375 light the result with its doors', await page.evaluate(measureWeekly, ['#advancesView .owes-closure-slips']), FLOOR);
+    await tap(page, '#advancesView .owes-closure-fix');
+    same('«המקדמות של …» only navigates: his advances page, the record unmoved', await page.evaluate(() =>
+        [currentView, ADVANCE_WORKER !== null, localStorage.getItem('scheduleData:v2')]), ['advances', true, recordBefore]);
     await page.close();
 }
 
@@ -346,7 +386,7 @@ for (const [width, height] of [[320, 568], [375, 667], [440, 956]]) {
     await page.waitForTimeout(200);
     await tap(page, '#advancesView .weekly-close-entry');
     await page.waitForFunction(() => WEEKLY_CLOSE && WEEKLY_CLOSE.read !== null);
-    same('the same pass opens from «מקדמות»', await page.evaluate(() => WEEKLY_CLOSE.read.men.length), 8);
+    same('the same pass opens from «מקדמות» (v198: seven - ג\'מאל did not work)', await page.evaluate(() => WEEKLY_CLOSE.read.men.length), 7);
     holdFloors('375 light «מקדמות» with the button', await page.evaluate(measureWeekly, ['#advancesView .weekly-close-entry']), FLOOR);
     await page.close();
 }

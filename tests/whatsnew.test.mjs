@@ -87,6 +87,17 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    { build: 'v198', items: [
+        { title: 'סגירת שבוע: רק מי שעבד, ותלוש לכל עובד',
+            text: 'בסגירת שבוע מופיעים רק עובדים שעבדו בתקופה, ואחרי הסגירה יש לכל עובד כפתור שפותח את התלוש שלו בוואטסאפ.',
+            where: 'דוחות ← לפי עובד ← סגירת שבוע', go: 'payReport' },
+        { title: 'תיקון: סוגרים חשבונות מהישן לחדש',
+            text: 'האפליקציה כבר לא סוגרת חשבון חדש של עובד לפני חשבון ישן שלו שעבר בו חוב, כדי שאותה מקדמה לא תנוכה פעמיים.',
+            where: 'מקדמות', go: 'advances' },
+        { title: 'איפוס מקדמות',
+            text: 'כלי לפעם אחת: סוגר כל חשבון ישן בלי ניכוי ורושם שכל עובד החזיר את מה שהוא עוד חייב, ורואים הכל לפני האישור.',
+            where: 'הגדרות ← גיבוי ושחזור ← איפוס מקדמות', go: 'advanceReset' }
+    ] },
     { build: 'v197', items: [
         { title: 'סגירת שבוע',
             text: 'כל העובדים שהתקופה שלהם הסתיימה נסגרים בפעם אחת: הניכוי כבר ממולא ואפשר לשנות אותו, ושום דבר לא נסגר לפני הסיכום.',
@@ -418,7 +429,7 @@ await block('the news itself: every build, every item, every word', async () => 
 
     const items = builds.flatMap(entry => entry.items.map(item => ({ build: entry.build, ...item })));
     const ways = Object.keys(device.global('WHATSNEW_GO')).sort();
-    same('the ways «הראה לי» can go', ways, ['advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'display', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
+    same('the ways «הראה לי» can go', ways, ['advanceReset', 'advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'display', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
     check('every item is a title, a sentence and a place, and nothing else',
         items.every(item => Object.keys(item).every(key => ['build', 'title', 'text', 'where', 'go'].includes(key))
             && [item.title, item.text, item.where].every(value => typeof value === 'string' && value.trim() === value && value.length > 0)));

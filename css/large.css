@@ -157,12 +157,17 @@
 :root.display-large .owes-row,
 :root.display-large .owes-closure-card { min-height: 64px !important; }
 :root.display-large .owes-closure textarea { min-height: 160px !important; }
+:root.display-large .payslips-closed-text summary,
+:root.display-large .owes-closure-fix { min-height: 52px !important; }
 /* «סגירת שבוע» (js/ui/weeklyclose.js): a man's row, his field and the buttons. */
 :root.display-large .weekly-close-row { min-height: 64px !important; }
 :root.display-large #weeklyCloseModal input.weekly-close-input,
 :root.display-large .weekly-close-actions button,
 :root.display-large .weekly-close-unskip,
 :root.display-large .weekly-close-foot-actions button { min-height: 56px !important; }
+/* «איפוס מקדמות» (js/ui/advancereset.js): its own two buttons; the rest is «סגירת שבוע»'s. */
+:root.display-large .advance-reset-backup-button,
+:root.display-large .advance-reset-closures { min-height: 56px !important; }
 @media (max-width: 700px) {
     :root.display-large .week-phone-date { min-height: 58px !important; }
 }
@@ -939,6 +944,9 @@
 :root.display-large .owes-figure b { font-size: 22px; font-weight: 800; }
 :root.display-large .owes-closure textarea { font-size: 20px; line-height: 1.5; }
 :root.display-large .owes-doors button { font-size: 20px; }
+:root.display-large .owes-closure-slips h3 { font-size: 23px; font-weight: 800; }
+:root.display-large .payslips-closed-text summary { font-size: 21px; font-weight: 600; line-height: 1.4; }
+:root.display-large .owes-closure-fix { font-size: 21px; }
 /* «סגירת שבוע» (js/ui/weeklyclose.js), one rule for one rule. */
 :root.display-large .weekly-close-entry { font-size: 21px; font-weight: 700; }
 :root.display-large #weeklyCloseModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
@@ -976,6 +984,14 @@
 :root.display-large .weekly-close-total small { font-size: 20px; font-weight: 600; }
 :root.display-large .weekly-close-total b { font-size: 23px; font-weight: 900; }
 :root.display-large .weekly-close-foot-actions button { font-size: 22px; font-weight: 800; }
+:root.display-large #advanceResetModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
+:root.display-large .advance-reset-backup-line { font-size: 21px; font-weight: 800; line-height: 1.45; }
+:root.display-large .advance-reset-backup-button { font-size: 21px; font-weight: 700; }
+:root.display-large .advance-reset-done-line { font-size: 21px; font-weight: 700; line-height: 1.45; }
+:root.display-large .advance-reset-done-sub { font-size: 21px; font-weight: 800; }
+:root.display-large .advance-reset-done-row { font-size: 20px; font-weight: 500; line-height: 1.45; }
+:root.display-large .advance-reset-board { font-size: 21px; font-weight: 800; line-height: 1.45; }
+:root.display-large .advance-reset-closures { font-size: 21px; font-weight: 700; }
 
 /* ---- 4. THE SHAPES ------------------------------------------------------------------ */
 

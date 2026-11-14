@@ -14,8 +14,13 @@
 //                              and points at it (the owner's D5)
 //   ראמי עודה      fortnightly  5,950 on 21/10; that fortnight closed by hand with 2,000 taken
 //   ג'מאל בשארה    fortnightly  3,000 on 19/10, worked until 22/10 and not since; that
-//                              fortnight closed by hand with nothing taken
+//                              fortnight closed by hand with nothing taken. Since v198 he is
+//                              NOT in the pass (the owner's answers 1 and 9: only a man who
+//                              worked in the period) - he is on «מי חייב כסף»
 //   וליד מנסור     fortnightly  no advance
+//
+// Every man has a number (invented, 050-000-00xx), so the close's page draws a WhatsApp
+// door for each (v198, the owner's answer 7).
 //
 // Every earlier period that money ran through is closed by hand, oldest first, except
 // כרים's - which is the state the owner's decisions leave a record in after the first
@@ -37,6 +42,7 @@ export function weeklySeedCrew() {
         { id: 'w_j', name: 'ג\'מאל בשארה', active: true, dailyRate: 500, hourlyRate: 0 },
         { id: 'w_w', name: 'וליד מנסור', active: true, dailyRate: 500, hourlyRate: 0 }
     ];
+    State.schedule.workers.forEach((worker, i) => { worker.phone = `050-00000${String(11 + i)}`; });
     State.schedule.places = [{ id: 'p_1', name: 'חיפה - נמל', active: true }, { id: 'p_2', name: 'נצרת', active: true }];
     const day = new Date(2026, 9, 16, 12);
     const last = new Date(2026, 10, 12, 12);

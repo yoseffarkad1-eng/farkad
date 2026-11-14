@@ -233,11 +233,49 @@ function snap(node) {
 // on «לפי עובד» and on top of «מקדמות» exactly when this record may be closed, and nowhere
 // else.
 const WEEKLY_ENTRY = /(^|\s)weekly-close-entry(\s|$)/;
+// v198: THE OWNER MOVED v195'S WARNINGS (2026-11-14): a deduction put off is flagged from ONE
+// period of his ended with nothing taken, not two, and a period closed with less taken than
+// the sheet could take is flagged «ניכוי חלקי». So the board's flags, its count of who needs
+// attention and «שים לב» - and only those three - say more than v195's did on these records,
+// and are taken out of the comparison here, counted. Their every figure and word is held
+// against its source in tests/owes.test.mjs; everything else on both pages is still v195's.
+const OWES_MOVED = /(^|\s)(owes-flags|owes-warnings|owes-total-count)(\s|$)/;
+// v198, THE OWNER'S FIX (a) (2026-11-14): a close is refused out of order - in front of an
+// open period of his that handed a debt on, or behind a later close that took a carried
+// debt (planPeriodClosure's 'earlierOpen' / 'laterClosed', js/model/ledger.js). The model is
+// this tree's on both sides, so the plan is the same; only the drawing of it differs. Where
+// v195's closing box drew NOTHING for a plan it could not close (the days dialog), and where
+// v195's closing dialog said only its general sentence (ORDER_GENERAL below, which is still
+// this build's sentence for every other reason), this build draws the box with one of the
+// two order sentences (and, for 'earlierOpen', v189's button that only navigates). That box -
+// and only a box whose first line is one of those two sentences - is drawn here as one
+// marker node, COUNTED, and a reading that differs from v195's is excused ONLY when putting
+// back exactly what v195 drew in the marker's place (nothing, or the general sentence)
+// makes the two the same bytes. Its words and the plan behind it are held in
+// tests/closeorder.test.mjs.
+const PERIOD_CLOSURE = /(^|\s)period-closure(\s|$)/;
+const ORDER_MARKER = JSON.stringify({ tag: 'ORDER-REFUSAL' });
+const ORDER_GENERAL = JSON.stringify({ tag: 'P', cls: 'hint hint-warn', text: 'אי אפשר לאשר את החשבון כרגע. בדוק שהשכר והיתרות הושלמו.' });
+const orderRefusal = (device, node) => Boolean(device.orderTexts) && PERIOD_CLOSURE.test(node.className || '')
+    && node.children.length > 0 && device.orderTexts.indexOf(node.children[0].textContent) !== -1;
+const orderExplained = (before, after) => after.indexOf(ORDER_MARKER) !== -1
+    && (after.split(ORDER_MARKER).join(ORDER_GENERAL) === before
+        || after.split(`,${ORDER_MARKER}`).join('').split(`${ORDER_MARKER},`).join('').split(ORDER_MARKER).join('') === before);
 const withoutWeekly = (device, nodes) => nodes.filter(node => {
+    if (OWES_MOVED.test(node.className || '')) {
+        device.owesMoved = (device.owesMoved || 0) + 1;
+        return false;
+    }
     if (!WEEKLY_ENTRY.test(node.className || '')) return true;
     device.weeklyEntries = (device.weeklyEntries || 0) + 1;
     return false;
-}).map(node => (node.children.length ? Object.assign(snap(node), { kids: withoutWeekly(device, node.children) }) : snap(node)));
+}).map(node => {
+    if (orderRefusal(device, node)) {
+        device.orderRefused = (device.orderRefused || 0) + 1;
+        return { tag: 'ORDER-REFUSAL' };
+    }
+    return node.children.length ? Object.assign(snap(node), { kids: withoutWeekly(device, node.children) }) : snap(node);
+});
 const drawnIn = (device, id) => JSON.stringify(withoutWeekly(device, device.dom.getElementById(id).children));
 
 // THE OLD BUILD IS ANSWERED THE GATE ONCE PER RECORD STATE, by its own function. It asks
@@ -318,9 +356,14 @@ function everything(device, men) {
     return out;
 }
 
-function differences(before, after) {
+function differences(before, after, excused) {
     const keys = Object.keys(before);
-    const wrong = keys.filter(key => before[key] !== after[key]);
+    const wrong = keys.filter(key => {
+        if (before[key] === after[key]) return false;
+        // v198, fix (a): the order refusal in the marker's place, and nothing else.
+        if (excused && orderExplained(before[key], after[key])) { excused.count += 1; return false; }
+        return true;
+    });
     if (Object.keys(after).length !== keys.length) wrong.push('the set of readings');
     return wrong;
 }
@@ -355,11 +398,16 @@ const READINGS = [
             const planned = flags.carryAdvances ? pair[1].call('planCarryMigration', pair[1].State.schedule).needed : null;
             const state = `${name}: ${gate ? 'read the new way' : 'read the old way'}${planned === true ? ', a migration on the record' : ''}`;
             tally.states[state] = (tally.states[state] || 0) + 1;
+            pair[1].orderTexts = JSON.parse(pair[1].run('JSON.stringify(Object.values(CLOSURE_ORDER_TEXT))'));
             const before = everything(pair[0], record.men);
             const after = everything(pair[1], record.men);
             tally.readings += 1;
             tally.compared += Object.keys(before).length;
-            differences(before, after).forEach(key => tally.wrong.push(`seed ${seed}, ${name}: ${key}`));
+            tally.excused = tally.excused || { count: 0 };
+            differences(before, after, tally.excused).forEach(key => tally.wrong.push(`seed ${seed}, ${name}: ${key}`));
+            tally.owesMoved = (tally.owesMoved || 0) + (pair[1].owesMoved || 0);
+            tally.orderRefused = (tally.orderRefused || 0) + (pair[1].orderRefused || 0);
+            if (pair[0].orderRefused) tally.wrong.push(`seed ${seed}, ${name}: v195 drew an order refusal`);
             // «סגירת שבוע»'s button: never in v195; in this build once per draw of «לפי עובד»
             // and of the board on top of «מקדמות», exactly when the record may be closed (the
             // per-man box's own gate), and never on «לפי אתר» or a man's own page.
@@ -375,9 +423,17 @@ const READINGS = [
     given('the corpus has closes, repayments and every reading of the gate', tally.closes > 10 && tally.repaid > 3
         && Object.keys(tally.states).some(key => /new way/.test(key)) && Object.keys(tally.states).some(key => /shut.*old way/.test(key))
         && Object.keys(tally.states).some(key => /nobody approved: read the old way/.test(key)), JSON.stringify(tally.states));
+    tally.owesMoved = tally.owesMoved || 0;
     check(`${tally.records} records x ${READINGS.length} readings, ${tally.compared} readings of a screen: every one v195's bytes`,
         tally.wrong.length === 0, tally.wrong.slice(0, 4).join(' | '));
     console.log(`        (${JSON.stringify(tally.states)}; ${tally.closes} closes, ${tally.repaid} repayments)`);
+    console.log(`        (v198: ${tally.owesMoved} nodes of the board's flags, its attention count and «שים לב» taken out of the comparison)`);
+    check('the board\'s moved nodes were there to take out (the owner\'s 2026-11-14 answer is exercised by these records)', tally.owesMoved > 0, String(tally.owesMoved));
+    tally.orderRefused = tally.orderRefused || 0;
+    console.log(`        (v198: ${tally.orderRefused} closing boxes refusing a close out of order - fix (a) - drawn as a marker; `
+        + `${tally.excused.count} readings excused only because v195's own drawing in its place makes them the same bytes)`);
+    check('the out-of-order refusals were there to take out (fix (a) is exercised by these records)', tally.orderRefused > 0 && tally.excused.count > 0,
+        `${tally.orderRefused} / ${tally.excused.count}`);
     check(`«סגירת שבוע»'s one button: on «לפי עובד» and «מקדמות» once a draw where the record may be closed (${tally.weekly.may} readings), nowhere where it may not (${tally.weekly.mayNot}), never on «לפי אתר» or a man's page - the only thing taken out of the comparison`,
         tally.weekly.may > 0 && tally.weekly.mayNot > 0 && tally.weeklyWrong.length === 0, tally.weeklyWrong.slice(0, 4).join(' | '));
 }

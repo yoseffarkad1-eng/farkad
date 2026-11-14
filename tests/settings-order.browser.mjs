@@ -16,7 +16,15 @@
 // «כבוי»), and the suite that said "nine cards" says ten. Nothing that was on the sheet
 // moved or changed a word: every other line of CONTROLS and SENTENCES is as it was.
 //
-// So this file pins the ORDER (three sections, ten cards, by their own titles), the
+// v198 (candidate): an ELEVENTH card, «איפוס מקדמות», last in «גיבוי ושחזור» - a one-time tool
+// that writes money (js/ui/advancereset.js), put out of easy reach at the owner's word
+// (2026-11-14: "somewhere not within easy reach, for example in the settings page"). A moved
+// expectation, on purpose and listed: ORDER, POSTURE, FOLD and the "every reason standing"
+// posture gain the row (shut, and shut with every reason standing: it has none), the
+// inventory gains its one button and its four runs of words, and "ten cards" says eleven.
+// Nothing that was on the sheet moved or changed a word.
+//
+// So this file pins the ORDER (three sections, eleven cards, by their own titles), the
 // POSTURE (what is open when the sheet opens, and that it is the same every time), the
 // rule that a redraw neither opens nor shuts anything, every reason a row opens by
 // itself, and an INVENTORY: every control and every sentence that was on the v171 sheet,
@@ -43,16 +51,16 @@ const errors = [];
 // THE ORDER, as the owner asked for it on 2026-11-09 and as index.html now has it.
 const ORDER = [
     {id: 'settingsDaily', section: 'כללי', cards: ['ענן וסנכרון', 'תזכורות בטלפון', 'תצוגה גדולה', 'הסעות']},
-    {id: 'settingsBackups', section: 'גיבוי ושחזור', cards: ['גיבוי', 'ייבוא ושחזור', 'שחזור חירום']},
+    {id: 'settingsBackups', section: 'גיבוי ושחזור', cards: ['גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'איפוס מקדמות']},
     {id: 'settingsHelp', section: 'מכשיר ועזרה', cards: ['עדכון וגרסה', 'מצב המכשיר', 'מידע טכני']}
 ];
 // 'card' is the one that is not a row and cannot be shut.
 const POSTURE = {'ענן וסנכרון': 'card', 'תזכורות בטלפון': false, 'תצוגה גדולה': false, 'הסעות': false,
-    'גיבוי': true, 'ייבוא ושחזור': false, 'שחזור חירום': false,
+    'גיבוי': true, 'ייבוא ושחזור': false, 'שחזור חירום': false, 'איפוס מקדמות': false,
     'עדכון וגרסה': false, 'מצב המכשיר': false, 'מידע טכני': false};
 const FOLD = {'תזכורות בטלפון': 'settingsFoldReminders', 'תצוגה גדולה': 'displayLargeCard', 'הסעות': 'transportSwitchCard',
     'גיבוי': 'settingsFoldBackup', 'ייבוא ושחזור': 'settingsFoldRestore',
-    'שחזור חירום': 'settingsFoldRescue', 'עדכון וגרסה': 'settingsFoldUpdate',
+    'שחזור חירום': 'settingsFoldRescue', 'איפוס מקדמות': 'settingsFoldAdvanceReset', 'עדכון וגרסה': 'settingsFoldUpdate',
     'מצב המכשיר': 'settingsFoldDevice', 'מידע טכני': 'diagnosticGroup'};
 
 // THE INVENTORY OF THE v171 SHEET. Captured once, on 2026-11-09, from the tree of commit
@@ -64,6 +72,8 @@ const FOLD = {'תזכורות בטלפון': 'settingsFoldReminders', 'תצוג�
 // inline handler`; the three with no inline handler are built by script and are pressed
 // further down instead.
 const CONTROLS = [
+    // v198, MOVED ON PURPOSE: «איפוס מקדמות» (js/ui/advancereset.js), its row's one button.
+    'button |  | איפוס מקדמות | openAdvanceReset()',
     "button |  | גיבוי ושחזור | settingsJump('settingsBackups')",
     'button |  | חזרה✕ | closeSettings()',
     "button |  | כללי | settingsJump('settingsDaily')",
@@ -98,6 +108,7 @@ const SENTENCES = [
     'אותיות וכפתורים גדולים יותר',
     'אחסון והתקנה',
     'אין במכשיר הזה רישום של ייצוא קובץ גיבוי.',
+    'איפוס מקדמות', 'איפוס מקדמות',
     'אם כבר הוספת תזכורת ליומן, הסר את יומן פרקד ב־iPhone או את סדרת האירועים ב־Galaxy כדי למנוע תזכורת כפולה.',
     'באילו ערבים להזכיר?',
     'בדוק עדכון',
@@ -140,10 +151,12 @@ const SENTENCES = [
     'מכשיר ועזרה', 'מכשיר ועזרה',
     'מצב החיבור של המכשיר הזה',
     'מצב המכשיר',
+    'סוגר כל חשבון ישן בלי ניכוי, ורושם שכל עובד החזיר את מה שהוא עוד חייב. לפני שמאשרים רואים הכל, ואפשר לדלג על עובד.',
     'עדכון וגרסה',
     'עותק נוסף של העבודה',
     'ענן וסנכרון',
     'פועל בדפדפן - לא מותקן על מסך הבית.',
+    'פעם אחת: כל העובדים לאפס',
     'פרקד · ניהול עובדים',
     'פתח את פרקד מהסמל במסך הבית, לחץ על הפעלה ואשר התראות. נדרש iOS 16.4 ומעלה.',
     'פתח ב־Chrome או Samsung Internet, לחץ על הפעלה ואשר התראות במכשיר.',
@@ -230,7 +243,7 @@ try {
     const record = await page.evaluate(() => JSON.stringify(State.schedule));
     await openSheet(page);
 
-    suite('three sections, ten cards, in the order that was asked for');
+    suite('three sections, eleven cards, in the order that was asked for');
     same('the sections and their cards, by their own titles', await layout(page), ORDER);
     same('the jump buttons name the same three sections, in the same order',
         await page.locator('.settings-nav button').allTextContents(), ORDER.map(part => part.section));
@@ -624,9 +637,9 @@ try {
         });
         await openSheet(everything);
         await everything.waitForFunction(() => document.getElementById('settingsFoldReminders').open);
-        same('every reason standing: הסעות, תצוגה גדולה and מידע טכני are still shut, everything else is open',
+        same('every reason standing: הסעות, תצוגה גדולה, איפוס מקדמות and מידע טכני are still shut, everything else is open',
             await posture(everything), {'ענן וסנכרון': 'card', 'תזכורות בטלפון': true, 'תצוגה גדולה': false, 'הסעות': false,
-                'גיבוי': true, 'ייבוא ושחזור': true, 'שחזור חירום': true,
+                'גיבוי': true, 'ייבוא ושחזור': true, 'שחזור חירום': true, 'איפוס מקדמות': false,
                 'עדכון וגרסה': true, 'מצב המכשיר': true, 'מידע טכני': false});
         await everything.context().close();
     }
@@ -671,7 +684,7 @@ try {
                     };
                 });
                 check(`${tag}, ${state}: every row is at least 56px tall and wider than a finger`,
-                    measured.rows.length === 9 && measured.rows.every(([, w, h]) => h >= 56 && w >= 44),
+                    measured.rows.length === 10 && measured.rows.every(([, w, h]) => h >= 56 && w >= 44),
                     JSON.stringify(measured.rows));
                 same(`${tag}, ${state}: nothing a finger lands on is under 44px either way`, measured.small, []);
                 same(`${tag}, ${state}: no field under 16px`, measured.fine, []);

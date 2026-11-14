@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v197';
+const APP_VERSION = 'v198';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -168,6 +168,8 @@ function render() {
     // And for «סגירת שבוע» (js/ui/weeklyclose.js) - which does NOT redraw: a record that moved
     // under it raises one line, nothing chosen is lost, and the press compares everything.
     if (typeof renderWeeklyCloseIfOpen === 'function') renderWeeklyCloseIfOpen();
+    // And for «איפוס מקדמות» (js/ui/advancereset.js), the same way: one line, nothing redrawn.
+    if (typeof renderAdvanceResetIfOpen === 'function') renderAdvanceResetIfOpen();
     // And for the finder (js/ui/find.js): a man added or turned off on another phone is
     // found, or not, as the record has him now.
     if (typeof renderFindIfOpen === 'function') renderFindIfOpen();

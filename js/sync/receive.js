@@ -996,8 +996,21 @@ Object.assign(FarkadSync, {
         // Ledger entries are append-only against the other phones too: a device that has
         // never heard of one has not disagreed with it. See mergeLedgerInto.
         const ledgerClash = [];
+        // AND A CLOSE OF THIS PHONE'S THAT LOST THE RACE to the same period closed on another
+        // phone (closureLostTo, js/model/ledger.js) is not one of those: the server's close
+        // landed first and is the record. Retired here, BEFORE reapplyPending below could lay
+        // it back over the snapshot; put aside and said once (settleLostClosures). If it
+        // cannot be retired it is held exactly as it always was.
+        const closuresLost = [];
         State.schedule = (typeof mergeLedgerInto === 'function')
-            ? mergeLedgerInto(remote, previous, ledgerClash) : remote;
+            ? mergeLedgerInto(remote, previous, ledgerClash,
+                Number.isInteger((raw || {}).revision) ? closuresLost : undefined) : remote;
+        if (closuresLost.length > 0 && !this.settleLostClosures(closuresLost)) {
+            closuresLost.forEach(item => {
+                ledgerClash.push({ family: 'advances', id: item.id, mine: item.entry,
+                    theirs: ((State.schedule.ledger || {}).advances || {})[item.id] });
+            });
+        }
         // ONE IMMUTABLE ID, TWO DIFFERENT BODIES, and nothing here decides which is true.
         //
         // Both are kept - the arriving copy where it landed, this phone's beside it under

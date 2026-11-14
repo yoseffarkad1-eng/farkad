@@ -400,7 +400,11 @@ const holds = (name, device) => {
 
 // ---------------------------------------------------------------- 4. part deductions, week after week
 {
-    suite('500 off every week: the board follows each close, and has nothing to warn of');
+    // MOVED ON PURPOSE (v198, the owner, 2026-11-14): «or less than the maximum while debt
+    // remains» is warned about every period. 500 off a 1,500 wage while 1,000 is still owed
+    // is such a period, so the board that had nothing to warn of now says it - and says it
+    // in its own words, «ניכוי חלקי», never as «בלי ניכוי».
+    suite('500 off every week: the board follows each close, and says each time that less was taken than could be');
 
     const device = phone(make => {
         make.man('w_s', 'סאמר ח\'ורי', { payCycles: '2026-08-07=weekly' });
@@ -419,11 +423,56 @@ const holds = (name, device) => {
         [3500, W[0][1], 5], [3000, W[1][1], 4], [2500, W[2][1], 3], [2000, W[3][1], 2], [1500, W[4][1], 1], [1000, W[5][1], 0]
     ]);
     const read = device.read();
-    same('at the end: 1,000 owed, no period quiet, nobody needing attention', [read.rows[0].amount, read.rows[0].quiet, read.attention], [1000, 0, 0]);
-    same('no warning', device.warnings(), []);
+    same('at the end: 1,000 owed, no period quiet, the last week closed short, he needs attention',
+        [read.rows[0].amount, read.rows[0].quiet, read.rows[0].short, read.attention],
+        [1000, 0, { from: W[5][0], to: W[5][1], cycle: 'weekly', taken: 500, most: 1500 }, 1]);
+    same('one warning, in words', device.warnings().map(warning => [warning.kind, plain(warning.title)].concat(warning.lines.map(plain))), [[
+        'short', 'ניכוי חלקי: סאמר ח\'ורי · 1000 ₪',
+        `בסגירה של ${plain(device.run(`owesSpanText({ from: ${JSON.stringify(W[5][0])}, to: ${JSON.stringify(W[5][1])} })`))} נוכו 500 ₪ מתוך 1500 ₪ שאפשר היה לנכות, והשאר נשאר חוב.`]]);
     const page = device.draw();
-    same('the count line says one man owes and no more', device.texts(page, 'owes-total-count'), ['עובד אחד חייב']);
-    same('no flag on his row, and no «שים לב»', [page.querySelectorAll('.owes-flag').length, page.querySelectorAll('.owes-warnings').length], [0, 0]);
+    same('the count line says one man owes, and that he needs attention', device.texts(page, 'owes-total-count'), ['עובד אחד חייב · אחד דורש טיפול']);
+    same('one flag on his row, «ניכוי חלקי», and «שים לב»', [device.texts(page, 'owes-flag'), page.querySelectorAll('.owes-warnings').length], [['ניכוי חלקי'], 1]);
+    // And a close that took ALL the sheet could take is not short.
+    const full = phone(make => {
+        make.man('w_s', 'סאמר ח\'ורי', { payCycles: '2026-08-07=weekly' });
+        make.work('w_s', W.slice(0, 6).reduce((all, week) => all.concat(FIVE(week[0])), []).concat(['2026-09-20', '2026-09-21']));
+        make.give('w_s', '2026-08-10', 20000);
+    });
+    W.slice(0, 6).forEach((week, n) => {
+        const at = `2026-09-22T1${n}:00:00.000Z`;
+        const most = full.call('planPeriodClosure', full.State.schedule, 'w_s', week[0], week[1], at).deducted;
+        given(`week ${n + 1} closes with the most, ${most}`, most > 0 && full.close([['w_s', week[0], week[1], most]], at) === true);
+    });
+    const fullRead = full.read();
+    same('a debt still owed after six closes at the most: nothing short, nothing quiet, no warning',
+        [fullRead.rows[0].amount > 0, fullRead.rows[0].short, fullRead.rows[0].quiet, full.warnings()], [true, null, 0, []]);
+}
+
+// ---------------------------------------------------------------- 4b. one period is enough (v198)
+{
+    // THE OWNER, 2026-11-14: a deduction put off is warned about EVERY period, not after two.
+    // A week closed with nothing taken - «בלי ניכוי» in «סגירת שבוע» - and the week after it
+    // not yet ended: the board says it now, in the singular.
+    suite('one week closed with nothing taken is flagged that week (the owner, 2026-11-14)');
+    const device = phone(make => {
+        make.man('w_s', 'סאמר ח\'ורי', { payCycles: '2026-08-07=weekly' });
+        make.work('w_s', FIVE(W[0][0]).concat(FIVE(W[1][0])));
+        make.give('w_s', '2026-08-17', 900);
+    }, { today: addDays(W[1][1], 1) });
+    given('his week closes with nothing taken', device.close([['w_s', W[1][0], W[1][1], 0]], `${addDays(W[1][1], 1)}T10:00:00.000Z`) === true);
+    const row = device.read().rows[0];
+    same('one week quiet, and he needs attention', [row.quiet, row.short, device.read().attention], [1, null, 1]);
+    same('the warning, in the singular', device.warnings().map(warning => [warning.kind, plain(warning.title)].concat(warning.lines.map(plain))),
+        [['quiet', 'שבוע אחד בלי ניכוי: סאמר ח\'ורי · 900 ₪', `המקדמה מ-${plain(device.run(`owesDate(${JSON.stringify('2026-08-17')}, todayStr())`))}. מאז לא נוכה ולא הוחזר כלום.`]]);
+    same('and on his row', device.texts(device.draw(), 'owes-flag'), ['שבוע אחד בלי ניכוי']);
+    const fortnight = phone(make => {
+        make.man('w_d', 'דוד כהן');
+        make.work('w_d', FIVE(P[0][0]).concat(['2026-08-17', '2026-08-18']));
+        make.give('w_d', '2026-08-10', 700);
+    }, { today: addDays(P[0][1], 1) });
+    same('a fortnight left open with the debt in it: the same, in its own word',
+        [fortnight.read().rows[0].quiet, fortnight.texts(fortnight.draw(), 'owes-flag')], [1, ['תקופה אחת בלי ניכוי', 'חשבון קודם לא נסגר']]);
+    holds('every figure its source\'s', device);
 }
 
 // ---------------------------------------------------------------- 5. the man who stopped coming
@@ -1074,7 +1123,7 @@ function seeded(seed) {
     const device = phone(make => { make.man('w_d', 'דוד'); });
     const said = JSON.parse(device.run(`JSON.stringify(Object.keys(OWES_TEXT).reduce((out, key) => {
         const value = OWES_TEXT[key];
-        out[key] = typeof value === 'function' ? value('<>') : value;
+        out[key] = typeof value === 'function' ? value('<>', '<>', '<>') : value;
         return out;
     }, {}))`));
     same('the block, word for word', said, {
@@ -1091,6 +1140,11 @@ function seeded(seed) {
         neverDeducted: 'הניכוי האחרון: אין',
         quietWeeks: '<> שבועות בלי ניכוי',
         quietPeriods: '<> תקופות בלי ניכוי',
+        // v198 (the owner, 2026-11-14: every period, and less than the most): PROPOSED.
+        quietWeek: 'שבוע אחד בלי ניכוי',
+        quietPeriod: 'תקופה אחת בלי ניכוי',
+        short: 'ניכוי חלקי',
+        shortLine: 'בסגירה של <> נוכו <> ₪ מתוך <> ₪ שאפשר היה לנכות, והשאר נשאר חוב.',
         idleWeek: 'לא עבד השבוע',
         idlePeriod: 'לא עבד בתקופה',
         unclosed: 'חשבון קודם לא נסגר',
@@ -1126,9 +1180,11 @@ function seeded(seed) {
         sum: 'סה״כ',
         noWage: 'בלי שכר יומי',
         history: 'כל ניכוי כאן רשום גם בהיסטוריה של העובד בעמוד המקדמות שלו - ושם אפשר לרשום תיקון לצידו.',
+        advancesOf: 'המקדמות של <>',
         textLabel: 'הסגירה כטקסט'
     });
-    same('the owner\'s number: flagged after two periods', device.run('OWES_QUIET_PERIODS'), 2);
+    // MOVED ON PURPOSE (v198): the owner said two on 2026-11-13 and EVERY period on 2026-11-14.
+    same('the owner\'s number: flagged from one period', device.run('OWES_QUIET_PERIODS'), 1);
 
     const reused = JSON.parse(device.run('JSON.stringify(OWES_REUSED)'));
     const owners = {

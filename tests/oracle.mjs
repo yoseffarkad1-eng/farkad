@@ -983,6 +983,33 @@ function planned(record, workerId, from, to, deduction) {
     if (closuresOverlapping(record, workerId, from, to).some(key => key !== from)) {
         reasons.push('overlap');
     }
+    // «Oldest first, and never behind a close that took money» (the owner's problem (a),
+    // tests/closeorder.test.mjs). Money ran through a period when he came into it owing or
+    // in credit, or something was handed over, back or corrected in it.
+    const ran = one => one.carriedIn > 0 || one.creditIn > 0 || one.given > 0 || one.repaid > 0
+        || one.reversed !== 0;
+    if (!account.closed && account.carriedIn > 0) {
+        // An earlier period of his, open, that money ran through and that HANDED A DEBT ON
+        // - the walk presumed less came off it than he owed - and settled by no closure
+        // over its days on any grid.
+        let position = 0;
+        const behind = periodsBefore(record, workerId, from).some(period => {
+            const one = walk(record, workerId, period.from, period.to, position);
+            position = one.position;
+            return !one.closed && ran(one) && one.carriedForward > 0
+                && closuresOverlapping(record, workerId, period.from, period.to).length === 0;
+        });
+        if (behind) reasons.push('earlierOpen');
+    }
+    if (!account.closed && ran(account)) {
+        // A later period of his, closed, that took money from a balance carried into it.
+        let later = false;
+        closuresOf(record, workerId).forEach(period => {
+            if (period.from > to && period.deducted > 0
+                && ((period.carriedIn || 0) > 0 || (period.creditIn || 0) > 0)) later = true;
+        });
+        if (later) reasons.push('laterClosed');
+    }
     if (account.review) reasons.push('overpaid');
     if (account.gross === null) reasons.push('unpriced');
 
