@@ -56,6 +56,7 @@ const source = file => readFileSync(join(ROOT, file), 'utf8');
 // The pay sheet as v195 served it: origin/main when this was written.
 const V195 = 'b48ac44';
 const SCREENS = ['js/ui/reports.js', 'js/ui/workercard.js', 'js/ui/seder.js', 'js/ui/payslips.js', 'js/ui/monthsummary.js', 'js/ui/owes.js'];
+const NOW_ONLY = ['js/ui/daycheck.js', 'js/ui/weeklyclose.js'];
 const NOW = {};
 const OLD = {};
 SCREENS.forEach(file => { NOW[file] = source(file); });
@@ -99,6 +100,9 @@ function opened(storage, flags, files) {
     device.run = code => vm.runInContext(code, device.ctx, { filename: 'harness:reports.speed' });
     device.run(source('js/ui/sitecolor.js'));
     SCREENS.forEach(file => device.run(files[file]));
+    // v197: «סגירת שבוע» on the build under test - its button in the draw of «דוחות» and of
+    // «מקדמות», and its list read as one more way in. v195 had no such file.
+    if (files === NOW) NOW_ONLY.forEach(file => device.run(source(file)));
     device.run('var currentView = "reports";');
     device.ctx.showView = view => device.run(`currentView = ${JSON.stringify(view)}`);
     device.ctx.askTell = () => Promise.resolve();
@@ -223,7 +227,18 @@ function snap(node) {
     else out.kids = node.children.map(snap);
     return out;
 }
-const drawnIn = (device, id) => JSON.stringify(device.dom.getElementById(id).children.map(snap));
+// v197: «סגירת שבוע»'s one button (js/ui/weeklyclose.js) is drawn by the build under test
+// beside the pay sheet and outside its section, and v195 had no such file. It is taken out
+// of the comparison here - and COUNTED, per draw, so that suite 1 says where it was drawn:
+// on «לפי עובד» and on top of «מקדמות» exactly when this record may be closed, and nowhere
+// else.
+const WEEKLY_ENTRY = /(^|\s)weekly-close-entry(\s|$)/;
+const withoutWeekly = (device, nodes) => nodes.filter(node => {
+    if (!WEEKLY_ENTRY.test(node.className || '')) return true;
+    device.weeklyEntries = (device.weeklyEntries || 0) + 1;
+    return false;
+}).map(node => (node.children.length ? Object.assign(snap(node), { kids: withoutWeekly(device, node.children) }) : snap(node)));
+const drawnIn = (device, id) => JSON.stringify(withoutWeekly(device, device.dom.getElementById(id).children));
 
 // THE OLD BUILD IS ANSWERED THE GATE ONCE PER RECORD STATE, by its own function. It asks
 // the question a dozen times a draw and plans every time; nothing in a record moves while
@@ -254,14 +269,19 @@ const RANGES = [
 // Everything the pay sheet and the screens that read it say about one record, as text.
 function everything(device, men) {
     const out = {};
+    device.weeklyDrawn = [];
     const json = code => device.run(`JSON.stringify(${code})`);
     device.run('REPORT_DEDUCTIONS.clear(); REPORT_WORKERS = null; INVOICE_PLACE = null; REPORT_CARD_GRID = true;');
     RANGES.forEach(([name, set]) => {
         device.run(set);
         device.run('REPORT_SECTION = "workers"; renderReports();');
+        device.weeklyEntries = 0;
         out[`${name}: «לפי עובד»`] = drawnIn(device, 'reportsView');
+        device.weeklyDrawn.push(['workers', device.weeklyEntries]);
         device.run('REPORT_SECTION = "sites"; renderReports();');
+        device.weeklyEntries = 0;
         out[`${name}: «לפי אתר»`] = drawnIn(device, 'reportsView');
+        device.weeklyDrawn.push(['sites', device.weeklyEntries]);
         device.run('REPORT_SECTION = "workers";');
         out[`${name}: the pay rows`] = json('payrollRows()');
         out[`${name}: the workbook`] = json('reportSheets()');
@@ -280,10 +300,14 @@ function everything(device, men) {
         });
     });
     device.run('ADVANCE_WORKER = null; OWES_PAGE = null; ADVANCE_ORDER_DRAFT = null; clear(document.getElementById("advancesView")); renderAdvances();');
+    device.weeklyEntries = 0;
     out['«מקדמות»'] = drawnIn(device, 'advancesView');
+    device.weeklyDrawn.push(['advances', device.weeklyEntries]);
     men.forEach(id => {
         device.run(`ADVANCE_WORKER = ${JSON.stringify(id)}; clear(document.getElementById("advancesView")); renderAdvances();`);
+        device.weeklyEntries = 0;
         out[`«מקדמות»: ${id}`] = drawnIn(device, 'advancesView');
+        device.weeklyDrawn.push(['a man', device.weeklyEntries]);
         out[`${id}: his card`] = json(`workerCardFacts(${JSON.stringify(id)})`);
     });
     device.run('ADVANCE_WORKER = null;');
@@ -313,7 +337,7 @@ const READINGS = [
 {
     suite('every figure of the pay sheet and the screens that read it is v195\'s, byte for byte');
 
-    const tally = { records: 0, readings: 0, compared: 0, states: {}, closes: 0, repaid: 0, wrong: [] };
+    const tally = { records: 0, readings: 0, compared: 0, states: {}, closes: 0, repaid: 0, wrong: [], weekly: { may: 0, mayNot: 0 }, weeklyWrong: [] };
     const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8];
     for (const seed of SEEDS) {
         const record = seeded(seed, seed % 4 === 0);
@@ -336,6 +360,16 @@ const READINGS = [
             tally.readings += 1;
             tally.compared += Object.keys(before).length;
             differences(before, after).forEach(key => tally.wrong.push(`seed ${seed}, ${name}: ${key}`));
+            // «סגירת שבוע»'s button: never in v195; in this build once per draw of «לפי עובד»
+            // and of the board on top of «מקדמות», exactly when the record may be closed (the
+            // per-man box's own gate), and never on «לפי אתר» or a man's own page.
+            const may = pair[1].call('weeklyCloseGateNow') === true;
+            const drawn = pair[1].weeklyDrawn;
+            tally.weekly[may ? 'may' : 'mayNot'] += 1;
+            if ((pair[0].weeklyEntries || 0) !== 0
+                || !drawn.every(([section, count]) => count === ((section === 'workers' || section === 'advances') && may ? 1 : 0))) {
+                tally.weeklyWrong.push(`seed ${seed}, ${name}: ${JSON.stringify(drawn)}`);
+            }
         }
     }
     given('the corpus has closes, repayments and every reading of the gate', tally.closes > 10 && tally.repaid > 3
@@ -344,6 +378,8 @@ const READINGS = [
     check(`${tally.records} records x ${READINGS.length} readings, ${tally.compared} readings of a screen: every one v195's bytes`,
         tally.wrong.length === 0, tally.wrong.slice(0, 4).join(' | '));
     console.log(`        (${JSON.stringify(tally.states)}; ${tally.closes} closes, ${tally.repaid} repayments)`);
+    check(`«סגירת שבוע»'s one button: on «לפי עובד» and «מקדמות» once a draw where the record may be closed (${tally.weekly.may} readings), nowhere where it may not (${tally.weekly.mayNot}), never on «לפי אתר» or a man's page - the only thing taken out of the comparison`,
+        tally.weekly.may > 0 && tally.weekly.mayNot > 0 && tally.weeklyWrong.length === 0, tally.weeklyWrong.slice(0, 4).join(' | '));
 }
 
 // ---------------------------------------------------------------- a season
@@ -403,7 +439,10 @@ const WAYS_IN = [
     ['a man\'s statement', 'workerStatementText("w_2");'],
     ['a worker card', 'workerCardFacts("w_2");'],
     ['the payslips', 'payslipsFacts("current");'],
-    ['the month', `monthSummaryFacts("${TODAY.slice(0, 7)}");`]
+    ['the month', `monthSummaryFacts("${TODAY.slice(0, 7)}");`],
+    // v197: «סגירת שבוע»'s list (js/ui/weeklyclose.js) is read inside the same one reading -
+    // the same gate answer, kept under the record between draws - with its own scope inside.
+    ['«סגירת שבוע»\'s list', `weeklyCloseRead(State.schedule, todayStr(), "${TODAY}T15:00:00.000Z");`]
 ];
 
 // ---------------------------------------------------------------- 2. the questions, counted

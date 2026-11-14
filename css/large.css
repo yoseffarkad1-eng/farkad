@@ -157,6 +157,12 @@
 :root.display-large .owes-row,
 :root.display-large .owes-closure-card { min-height: 64px !important; }
 :root.display-large .owes-closure textarea { min-height: 160px !important; }
+/* «סגירת שבוע» (js/ui/weeklyclose.js): a man's row, his field and the buttons. */
+:root.display-large .weekly-close-row { min-height: 64px !important; }
+:root.display-large #weeklyCloseModal input.weekly-close-input,
+:root.display-large .weekly-close-actions button,
+:root.display-large .weekly-close-unskip,
+:root.display-large .weekly-close-foot-actions button { min-height: 56px !important; }
 @media (max-width: 700px) {
     :root.display-large .week-phone-date { min-height: 58px !important; }
 }
@@ -933,6 +939,43 @@
 :root.display-large .owes-figure b { font-size: 22px; font-weight: 800; }
 :root.display-large .owes-closure textarea { font-size: 20px; line-height: 1.5; }
 :root.display-large .owes-doors button { font-size: 20px; }
+/* «סגירת שבוע» (js/ui/weeklyclose.js), one rule for one rule. */
+:root.display-large .weekly-close-entry { font-size: 21px; font-weight: 700; }
+:root.display-large #weeklyCloseModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
+:root.display-large .weekly-close-meta { font-size: 20px; font-weight: 500; }
+:root.display-large .weekly-close-step { font-size: 20px; font-weight: 600; }
+:root.display-large .weekly-close-step-on { font-weight: 800; }
+:root.display-large .weekly-close-status { font-size: 21px; font-weight: 600; line-height: 1.45; }
+:root.display-large .weekly-close-lead { font-size: 21px; line-height: 1.5; }
+:root.display-large .weekly-close-group { font-size: 22px; font-weight: 600; }
+:root.display-large .weekly-close-group strong { font-weight: 900; }
+:root.display-large .weekly-close-name { font-size: 23px; font-weight: 800; line-height: 1.4; }
+:root.display-large .weekly-close-chip { font-size: 20px; font-weight: 700; line-height: 1.4; }
+:root.display-large .weekly-close-cell small { font-size: 20px; font-weight: 500; }
+:root.display-large .weekly-close-cell b { font-size: 22px; font-weight: 800; }
+:root.display-large .weekly-close-held { font-size: 21px; font-weight: 600; line-height: 1.45; }
+:root.display-large .weekly-close-show { font-size: 21px; }
+:root.display-large .weekly-close-line { font-size: 21px; line-height: 1.4; }
+:root.display-large .weekly-close-line:last-child { font-weight: 800; }
+:root.display-large .weekly-close-line b { font-size: 22px; font-weight: 800; }
+:root.display-large .weekly-close-label { font-size: 21px; font-weight: 700; }
+:root.display-large #weeklyCloseModal input.weekly-close-input { font-size: 23px; font-weight: 700; }
+:root.display-large .weekly-close-preview { font-size: 21px; font-weight: 700; line-height: 1.45; }
+:root.display-large .weekly-close-error { font-size: 20px; }
+:root.display-large .weekly-close-actions button,
+:root.display-large .weekly-close-unskip { font-size: 20px; font-weight: 700; }
+:root.display-large .weekly-close-skipped { font-size: 21px; font-weight: 600; }
+:root.display-large .weekly-close-summary h4 { font-size: 23px; font-weight: 800; }
+:root.display-large .weekly-close-tr { font-size: 21px; }
+:root.display-large .weekly-close-tr strong { font-size: 21px; font-weight: 800; }
+:root.display-large .weekly-close-th { font-size: 20px; font-weight: 600; }
+:root.display-large .weekly-close-sum { font-weight: 800; }
+:root.display-large .weekly-close-named strong { font-size: 21px; font-weight: 800; line-height: 1.4; }
+:root.display-large .weekly-close-named p { font-size: 20px; font-weight: 500; line-height: 1.45; }
+:root.display-large .weekly-close-final { font-size: 20px; }
+:root.display-large .weekly-close-total small { font-size: 20px; font-weight: 600; }
+:root.display-large .weekly-close-total b { font-size: 23px; font-weight: 900; }
+:root.display-large .weekly-close-foot-actions button { font-size: 22px; font-weight: 800; }
 
 /* ---- 4. THE SHAPES ------------------------------------------------------------------ */
 

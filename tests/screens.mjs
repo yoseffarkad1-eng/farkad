@@ -228,6 +228,15 @@ function reportsDefault() {
     REPORT_WORKERS = null; REPORT_SECTION = 'workers'; REPORT_CARD_GRID = true;
 }
 
+// «סגירת שבוע», opened from its own button in «דוחות», and read (after a frame).
+async function openWeeklyCloseScreen(page) {
+    await run(page, reportsDefault);
+    await view('reports')(page);
+    await byText(page, '#reportsView', 'סגירת שבוע');
+    await page.waitForFunction(() => typeof WEEKLY_CLOSE !== 'undefined' && WEEKLY_CLOSE && WEEKLY_CLOSE.read !== null);
+    await pause(page);
+}
+
 export const SCREENS = [
     { name: 'day - by site', scope: APP, open: async page => { await home(page); } },
     { name: 'day - by worker', scope: APP,
@@ -329,6 +338,25 @@ export const SCREENS = [
                 fold.open = true;
             }); await pause(page); },
         close: page => run(page, () => { OWES_HEAD_OPEN = false; owesRecordBack(); }) },
+    // «סגירת שבוע» (js/ui/weeklyclose.js): the list, one man opened, the summary - on the
+    // seeded record as it is (nothing written: the dialog writes only at its last button,
+    // which is never pressed here). The seeded phone has no cloud, so the line at its top
+    // says so - which is a state the screen has, and is measured with the rest.
+    { name: 'reports - «סגירת שבוע», the list', scope: ['#weeklyCloseModal'],
+        open: async page => { await openWeeklyCloseScreen(page); },
+        close: page => run(page, () => closeWeeklyClose()) },
+    { name: 'reports - «סגירת שבוע», one man opened', scope: ['#weeklyCloseModal'],
+        open: async page => { await openWeeklyCloseScreen(page);
+            await run(page, () => {
+                const man = WEEKLY_CLOSE.read.men.filter(one => !one.held)[0];
+                if (!man) throw new Error('nobody to open in «סגירת שבוע»');
+                WEEKLY_CLOSE.open = man.id;
+                renderWeeklyClose();
+            }); await pause(page); },
+        close: page => run(page, () => closeWeeklyClose()) },
+    { name: 'reports - «סגירת שבוע», the summary', scope: ['#weeklyCloseModal'],
+        open: async page => { await openWeeklyCloseScreen(page); await run(page, () => weeklyCloseGo()); await pause(page); },
+        close: page => run(page, () => closeWeeklyClose()) },
 
     { name: 'reports - by worker', scope: APP,
         open: async page => { await run(page, reportsDefault); await view('reports')(page); } },

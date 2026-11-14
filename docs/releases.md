@@ -1,4 +1,129 @@
-## v196 — «דוחות» asks the carry gate once a draw: the pay sheet's one reading (candidate, not served)
+## v197 — «סגירת שבוע»: every man's ended period closed in one pass (candidate, not served)
+
+**Not served until the merge and the Pages deployment are recorded here by the next release.**
+Built on `5cab7b9` (v196, served 2026-11-14: PR 78 merged it into main as `8083f99`, whose tree is
+`5cab7b9`'s; the Pages run and the served stamp were not read from the build machine). One commit that
+moves the three stamps: branch `weekly-close` (nine commits on `b48ac44`, stamps unmoved)
+squashed onto v196, its reading put inside v196's one reading (below), and one «מה חדש» item.
+The app's files: `js/ui/weeklyclose.js` (new), `js/ui/reports.js` (one call in
+`renderReports`), `js/ui/owes.js` (the button on top of «מקדמות», «סגירות שנרשמו» read inside
+the pass's scope, and the men a pass did not close named on the close's page),
+`js/ui/modal.js` (its closer), `js/app.js` (`renderWeeklyCloseIfOpen` in `render()`, and the
+stamp), `index.html` (the dialog, one script tag after `js/ui/owes.js`, and the stamp),
+`css/app.css` (one print rule), `css/design.css` (one block, the last), `css/large.css` (the
+sizes said again), `js/ui/whatsnew.js` for its item; `sw.js` changes in its `VERSION` line and
+in ONE line of the shell list, `./js/ui/weeklyclose.js`. Nothing in `js/sync`, `js/model`,
+`js/state.js`, `js/store.js`, `js/recovery.js`, `firestore.rules` or `functions`. No new entry
+kind, field, Store key or writer: every entry is written by `closePeriodChanges`, the function
+the per-man closing button already calls.
+
+**The owner's approval, 2026-11-14:** publish it as it is, with the refusals that protect him.
+**His five decisions, 2026-11-13** (he saw pictures of a mock-up, not these words on a phone):
+- **D1 - warn after 2 periods** of his own ended with nothing taken (v195's
+  `OWES_QUIET_PERIODS`, unchanged).
+- **D2 - the field starts filled** with the most the pay sheet proposes to take off
+  (`planPeriodClosure`'s own `deducted`), and he can lower it, choose «בלי ניכוי», or skip.
+- **D3 - no reason is asked for a skip.**
+- **D4 - close only when synced, and from one phone.**
+- **D5 - old periods are closed by hand, man by man, oldest first.** Nothing here closes an old
+  period.
+
+**What it does.** One button, «סגירת שבוע», in «דוחות» ← «לפי עובד» (above the pay sheet and
+OUTSIDE its section, like «שים לב»: never on paper, in the picture or in the file) and on top
+of «מקדמות», drawn only where the per-man box could close (`financialWritingEnabled`). It opens
+one dialog of three steps:
+1. **«בדיקה»** - every man whose own last finished period (a week for a weekly man, a
+   fortnight otherwise) is open and holds anything, grouped by that period, oldest first; on
+   each: his wage, what he carried in, what he was handed, what he owes in all, the field
+   filled (D2), «הכל», «בלי ניכוי», «דלג על העובד» (D3), and for the amount typed what he is
+   paid and what stays owed - `advanceAccount`'s own two lines, held equal to
+   `planPeriodClosure(..., x)` and to the per-man box's preview for every amount the suite
+   tries.
+2. **«סיכום»** - how many accounts will close and, BY NAME, the men left owing with nothing
+   taken this time, the men skipped and the men held; nothing is written before this page and
+   its one button.
+3. **«נסגר»** - `closePeriodChanges` per man at ONE moment, committed by ONE
+   `saveFinancialAction` (one `State.commitMany`, one journal batch), read back (a man is
+   closed when his period reads closed under this write's own moment), and the close's own
+   page in «סגירות שנרשמו», naming the men it did not close. The record after a pass is BYTE
+   FOR BYTE the record the per-man box leaves when the same men are closed one by one
+   (`closeAccountFor`; tests/weeklyclose.test.mjs W3).
+The choices are memory: a reload forgets them, and looking writes nothing.
+
+**What it refuses**, each in one sentence on the man's card or at the top, never by leaving
+him out:
+- a phone that is not «מסונכרן בין המכשירים» (D4) - the permanent deletion's own question
+  (`deletionBlockers`), asked before the summary and again as the first line of the write;
+  also a phone whose disk will not take the record, and a record another window changed;
+- a man with an EARLIER period of his left open while money he owed ran through it (D5 and
+  the design's finding L7): the card names that period, and its one button is v195's, which
+  only NAVIGATES there;
+- a man whose period ends today and whose today is not recorded;
+- a record that moved between the drawing and the press: the whole list is read again at the
+  moment of the write and every chosen man compared, the ledger's balance included - one
+  difference stops EVERYBODY, nothing is written, and the men who moved are named;
+- more changes than one write may carry, and a shared record that would pass 768 KiB
+  (`WEEKLY_CLOSE_RECORD_LIMIT`, against the cloud's 1 MiB per document);
+- every reason the per-man box refuses (overpaid, overlap, clock, unpriced), in its words;
+- a second press inside 1.5 s, and a second write of a choice already written.
+
+**WHAT IT DOES NOT FIX. ALL THREE NEED CHANGES TO THE MODEL OR TO SYNC, WHICH THE OWNER HAS
+ASKED TO HAVE EXPLAINED TO HIM FIRST; NONE IS IN THIS RELEASE.**
+- **(A) THE SHIPPED PER-MAN BOX CAN STILL RECORD A DOUBLE DEDUCTION WHEN PERIODS ARE CLOSED OUT
+  OF ORDER.** A later period closed in front of an earlier open one records deductions worked
+  out from the sheet's presumption about the open one; a day typed into the open one
+  afterwards takes the same money off a second wage - REPRODUCED: 2,610 recorded against a
+  2,000 advance (tests/weeklyclose.test.mjs). THE PASS REFUSES THAT ORDER; THE PER-MAN BOX
+  DOES NOT, and where such a period is already behind a close, the card says so in its own
+  sentence and sends him to the man's advances page first.
+- **(B) TWO PHONES CLOSING THE SAME ACCOUNT IN THE SAME SECOND STRAND THE LOSER.** Both synced
+  by every test a phone can make, one a second behind the other: the server keeps the first
+  close, and the second phone's write is held aside, the man owing and blocked on that phone
+  (measured and printed in W12, not pinned). ONLY A RULE ON THE SERVER CURES IT. THE RULE IS
+  THAT ONE PHONE CLOSES (D4).
+- **(C) EVERY CLOSED PERIOD COPIES ITS DAYS INTO THE SHARED RECORD** - about 1.2 KB a close;
+  fourteen weekly men are about 14 KB a week against the cloud's 1 MiB per document. THE PASS
+  REFUSES ABOVE 768 KiB; THE RECORD STILL GROWS WITH EVERY CLOSE, BY EITHER DOOR.
+
+**The two read scopes, made one.** v196 runs every way into the pay sheet that reads money
+inside ONE reading (`reportReadOnce`: the gate answered once and kept under the record between
+draws, each range's sheet and each man's closed periods once); the branch had its own scope
+(`weeklyCloseOnce`: the ledger sorted and folded, one advance's history, a range's sheet, a
+man's closures, the gate and - on an approved record - the migration's plan, each answered once
+per STATE of the record and forgotten at every append). In v197 the list's reading
+(`weeklyCloseRead`) opens `reportReadOnce` OUTSIDE `weeklyCloseOnce`, so the list shares the
+pay sheet's gate answer and its kept answer, and the inner scope still forgets at an append; a
+reading already open («סגירות שנרשמו» under a draw of «מקדמות») is the same reading. The WRITE is
+never inside `reportReadOnce`, whose answers do not know an append: it calls the reading,
+which closes before a byte is written. No figure moves: tests/weeklyclose.test.mjs holds every
+change built inside the scopes equal to the same change built with none, and
+tests/reports.speed.test.mjs now loads the file on the build under test, counts the list as one
+more way in (planned at most once on a moved record, not at all drawn again unmoved, not at all
+on an approved record, nothing with the carry shut), and holds every node of «דוחות» and
+«מקדמות» byte for byte v195's with «סגירת שבוע»'s one button the only node taken out - and that
+button counted, once a draw on «לפי עובד» and on «מקדמות» exactly where the record may be closed,
+never on «לפי אתר» or a man's page.
+
+**The cost.** Fourteen men on a season of days, every earlier period closed (a 600 KB record):
+the list read in about half a second and the pass written in about one second in Node
+(tests/weeklyclose.test.mjs W10 prints the times on the run); the commit's own redraw of the page
+under the dialog is held for the length of the commit and made once afterwards, and
+«סגירות שנרשמו» is read inside the pass's scope (about 1 s against about 100 s without it, in
+Node, account for account the same).
+
+**«מה חדש»**: one item, PROPOSED - «סגירת שבוע»: «כל העובדים שהתקופה שלהם הסתיימה נסגרים בפעם
+אחת: הניכוי כבר ממולא ואפשר לשנות אותו, ושום דבר לא נסגר לפני הסיכום.», where «דוחות ← לפי
+עובד ← סגירת שבוע», go: 'payReport'.
+
+**Tests.** tests/weeklyclose.test.mjs (on devices: who is on it, every figure the close's own,
+the record after a pass byte for byte the per-man box's, a double press, a record that moved,
+the sync rule, the earlier period and finding L7 reproduced, the gates, the screen, the cost,
+two phones on one cloud, the words) and tests/weeklyclose.browser.mjs (the glass at 320, 375
+and 440, both schemes, doubled text and «תצוגה גדולה»; tests/weeklyclose.seed.mjs is its crew);
+three screens added to tests/screens.mjs; tests/reports.speed.test.mjs as above. Every new
+Hebrew string PROPOSED and pinned. NOT TRIED ON A REAL PHONE.
+
+## v196 — «דוחות» asks the carry gate once a draw: the pay sheet's one reading (served 2026-11-14)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.** The release commit moves the three stamps to v196 and adds one «מה חדש» item («דוחות נפתחים מהר יותר», go: 'payReport', proposed). One test instrument repaired in the same commit: `tests/removepace.browser.mjs` skipped Saturdays when it seeded its season, today included, so on a Saturday (the v196 gate ran on Saturday 2026-11-14) nobody stood on the site under the finger and the suite failed on every check after its seed; the app was not involved, and main would have failed the same way that day. The day the phone stands on is now always seeded. v194's removals were tried by the owner on his own phone on 2026-11-13 and he wrote that they work, with no jump that bothers him - the first repair of this run confirmed on a real phone. The note below was written on the branch, before the stamps moved:
 
