@@ -87,6 +87,11 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    { build: 'v196', items: [
+        { title: 'דוחות נפתחים מהר יותר',
+            text: 'עמוד הדוחות ועמוד המקדמות נפתחים הרבה יותר מהר, וכל הסכומים בהם נשארו בדיוק כמו שהיו.',
+            where: 'דוחות ← לפי עובד', go: 'payReport' }
+    ] },
     { build: 'v195', items: [
         { title: 'מקדמות: מי חייב כסף',
             text: 'בראש עמוד המקדמות רואים כמה העובדים חייבים, מי חייב וממתי, ואזהרה כשחשבון קודם לא נסגר או כשעברו שתי תקופות בלי ניכוי.',

@@ -654,8 +654,14 @@ const cellOf = (facts, label) => ((facts.pay || []).filter(one => one.label === 
     device.State.commit(device.call('recordCarryApproval', device.State.schedule,
         device.call('planCarryMigration', device.State.schedule), '2026-08-25T09:00:00.000Z', 'd_person'));
     device.run('GATE_ASKS = 0');
-    same('a later reading asks again - nothing is remembered between two readings',
-        [device.facts('w_01').owed.label, device.run('GATE_ASKS')], ['נשאר להחזיר', 1]);
+    // MOVED ON PURPOSE (v196, the pay sheet's one reading - reportReadOnce, js/ui/reports.js):
+    // this said the later reading asks the gate's function once. On a record that CARRIES
+    // the approval the gate's answer is true whatever the plan says (reportGateAnswer, the
+    // rule owesGateAnswer reads), so the function - and the plan behind it - is now not
+    // asked at all; tests/reports.speed.test.mjs holds the short answer equal to the gate
+    // in every state. The label is the approved one, so the answer is still the gate's.
+    same('a later reading, the record now approved, says what the approval opens and plans nothing',
+        [device.facts('w_01').owed.label, device.run('GATE_ASKS')], ['נשאר להחזיר', 0]);
 
     // A THROW in the middle of a reading: the range, the filter and the gate all go back.
     device.run(`REPORT_RANGE.from = '2026-01-01'; REPORT_RANGE.to = '2026-01-31'; REPORT_WORKERS = null;

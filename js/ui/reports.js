@@ -27,6 +27,131 @@ let ADVANCE_SEARCH = '';
 const ADVANCE_ORDER_KEY = 'farkad:advanceWorkerOrder';
 let ADVANCE_ORDER_DRAFT = null;
 
+// ---------------------------------------------------- one draw, one question (v196)
+//
+// WHAT A DRAW OF THIS PAGE COST, AND WHY. Every reader of the sheet asks the carry gate
+// for itself - payrollRows, moneyNoteParts per man, financeLineText, workerAccountFor,
+// the closing button, the advances list's buttons - and that is right: no reader may get
+// ahead of an approval. But the question is not a lookup. carryReportingEnabled re-plans
+// the migration (js/model/ledger.js), and the plan walks every man's account forward
+// (planAdvanceCarry, js/model/schema.js) - for a man with a debt and NO daily rate, to its
+// ceiling of four thousand fortnights, each a pay sheet of the whole crew. «דוחות» ←
+// «לפי עובד» asked it 16 to 18 times a draw in Node and 27 in Chromium: two seconds a
+// draw on fifteen men over half a year in Node, seven on a season in Chromium slowed
+// four times, and tens of seconds with one man who has a debt and no rate
+// (docs/releases.md, v196).
+//
+// So each way INTO this file that reads money - a draw of «דוחות», a draw of «מקדמות»,
+// the workbook's sheets, a man's days, his closing, his statement - reads inside ONE
+// reading (reportReadOnce), and inside it:
+//
+//   - THE GATE is answered once, and on a record that CARRIES the approval not planned
+//     at all (reportGateAnswer - the gate's own rule read from its own parts, the same
+//     reading owesGateAnswer makes in js/ui/owes.js and held equal to the gate in every
+//     state by tests/reports.speed.test.mjs);
+//   - THE PAY SHEET of a range is worked out once (payrollReport), and A MAN'S CLOSED
+//     PERIODS folded once (closedPeriods), however many readers ask - the two readers
+//     owesOnce already shares the same way, for the reason it gives: inside one
+//     synchronous step the record cannot change, and what they hand back is read and
+//     never written to.
+//
+// NOTHING IS ANSWERED FROM MEMORY FOR ANOTHER RECORD. A schedule other than the one the
+// reading opened on goes to the real function every time; the real functions are put
+// back in a finally, throw or no throw; and a reading opened inside a reading of the same
+// record is the same reading. The one answer kept BETWEEN draws is the gate's on a record
+// that has to be planned (nobody approved it, or nothing was ever approved on it), and it
+// is kept under a key that IS the record - the write tick, today, the build's flags and
+// the whole record as text, compared and never hashed (reportGateKey; the rule owesKey
+// keeps) - so a figure drawn after any change, by any door, is the record's as it is.
+//
+// No figure is worked out a new way: every reader is asked exactly what it was asked
+// before, and tests/reports.speed.test.mjs holds every cell of the sheet, the paper's
+// tables, the workbook, the statements and the cards byte for byte against the pay sheet
+// of v195 (out of Git) under both readings of the gates.
+let REPORT_ONCE = null;
+let REPORT_GATE_KEPT = null;
+
+function reportGateKey(schedule) {
+    return [
+        String(typeof Store === 'object' && Store ? Store.tick : 0),
+        String(typeof todayStr === 'function' ? todayStr() : ''),
+        typeof FARKAD_FLAGS === 'object' ? JSON.stringify(FARKAD_FLAGS) : '',
+        JSON.stringify(schedule)
+    ].join('|');
+}
+
+// js/model/ledger.js:
+//     carryReportingEnabled(schedule) = advanceCarryEnabled() && carryMigrationSettled(schedule)
+//     carryMigrationSettled(schedule) = !plan.needed || carryMigrationApproved(schedule, plan)
+// and the approval reads one thing of the plan, its id, the constant carryMigrationId().
+// So with the flag shut the answer is false and on a record carrying the approval it is
+// true, whatever the plan would say. Any other record is planned - by the gate's own
+// function, `ask` - and that answer is kept under the record itself.
+function reportGateAnswer(schedule, ask) {
+    if (typeof advanceCarryEnabled === 'function' && typeof carryMigrationApproved === 'function'
+        && typeof carryMigrationId === 'function') {
+        if (advanceCarryEnabled() !== true) return false;
+        if (carryMigrationApproved(schedule, { id: carryMigrationId() }) === true) return true;
+    }
+    const key = reportGateKey(schedule);
+    if (REPORT_GATE_KEPT && REPORT_GATE_KEPT.key === key) return REPORT_GATE_KEPT.answer;
+    const answer = ask(schedule) === true;
+    REPORT_GATE_KEPT = { key, answer };
+    return answer;
+}
+
+// Whether a reading of THIS record is open - the entry points below ask it first, and
+// when it is not they open one around themselves and come back in. With no State there
+// is no record to read once over, and the entry point simply runs.
+function reportReading() {
+    if (typeof State !== 'object' || !State) return true;
+    return REPORT_ONCE !== null && REPORT_ONCE.schedule === State.schedule;
+}
+
+function reportReadOnce(read, self, args) {
+    if (reportReading()) return read.apply(self, args || []);
+    const schedule = State.schedule;
+    const outer = REPORT_ONCE;
+    const real = { gate: carryReportingEnabled, sheet: payrollReport, closed: closedPeriods };
+    const model = typeof real.gate === 'function' && typeof real.sheet === 'function'
+        && typeof real.closed === 'function';
+    let gate;
+    const sheets = new Map();
+    const folds = new Map();
+    REPORT_ONCE = { schedule };
+    if (model) {
+        carryReportingEnabled = asked => {
+            if (asked !== schedule) return real.gate(asked);
+            if (gate === undefined) gate = reportGateAnswer(asked, real.gate);
+            return gate;
+        };
+        payrollReport = function (asked, from, to) {
+            if (asked !== schedule || arguments.length !== 3 || typeof from !== 'string' || typeof to !== 'string') {
+                return real.sheet.apply(this, arguments);
+            }
+            const key = `${from}..${to}`;
+            if (!sheets.has(key)) sheets.set(key, real.sheet(asked, from, to));
+            return sheets.get(key);
+        };
+        closedPeriods = function (asked, workerId) {
+            if (asked !== schedule || arguments.length !== 2) return real.closed.apply(this, arguments);
+            const key = String(workerId);
+            if (!folds.has(key)) folds.set(key, real.closed(asked, workerId));
+            return folds.get(key);
+        };
+    }
+    try {
+        return read.apply(self, args || []);
+    } finally {
+        if (model) {
+            carryReportingEnabled = real.gate;
+            payrollReport = real.sheet;
+            closedPeriods = real.closed;
+        }
+        REPORT_ONCE = outer;
+    }
+}
+
 // A display preference for this device, separate from the shared crew and money.
 // Keep every current worker: an old order may name removed workers or predate new ones.
 function advanceWorkersInOrder(ids) {
@@ -184,6 +309,7 @@ function refreshWorkerFinance(workerId) {
 }
 
 function renderAdvances() {
+    if (!reportReading()) return reportReadOnce(renderAdvances, this, arguments);
     const root = document.getElementById('advancesView');
     if (!root) return;
     // A cloud update may redraw totals, but never discards an amount being typed.
@@ -459,6 +585,7 @@ function defaultPayrollRange() {
 }
 
 function renderReports() {
+    if (!reportReading()) return reportReadOnce(renderReports, this, arguments);
     const root = document.getElementById('reportsView');
     if (!root) return;
 
@@ -2436,6 +2563,7 @@ function workerSummaryFromSheet(workerId) {
 // doubled days, the hours, and what each day came to. It is read out to the person asking,
 // so it runs the same arithmetic as the total rather than re-deriving it a second way.
 function openWorkerDays(workerId) {
+    if (!reportReading()) return reportReadOnce(openWorkerDays, this, arguments);
     const worker = State.worker(workerId);
     if (!worker) return;
 
@@ -2509,6 +2637,7 @@ function openWorkerDays(workerId) {
 }
 
 function openWorkerSettlement(workerId) {
+    if (!reportReading()) return reportReadOnce(openWorkerSettlement, this, arguments);
     const worker = State.worker(workerId);
     if (!worker) return;
     const span = reportSpanFor(worker.id);
@@ -3627,6 +3756,7 @@ function openEventReversalForm(entry, row) {
 // the days, then what they add up to, then what was already handed over. Sent the same
 // way the seder is, because that is the channel these men are reachable on.
 function workerStatementText(workerId) {
+    if (!reportReading()) return reportReadOnce(workerStatementText, this, arguments);
     const worker = State.worker(workerId);
     if (!worker) return '';
 
@@ -3810,6 +3940,7 @@ function workerStatementText(workerId) {
 }
 
 function shareWorkerStatement(workerId) {
+    if (!reportReading()) return reportReadOnce(shareWorkerStatement, this, arguments);
     const text = workerStatementText(workerId);
     if (!text) return;
 
@@ -4574,6 +4705,7 @@ function withoutRimaSheetRows() {
 // «בלי עובדי רימא» (v167) goes with it, under the same condition, and RIGHT AFTER the
 // billing grid it is read against - the owner's order. The keys are in the file's order.
 function reportSheets() {
+    if (!reportReading()) return reportReadOnce(reportSheets, this, arguments);
     const rima = rimaSheetRows();
     const withoutRima = withoutRimaSheetRows();
     const withRima = sheets => {

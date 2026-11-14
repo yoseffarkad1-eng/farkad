@@ -149,7 +149,11 @@ function monthSummaryScope(read) {
         return answer;
     };
     try {
-        return read();
+        // And the reading is the pay sheet's own one reading (reportReadOnce, js/ui/reports.js,
+        // v196): on a record that carries the approval the gate is answered without planning
+        // the migration at all, and each range's sheet and each man's closed periods are
+        // worked out once for the whole of it.
+        return typeof reportReadOnce === 'function' ? reportReadOnce(read) : read();
     } finally {
         carryReportingEnabled = ask;
         REPORT_RANGE.from = held.from;
@@ -283,6 +287,8 @@ function monthSummaryMoney(value) {
 // each figure against the report's without a browser, and so that what is on the screen
 // and what leaves as text cannot be anything this did not return.
 function monthSummaryFacts(key) {
+    // One reading for the whole of it - the pay sheet's (reportReadOnce, js/ui/reports.js).
+    if (typeof reportReadOnce === 'function' && !reportReading()) return reportReadOnce(monthSummaryFacts, this, arguments);
     const beforeKey = monthSummaryShift(key, -1);
     const [now, before] = monthSummaryScope(() => [monthSummaryRead(key), monthSummaryRead(beforeKey)]);
     const beforeName = monthSummaryName(beforeKey, true);

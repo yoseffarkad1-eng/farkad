@@ -658,7 +658,17 @@ function approvalPhone() {
         device.run('carryReportingEnabled === GATE_COUNTED') === true);
     device.run('GATE_ASKS = 0');
     device.facts('current');
-    same('a later reading asks again - nothing is remembered between two readings',
+    // MOVED ON PURPOSE (v196, the pay sheet's one reading - reportReadOnce, js/ui/reports.js):
+    // this said a later reading asks again. The answer of a record that has to be planned is
+    // now kept under a key that IS the record (reportGateKey: the write tick, today, the
+    // flags and the whole record as text), so a reading of the SAME record asks nothing -
+    // and a reading of a record that moved asks once, from the gate's own function.
+    same('a later reading of the same record asks nothing: the answer is kept under the record',
+        device.run('GATE_ASKS'), 0);
+    device.State.commit(device.call('addAdvance', device.State.schedule, 'w_04', '2026-11-04', 100, ''));
+    device.run('GATE_ASKS = 0');
+    device.facts('current');
+    same('and a reading after the record moved asks the gate\'s function again, once',
         device.run('GATE_ASKS'), 1);
 
     // A THROW in the middle: the range, the filter and the gate all go back.
