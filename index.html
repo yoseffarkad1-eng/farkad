@@ -106,7 +106,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v196">
+<meta name="farkad-build" content="v197">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -849,6 +849,27 @@
     </div>
 </div>
 
+<!-- «סגירת שבוע» (js/ui/weeklyclose.js): every man whose own period has ended, one field each,
+     then a summary page that names who closes with nothing taken and who was skipped, then
+     ONE write. Every word is in that file or borrowed from its owner; this is the frame. The
+     status line and the foot live outside the body on purpose: the body is redrawn. -->
+<div class="modal" id="weeklyCloseModal">
+    <div class="modal-content weekly-close-content">
+        <h3 id="weeklyCloseTitle" tabindex="-1"></h3>
+        <p id="weeklyCloseMeta" class="weekly-close-meta"></p>
+        <div id="weeklyCloseSteps" class="weekly-close-steps"></div>
+        <p id="weeklyCloseStatus" class="weekly-close-status" role="status" aria-live="polite" hidden></p>
+        <div id="weeklyCloseBody" class="weekly-close-body"></div>
+        <div class="weekly-close-foot">
+            <div id="weeklyCloseTotals" class="weekly-close-totals" hidden></div>
+            <div class="weekly-close-foot-actions">
+                <button type="button" class="weekly-close-go" id="weeklyCloseGo" onclick="weeklyCloseGo()" hidden></button>
+                <button type="button" class="btn-secondary weekly-close-back" id="weeklyCloseBack" onclick="weeklyCloseBack()"></button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- «בדיקת היום»: what may have been forgotten on the day on screen, read off the record
      and compared with the working day before it. Entered from the one button at the foot
      of the day's list. It only shows: nothing in it writes, and a name or a site in it
@@ -1109,6 +1130,12 @@
      typeof when «מקדמות» and «דוחות» are drawn) and share.js (the two doors a closure's text
      leaves by). It runs nothing at load and writes nothing, ever. -->
 <script src="js/ui/owes.js"></script>
+<!-- «סגירת שבוע»: the week's accounts closed in one sitting, through the per-man close's own
+     writer. After owes.js (its gate's answer, the one button that points the sheet at an
+     older account, and the closure page a pass ends on) and reports.js (the close's own
+     words and constants). Runs nothing at load; reports.js and owes.js ask for its button
+     by name, through typeof. -->
+<script src="js/ui/weeklyclose.js"></script>
 <script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>
 <script src="js/ui/migration.js"></script>

@@ -1998,6 +1998,8 @@ a[href]:focus-visible,
 /* «מי חייב כסף» and «שים לב» (js/ui/owes.js) are the screen's: a reading of who owes is
    not part of the pay sheet somebody is handed. */
 @media print { .owes, .owes-warnings, .owes-pending, .owes-closures, .owes-closure, .owes-closures-entry { display: none !important; } }
+/* «סגירת שבוע» (js/ui/weeklyclose.js): a button to a dialog, never on the sheet somebody is handed. */
+@media print { .weekly-close-entry { display: none !important; } }
 
 /* THE FINANCIAL SECTION (renderFinanceBlock): the men whose money moved in this period
    and who worked no day in it. One line each, inside the pay sheet's own section so the

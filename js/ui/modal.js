@@ -29,6 +29,9 @@ const MODAL_CLOSERS = {
     sederModal: () => closeSederList(),
     // «תלוש לכל עובד» (js/ui/payslips.js): closed on purpose, so a reload does not reopen it.
     payslipsModal: () => closePayslips(),
+    // «סגירת שבוע» (js/ui/weeklyclose.js): nothing is written until its last button, so
+    // closing forgets the choices - and it does not close while the write is on its way.
+    weeklyCloseModal: () => closeWeeklyClose(),
     // The summary of the day's rides (v179, js/ui/transport.js).
     transportSummaryModal: () => closeTransportSummary(),
     // The day's check (js/ui/daycheck.js). Nothing to clear behind it: it holds no state.

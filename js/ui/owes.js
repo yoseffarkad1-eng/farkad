@@ -376,7 +376,14 @@ function owesWarnings(read) {
 // `at` and one `by` - so a group is "same moment, same phone". Nothing is stored for this;
 // it is read off what is there.
 function owesClosures(schedule) {
-    return owesOnce(schedule, () => owesClosuresRead(schedule));
+    const read = () => owesOnce(schedule, () => owesClosuresRead(schedule));
+    // A SEASON OF WEEKLY CLOSES IS HUNDREDS OF ACCOUNTS, each read by advanceAccount, whose
+    // walk folds the whole ledger again for every period it steps through: measured on
+    // fourteen men closed every week from May, 23 seconds for this page in Chromium. Where
+    // «סגירת שבוע» is on the build (js/ui/weeklyclose.js) its scope answers the model's
+    // repeated questions once per state of the record for the length of this one reading -
+    // the same answers (tests/weeklyclose.test.mjs holds the two readings equal), 0.6 s.
+    return typeof weeklyCloseOnce === 'function' ? weeklyCloseOnce(read) : read();
 }
 
 function owesClosuresRead(schedule) {
@@ -631,6 +638,10 @@ function renderOwesInto(root) {
     // the gate, whose question may re-plan the migration - only if there is an advance, or
     // a closure to offer.
     const read = owesAnyAdvance(State.schedule) || owesAnyClosure(State.schedule) ? owesReadNow() : null;
+    // «סגירת שבוע» (js/ui/weeklyclose.js): the week closed from here as well as from «דוחות».
+    // Its own gate decides whether it is drawn.
+    const weekly = typeof weeklyCloseEntryButton === 'function' ? weeklyCloseEntryButton() : null;
+    if (weekly) box.appendChild(weekly);
     if (!read || read.rows.length === 0) {
         box.appendChild(el('p', 'owes-none', OWES_TEXT.none));
         root.appendChild(box);
@@ -858,6 +869,9 @@ function owesDrawClosure(root, group) {
     page.appendChild(button(OWES_TEXT.backToClosures, 'btn-secondary', () => owesOpenPage('closures')));
     page.appendChild(el('h2', null, owesClosureTitle(group)));
     page.appendChild(el('p', 'owes-closure-meta', owesClosureMeta(group)));
+    // The men a «סגירת שבוע» this phone just made did not close, by name (memory only).
+    const notClosed = typeof weeklyCloseNotClosedNode === 'function' ? weeklyCloseNotClosedNode(group.key) : null;
+    if (notClosed) page.appendChild(notClosed);
 
     const figures = (deducted, net, remained) => {
         const row = el('div', 'owes-figures');

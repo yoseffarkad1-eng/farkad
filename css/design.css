@@ -1567,5 +1567,79 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .owes-closure textarea { box-sizing: border-box; width: 100%; min-height: 160px; margin-top: 12px; font-size: 16px; line-height: 1.5; }
 .owes-doors { margin-top: 10px; }
 .owes-doors button { font-size: 16px; }
+/* ---- «סגירת שבוע» (js/ui/weeklyclose.js) ---------------------------------------------
+   The week closed in one sitting. A man is one row: his name - the first thing, heaviest -
+   and one word for what will happen to him, then four figures in a row that goes two by two
+   on the narrowest phone; pressed, it opens in place to his figures, the field (52px tall)
+   and three buttons. His edge is his pay group's colour (v192's two tokens, data-cycle). A
+   man who cannot be closed here is a sentence in ink on the warning's ground, with v195's
+   button. The foot sticks to the bottom of the dialog with the three totals and the two
+   buttons. No fixed height and no text in a fixed box: doubled text and «תצוגה גדולה» make
+   the rows taller and nothing else. */
+.weekly-close-entry { width: 100%; min-height: 48px; margin: 0 0 14px; font-size: 17px; font-weight: 700; white-space: normal; }
+#weeklyCloseModal .modal-content { padding-bottom: 0; }
+#weeklyCloseModal .modal-content > h3 { margin: 0 0 4px; font-size: 22px; line-height: 1.3; }
+.weekly-close-meta { margin: 0 0 10px; color: var(--ink-2); font-size: 16px; font-weight: 500; }
+.weekly-close-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 0 0 12px; }
+.weekly-close-step { padding: 6px 4px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 16px; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
+.weekly-close-step-on { background: var(--accent); color: var(--on-accent); font-weight: 800; }
+.weekly-close-status { margin: 0 0 12px; padding: 10px 12px; border-inline-start: 4px solid var(--warn); border-radius: var(--radius-sm); background: var(--warn-bg); color: var(--ink); font-size: 17px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.weekly-close-lead { margin: 0 0 12px; color: var(--ink); font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; }
+.weekly-close-groupbox { display: grid; gap: 10px; margin: 0 0 16px; }
+.weekly-close-group { margin: 4px 0 0; color: var(--ink-2); font-size: 18px; font-weight: 600; }
+.weekly-close-group strong { font-weight: 900; }
+.weekly-close-group[data-cycle="weekly"] strong { color: var(--group-weekly-ink); }
+.weekly-close-group[data-cycle="biweekly"] strong { color: var(--group-biweekly-ink); }
+.weekly-close-card { display: grid; gap: 10px; padding: 0 0 12px; border-radius: 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); border-inline-start: 8px solid var(--line); overflow: hidden; }
+.weekly-close-card[data-cycle="weekly"] { border-inline-start-color: var(--group-weekly-mark); }
+.weekly-close-card[data-cycle="biweekly"] { border-inline-start-color: var(--group-biweekly-mark); }
+.weekly-close-opened { box-shadow: inset 0 0 0 2px var(--accent); }
+.weekly-close-row { display: grid !important; gap: 8px; width: 100%; min-height: 64px; padding: 12px 14px 0 !important; text-align: start; white-space: normal !important; background: transparent !important; border: 0 !important; border-radius: 0 !important; color: var(--ink); }
+.weekly-close-row-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; }
+.weekly-close-name { min-width: 0; color: var(--ink); font-size: 20px; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; }
+.weekly-close-chip { padding: 4px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--ink); font-size: 16px; font-weight: 700; line-height: 1.4; }
+.weekly-close-chip-none, .weekly-close-chip-nowage { background: var(--warn-bg); box-shadow: inset 0 0 0 2px var(--warn); }
+.weekly-close-chip-skipped, .weekly-close-chip-held, .weekly-close-chip-bad { background: var(--danger-bg); box-shadow: inset 0 0 0 2px var(--danger); }
+.weekly-close-four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.weekly-close-cell { display: grid; gap: 2px; min-width: 0; align-content: start; }
+.weekly-close-cell small { color: var(--ink-2); font-size: 16px; font-weight: 500; overflow-wrap: anywhere; }
+.weekly-close-cell b { color: var(--ink); font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+@media (max-width: 359px) { .weekly-close-four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.weekly-close-card > :not(.weekly-close-row) { margin-inline: 14px; }
+.weekly-close-held { margin: 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--warn-bg); color: var(--ink); font-size: 17px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.weekly-close-show { min-height: 48px; font-size: 17px; white-space: normal; }
+.weekly-close-detail { display: grid; gap: 0; padding: 4px 12px; border-radius: 12px; background: var(--surface-2); }
+.weekly-close-line { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: 17px; line-height: 1.4; }
+.weekly-close-line:last-child { border-bottom: 0; font-weight: 800; }
+.weekly-close-line b { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.weekly-close-label { display: grid; gap: 6px; font-size: 17px; font-weight: 700; }
+#weeklyCloseModal input.weekly-close-input { min-height: 52px; margin: 0; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.weekly-close-preview { margin: 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--ink); font-size: 17px; font-weight: 700; line-height: 1.45; overflow-wrap: anywhere; }
+.weekly-close-preview:empty, .weekly-close-error:empty { display: none; }
+.weekly-close-error { margin: 0; font-size: 16px; }
+.weekly-close-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.weekly-close-actions button, .weekly-close-unskip { flex: 1 1 96px; min-height: 52px; padding: 8px 10px; font-size: 16px; font-weight: 700; white-space: normal; overflow-wrap: break-word; }
+.weekly-close-skipped { margin: 0; color: var(--ink); font-size: 17px; font-weight: 600; }
+.weekly-close-summary { padding: 12px 14px; border-radius: 14px; background: var(--surface-2); }
+.weekly-close-summary h4 { margin: 0 0 8px; font-size: 20px; font-weight: 800; }
+.weekly-close-tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); font-size: 17px; font-variant-numeric: tabular-nums; }
+.weekly-close-tr strong { min-width: 0; font-size: 17px; font-weight: 800; overflow-wrap: anywhere; }
+.weekly-close-tr > span { min-width: 0; overflow-wrap: anywhere; }
+.weekly-close-th { color: var(--ink-2); font-size: 16px; font-weight: 600; }
+.weekly-close-sum { border-top: 2px solid var(--ink); border-bottom: 0; font-weight: 800; }
+.weekly-close-named { margin: 12px 0 0; padding: 10px 12px; border-inline-start: 4px solid var(--warn); border-radius: 12px; background: var(--warn-bg); color: var(--ink); }
+.weekly-close-named-skipped, .weekly-close-named-held { border-inline-start-color: var(--danger); background: var(--danger-bg); }
+.weekly-close-named strong { display: block; font-size: 17px; font-weight: 800; line-height: 1.4; }
+.weekly-close-named p { margin: 4px 0 0; font-size: 16px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.weekly-close-final { margin: 12px 0 0; font-size: 16px; }
+.weekly-close-foot { position: sticky; bottom: 0; z-index: 1; display: grid; gap: 8px; margin-top: 8px; padding: 10px 0 16px; border-top: 1px solid var(--line); background: var(--surface); }
+.weekly-close-foot-loose { position: static; }
+.weekly-close-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.weekly-close-total { display: grid; gap: 0; min-width: 0; text-align: center; }
+.weekly-close-total small { color: var(--ink-2); font-size: 16px; font-weight: 600; }
+.weekly-close-total b { color: var(--ink); font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.weekly-close-foot-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.weekly-close-foot-actions button { flex: 1 1 120px; min-height: 52px; font-size: 18px; font-weight: 800; white-space: normal; overflow-wrap: break-word; }
+.weekly-close-foot-actions .weekly-close-go { flex: 2 1 160px; }
 
 }

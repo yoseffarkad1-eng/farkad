@@ -612,6 +612,12 @@ function renderReports() {
     // «שים לב» (js/ui/owes.js): one row, shut, above the pay sheet and OUTSIDE its section,
     // so the paper, the picture and the file are what they were.
     if (REPORT_SECTION === 'workers' && typeof renderOwesWarningsInto === 'function') renderOwesWarningsInto(root);
+    // «סגירת שבוע» (js/ui/weeklyclose.js): one button, above the pay sheet and outside its
+    // section like the row above it - never on paper, in the picture or in the file.
+    if (REPORT_SECTION === 'workers' && typeof weeklyCloseEntryButton === 'function') {
+        const entry = weeklyCloseEntryButton();
+        if (entry) root.appendChild(entry);
+    }
 
     // Both sections are built and both are in the DOM, whichever is chosen; the one not
     // being looked at carries .report-offscreen, which the print block hides as well.
