@@ -2549,9 +2549,14 @@ function advanceWalk(schedule, workerId, fromDate, toDate, carriedIn) {
 }
 
 // The account, start to finish, with what came before it already walked.
-function advanceAccount(schedule, workerId, fromDate, toDate, deduction) {
+//
+// `positionIn` is where he stands as the account opens, when the caller has ALREADY walked
+// the accounts before it (planPeriodClosure does, to ask which of them are still open) -
+// the same advancePositionInto figure, handed over so the walk is not made twice. Omitted,
+// it is worked out here exactly as it always was.
+function advanceAccount(schedule, workerId, fromDate, toDate, deduction, positionIn) {
     const account = advanceWalk(schedule, workerId, fromDate, toDate,
-        advancePositionInto(schedule, workerId, fromDate));
+        positionIn === undefined ? advancePositionInto(schedule, workerId, fromDate) : positionIn);
     // Draft amounts never mutate the ledger. Closing revalidates the choice and
     // journals the whole account. Historical closed accounts retain their figures.
     if (deduction === undefined || account.closed) return account;

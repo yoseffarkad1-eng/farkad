@@ -269,7 +269,11 @@ for (const [width, height] of [[320, 568], [375, 667], [440, 956]]) {
             ['מחמוד עיסא', '2000 ₪'], ['אחמד זועבי', '1200 ₪'], ['יוסף נסאר', '1000 ₪']]);
         same(`${label}: each amount is the figure the list under it is built from`, board.rows.map(row => row.amount), board.sources);
         same(`${label}: and the ledger's own balance`, board.rows.map(row => row.amount), board.ledger);
-        same(`${label}: the total is the sum of its rows`, [board.total, board.count], [board.sum, '6 עובדים חייבים · 3 דורשים טיפול']);
+        // MOVED ON PURPOSE (v198, the owner, 2026-11-14): a deduction put off is flagged from ONE
+        // period, and a period closed with less taken than could be is «ניכוי חלקי» - so ראמי
+        // (2,000 of a fortnight's wage taken, 3,950 left) and מחמוד (one week since his close,
+        // nothing taken) need attention too: four, and eight things.
+        same(`${label}: the total is the sum of its rows`, [board.total, board.count], [board.sum, '6 עובדים חייבים · 4 דורשים טיפול']);
         same(`${label}: the list under it says the same six figures, and the man who gave it all back owes nothing`,
             board.list.filter(text => !/^(כרם|נאסר)/.test(text)).sort(),
             ['אחמד זועבי1200 ₪ נשארו', 'ג\'מאל בשארה3000 ₪ נשארו', 'וליד מנסור0 ₪ נשארו', 'יוסף נסאר1000 ₪ נשארו',
@@ -279,15 +283,16 @@ for (const [width, height] of [[320, 568], [375, 667], [440, 956]]) {
             'שבועי · מאז 16/10 · הניכוי האחרון: אין', 'שבועי · מאז 27/10 · נוכה לאחרונה 29/10',
             'דו־שבועי · מאז 03/11 · הניכוי האחרון: אין', 'שבועי · מאז 08/11 · הניכוי האחרון: אין']);
         same(`${label}: the flags`, board.rows.map(row => row.flags), [
-            [], ['4 שבועות בלי ניכוי', 'חשבון קודם לא נסגר', 'לא עבד השבוע'], ['3 שבועות בלי ניכוי', 'חשבון קודם לא נסגר'],
-            ['חשבון קודם לא נסגר'], [], []]);
+            ['ניכוי חלקי'], ['4 שבועות בלי ניכוי', 'חשבון קודם לא נסגר', 'לא עבד השבוע'], ['3 שבועות בלי ניכוי', 'חשבון קודם לא נסגר'],
+            ['שבוע אחד בלי ניכוי', 'חשבון קודם לא נסגר'], [], []]);
         same(`${label}: each row keyed for its pay group's colour`, board.rows.map(row => row.cycle),
             ['biweekly', 'weekly', 'weekly', 'weekly', 'biweekly', 'weekly']);
         same(`${label}: «שים לב» stands open, under the board`, [board.warningsOpen, board.afterBoard], [[true], true]);
-        same(`${label}: six things, the unclosed accounts first`, board.warnings.map(plain), [
+        same(`${label}: eight things, the unclosed accounts first`, board.warnings.map(plain), [
             'חשבון קודם לא נסגר: 09/10 - 15/10 · ג\'מאל בשארה', 'חשבון קודם לא נסגר: 16/10 - 22/10 · סאמר ח\'ורי',
-            'חשבון קודם לא נסגר: 30/10 - 05/11 · מחמוד עיסא', '4 שבועות בלי ניכוי: ג\'מאל בשארה · 3000 ₪',
-            '3 שבועות בלי ניכוי: סאמר ח\'ורי · 2400 ₪', 'יש חוב ואין ימי עבודה השבוע: ג\'מאל בשארה · 3000 ₪']);
+            'חשבון קודם לא נסגר: 30/10 - 05/11 · מחמוד עיסא', 'ניכוי חלקי: ראמי עודה · 3950 ₪',
+            '4 שבועות בלי ניכוי: ג\'מאל בשארה · 3000 ₪', '3 שבועות בלי ניכוי: סאמר ח\'ורי · 2400 ₪',
+            'שבוע אחד בלי ניכוי: מחמוד עיסא · 2000 ₪', 'יש חוב ואין ימי עבודה השבוע: ג\'מאל בשארה · 3000 ₪']);
         holdFloors(`${label} «מקדמות»`, await page.evaluate(measureOwes), FLOOR);
 
         // ---- a row opens that man's advances
@@ -325,13 +330,13 @@ for (const [width, height] of [[320, 568], [375, 667], [440, 956]]) {
         });
         same(`${label}: at the head of «דוחות» it is one shut row, above the sheet and outside it`,
             [head.folds, head.open, head.inSheet, head.above, head.shown], [1, false, 0, true, 0]);
-        check(`${label}: saying how many things`, /^שים לב\s*6 דברים$/.test(head.summary), head.summary);
+        check(`${label}: saying how many things`, /^שים לב\s*8 דברים$/.test(head.summary), head.summary);
         holdFloors(`${label} «דוחות», shut`, await page.evaluate(measureOwes), FLOOR);
         await tap(page, '#reportsView .owes-warnings summary');
-        same(`${label}: a tap opens it in place: the same six`, await page.evaluate(() => {
+        same(`${label}: a tap opens it in place: the same eight`, await page.evaluate(() => {
             const fold = document.querySelector('#reportsView .owes-warnings');
             return [fold.open, [...fold.querySelectorAll('.owes-warning')].filter(node => node.checkVisibility()).length];
-        }), [true, 6]);
+        }), [true, 8]);
         holdFloors(`${label} «דוחות», open`, await page.evaluate(measureOwes), FLOOR);
         await page.evaluate(() => render());
         await settled(page);
@@ -534,7 +539,7 @@ for (const [width, height] of [[320, 568], [375, 667]]) {
             sheetTop: Math.round(view.querySelector('.report-payroll').getBoundingClientRect().top + window.scrollY) };
     };
     const rest = await page.evaluate(look);
-    given('at rest the row is there, shut, saying six things', rest.rows === 1 && rest.pending === 0 && /6 דברים$/.test(rest.summary), JSON.stringify(rest));
+    given('at rest the row is there, shut, saying eight things (v198)', rest.rows === 1 && rest.pending === 0 && /8 דברים$/.test(rest.summary), JSON.stringify(rest));
 
     // The record has not moved: the row is drawn IN the draw, from the kept reading.
     const again = await page.evaluate(look => { window.__reads = []; renderReports(); return (0, eval)(`(${look})`)(); }, look.toString());
@@ -565,7 +570,7 @@ for (const [width, height] of [[320, 568], [375, 667]]) {
     });
     same('then the record was read ONCE - the draw that was replaced read nothing', after.reads, 1);
     check('after a frame had been given to the page, not in the draw', fresh.frames.length === 1 && fresh.frames[0] >= 1, JSON.stringify(fresh.frames));
-    given('the record now warns of fewer things, none of them his', fresh.kept && fresh.things > 0 && fresh.things < 6 && fresh.his === 0, JSON.stringify(fresh));
+    given('the record now warns of fewer things, none of them his', fresh.kept && fresh.things > 0 && fresh.things < 8 && fresh.his === 0, JSON.stringify(fresh));
     same('the row says the record as it is now', [after.rows, after.pending, after.summary.replace(/\s/g, '')], [1, 0, fresh.words.replace(/\s/g, '')]);
     same('and the sheet did not move when it arrived', after.sheetTop, rest.sheetTop);
     same('opened, no warning is about the man who paid', await page.evaluate(() => {

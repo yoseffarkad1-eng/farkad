@@ -197,10 +197,20 @@ function payslipsPeriodKey(period) {
 //   periods  the distinct periods the men of this record are in, each with how many of
 //            the listed men it holds - the dates said before the first tap
 function payslipsFacts(which) {
-    // One reading for the whole of it - the pay sheet's (reportReadOnce, js/ui/reports.js).
-    if (typeof reportReadOnce === 'function' && !reportReading()) return reportReadOnce(payslipsFacts, this, arguments);
     const mode = which === 'previous' ? 'previous' : 'current';
     const today = todayStr();
+    return Object.assign({ which: mode }, payslipsFactsFor(worker => payslipsPeriodOf(worker, mode, today)));
+}
+
+// THE SAME READING, FOR PERIODS SOMEBODY ELSE NAMES: `periodOf(worker)` answers his period
+// ({ from, to, cycle }) or null to leave him out. «סגירת שבוע»'s result page (v198, the
+// owner's answer 7) asks it for the periods a close just shut - each man's own period, the
+// one his frozen payslip is of - and draws one door per man by payslipsClosedDoors below.
+// Nothing here is different for it: the statement, the sheet's cell, the comparison, the
+// number and the marks are the list's own.
+function payslipsFactsFor(periodOf) {
+    // One reading for the whole of it - the pay sheet's (reportReadOnce, js/ui/reports.js).
+    if (typeof reportReadOnce === 'function' && !reportReading()) return reportReadOnce(payslipsFactsFor, this, arguments);
     const workers = ((State.schedule && State.schedule.workers) || [])
         .filter(worker => worker && isSafeId(String(worker.id)));
 
@@ -209,7 +219,8 @@ function payslipsFacts(which) {
     const groups = [];
     const groupOf = Object.create(null);
     workers.forEach(worker => {
-        const period = payslipsPeriodOf(worker, mode, today);
+        const period = periodOf(worker);
+        if (!period) return;
         const key = payslipsPeriodKey(period);
         if (!groupOf[key]) {
             groupOf[key] = { key, from: period.from, to: period.to, cycles: [], ids: [], listed: 0 };
@@ -280,7 +291,6 @@ function payslipsFacts(which) {
     });
 
     return {
-        which: mode,
         rows,
         periods: groups.filter(group => group.listed > 0 || rows.length === 0).map(group => ({
             key: group.key,
@@ -723,4 +733,107 @@ function payslipsEntryButton() {
     return entry;
 }
 
+// ================================================================== after a close (v198)
+//
+// THE OWNER'S ANSWER 7 (2026-11-14): after «סגירת שבוע» is confirmed, each man is sent his
+// own statement. The close's own page («סגירות שנרשמו», js/ui/owes.js) asks this for one
+// door per man it closed - the door of the list above, unchanged: his statement byte for
+// byte (workerStatementText), read with the report pointed at HIS closed period; the sheet's
+// own «לתשלום» cell held against it; his own number; opened by his tap and marked «נפתח
+// בוואטסאפ» in the list's own marks (farkadPayslipsProgress, per period and man) - never
+// "sent". A row whose two figures differ has no door, and says so in the list's words.
+//
+// Drawn on every close's page, not only the one just made: iOS kills a home-screen app
+// while WhatsApp is in front, and the way back to the doors must not be a pass that is
+// already written.
+
+// `items` = [{ workerId, from, to }]: the accounts of one close. Answers a map from worker
+// id to his row as payslipsFactsFor reads it, holding only men whose row the sheet files
+// under exactly that period.
+function payslipsClosedFacts(items) {
+    const wanted = Object.create(null);
+    (items || []).forEach(item => {
+        if (item && item.workerId && item.from && item.to) wanted[String(item.workerId)] = item;
+    });
+    const facts = payslipsFactsFor(worker => {
+        const item = wanted[String(worker.id)];
+        if (!item) return null;
+        const period = periodRangeFor(worker, item.from);
+        return { from: String(item.from), to: String(item.to), cycle: period ? period.cycle : undefined };
+    });
+    const out = Object.create(null);
+    facts.rows.forEach(row => {
+        const item = wanted[row.workerId];
+        if (item && row.period.from === String(item.from) && row.period.to === String(item.to)) out[row.workerId] = row;
+    });
+    return out;
+}
+
+// Whether a close's page with doors on it is on the screen: after a door's tap, and back
+// from WhatsApp, it is drawn again so that «נפתח בוואטסאפ» stands under the name.
+function payslipsClosedOnScreen() {
+    return typeof document !== 'undefined' && typeof document.querySelector === 'function'
+        && Boolean(document.querySelector('.payslips-closed'));
+}
+
+function payslipsClosedRedraw() {
+    if (payslipsClosedOnScreen() && typeof render === 'function') render();
+}
+
+// One man's door on a close's page: what stands on him, the door (or the copy, with no
+// number; or nothing, when his figures differ) and his message, folded. null with no row.
+function payslipsClosedNode(row) {
+    if (!row) return null;
+    const state = payslipsState(row);
+    const node = el('div', `payslips-closed${state === 'differs' ? ' payslips-row-differs' : ''}`);
+    node.dataset.workerId = row.workerId;
+    if (row.review) node.appendChild(el('p', 'payslips-warn', row.review));
+    const said = { differs: PAYSLIPS_TEXT.differs, nophone: SEDER_TEXT.noPhone,
+        opened: SEDER_TEXT.opened, changed: SEDER_TEXT.changed }[state];
+    if (said) node.appendChild(el('p', state === 'opened' ? 'payslips-state' : 'payslips-warn', said));
+    if (row.sharedWith.length > 0) {
+        node.appendChild(el('p', 'payslips-warn', SEDER_TEXT.shared(row.sharedWith.map(isolate).join(', '))));
+    }
+    // His message, read before it is opened - folded, so a close of fourteen men is not
+    // fourteen messages long. A read-only field, as on the list.
+    const fold = el('details', 'payslips-closed-text');
+    fold.appendChild(el('summary', null, PAYSLIPS_TEXT.show));
+    const box = document.createElement('textarea');
+    box.className = 'payslips-text';
+    box.readOnly = true;
+    box.value = row.text;
+    box.rows = Math.min(18, row.text.split('\n').length + 1);
+    box.setAttribute('aria-label', PAYSLIPS_TEXT.messageFor(isolate(row.name)));
+    fold.appendChild(box);
+    const actions = el('div', 'payslips-actions');
+    let doors = 0;
+    if (state === 'differs') {
+        // No door and no copy: see the head of this file.
+    } else if (row.number) {
+        doors += 1;
+        const door = payslipsDoor(row);
+        door.addEventListener('click', event => {
+            if (!event.defaultPrevented) setTimeout(payslipsClosedRedraw, PAYSLIPS_TAP_GUARD_MS + 20);
+        });
+        actions.appendChild(door);
+    } else {
+        doors += 1;
+        const status = el('span', 'share-status');
+        status.setAttribute('role', 'status');
+        actions.appendChild(button(PAYSLIPS_REUSED.copy, 'btn-secondary payslips-copy', () => {
+            fold.open = true;
+            copyTextOut(box, status);
+        }));
+        actions.appendChild(status);
+    }
+    if (doors > 0) node.appendChild(actions);
+    node.appendChild(fold);
+    return node;
+}
+
 payslipsWatch();
+if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') payslipsClosedRedraw();
+    });
+}

@@ -1547,7 +1547,8 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .owes-warnings-head { box-sizing: border-box; min-height: 48px; padding: 12px 14px; border-radius: 12px; background: var(--warn-bg); color: var(--ink); cursor: pointer; font-size: 18px; font-weight: 800; line-height: 1.4; }
 .owes-warnings-count { margin-inline-start: 10px; color: var(--ink); font-size: 16px; font-weight: 600; }
 .owes-warning { margin-top: 8px; padding: 12px 14px; border-inline-start: 4px solid var(--warn); border-radius: 12px; background: var(--warn-bg); color: var(--ink); }
-.owes-warning-quiet { border-inline-start-color: var(--danger); background: var(--danger-bg); }
+.owes-warning-quiet,
+.owes-warning-short { border-inline-start-color: var(--danger); background: var(--danger-bg); }
 .owes-warning-title { display: block; font-size: 18px; font-weight: 800; line-height: 1.4; overflow-wrap: anywhere; }
 .owes-warning-line { margin: 4px 0 0; color: var(--ink); font-size: 16px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
 .owes-show { width: 100%; min-height: 48px; margin-top: 10px; font-size: 17px; white-space: normal; }
@@ -1567,6 +1568,17 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .owes-closure textarea { box-sizing: border-box; width: 100%; min-height: 160px; margin-top: 12px; font-size: 16px; line-height: 1.5; }
 .owes-doors { margin-top: 10px; }
 .owes-doors button { font-size: 16px; }
+/* v198: under a close, each man's own message (payslipsClosedNode, js/ui/payslips.js) and the
+   way to his advances, where a deduction is corrected. The door and its states are the
+   payslips list's own rules; this only lays a man out as one block with his name first. */
+.owes-closure-slips { margin-top: 18px; }
+.owes-closure-slips h3 { margin: 0 0 8px; color: var(--ink); font-size: 20px; font-weight: 800; }
+.owes-closure-slip { display: grid; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--line-soft); }
+.owes-closure-slip:last-child { border-bottom: 0; }
+.owes-closure-slip-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+.payslips-closed { display: grid; gap: 8px; }
+.payslips-closed-text summary { min-height: 44px; padding: 10px 0; color: var(--ink); cursor: pointer; font-size: 17px; font-weight: 600; line-height: 1.4; }
+.owes-closure-fix { width: 100%; min-height: 48px; font-size: 17px; white-space: normal; overflow-wrap: break-word; }
 /* ---- «סגירת שבוע» (js/ui/weeklyclose.js) ---------------------------------------------
    The week closed in one sitting. A man is one row: his name - the first thing, heaviest -
    and one word for what will happen to him, then four figures in a row that goes two by two
@@ -1641,5 +1653,22 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .weekly-close-foot-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .weekly-close-foot-actions button { flex: 1 1 120px; min-height: 52px; font-size: 18px; font-weight: 800; white-space: normal; overflow-wrap: break-word; }
 .weekly-close-foot-actions .weekly-close-go { flex: 2 1 160px; }
+/* «איפוס מקדמות» (js/ui/advancereset.js): the «סגירת שבוע» frame, its own dialog, and the few
+   pieces it adds - the backup line, a three-column summary, the result. */
+#advanceResetModal .modal-content { padding-bottom: 0; }
+#advanceResetModal .modal-content > h3 { margin: 0 0 4px; font-size: 22px; line-height: 1.3; }
+.advance-reset-backup { display: grid; gap: 8px; margin: 0 0 14px; padding: 12px; border-inline-start: 4px solid var(--danger); border-radius: 12px; background: var(--danger-bg); color: var(--ink); }
+.advance-reset-backup-line { margin: 0; color: var(--ink); font-size: 18px; font-weight: 800; line-height: 1.45; overflow-wrap: anywhere; }
+.advance-reset-backup-button { min-height: 48px; font-size: 17px; font-weight: 700; white-space: normal; }
+.advance-reset-row { min-height: 0 !important; padding-bottom: 0 !important; }
+.advance-reset-card .weekly-close-detail { margin-inline: 14px; }
+.advance-reset-periods-head { font-weight: 700; }
+.advance-reset-tr { grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)); }
+.advance-reset-done-line { margin: 0 0 8px; color: var(--ink); font-size: 18px; font-weight: 700; line-height: 1.45; overflow-wrap: anywhere; }
+.advance-reset-done-sub { display: block; margin: 8px 0 0; font-size: 17px; font-weight: 800; }
+.advance-reset-done-row { margin: 4px 0 0; font-size: 17px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.advance-reset-board { margin: 12px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--accent-soft); color: var(--ink); font-size: 18px; font-weight: 800; line-height: 1.45; overflow-wrap: anywhere; }
+.advance-reset-board-owing { background: var(--warn-bg); box-shadow: inset 0 0 0 2px var(--warn); }
+.advance-reset-closures { width: 100%; min-height: 48px; margin: 12px 0 16px; font-size: 17px; font-weight: 700; white-space: normal; }
 
 }

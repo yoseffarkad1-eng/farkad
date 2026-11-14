@@ -17,7 +17,10 @@
 //     new field, never a 'repaid' («העובד החזיר כסף» is cash, and cash for money the sheet
 //     already took off a wage counts the same shekels twice). tests/weeklyclose.test.mjs
 //     holds the record after a pass byte for byte equal to the same men closed one by one
-//     through closeAccountFor.
+//     through closeAccountFor. v198 (the owner, 2026-11-14): a man's periods behind his own
+//     that a debt ran through and that have NO day of work are closed first, oldest first,
+//     with nothing taken, by the same writer in the same commit - and named before the
+//     press; a period WITH a day of work is never closed by the pass (weeklyCloseEarlier).
 //   - EVERY FIGURE IS THE MODEL'S. The wage, what he carried in, what he was handed, what can
 //     come off (planPeriodClosure's own `deducted`), and for an amount typed what is left to
 //     pay and what stays owed - advanceAccount's own two lines (net = gross - off,
@@ -103,6 +106,11 @@ const WEEKLY_CLOSE_TEXT = Object.freeze({
     heldEarlierBehind: dates => `חשבון קודם שלו לא נסגר (${dates}), ותקופה מאוחרת יותר שלו כבר נסגרה. `
         + 'סגירה של החשבון ההוא עלולה לנכות את אותה מקדמה פעמיים - בדוק את עמוד המקדמות שלו לפני שסוגרים אותו.',
     heldOther: 'אי אפשר לסגור אותו כאן. סגור אותו מהחשבון שלו בדוח.',
+    // --- v198: his periods with no day of work, closed first with nothing taken
+    emptyNote: (dates, weekly) => (weekly
+        ? `שבוע בלי ימי עבודה (${dates}) ייסגר קודם, בלי ניכוי.`
+        : `תקופה בלי ימי עבודה (${dates}) תיסגר קודם, בלי ניכוי.`),
+    emptyList: 'ייסגרו קודם, בלי ניכוי - תקופות שלא היו בהן ימי עבודה:',
     // --- the foot
     footDeduct: 'ינוכה',
     next: 'המשך לסיכום',
@@ -133,8 +141,8 @@ const WEEKLY_CLOSE_TEXT = Object.freeze({
 // The words this screen borrows, each beside the screen that owns it. Repeated here because
 // those screens build them inline; tests/weeklyclose.test.mjs finds every one of them in its
 // owner's source, so a word changed there and not here fails by name. PAY_CYCLE_LABELS,
-// OTHER_ACCOUNT_SHOW, NO_DAILY_RATE_NOTE, CLOSURE_CLOCK_BEHIND, ADVANCE_CREDIT_FROM_BEFORE and
-// LEDGER_KIND_LABELS
+// OTHER_ACCOUNT_SHOW, NO_DAILY_RATE_NOTE, CLOSURE_CLOCK_BEHIND, CLOSURE_ORDER_TEXT (v198),
+// ADVANCE_CREDIT_FROM_BEFORE and LEDGER_KIND_LABELS
 // (js/ui/reports.js) and OWES_TEXT.sum (js/ui/owes.js) are read, not repeated.
 const WEEKLY_CLOSE_REUSED = Object.freeze({
     toPay: 'לתשלום',                                          // js/ui/reports.js, the sheet's column
@@ -355,13 +363,26 @@ function weeklyCloseTarget(schedule, worker, today, memo) {
 //
 // His periods are walked the way advancePositionInto walks them (accountsBefore and
 // advanceWalk, each handing the next where he stands), so each period's figures are
-// advanceAccount's own. Answers { from, to, behindClosed, position } or null - `position`
-// is where he stands as `from` opens, which the caller hands to the target's own walk.
+// advanceAccount's own. Answers { earlier, worked, empties, position }: `earlier` the oldest
+// such period ({ from, to, behindClosed }) or null; `worked` whether any such period has a
+// day of work in it; `empties` every such period with NO day of work, oldest first; and
+// `position` where he stands as `from` opens, which the caller hands to the target's own walk.
+//
+// v198, THE OWNER'S ANSWER (2026-11-14): a period of his that a debt ran through and that has
+// NO day of work in it - he took an advance and did not come, or did not come that week - has
+// no wage for anything to come off. Left open, it held him the next week («חשבון קודם שלו לא
+// נסגר») until somebody closed it by hand. Now, when EVERY such period behind his target is
+// one with no day of work, the pass closes them itself, first, oldest first, with nothing
+// taken, in the same write as his target (weeklyCloseMan plans it, weeklyCloseWrite writes
+// it). A period WITH a day of work in it is never closed by the pass: D5 stands - those are
+// closed by hand, oldest first - and while one is open he is held exactly as before.
 function weeklyCloseEarlier(schedule, workerId, from) {
     const periods = accountsBefore(schedule, workerId, from);
     let position = 0;
     let open = null;
     let closedAfter = false;
+    let worked = false;
+    const empties = [];
     for (let n = 0; n < periods.length && n < WEEKLY_CLOSE_WALK_CEILING; n += 1) {
         const period = periods[n];
         const walk = advanceWalk(schedule, workerId, period.from, period.to, position);
@@ -372,17 +393,60 @@ function weeklyCloseEarlier(schedule, workerId, from) {
         }
         const money = walk.carriedIn > 0 || walk.creditIn > 0 || walk.given > 0 || walk.repaid > 0
             || walk.reversed !== 0;
-        if (money && !open) open = { from: period.from, to: period.to };
+        if (!money) continue;
+        if (!open) open = { from: period.from, to: period.to };
+        const row = payrollReport(schedule, period.from, period.to)
+            .filter(item => String(item.workerId) === String(workerId))[0] || null;
+        if (row && row.attendanceDays > 0) worked = true;
+        else empties.push({ from: period.from, to: period.to });
     }
-    return { earlier: open ? Object.assign(open, { behindClosed: closedAfter }) : null, position };
+    return { earlier: open ? Object.assign(open, { behindClosed: closedAfter }) : null, worked, empties, position };
+}
+
+// The record as it will be once his periods with no day of work are closed with nothing
+// taken - a COPY, never the record: the schedule shallow-copied with a ledger map of its own,
+// written by the per-man close's own writer (closePeriodChanges at 0) exactly as the write
+// will write it, oldest first. Answers { schedule, failed } - `failed` the first of them the
+// writer would not close (its plan refused), or null. Nothing here touches the record: the
+// entries the writer appends land in the copy's own map.
+const WEEKLY_CLOSE_PLAN_BY = 'd_weeklyclose_plan';
+function weeklyCloseWithoutEmpties(schedule, workerId, empties, at) {
+    const ledger = (schedule && schedule.ledger) || {};
+    const copy = Object.assign({}, schedule, {
+        ledger: Object.assign({}, ledger, { advances: Object.assign({}, ledger.advances || {}) })
+    });
+    for (const period of empties) {
+        const made = closePeriodChanges(copy, workerId, period.from, period.to, at, WEEKLY_CLOSE_PLAN_BY, 0);
+        if (!weeklyCloseEmptyMade(made)) return { schedule: copy, failed: period };
+    }
+    return { schedule: copy, failed: null };
+}
+
+// What closing a period with no day of work writes, and nothing else: its one frozen
+// payslip, with no wage and nothing taken, and no deduction beside it.
+function weeklyCloseEmptyMade(made) {
+    return Array.isArray(made) && made.length === 1 && made[0] && made[0].value
+        && made[0].value.kind === 'closed' && (Number(made[0].value.gross) || 0) === 0
+        && (Number(made[0].value.deducted) || 0) === 0;
 }
 
 // The planner's reasons, in the order this screen says them.
-const WEEKLY_CLOSE_PLAN_REASONS = ['overpaid', 'overlap', 'clock', 'unpriced', 'deduction'];
+//
+// v198: the planner itself now refuses a close OUT OF ORDER (planPeriodClosure's
+// 'earlierOpen' and 'laterClosed', js/model/ledger.js - the owner's fix (a), 2026-11-14).
+// This screen's own rule above (weeklyCloseEarlier) is the broader one - ANY earlier open
+// period money ran through - so a man the model holds for an earlier period is already held
+// here first, by name. They are listed anyway, so that the two can never disagree in what
+// is said: should the model refuse where this screen's walk did not (its ceiling, or a
+// record that changed between the two questions), 'earlierOpen' is said as this screen's own
+// «חשבון קודם שלו לא נסגר» with the period the MODEL names and v195's button to it, and
+// 'laterClosed' in the per-man box's own sentence (CLOSURE_ORDER_TEXT, js/ui/reports.js) -
+// never «אי אפשר לסגור אותו כאן».
+const WEEKLY_CLOSE_PLAN_REASONS = ['overpaid', 'overlap', 'clock', 'earlierOpen', 'laterClosed', 'unpriced', 'deduction'];
 
 // ONE MAN, READ. Everything his row and his card say, and everything the write will hold
-// him to (`sig`). null when he has no account in his last finished period at all, or it is
-// already closed.
+// him to (`sig`). null when he did not work in his last finished period, or it is already
+// closed.
 function weeklyCloseMan(schedule, worker, today, at, memo) {
     const id = String(worker.id);
     const target = weeklyCloseTarget(schedule, worker, today, memo);
@@ -390,11 +454,17 @@ function weeklyCloseMan(schedule, worker, today, at, memo) {
     if (frozenPeriodFor(schedule, id, period.from, period.to) !== undefined) return null;
     const row = payrollReport(schedule, period.from, period.to)
         .filter(item => String(item.workerId) === id)[0] || null;
+    // ONLY A MAN WHO WORKED IN IT (the owner, 2026-11-14, answers 1 and 9): at least one
+    // day of work in the period. A man with a debt and no day of work - he took an advance
+    // and did not come, or he stopped coming - is not in the pass: there is no wage to
+    // take anything from, and he is on «מי חייב כסף» (js/ui/owes.js), which is where the
+    // owner looks for him. v197 listed him on his money alone and closed his period with
+    // nothing taken. The consequence is said in docs/releases.md (v198): that period stays
+    // open, and since a debt ran through it, a later pass holds him («חשבון קודם שלו לא
+    // נסגר») until it is closed by hand - the D5 rule, unchanged.
+    if (!(row && row.attendanceDays > 0)) return null;
     const back = weeklyCloseEarlier(schedule, id, period.from);
     const account = advanceWalk(schedule, id, period.from, period.to, back.position);
-    const recorded = Boolean(row) && (row.attendanceDays > 0 || row.absent > 0 || Number(row.advances) > 0);
-    const money = account.carriedIn > 0 || account.creditIn > 0 || account.given > 0 || account.repaid > 0;
-    if (!recorded && !money) return null;
     const open = openAdvanceBalance(schedule, id);
     const man = {
         id,
@@ -413,30 +483,51 @@ function weeklyCloseMan(schedule, worker, today, at, memo) {
         balance: agoraRound(account.carriedForward + account.deducted),
         max: 0,
         ledgerLeft: open ? open.total : 0,
+        // v198: his periods behind this one with no day of work, closed first with nothing
+        // taken (weeklyCloseEarlier says why). Named on his card and in the summary.
+        empties: [],
         held: null
     };
+    // The record the target is planned on: the record itself, or - when the pass will close
+    // his periods with no day of work first - a copy with those closed.
+    let planned = schedule;
     if (target.todayHeld) man.held = { kind: 'endsToday' };
-    else if (back.earlier) {
+    else if (back.earlier && back.worked) {
         man.held = { kind: back.earlier.behindClosed ? 'earlierBehind' : 'earlier',
             from: back.earlier.from, to: back.earlier.to };
-    } else {
-        // The per-man box's own question, at the moment the write will ask it.
-        const plan = planPeriodClosure(schedule, id, period.from, period.to, at);
+    } else if (back.earlier) {
+        const without = weeklyCloseWithoutEmpties(schedule, id, back.empties, at);
+        if (without.failed) {
+            // The writer would not close one of them (behind a later close that took a carried
+            // debt, a day typed onto it meanwhile, no rate...): held on it, by name, as before.
+            man.held = { kind: back.earlier.behindClosed ? 'earlierBehind' : 'earlier',
+                from: without.failed.from, to: without.failed.to };
+        } else {
+            man.empties = back.empties.map(span => ({ from: span.from, to: span.to }));
+            planned = without.schedule;
+        }
+    }
+    if (!man.held) {
+        // The per-man box's own question, at the moment the write will ask it - on the record
+        // as it will be when the write reaches him.
+        const plan = planPeriodClosure(planned, id, period.from, period.to, at);
         if (!plan.canClose) {
             const reason = WEEKLY_CLOSE_PLAN_REASONS.filter(one => plan.reasons.indexOf(one) !== -1)[0] || 'other';
-            man.held = { kind: reason };
+            man.held = reason === 'earlierOpen' && plan.earlierOpen
+                ? { kind: 'earlier', from: plan.earlierOpen.from, to: plan.earlierOpen.to }
+                : { kind: reason };
         } else {
             man.max = plan.deducted;
             man.gross = plan.gross;
         }
     }
     man.sig = JSON.stringify([man.name, man.active, man.cycle, man.from, man.to, man.days, man.gross,
-        man.carriedIn, man.creditIn, man.given, man.repaid, man.balance, man.max, man.ledgerLeft, man.held]);
+        man.carriedIn, man.creditIn, man.given, man.repaid, man.balance, man.max, man.ledgerLeft, man.empties, man.held]);
     return man;
 }
 
-// THE WHOLE LIST, at one moment: every man whose last finished period is open and holds
-// anything, grouped by his period - oldest first, weekly before fortnightly - in the
+// THE WHOLE LIST, at one moment: every man whose last finished period is open and who
+// worked in it, grouped by his period - oldest first, weekly before fortnightly - in the
 // roster's order inside a group. `gate` false: the record nobody approved, or this build's
 // writer shut - no figure at all (tests/approval.test.mjs).
 //
@@ -572,6 +663,16 @@ function weeklyCloseWrite(picks) {
         try {
             weeklyCloseOnce(() => {
                 for (const pick of picks) {
+                    // v198: first his periods with no day of work, oldest first, nothing taken -
+                    // each exactly its one frozen payslip, or the whole pass is not written.
+                    for (const span of pick.man.empties || []) {
+                        const empty = closePeriodChanges(State.schedule, pick.man.id, span.from, span.to, at, by, 0);
+                        if (!weeklyCloseEmptyMade(empty)) {
+                            failure = { kind: 'build', id: pick.man.id };
+                            return;
+                        }
+                        empty.forEach(change => built.push(change));
+                    }
                     const made = closePeriodChanges(State.schedule, pick.man.id, pick.man.from, pick.man.to,
                         at, by, pick.x);
                     const artifacts = made.filter(change => change && change.value && change.value.kind === 'closed');
@@ -614,10 +715,12 @@ function weeklyCloseWrite(picks) {
     if (failure || !result.saved) return result;
     // READ BACK, never assumed: a man is closed when his period reads closed under this
     // write's own moment.
-    result.closed = picks.filter(pick => {
-        const artifact = periodArtifactFor(State.schedule, pick.man.id, pick.man.from);
-        return artifact && artifact.at === at && artifact.by === by;
-    }).map(pick => pick.man.id);
+    const mine = (id, from) => {
+        const artifact = periodArtifactFor(State.schedule, id, from);
+        return Boolean(artifact && artifact.at === at && artifact.by === by);
+    };
+    result.closed = picks.filter(pick => mine(pick.man.id, pick.man.from)
+        && (pick.man.empties || []).every(span => mine(pick.man.id, span.from))).map(pick => pick.man.id);
     return result;
 }
 
@@ -883,8 +986,18 @@ function weeklyCloseCard(man) {
     card.appendChild(row);
     if (WEEKLY_CLOSE.moved.indexOf(man.id) !== -1) card.appendChild(el('p', 'hint hint-warn', WEEKLY_CLOSE_TEXT.changedHere));
     if (man.held) { weeklyCloseHeld(card, man); return card; }
+    weeklyCloseEmptyLines(man).forEach(text => card.appendChild(el('p', 'hint weekly-close-empty', text)));
     if (opened) weeklyCloseOpened(card, man, choice);
     return card;
+}
+
+// v198: one sentence per period of his the pass closes first with nothing taken.
+function weeklyCloseEmptyLines(man) {
+    return (man.empties || []).map(span => WEEKLY_CLOSE_TEXT.emptyNote(weeklyCloseDates(span.from, span.to),
+        periodRangeFor(weeklyCloseWorker(man.id), span.from).cycle === 'weekly'));
+}
+function weeklyCloseWorker(id) {
+    return ((State.schedule && State.schedule.workers) || []).filter(worker => worker && String(worker.id) === String(id))[0] || { id };
 }
 
 function weeklyCloseHeldText(man) {
@@ -897,6 +1010,7 @@ function weeklyCloseHeldText(man) {
     case 'overpaid': return WEEKLY_CLOSE_REUSED.overpaid;
     case 'overlap': return WEEKLY_CLOSE_REUSED.overlap;
     case 'clock': return CLOSURE_CLOCK_BEHIND;
+    case 'laterClosed': return CLOSURE_ORDER_TEXT.laterClosed;
     case 'unpriced': return `${NO_DAILY_RATE_NOTE}.`;
     default: return WEEKLY_CLOSE_TEXT.heldOther;
     }
@@ -1086,6 +1200,9 @@ function weeklyCloseDrawSummary(body) {
         men.forEach(man => box.appendChild(el('p', null, line(man))));
         body.appendChild(box);
     };
+    // v198: the periods with no day of work each man's close takes with it, BY NAME.
+    named('weekly-close-named-empty', WEEKLY_CLOSE_TEXT.emptyList, closing.map(pick => pick.man).filter(man => (man.empties || []).length > 0),
+        man => `${isolate(man.name)} · ${man.empties.map(span => weeklyCloseDates(span.from, span.to)).join(', ')}`);
     named('weekly-close-named-zero', WEEKLY_CLOSE_TEXT.zeroList, zero,
         man => `${isolate(man.name)} · ${WEEKLY_CLOSE_TEXT.remain} ${weeklyCloseMoney(man.balance)}`);
     named('weekly-close-named-skipped', WEEKLY_CLOSE_TEXT.skippedList, skipped,

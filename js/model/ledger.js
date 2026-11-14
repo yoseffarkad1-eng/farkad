@@ -866,7 +866,12 @@ function closureFacts(schedule, workerId, from, to, carriedIn, deduction) {
         ? workerDaysReport(schedule, worker, from, to).map(day => ({
             date: String(day.date),
             amount: Number(day.amount) || 0,
-            absent: Boolean(day.absent),
+            // ONLY WHEN HE WAS ABSENT. `"absent":false` was sixteen bytes on every day of
+            // every payslip, for ever, saying what a missing key says: every reader of a
+            // frozen day since v101 reads it as Boolean(day.absent) (workerDaysReport,
+            // js/model/money.js), and so does every build on the phones. A day he was
+            // absent still says so. tests/closuresize.test.mjs.
+            absent: day.absent ? true : undefined,
             entries: (day.entries || []).map(one => {
                 // ONLY WHAT IS THERE, the way workerDaysReport reads it back. This wrote
                 // `rate: undefined` and `hours: undefined` as OWN keys on every ordinary
@@ -937,6 +942,28 @@ function recordPeriodClosed(schedule, advanceId, workerId, from, to, amount, at,
     // route carries them. A caller that has already walked the account passes its own
     // walk in rather than making this repeat it.
     const held = facts || closureFacts(schedule, workerId, from, to, undefined);
+    // THE PAYSLIP ONCE, ON THE PERIOD'S OWN RECORD - not again on every deduction.
+    //
+    // Up to v195 each deduction carried the whole frozen payslip a second (and third)
+    // time: the basis and the day list, about 1.2 KB a fortnight, once per advance the close
+    // touched - in the one document three phones share, whose limit is 1 MiB, for ever
+    // (tests/closuresize.test.mjs). Every reader of a closed period asks closedPeriods,
+    // which takes the basis and the days from the first entry of the period that carries
+    // them; the period's record (recordPeriodArtifact) is written in the same commit with
+    // both, and v195 - the build on the phones - reads them from there exactly as this one
+    // does (tests/closuresize.test.mjs S3, on its own bytes). So a deduction
+    // keeps its money and the payslip's money figures - the judge (closureProblems) reads
+    // its wage off the deduction itself - and not the evidence a second time.
+    //
+    // A deduction ALREADY written with the copies keeps them (iron law 1) and reads exactly
+    // as it did.
+    //
+    // ONLY WHERE THE PERIOD'S RECORD IS THERE WITH THEM. closePeriodChanges writes it first,
+    // in the same commit; a deduction written by any other route, with no record of its
+    // period beside it, still carries the evidence itself.
+    const artifact = periodArtifactFor(schedule, workerId, from);
+    const evidenceThere = Boolean(artifact) && Array.isArray(artifact.days)
+        && isPlainObject(artifact.basis);
     return appendLedgerEntry(schedule, Object.assign({}, held && {
         gross: held.gross,
         carriedIn: held.carriedIn,
@@ -945,8 +972,8 @@ function recordPeriodClosed(schedule, advanceId, workerId, from, to, amount, at,
         repaid: held.repaid,
         reversed: held.reversed,
         net: held.net,
-        basis: held.basis,
-        days: held.days
+        basis: evidenceThere ? undefined : held.basis,
+        days: evidenceThere ? undefined : held.days
     }, {
         id: closureId(advanceId, from),
         advanceId: String(advanceId),
@@ -1085,8 +1112,49 @@ function overlappingClosures(schedule, workerId, from, to) {
     }).sort();
 }
 
+// WHERE THIS CLOSE STANDS AMONG HIS OTHER PERIODS: the oldest earlier period of his that
+// money ran through and nobody closed, and whether a LATER period of his is already closed
+// with a deduction recorded on it. Walked once, the way advancePositionInto walks (each
+// period handing the next where he stands), so `position` is that function's own figure.
+//
+// "Money ran through it": he came into it owing or in credit, or something was handed
+// over, handed back or corrected in it. Those are the periods the walk presumes a
+// deduction in when nobody closed them; a period with none of that cannot have anything
+// taken twice through it.
+function closureMoneyRan(walk) {
+    return walk.carriedIn > 0 || walk.creditIn > 0 || walk.given > 0 || walk.repaid > 0
+        || walk.reversed !== 0;
+}
+function closureOrderFacts(schedule, workerId, from, to) {
+    let position = 0;
+    let earlierOpen = null;
+    accountsBefore(schedule, workerId, from).forEach(period => {
+        const walk = advanceWalk(schedule, workerId, period.from, period.to, position);
+        position = walk.position;
+        // Only one that HANDED A DEBT ON: the walk presumed less came off its wage than he
+        // owed, and the rest was carried into the periods after it. That carried figure is
+        // what a later close takes, and what this one can take again once a day is typed
+        // into it. One that presumed the whole debt taken hands on nothing to take twice.
+        if (earlierOpen || walk.closed || !closureMoneyRan(walk) || !(walk.carriedForward > 0)) return;
+        // Settled by a closure over the same days on another grid (a cycle that changed):
+        // not open, whatever its key.
+        if (overlappingClosures(schedule, workerId, period.from, period.to).length > 0) return;
+        earlierOpen = { from: period.from, to: period.to };
+    });
+    // A later close that took money AND opened on what came before it: its opening figure
+    // is a presumption about the periods behind it. One that opened owing nothing and in
+    // no credit took only money handed over inside itself, which no close behind it can
+    // take again.
+    const closed = closedPeriods(schedule, workerId) || {};
+    const laterClosed = Object.keys(closed).some(key => String(key) > String(to)
+        && (Number(closed[key].deducted) || 0) > 0
+        && ((Number(closed[key].carriedIn) || 0) > 0 || (Number(closed[key].creditIn) || 0) > 0));
+    return { position: agoraRound(position), earlierOpen, laterClosed };
+}
+
 function planPeriodClosure(schedule, workerId, from, to, at, deduction) {
-    const walk = advanceAccount(schedule, workerId, from, to, deduction);
+    const order = closureOrderFacts(schedule, workerId, from, to);
+    const walk = advanceAccount(schedule, workerId, from, to, deduction, order.position);
     const reasons = [];
     if (walk.invalidDeduction) reasons.push('deduction');
     if (walk.closed) reasons.push('closed');
@@ -1095,6 +1163,37 @@ function planPeriodClosure(schedule, workerId, from, to, at, deduction) {
     const overlaps = overlappingClosures(schedule, workerId, from, to)
         .filter(key => key !== String(from));
     if (overlaps.length > 0) reasons.push('overlap');
+    // OLDEST FIRST, AND NEVER BEHIND A CLOSE THAT TOOK MONEY.
+    //
+    // An open period is read by the walk as if the full possible deduction had come off
+    // its wage, and a later close is computed from that presumption. Measured on v195
+    // (tests/closeorder.test.mjs O1): one day and 2,000 handed over in P1, P1 left open,
+    // P2 closed by hand at the sheet's 1,390; then a forgotten day typed into P1 and P1
+    // closed as the box offered - 1,220. 2,610 recorded as deducted against 2,000, the
+    // extra read as his credit: 610 taken off two wages, and nothing anywhere refusing it.
+    //
+    // So a NEW close is refused, and named, when
+    //   - it opens owing, and an earlier period of his that handed a debt on is still open
+    //     (close that one first - oldest to newest, the owner's own order), or
+    //   - money runs through it, and a later period of his is already closed with a
+    //     deduction recorded on a balance carried into it (that close was computed from a
+    //     presumption about this one; what is right here is for a person to decide,
+    //     looking at his advances).
+    // A period no money ran through moves nothing whatever order it is closed in, and is
+    // never refused for this.
+    //
+    // ONLY THE PLANNER ASKS THIS. closureProblems - the judge of closures already on the
+    // record, here and arriving from other phones - does not: a closure written out of
+    // order by an earlier build is a record, it is never rewritten or condemned (iron law
+    // 1), and it reads exactly as it did (tests/closeorder.test.mjs O4).
+    // Narrowed to the case that can take money twice: THIS period opens owing, on what an
+    // open one behind it handed on, so what it would take rests on a presumption about
+    // that one. A period that opens owing nothing takes only money handed over inside
+    // itself.
+    if (!walk.closed && order.earlierOpen && walk.carriedIn > 0) {
+        reasons.push('earlierOpen');
+    }
+    if (!walk.closed && closureMoneyRan(walk) && order.laterClosed) reasons.push('laterClosed');
     if (walk.review) reasons.push('overpaid');
     if (walk.gross === null) reasons.push('unpriced');
 
@@ -1176,6 +1275,8 @@ function planPeriodClosure(schedule, workerId, from, to, at, deduction) {
         chosenDeduction: deduction,
         carriedForward: walk.carriedForward, rows, reasons,
         alreadyClosed: Boolean(periodArtifactFor(schedule, workerId, from)),
+        // The period to close first, for the screen to name and point at.
+        earlierOpen: reasons.indexOf('earlierOpen') !== -1 ? order.earlierOpen : null,
         canClose: reasons.length === 0 };
 }
 
@@ -1819,14 +1920,87 @@ function ledgerPathSupersededBy(path, mine, theirs) {
     return sameLedgerFact(mine, theirs);
 }
 
+// ONE PERIOD, CLOSED ONCE - BY WHOEVER LANDED FIRST.
+//
+// A close is several entries with ids derived from what they close: the period's record
+// `le_period_<man>_<from>` and one `le_close_<advance>_<from>` per advance it took money
+// from. Two phones closing the same period with the SAME numbers write the same facts
+// under the same ids and settle as one (sameLedgerFact). With DIFFERENT numbers - one took
+// 900, the other 0, pressed in the same second before either had heard the other - the
+// server's compare-and-set keeps the first and refuses the second, and the period is
+// closed, once, exactly as the first phone closed it. Measured on v195
+// (tests/closerace.test.mjs): the phone that lost then held its own close as a dispute
+// about money - status 'error', a record held aside, a write queued for ever, every write
+// blocked until a person exported a backup - over a period nobody disagreed was closed.
+//
+// So a close of THIS phone's that meets a different close of the same man and the same
+// period already in the server's document has lost the race, WHOLE: the period's record
+// and every deduction of it, including one the server has no entry for under its id (the
+// winner took nothing from that advance) - mixing the winner's payslip with a part of the
+// loser's money is the one outcome worse than either. The caller puts the losing bytes
+// aside on this phone, says so once, and neither sends nor keeps them in the record.
+//
+// ASKED ONLY OF A DOCUMENT THAT SPEAKS THE PROTOCOL (an integer revision): there the
+// server is the arbiter and a close in its document is the one that landed first. A legacy
+// document merges field paths with no order, and nothing here decides anything for it.
+// A group is read off the document as it ARRIVED - `groups` is computed once, before
+// anything of this phone's is merged into it - so this phone's own close can never be
+// "already there" by its own hand.
+function closureGroupKey(entry, doc) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    const kind = String(entry.kind);
+    if (kind !== 'closed' && kind !== 'deducted') return null;
+    if (!entry.periodFrom) return null;
+    let who = entry.workerId;
+    if ((who === undefined || who === null) && doc && isPlainObject(doc.advances)
+        && ownsKey(doc.advances, String(entry.advanceId))) {
+        who = (doc.advances[String(entry.advanceId)] || {}).workerId;
+    }
+    if (who === undefined || who === null || who === '') return null;
+    return `${String(who)}|${String(entry.periodFrom)}`;
+}
+// `ordered` is the caller's word that `doc` arrived from a document that speaks the
+// protocol, for a copy whose envelope has already been taken off (the snapshot's
+// adoption reads `raw.revision` and hands over the normalised schedule).
+function closureGroupsOf(doc, ordered) {
+    const out = new Set();
+    if (!doc || (!ordered && !Number.isInteger(doc.revision))) return out;
+    const held = doc.ledger && doc.ledger.advances;
+    if (!isPlainObject(held)) return out;
+    Object.keys(held).forEach(id => {
+        const key = closureGroupKey(held[id], doc);
+        if (key) out.add(key);
+    });
+    return out;
+}
+// `path` and `mine` are one entry of this phone's; `doc` the server's document as it
+// arrived (or `groups`, its closure groups, already read off it).
+function closureLostTo(path, mine, doc, groups) {
+    const parts = String(path).split('.');
+    if (parts.length !== 3 || parts[0] !== 'ledger' || parts[1] !== 'advances') return false;
+    if (!doc || (!groups && !Number.isInteger(doc.revision))) return false;
+    const key = closureGroupKey(mine, doc);
+    if (!key) return false;
+    const held = (doc.ledger && isPlainObject(doc.ledger.advances)) ? doc.ledger.advances : {};
+    if (ownsKey(held, parts[2]) && sameLedgerFact(mine, held[parts[2]])) return false;
+    return (groups || closureGroupsOf(doc)).has(key);
+}
+
 // `conflicts`, when given, collects every id whose two sides disagree. The caller reports
 // them and holds; this function never resolves one, because there is no honest rule that
 // could.
-function mergeLedgerInto(target, source, conflicts) {
+//
+// `lost`, when given (the snapshot's adoption, js/sync/receive.js, and nowhere else, and
+// only for a snapshot of a document that speaks the protocol), collects this phone's
+// closes that lost the race to one already in `target` - see closureLostTo - instead of
+// carrying them into it or calling them a conflict.
+function mergeLedgerInto(target, source, conflicts, lost) {
     if (!target || !source) return target;
     const mine = (source && source.ledger) || {};
     if (!mine || typeof mine !== 'object' || Array.isArray(mine)) return target;
 
+    // Read off the arriving document BEFORE anything of this phone's is put into it.
+    const arrivedClosed = lost ? closureGroupsOf(target, true) : null;
     target.ledger = target.ledger || { advances: {} };
 
     // EVERY PART OF THE CONTAINER, not the one map this used to copy.
@@ -1848,6 +2022,13 @@ function mergeLedgerInto(target, source, conflicts) {
                 target.ledger[key] = {};
             }
             Object.keys(held).forEach(id => {
+                // A CLOSE OF THIS PHONE'S THAT LOST THE RACE, whole: not carried, not a
+                // conflict - handed back to the caller. See closureLostTo.
+                if (lost && key === 'advances' && arrivedClosed.size > 0
+                    && closureLostTo(`ledger.advances.${id}`, held[id], target, arrivedClosed)) {
+                    lost.push({ id: String(id), entry: held[id] });
+                    return;
+                }
                 if (!ownsKey(target.ledger[key], id)) {
                     putKey(target.ledger[key], id, held[id]);
                     return;

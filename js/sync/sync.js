@@ -36,6 +36,9 @@ const OUTBOX_KEY = 'farkad:outbox';
 // that dies with the tab. One key per operation means no two windows ever write the same
 // one, which is the only kind of write this store makes safely.
 const HOLD_PREFIX = 'farkad:hold:';
+// A close of this phone's that lost the race to another phone's close of the same period,
+// kept aside here and nowhere else. See settleLostClosures.
+const CLOSURE_ASIDE_PREFIX = 'farkad:closureAside:';
 
 // A PERSON'S ANSWER TO ONE HELD OPERATION, written before the send it authorises. Its own
 // key, one per operation, so no two windows write the same bytes and a crash cannot leave
@@ -2897,6 +2900,59 @@ const FarkadSync = {
             else if (record && record.path) rows.push(record);
         });
         return rows;
+    },
+
+    // A CLOSE OF THIS PHONE'S THAT LOST THE RACE (closureLostTo, js/model/ledger.js): the
+    // server holds the same man's same period closed by another phone, which landed first.
+    // `lost` is [{ id, entry }], every ledger entry of the losing close.
+    //
+    // Its operations are RETIRED - the mechanism that already exists for "this operation
+    // lost and must never be current again" (answerHold, collectQueueGarbage): one verified
+    // key each, read off the disk by every projection, so it is neither sent nor laid back
+    // over the record by a replay, and the collector takes it. A hold or held-aside mark it
+    // had collected goes with it. Its bytes are put aside on this phone, one key per period
+    // (farkad:closureAside:<man>_<from>), never the record, the outbox or the cloud - the
+    // person decided an amount here, and what it was is kept. And the person is told, once
+    // per period.
+    //
+    // Answers whether every operation could be retired. One that could not stays exactly
+    // as it was, and the caller treats the close as it always did: held, for a person.
+    settleLostClosures(lost) {
+        this.loadOutbox();
+        const paths = new Set((lost || []).map(item => `ledger.advances.${item.id}`));
+        if (paths.size === 0) return true;
+        let whole = true;
+        this.physicalOperations().forEach(op => {
+            if (op.retired || !paths.has(String(op.path))) return;
+            const key = outboxBeatKey(op.slot, op.opId);
+            if (Store.durableGet(key) !== ACK_VALUE && !Store.setVerified(key, ACK_VALUE)) {
+                Store.forget(key);
+                whole = false;
+                return;
+            }
+            Store.forget(outboxHoldKey(op.slot, op.opId));
+            Store.remove(outboxHoldKey(op.slot, op.opId));
+            Store.remove(HOLD_PREFIX + op.opId);
+            this._heldNow.delete(String(op.path));
+            this._heldLocalNow.delete(String(op.opId));
+        });
+        const told = [];
+        const byPeriod = {};
+        lost.forEach(item => {
+            const key = closureGroupKey(item.entry, State.schedule);
+            if (!key) return;
+            (byPeriod[key] = byPeriod[key] || {})[item.id] = item.entry;
+        });
+        Object.keys(byPeriod).forEach(key => {
+            const aside = CLOSURE_ASIDE_PREFIX + key.replace('|', '_');
+            if (Store.durableGet(aside) !== null) return;
+            Store.set(aside, JSON.stringify({ at: new Date().toISOString(), entries: byPeriod[key] }));
+            told.push(key);
+        });
+        if (told.length > 0 && typeof closureLostTell === 'function') {
+            try { closureLostTell(told); } catch (error) { /* the telling is never the record */ }
+        }
+        return whole;
     },
 
     holdAnswer(opId) {

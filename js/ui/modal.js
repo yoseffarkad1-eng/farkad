@@ -32,6 +32,8 @@ const MODAL_CLOSERS = {
     // «סגירת שבוע» (js/ui/weeklyclose.js): nothing is written until its last button, so
     // closing forgets the choices - and it does not close while the write is on its way.
     weeklyCloseModal: () => closeWeeklyClose(),
+    // «איפוס מקדמות» (js/ui/advancereset.js): the same, and the same refusal while it writes.
+    advanceResetModal: () => closeAdvanceReset(),
     // The summary of the day's rides (v179, js/ui/transport.js).
     transportSummaryModal: () => closeTransportSummary(),
     // The day's check (js/ui/daycheck.js). Nothing to clear behind it: it holds no state.

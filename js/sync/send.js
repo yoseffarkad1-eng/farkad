@@ -355,7 +355,16 @@ Object.assign(FarkadSync, {
         clearTimeout(this._retryTimer);
         this._retryTimer = null;
 
-        if (this.pendingCount() === 0 && !this._stamp) return Promise.resolve();
+        // NOTHING OWED, AND THE LINE STILL SAYING SOMETHING IS ON ITS WAY. The ladder was
+        // the only reason it said so (honestStatusFor: "work the ladder is still going back
+        // for"), and the queue emptied under it without a send - a close that lost the race
+        // to another phone's close of the same period, retired rather than sent
+        // (settleLostClosures, js/sync/sync.js; tests/closerace.test.mjs R4). The line is
+        // asked again, through the one door that decides what may be said.
+        if (this.pendingCount() === 0 && !this._stamp) {
+            if (this.status === 'sending') this.setStatus('synced');
+            return Promise.resolve();
+        }
         // One send at a time, and no clock anywhere near this decision.
         //
         // The time bound that used to be here was the whole of G16.1. A send that had
@@ -489,15 +498,27 @@ Object.assign(FarkadSync, {
         // change in the money. Any difference in a FINANCIAL field is not the same fact,
         // is not settled here, and falls through to the hold exactly as before.
         const settledHere = new Map();
+        // AND A CLOSE THAT LOST THE RACE, whole (closureLostTo, js/model/ledger.js): the
+        // server holds the same period closed by another phone. Retired, not sent - and not
+        // held either, held or not: the period is closed, once, and nobody is asked to
+        // choose between two closes of it. See settleLostClosures.
+        const lostHere = [];
         if (this._baseDoc && typeof ledgerPathSupersededBy === 'function') {
+            const groups = typeof closureGroupsOf === 'function' ? closureGroupsOf(this._baseDoc) : null;
             this._outbox.forEach((item, path) => {
-                if (item.sent || item.held || this._heldNow.has(String(path))) return;
+                if (item.sent) return;
+                if (groups && groups.size > 0 && closureLostTo(path, item.value, this._baseDoc, groups)) {
+                    lostHere.push({ id: String(path).split('.')[2], entry: item.value });
+                    return;
+                }
+                if (item.held || this._heldNow.has(String(path))) return;
                 if (ledgerPathSupersededBy(path, item.value,
                     readPath(this._baseDoc, path))) {
                     settledHere.set(String(path), { opId: item.opId, seq: item.seq });
                 }
             });
         }
+        if (lostHere.length > 0) this.settleLostClosures(lostHere);
         if (settledHere.size > 0) this.acknowledge(settledHere);
 
         // A COUNT'S EARLIER ATTEMPT, sent again under its own name (v166). Decided before
@@ -874,6 +895,22 @@ Object.assign(FarkadSync, {
                     // base it cannot read, the write is held, and the person is told. An
                     // adapter that does not carry the document costs a delay; one that
                     // lets a stale listener decide costs somebody's correction.
+                    // A CLOSE THAT LOST THE RACE, first and whole - its period's record AND
+                    // every deduction of it, including one the server has no entry for under
+                    // its id, which contestedPaths would call uncontested and rebase on top
+                    // of the winner's payslip. Taken out of this write and retired; see
+                    // settleLostClosures and closureLostTo.
+                    const lostGroups = (error.document && typeof closureGroupsOf === 'function')
+                        ? closureGroupsOf(error.document) : null;
+                    const lostPaths = lostGroups && lostGroups.size > 0
+                        ? Object.keys(patch).filter(path => ENVELOPE_FIELDS.indexOf(path) === -1
+                            && closureLostTo(path, patch[path], error.document, lostGroups))
+                        : [];
+                    if (lostPaths.length > 0) {
+                        this.settleLostClosures(lostPaths.map(path => ({
+                            id: String(path).split('.')[2], entry: patch[path] })));
+                        lostPaths.forEach(path => { delete patch[path]; });
+                    }
                     const contested = this.contestedPaths(patch, error.document);
 
                     // ALREADY DONE, BY SOMEBODY ELSE'S HAND.
@@ -909,7 +946,7 @@ Object.assign(FarkadSync, {
                     // collected exactly as if it had landed - which is the truth: every
                     // fact it carried is on the server. Sending it again would replace the
                     // first writer's name with this one's.
-                    if (live.length === 0 && settled.length > 0
+                    if (live.length === 0 && (settled.length > 0 || lostPaths.length > 0)
                         && Object.keys(patch).every(key =>
                             ENVELOPE_FIELDS.indexOf(key) !== -1)) {
                         if (Number.isInteger(error.revision)) this._revision = error.revision;

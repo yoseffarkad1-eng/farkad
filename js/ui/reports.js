@@ -2747,6 +2747,27 @@ function renderPeriodClosure(worker) {
         box.appendChild(el('p', 'hint hint-warn', CLOSURE_CLOCK_BEHIND));
         return box;
     }
+    // OLDEST FIRST (planPeriodClosure, js/model/ledger.js): a period of his that money ran
+    // through is still open behind this one. Said, with the button that only NAVIGATES to
+    // it - v189's words, v195's way there - and no field.
+    if (plan.reasons.indexOf('earlierOpen') !== -1 && plan.earlierOpen) {
+        box.appendChild(el('p', 'hint hint-warn', CLOSURE_ORDER_TEXT.earlierOpen));
+        const span = { from: plan.earlierOpen.from, to: plan.earlierOpen.to };
+        const short = dateRange(formatShortDate(parseLocalDate(span.from)),
+            formatShortDate(parseLocalDate(span.to)));
+        box.appendChild(button(`${OTHER_ACCOUNT_SHOW} ${short}`, 'btn-secondary', () => {
+            if (typeof closeWorkerDays === 'function') closeWorkerDays();
+            if (typeof owesShowAccount === 'function') owesShowAccount(worker.id, span);
+            else showOtherAccount(span);
+        }));
+        return box;
+    }
+    // AND NEVER BEHIND A CLOSE THAT TOOK MONEY: that close was computed from a presumption
+    // about this period, so closing it now can take the same advance twice.
+    if (plan.reasons.indexOf('laterClosed') !== -1) {
+        box.appendChild(el('p', 'hint hint-warn', CLOSURE_ORDER_TEXT.laterClosed));
+        return box;
+    }
     if (!plan.canClose) return null;
 
     const label = el('label', 'field-label', 'כמה לקזז מהשכר הפעם?');
@@ -3537,6 +3558,25 @@ function deductionColumnName(rows = payrollRows()) {
 // in the dialog when the clock went behind between drawing the screen and pressing.
 // It names what would happen rather than the mechanism - a person holding a phone does
 // not care which timestamp lost, they care that a payment would move fortnight.
+// A close made on this phone that lost the race to the same period closed on another phone
+// in the same moments (settleLostClosures, js/sync/sync.js). The other phone's close
+// landed first and is the record; this phone's is kept aside on this phone only. Said
+// once per period. PROPOSED words, pinned in tests/closerace.test.mjs.
+const CLOSURE_LOST_TEXT = 'החשבון הזה כבר נסגר בטלפון אחר, באותו זמן. נשמרה הסגירה שהגיעה ראשונה, '
+    + 'והסגירה מהטלפון הזה לא נרשמה. בדוק את הסכומים בחשבון שלו.';
+function closureLostTell() {
+    if (typeof askTell === 'function') askTell(CLOSURE_LOST_TEXT);
+    if (typeof render === 'function') render();
+}
+
+// Why a close is refused for its ORDER (planPeriodClosure's `earlierOpen` and
+// `laterClosed`). PROPOSED words, pinned in tests/closeorder.test.mjs.
+const CLOSURE_ORDER_TEXT = Object.freeze({
+    earlierOpen: 'חשבון קודם של העובד הזה עדיין פתוח. סוגרים מהישן לחדש: סגור קודם את החשבון ההוא.',
+    laterClosed: 'תקופה מאוחרת יותר של העובד הזה כבר נסגרה עם ניכוי, והחשבון הזה עדיין פתוח. '
+        + 'סגירה שלו עכשיו עלולה לנכות את אותה מקדמה פעמיים - לכן היא חסומה. בדוק את עמוד המקדמות שלו.'
+});
+
 const CLOSURE_CLOCK_BEHIND = 'השעון של הטלפון הזה מפגר אחרי תנועה שכבר רשומה בחשבון. '
     + 'סגירה מהטלפון הזה תעביר את התנועה הזאת לתקופה הבאה - לכן היא חסומה עכשיו. '
     + 'נסה שוב בעוד כמה דקות, או סגור מטלפון אחר.';

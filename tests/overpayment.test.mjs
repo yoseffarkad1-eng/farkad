@@ -800,8 +800,26 @@ const closeIt = phone => phone.State.commitMany(phone.call('closePeriodChanges',
         give(record, 'a_1', '2026-08-10', 1000, '2026-08-10T09:00:00.000Z');
         app.closePeriodChanges(record, 'w_d', ...P1, '2026-08-20T18:00:00.000Z', 'd');
     });
-    same('an ordinary account closed by the two builds is the same bytes, entry for entry',
-        clone(plainNew.ledger.advances), clone(plainOld.ledger.advances));
+    // MOVED ON PURPOSE (problem (c), tests/closuresize.test.mjs): from this build a
+    // deduction no longer repeats the payslip's basis and day list (the period's record
+    // carries them, once), and a frozen day leaves `"absent":false` out. Those two and
+    // nothing else: every other byte of every entry is v179's. (So two phones on the two
+    // builds closing one account write two bodies under one id - the rollout rule, as at
+    // v180: every phone updated before the next account is closed.)
+    const asNow = entries => {
+        const out = clone(entries);
+        Object.values(out).forEach(entry => {
+            if (entry.kind === 'deducted' && out[`le_period_${entry.workerId}_${String(entry.periodFrom).replace(/-/g, '')}`]) {
+                delete entry.basis; delete entry.days;
+            }
+            (entry.days || []).forEach(day => { if (day.absent === false) delete day.absent; });
+        });
+        return out;
+    };
+    same('an ordinary account closed by the two builds is the same bytes, entry for entry - but for those two',
+        clone(plainNew.ledger.advances), asNow(plainOld.ledger.advances));
+    check('and the two differ there, so the comparison above is not vacuous',
+        JSON.stringify(clone(plainNew.ledger.advances)) !== JSON.stringify(clone(plainOld.ledger.advances)));
 }
 
 report();
