@@ -774,7 +774,12 @@ const approve = device => {
     device.ctx.carryReportingEnabled = schedule => { asked += 1; return gate(schedule); };
     device.facts('2026-11');
     device.ctx.carryReportingEnabled = gate;
-    same('the gate is asked once for both months of a reading', asked, 1);
+    // MOVED ON PURPOSE (v196, the pay sheet's one reading - reportReadOnce, js/ui/reports.js):
+    // this said the gate's function is asked once. This record CARRIES the approval (above),
+    // and on such a record the gate's answer is true whatever the plan says (reportGateAnswer,
+    // the rule owesGateAnswer reads; held equal to the gate in every state by
+    // tests/reports.speed.test.mjs) - so the function, and the plan behind it, is not asked.
+    same('the gate is asked at most once for both months of a reading - not at all on this approved record', asked, 0);
 }
 
 // ---------------------------------------------------------------- 4. it writes nothing

@@ -122,7 +122,11 @@ function payslipsScope(read) {
         return answer;
     };
     try {
-        return read();
+        // And the reading is the pay sheet's own one reading (reportReadOnce, js/ui/reports.js,
+        // v196): on a record that carries the approval the gate is answered without planning
+        // the migration at all, and each range's sheet and each man's closed periods are
+        // worked out once for the whole of it.
+        return typeof reportReadOnce === 'function' ? reportReadOnce(read) : read();
     } finally {
         carryReportingEnabled = ask;
         REPORT_RANGE.from = held.from;
@@ -193,6 +197,8 @@ function payslipsPeriodKey(period) {
 //   periods  the distinct periods the men of this record are in, each with how many of
 //            the listed men it holds - the dates said before the first tap
 function payslipsFacts(which) {
+    // One reading for the whole of it - the pay sheet's (reportReadOnce, js/ui/reports.js).
+    if (typeof reportReadOnce === 'function' && !reportReading()) return reportReadOnce(payslipsFacts, this, arguments);
     const mode = which === 'previous' ? 'previous' : 'current';
     const today = todayStr();
     const workers = ((State.schedule && State.schedule.workers) || [])

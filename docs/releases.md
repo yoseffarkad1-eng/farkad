@@ -1,4 +1,141 @@
-## v195 — «מי חייב כסף», «שים לב» and «סגירות שנרשמו»: readings of the advances that write nothing (candidate, not served)
+## v196 — «דוחות» asks the carry gate once a draw: the pay sheet's one reading (candidate, not served)
+
+**Not served until the merge and the Pages deployment are recorded here by the next release.** The release commit moves the three stamps to v196 and adds one «מה חדש» item («דוחות נפתחים מהר יותר», go: 'payReport', proposed). One test instrument repaired in the same commit: `tests/removepace.browser.mjs` skipped Saturdays when it seeded its season, today included, so on a Saturday (the v196 gate ran on Saturday 2026-11-14) nobody stood on the site under the finger and the suite failed on every check after its seed; the app was not involved, and main would have failed the same way that day. The day the phone stands on is now always seeded. v194's removals were tried by the owner on his own phone on 2026-11-13 and he wrote that they work, with no jump that bothers him - the first repair of this run confirmed on a real phone. The note below was written on the branch, before the stamps moved:
+
+**WRITTEN BEFORE THE STAMPS MOVED.** Branch `reports-speed` on `b48ac44` (origin/main,
+v195's tree). The three build stamps still say v195, on purpose: the release that serves this
+moves them, adds its «מה חדש» item if it wants one, and writes this heading over. Until then
+`tests/build.test.mjs` / `gate-integrity` are expected to fail on the unmoved stamps alone.
+The app's files: `js/ui/reports.js` (one section and one line at the head of seven functions),
+`js/ui/workercard.js`, `js/ui/payslips.js`, `js/ui/monthsummary.js` (their readings are the
+same reading). No new script, so `index.html` and `sw.js` are untouched. Nothing in `js/model`,
+`js/sync`, `js/state.js`, `js/store.js`, `js/recovery.js`, `firestore.rules` or `functions`; no
+key, field path, writer or Hebrew string added; NO FIGURE MOVES (below, measured).
+
+**Why.** v195 said it and left it: «דוחות» ← «לפי עובד» asked the carry gate 16-18 times a draw
+in Node and 27 in Chromium, and each question re-plans the migration (`carryReportingEnabled`
+-> `carryMigrationSettled` -> `planCarryMigration` -> `planAdvanceCarry`), which walks a man
+with a debt and no daily rate through 4,000 fortnights of whole-crew pay sheets. Every reader
+asks for itself (`payrollRows`, `moneyNoteParts` per man, `financeLineText`,
+`workerAccountFor`, the closing button, `financialWritingEnabled` on the advances page), which
+is right - no reader may get ahead of an approval - and was the whole cost.
+
+**What changed.** Each way into `js/ui/reports.js` that reads money - `renderReports`,
+`renderAdvances`, `reportSheets` (the workbook), `openWorkerDays`, `openWorkerSettlement`,
+`workerStatementText`, `shareWorkerStatement` - and `workerCardFacts`, `payslipsFacts`,
+`monthSummaryFacts` (and the three scopes under them) run inside ONE reading,
+`reportReadOnce`: for its length
+- the gate is answered once, by `reportGateAnswer` - v195's `owesGateAnswer` rule, read from
+  the gate's own parts: the carry flag shut is false, a record that CARRIES the approval is
+  true whatever the plan says (the approval reads only the plan's constant id), and only any
+  other record is planned, by the gate's own function;
+- `payrollReport` is worked out once per range and `closedPeriods` once per man (the two
+  readers `owesOnce` already shares, and for its reason: inside one synchronous step the
+  record cannot change, and what they hand back is only read);
+- another schedule always goes to the real functions; the real functions are put back in a
+  finally; a reading opened inside a reading of the same record is that reading.
+The one answer kept BETWEEN draws is the gate's on a record that has to be planned (nobody
+approved it, or no financial button was ever pressed on it), under `reportGateKey`: the write
+tick, today, the build's flags and the whole record as text, compared and never hashed -
+`owesKey`'s rule.
+
+### Before and after
+
+Node 22 on the build machine, the suites' devices; a crew of 15 over 26 weeks, half weekly, two
+advances each (180 kB); "questions" are calls of `carryMigrationSettled`; "approved" carries the
+approval; "nothing approved" needs no migration and carries no approval (the gate has to plan);
+"the debtor" adds one man with 1,000 owed and no daily rate. A moved draw = the record changed
+in memory before the draw.
+
+| Node, a moved draw of «דוחות» ← «לפי עובד» | v195 (b48ac44) | v196 |
+|---|---|---|
+| approved | 1,896-2,036 ms, 16 questions | 97-106 ms, 0 |
+| approved, drawn again unmoved | 2,076 ms, 16 | 74 ms, 0 |
+| nothing approved | 1,940-2,325 ms, 17 | 113-152 ms, 1 |
+| nothing approved, unmoved | 1,999 ms, 16 | 70 ms, 0 |
+| the debtor, approved | 26,930 ms, 17 | 117 ms, 0 |
+| the debtor, nobody approved (a migration on the record) | 25,926 ms, 18 | 1,105 ms, 1 |
+| the debtor, nobody approved, unmoved | 24,115 ms, 17 | 10 ms, 0 |
+| one question of the gate (no debtor / the debtor) | 94-116 ms / 1,398-1,649 ms | the same: the model is untouched |
+
+Per way in, Node, approved, a moved record (v195 -> v196): a man's page of «מקדמות» 581 ms, 5
+questions -> 8 ms, 0; his days 368 ms, 3 -> 20 ms, 0; his closing 133 ms, 1 -> 10 ms, 0; his
+statement 237 ms, 2 -> 10 ms, 0; the workbook 2,610 ms, 19 -> 171 ms, 0; a worker card 120 ms,
+1 -> 14 ms, 0; the payslips 419 ms, 1 -> 111 ms, 0; the month 118 ms, 1 -> 5 ms, 0. With the
+debtor and nobody approved every way in is one question, about a second (1.0-1.2 s), where
+v195 took up to 28.8 s (the workbook, 20 questions).
+
+Chromium (headless, the build machine), CPU throttled 4x, the season record of v195's note: 30
+men, 8 sites, a year of days, 16 advances, 6 repayments, 128 closes, 799 kB, approved.
+
+| Chromium 4x, a draw of «דוחות» ← «לפי עובד» | v195 | v196 |
+|---|---|---|
+| moved, with «שים לב» (median of 5) | 5,704 ms, 27 questions | 193 ms, 0 |
+| moved, without it (median of 5) | 5,707 ms, 27 | 186 ms, 0 |
+| unmoved (median of 3) | 5,562 ms, 27 | 204 ms, 0 |
+| approval taken off in memory, moved (median of 3) | 4,972 ms, 27 | 188 ms, 1 |
+| the same, unmoved | 5,113-5,333 ms, 27 | 131-152 ms, 0 |
+| one debtor's rate set to 0 in memory and 1,000 handed to him: one question | 24.4 s | 22.9 s (the model) |
+| that debtor, approved, one draw | 683 s (11 min 23 s), 29 questions | 170 ms, 0 |
+| that debtor, approval taken off, one draw | 698 s, 29 | 6,954 ms, 1 |
+| a draw of «מקדמות» (median of 3) | 118 ms, 0 | 131 ms, 0 |
+
+(v195's note measured 6,989 ms and 27 questions for the same draw, and 500 ms for the debtor's
+question; this machine measured 5.7 s and 24 s. The debtor here is made the same way; why his
+question is fifty times dearer than v195 measured was not looked into.)
+
+### No figure moved - how that is known
+
+- `tests/reports.speed.test.mjs`, in Node: 8 seeded records (both cycles, closes whole, half and
+  empty written through `saveFinancialAction`, repayments, men who stopped, a debtor with no
+  rate in two) x 3 readings (gates shut; open and approved; open with the approval taken off -
+  in this corpus always a record with a migration on it) - 3,276 readings, each the SAME BYTES
+  as v195's four files (`b48ac44`, out of Git) give: every node of «דוחות» on both sections
+  over seven ranges (the nodes the paper and the picture are drawn from), the pay rows, the
+  workbook's sheets, every man's statement, days dialog and closing dialog, «מקדמות» and each
+  man's page, every worker card, the payslips of both periods, the summary of two months.
+- In Chromium (a probe, not a suite: one 799 kB season disk loaded into v195's tree and this
+  one, unthrottled), approved and with the approval taken off, over the default account, the
+  fortnight before by hand and last month: `#reportsView`'s HTML on both sections, the
+  picture's spec (`readReportPrintout`) and its PNG bytes (`printoutImage('report')`), the
+  workbook, every man's statement, «מקדמות», eight worker cards - 52 readings, none different.
+- The paper was not printed and compared: it is the same nodes under unchanged stylesheets;
+  `print` and `exports-proof-print` pass on this branch.
+
+### Checks added and moved
+
+`tests/reports.speed.test.mjs` (in `npm test`): the proof above; the questions counted per way
+in (eleven) - approved none, nothing approved at most one a moved draw and none unmoved, a
+migration on the record exactly one for «לפי עובד» and none unmoved, the carry shut none, no
+range's pay sheet or man's closed periods worked out twice; v195's 16 for the same draw; the
+functions put back after a throw; another schedule asked of the real functions;
+`reportGateAnswer` equal to the gate and to `owesGateAnswer` in the four states, the model's
+lines pinned, the key's four parts pinned; FRESH - «דוחות», «מקדמות», a man's days and his card
+equal to the same drawn with every reader asked afresh after a day typed, an advance put in
+memory under a kept answer (a mutant key without the record turns this red), an advance written
+the form's way, a close, a repayment, a rate changed the roster's way, a change in memory with
+the tick unmoved, the approval removed and restored, the day turning; THE BOUND - with the
+debtor, a moved draw under one question of the gate (86-91 ms against 1,566 ms here).
+MOVED ON PURPOSE: `tests/workercard.test.mjs` "a later reading asks again" (1 -> 0: the record
+is approved by then), `tests/payslips.test.mjs` (a later reading of the same record asks 0, its
+answer kept under the record; one after a write asks 1), `tests/monthsummary.test.mjs` "the
+gate is asked once" (1 -> 0: approved).
+
+### What remains
+
+- On a record that has to be planned the first draw after each change still plans ONCE: about
+  a second in Node and 7 s in Chromium 4x with a debtor who has no rate - per change, not per
+  reader. The walk to the year 2180 is `planAdvanceCarry` in `js/model/schema.js`, untouched.
+- Every financial WRITE (`saveFinancialAction`) and the archive question (`openAdvanceBalance`
+  in `js/ui/roster.js`) still plan the migration for themselves, once each.
+- The kept gate answer costs `JSON.stringify` of the record each draw on such a record (the
+  same cost as `owesKey`; 1-3 ms in Node on 180 kB, tens of ms throttled on 799 kB).
+- Within a reading, readers other than `payrollReport` and `closedPeriods` (`advanceWalk`,
+  `advanceAccount`, `workerDaysReport`) are still asked as often as before; with the plan gone
+  they are no longer the cost.
+- Not tried on a real phone. Every timing is Node or headless Chromium on the build machine.
+
+## v195 — «מי חייב כסף», «שים לב» and «סגירות שנרשמו»: readings of the advances that write nothing (served 2026-11-13)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
 Built on `1be3987` (v194, served 2026-11-13: PR 76 merged, Pages run 96 succeeded; the served

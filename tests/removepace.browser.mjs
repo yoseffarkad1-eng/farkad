@@ -86,8 +86,11 @@ function seedSeason([big, firstDay]) {
     const last = new Date(today + 'T12:00:00');
     let at = 0; let days = 0;
     for (; day <= last; day.setDate(day.getDate() + 1), at += 1) {
-        if (day.getDay() === 6) continue;
         const date = toLocalDateStr(day);
+        // Saturdays are skipped as the crew does - but never TODAY: on a Saturday the suite
+        // seeded no day at all under the finger, and every check after it read an empty site
+        // (the v196 gate, run on Saturday 2026-11-14). The day the phone stands on is seeded.
+        if (day.getDay() === 6 && date !== today) continue;
         days += 1;
         active.forEach((worker, i) => {
             if (date === today) {

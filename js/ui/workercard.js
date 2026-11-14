@@ -158,7 +158,11 @@ function workerCardScope(workerId, period, read) {
         return answer;
     };
     try {
-        return read();
+        // And the reading is the pay sheet's own one reading (reportReadOnce, js/ui/reports.js,
+        // v196): on a record that carries the approval the gate is answered without planning
+        // the migration at all, and each range's sheet and each man's closed periods are
+        // worked out once for the whole of it.
+        return typeof reportReadOnce === 'function' ? reportReadOnce(read) : read();
     } finally {
         carryReportingEnabled = ask;
         REPORT_RANGE.from = held.from;
@@ -502,6 +506,8 @@ function workerCardContact(phone) {
 // that the suite can hold each figure against the sheet's without a browser - and so
 // that what is on the screen cannot be anything this did not return.
 function workerCardFacts(workerId) {
+    // One reading for the whole of it - the pay sheet's (reportReadOnce, js/ui/reports.js).
+    if (typeof reportReadOnce === 'function' && !reportReading()) return reportReadOnce(workerCardFacts, this, arguments);
     const worker = State.worker(workerId);
     if (!worker) return null;
     const today = todayStr();
