@@ -47,14 +47,20 @@
     --ink-3: #3f4854;
     --line: #c9cfd7;
     --line-soft: #e1e5ea;
-    --accent: #1a43bf;
+    /* v199 (look polish, the owner asked 2026-11-13): the four coloured words are the
+       values «תצוגה גדולה» already gave them (css/large.css, block 1), for everybody. Before:
+       the accent 6.5:1 on its soft ground, ok 5.6, warn 6.0-6.8, danger 5.4 on their tints -
+       «שגיאת סנכרון», «פעיל», «לא נרשמו», «טרם נרשם», «שעות נוספות» and every warning, the
+       words that say "look here", were the weakest on the screen in the sun. After: 7.3 to
+       8.4 on their own tints and more on a surface. The grounds are not touched. */
+    --accent: #163aa6;
     --accent-soft: #dce6fd;
     --on-accent: #ffffff;
-    --ok: #136b3f;
+    --ok: #0e5530;
     --ok-bg: #ddf3e6;
-    --warn: #8a4b00;
+    --warn: #6a3900;
     --warn-bg: #fcefd6;
-    --danger: #b3261e;
+    --danger: #8f1d17;
     --danger-bg: #fbe4e1;
     /* WhatsApp's own green, with ink dark enough to read on it (8.6:1). The only green
        button in the app, so "green" means one thing. */
@@ -85,7 +91,7 @@
     --ink-3: #aab3bf;
     --line: #3a404a;
     --line-soft: #262b33;
-    --accent: #7db2ff;
+    --accent: #9cc5ff;                  /* v199: 6.7:1 -> 8.2 on its soft ground (css/large.css's) */
     --accent-soft: #16294a;
     --on-accent: #04122b;
     --ok: #5bd893;
@@ -110,7 +116,7 @@
         --ink-3: #aab3bf;
         --line: #3a404a;
         --line-soft: #262b33;
-        --accent: #7db2ff;
+        --accent: #9cc5ff;
         --accent-soft: #16294a;
         --on-accent: #04122b;
         --ok: #5bd893;
@@ -1670,5 +1676,49 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .advance-reset-board { margin: 12px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--accent-soft); color: var(--ink); font-size: 18px; font-weight: 800; line-height: 1.45; overflow-wrap: anywhere; }
 .advance-reset-board-owing { background: var(--warn-bg); box-shadow: inset 0 0 0 2px var(--warn); }
 .advance-reset-closures { width: 100%; min-height: 48px; margin: 12px 0 16px; font-size: 17px; font-weight: 700; white-space: normal; }
+
+/* v199 (not served): THE LOOK, A FIRST PASS. (No dashed heading on purpose:
+   tests/usual.test.mjs and tests/payslips.test.mjs name the layer's last dashed blocks one by
+   one, and this one is written the way v198's «איפוס מקדמות» block is.)
+   The owner, 2026-11-13: "improve the app's look and its general appearance" - with his
+   condition that no button moves, no word and no number changes without him. So this block
+   is spacing, alignment, colour and lines only: no element added, removed or moved to
+   another place, no label, no size of a word (css/large.css restates sizes; none is set
+   here), and screen only, as the whole file. Each rule names the picture it answers. */
+
+/* THE TWO TRAYS ARE ONE KIND OF CHIP. «לא נרשמו» drew a man as one grey chip; «נעדרים», right
+   under it, drew him as a white field with a grey ✕ beside it - the span that holds his name
+   kept app.css's surface, the only part of a tray chip this file had not repainted. And in
+   both, the side button sat on the chip with nothing between them, so «וליד זועבי נעדר»
+   read as a sentence ("Walid is absent") rather than a name and a button. One ground for the
+   whole chip, and a hairline before the side button, as app.css first drew it for the tray
+   above (.tray-pending .chip-side). The chip keeps its height; the line is 1px of width. */
+.tray .chip .chip-main { background: transparent !important; }
+.tray .chip button.chip-side { border-inline-start: 1px solid var(--line) !important; }
+
+/* «לפי אתר»: THE BARS MEASURE THE SAME RULER. Each bar's track was whatever the row had left
+   after the site's name, so a long name made a short track: on the seeded fortnight 27 days
+   at רמת גן drew a longer bar than 32 at הרצליה - מגדל הים. The row is now «סיכום חודש»'s own
+   shape (.msum-bar-row): the swatch and the name on the first line, the track and the count
+   on the second, every track the same width. The same four children in the same order. */
+#reportsView .invoice-bar-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "swatch name name" "track track count";
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 2px;
+    padding-block: 8px;
+}
+#reportsView .invoice-bar-row > .invoice-swatch { grid-area: swatch; }
+#reportsView .invoice-bar-row > .invoice-bar-name { grid-area: name; }
+#reportsView .invoice-bar-row > .invoice-bar-track { grid-area: track; }
+#reportsView .invoice-bar-row > .invoice-bar-count { grid-area: count; }
+
+/* «סגירת שבוע»: A MAN'S FOUR FIGURES ON ONE LINE. Where a label runs to two lines («יישאר
+   חוב» at 375px) its figure sat a line below the other three, and the four are read across.
+   The label stays at the top of its cell and the figure goes to the cell's foot, so the
+   four figures share one line whatever the labels do. */
+.weekly-close-cell { align-content: space-between; }
 
 }

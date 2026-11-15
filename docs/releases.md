@@ -1,4 +1,105 @@
-## v198 — «סגירת שבוע» as the owner answered, three money repairs he approved, and «איפוס מקדמות» (candidate, not served)
+## v199 — the look, a first pass: colour, lines and alignment only (candidate, not served)
+
+The release commit moves the three stamps to v199 and adds one «מה חדש» item («מראה ברור יותר», go: 'day', proposed). The owner was sent before/after pictures of six screens on 2026-11-15 and asked whether to publish; this commit is held until he answers. The note below was written on the branch, before the stamps moved:
+
+**NOT SERVED, AND NOT A RELEASE YET.** A branch (`look-polish`, on `f6d5d82`, v198 served
+2026-11-14) whose three build stamps still say v198: it is a proposal to be shown to the owner
+as pictures, before and after, screen by screen, and he decides. The owner, 2026-11-13: "after
+the running tasks, improve the app's look and its general appearance" - with the promise he
+was given: no button moves, no word and no number changes without him. When he says yes, the
+release that carries it moves the three stamps, adds its «מה חדש» line (or `items: []`) and
+re-runs the gate on that commit.
+
+**What changed: `css/design.css` and one comment in `css/large.css`. Nothing else.** No file of
+`js/`, no `index.html`, no `sw.js`, no stamp, no Hebrew string, no element added, removed or
+moved, no font size, weight or line-height set (so `css/large.css` has nothing new to restate),
+and nothing on paper, in the shared picture or in a file - every rule is inside `@media screen`.
+
+1. **The coloured words reach 7:1 for everybody, in the light scheme** (design.css, the tokens).
+   The light `--accent`, `--ok`, `--warn` and `--danger`, and the dark `--accent`, take the
+   values «תצוגה גדולה» already gave them since v191 (css/large.css block 1, reviewed then):
+   `#163aa6`, `#0e5530`, `#6a3900`, `#8f1d17`; dark accent `#9cc5ff`. Measured before at
+   375x812 light: «שגיאת סנכרון» 5.4:1, «פעיל» 5.6, «שעות נוספות» and the WhatsApp dialog's
+   warning 6.0, «טרם נרשם» 6.1, «לא נרשמו (4)» and the backup's warning 6.8, the reminder's
+   «18:00» 6.5 - the words that say "look here" were the weakest on their screens in the sun,
+   while the three inks are held at 7:1. The grounds, the inks, the site colours and the two
+   pay groups' colours are not touched. The blue of every filled button is a shade darker
+   (light) and a shade lighter (dark).
+2. **The two trays of the day are one kind of chip** (design.css, v199 block). «נעדרים» drew a
+   man as a white field with a grey ✕ beside it - the span holding his name kept app.css's
+   surface, the one part of a tray chip v169 had not repainted - right under «לא נרשמו»'s grey
+   chips. And in both trays the side button sat on the chip with nothing between them, so
+   «וליד זועבי נעדר» read as a sentence ("Walid is absent") and not as a name and a button.
+   Now: one ground for the whole chip, and a 1px line before «נעדר» / ✕ (app.css's own
+   intention for the tray above, `.tray-pending .chip-side`). Same height, same targets.
+3. **«לפי אתר»: the bars measure on one ruler** (design.css, v199 block). Each track was what
+   the row had left after the site's name, so a long name made a short track: on the seeded
+   fortnight רמת גן's 27 drew a longer bar than הרצליה - מגדל הים's 32. The row is now «סיכום
+   חודש»'s own shape: swatch and name on the first line, the track and the count under them,
+   every track the same width. The same four children in the same order; each row is taller
+   (one line of name, one of bar).
+4. **«סגירת שבוע»: a man's four figures on one line** (design.css, v199 block). Where a label
+   ran to two lines («יישאר חוב» at 375px) its figure sat a line below the other three. The
+   label stays at the top of its cell, the figure goes to the cell's foot.
+
+**Tried and taken out:** `text-wrap: pretty` on the crew row's line of phone and rates (to keep
+«50» from standing alone under «שעה:»): Chromium left the line as it was (the figures are
+`<bdi>` isolates), so it is not shipped; the real repair is a non-breaking space, which is a
+change of the string and so a question below.
+
+**Pictures:** before and after of fifteen screens at 375x812, scale 2, light and dark, side by
+side («לפני» on the right, «אחרי» on the left), made with `tests/screens.mjs`'s own seeded phone
+and screen openers from the tree of `f6d5d82` and from this branch. Chromium with emulated
+touch; NOT a real phone, and nobody far-sighted has looked at them.
+
+**What it deliberately does NOT do - questions for the owner, each of which would move a
+control, change a word or change a size:**
+
+- **The week's names are cut** («מוחמד ...», «אחמד נ...», «איברהי...») while six day columns each
+  have room beside their colour square. The name column is 66-88px by a long-argued rule
+  (css/app.css, the week on a phone); widening it puts the seventh day off the screen. Wider
+  names and a push to see Friday - or as now?
+- **Two kinds of figure tile.** The report card puts the number over its word («5 / ימי עבודה»);
+  the worker card puts the word over the number («נוכחות / 9»). One order everywhere - which?
+- **Buttons in one row that wrap differently**: «דו־שבועי · 9» on two lines beside «שבועי · 2»
+  on one; «בוקר טוב» on two lines beside «קלאסי» and «אתרים»; «כרטיס עובד» always on two lines.
+  Shorter words, a smaller size, or a row of their own?
+- **The crew row's last figure alone on a line** («50» under «שעה:»): a non-breaking space
+  between «שעה:» and its figure (and «יומי:» and its figure) keeps each pair together - a change
+  of the string.
+- **Three controls of three looks on every crew row** - a grey «כרטיס עובד», a green pill «פעיל»,
+  and the bare words «עוד ⋯». One look for the three, or as now?
+- **The coloured edge of a card is drawn as a curve** on the reports' cards (an 8px border on a
+  14px corner), and «סגירת שבוע»'s card draws a grey outline inside its edge. Square the corner
+  on the edge's side?
+- **Small text that stays small for everybody**: the sync chip 12px, the week's dates 12px, the
+  worker card's labels and dates 14px, the carry card's «היום 500 ₪ · אחרי 300 ₪» 12px in ⋯.
+  «תצוגה גדולה» raises all of them; raising them for everybody costs names on the screen.
+- **The day's header** takes about a quarter of an 812px screen before the first site (the top
+  strip, the date, the two-way switch and the count); it folds to one line on a scroll.
+- **A ring round each dialog's title** in the pictures (orange or blue): `:focus-visible` on the
+  title the dialog focuses. Chromium draws it because the pictures open dialogs with no tap
+  first; whether an iPhone draws it after a real tap has not been tried. Not changed - it is
+  the keyboard's way in.
+
+**Tried and changed on the way:** the bars' track was first made 10px (from 6px). That is a
+fixed height in the layer's last block, which `tests/payslips.test.mjs` holds the layer's tail
+free of; the track keeps app.css's 6px. And the block is written without a dashed `/* ----`
+heading, as v198's «איפוס מקדמות» block is, because `tests/usual.test.mjs` names the dashed
+blocks at the end of the layer one by one - no pinned expectation moved.
+
+**Tests, on this branch, one suite at a time, no emulator** (the counts belong to the commit
+the hand-off names and are not repeated here): the node chain of `npm test` suite by suite -
+everything green except `build` and `gate-integrity`, red ONLY because `css/design.css` and
+`css/large.css` changed while the three stamps stayed on v198 (both say so in those words:
+"no cached file has changed since the three stamps last moved"); they go green in the release
+that moves the stamps. The browser suites asked for (mobile, design, declutter, largetext,
+scroll, removepace, smoke, holiday, reportnames, owes, weeklyclose, settings-order, print,
+polish) and navigation, monthsummary, reportsclarity, usual, rima, yosefgeves, sitecard,
+doubletap and workercard: all green. `npm run test:all` and `test:release` were NOT run as
+chains, and the emulator suites not at all (nothing under `js/sync` or `firestore.rules` moved).
+
+## v198 — «סגירת שבוע» as the owner answered, three money repairs he approved, and «איפוס מקדמות» (served 2026-11-14: PR 80, Pages run 100)
 
 **Not served until the merge and the Pages deployment are recorded here by the next release.**
 Built on `b4a905b` (v197, served 2026-11-14: PR 79 merged it into main as `b4a905b`, whose tree is

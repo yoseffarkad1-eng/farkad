@@ -73,6 +73,11 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    { build: 'v199', items: [
+        { title: 'מראה ברור יותר',
+            text: 'המילים הצבעוניות כהות וברורות יותר בשמש, והעמודות של לפי אתר נמדדות באותו גודל לכל אתר.',
+            where: 'בכל המסכים', go: 'day' }
+    ] },
     { build: 'v198', items: [
         { title: 'סגירת שבוע: רק מי שעבד, ותלוש לכל עובד',
             text: 'בסגירת שבוע מופיעים רק עובדים שעבדו בתקופה, ואחרי הסגירה יש לכל עובד כפתור שפותח את התלוש שלו בוואטסאפ.',
