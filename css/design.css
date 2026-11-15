@@ -190,7 +190,8 @@ input, select, textarea { border-radius: 12px; }
    And the strip keeps its PLACE: folding it into the day's own header row buys one more
    name on the screen, but only by positioning something against the top edge of an
    installed iPhone app, which is the edge js/ui/bars.js exists to repair. So it stays
-   static, in flow, 52px, exactly as the phone block of app.css left it.
+   static, in flow, as the phone block of app.css left it - 52px until v200, 44px since, on
+   a phone held upright (the air above and below its button, this file's last block).
    .topbar itself is never hidden: the tab bar is its child. */
 .topbar { border-bottom: 0 !important; }
 .topbar .brand { display: none !important; }
@@ -1764,7 +1765,9 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
    env() - law 8), and the line of the switcher sits on the date's line with no margin and 2px
    between it and undo's. No control moves, nothing is hidden, the folded header on a scroll
    is app.css's (one line, the track under it). Not the phone held sideways: its one-row bar is
-   app.css's own, last in that file. */
+   app.css's own, last in that file. And not «תצוגה גדולה», which keeps the air it was reviewed
+   with (css/large.css, the day's header). Measured at 375x812 and 320x568: the first site at
+   189px where it was at 206. */
 @media (max-width: 700px) and (min-height: 501px) {
     .topbar { padding-block: 0; margin-bottom: 2px; }
     .day-header { padding-top: max(2px, env(safe-area-inset-top)); }

@@ -1247,4 +1247,15 @@
     :root.display-large .week-cell .cell-line .site-mark { font-size: 18px !important; }
 }
 
+/* THE DAY'S HEADER KEEPS ITS AIR HERE (v200). css/design.css took the air out from between the
+   day header's lines for everybody (its last block): the top strip's 4px above and below its
+   button, the header's 4px inset, the switcher's margin. This mode was measured and reviewed
+   with that air (v191), and the strip is the one bar tests/largetext.browser.mjs requires to
+   be taller with the mode than without; so here it is what app.css gave it, as before. */
+@media (max-width: 700px) and (min-height: 501px) {
+    :root.display-large .topbar { padding-block: 4px !important; margin-bottom: 6px !important; }
+    :root.display-large .day-header { padding-top: max(4px, env(safe-area-inset-top)) !important; }
+    :root.display-large .day-header .day-tools { margin-top: 2px !important; row-gap: 3px !important; }
+}
+
 }
