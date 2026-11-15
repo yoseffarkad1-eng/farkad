@@ -116,7 +116,7 @@ const undoSays = page => page.evaluate(() => { const bar = document.getElementBy
     return bar && bar.style.display !== 'none' && bar.firstChild ? bar.firstChild.textContent : null; });
 
 // The opener brought to `fraction` of the screen's height, and its centre.
-async function aim(page, find, fraction) {
+async function aim(page, find, fraction, at = 0.5) {
     const point = await page.evaluate(([find, fraction]) => {
         const node = (0, eval)(find)();
         if (!node) return null;
@@ -125,10 +125,10 @@ async function aim(page, find, fraction) {
     }, [find, fraction]);
     if (!point) return null;
     await page.waitForTimeout(250);
-    return page.evaluate(find => {
+    return page.evaluate(([find, at]) => {
         const box = (0, eval)(find)().getBoundingClientRect();
-        return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
-    }, find);
+        return { x: box.left + box.width / 2, y: box.top + box.height * at };
+    }, [find, at]);
 }
 
 // Two taps at one point, the second starting `gap` ms after the first started (or at once, when
@@ -179,7 +179,12 @@ const OPENERS = [
     },
     {
         what: 'the tally «נרשמו X מתוך Y», opening the sheet', mode: 'sites', surface: 'assignSheet',
-        find: "() => document.querySelector('#dayView .now-count')", fractions: [0.3]
+        // MOVED ON PURPOSE (v200, the day's header 17px shorter at rest): pressed in the lower
+        // part of the tally, not its middle. The tally does not scroll (it is in the header), and
+        // its middle went from 181px to 164 - above the sheet's first site at 179 on the one layout
+        // that ever put a writer under it (320x568, five sites), so the control below wrote nowhere
+        // and proved nothing. 0.9 of its height is about 181px: still the tally, and over that site.
+        find: "() => document.querySelector('#dayView .now-count')", fractions: [0.3], at: 0.9
     }
 ];
 
@@ -203,7 +208,7 @@ for (const opener of OPENERS) {
     const window_ = opener.surface === 'assignSheet' ? WALK_BOUNCE : GUARD;
     for (const size of SIZES) for (const places of [2, 5]) for (const fraction of opener.fractions) for (let attempt = 0; attempt < 3; attempt++) {
         const { context, page } = await phone(size, places, opener.mode);
-        const point = await aim(page, opener.find, fraction);
+        const point = await aim(page, opener.find, fraction, opener.at);
         if (!point) { await context.close(); break; }
         await page.evaluate(selector => {
             window.__closeTapped = 0;
@@ -230,7 +235,7 @@ for (const opener of OPENERS) {
         // double tap with the guard put aside between its two taps.
         await run(page, CLOSER[opener.surface]);
         await page.waitForTimeout(GUARD + 100);
-        const again = await aim(page, opener.find, fraction);
+        const again = await aim(page, opener.find, fraction, opener.at);
         if (again) {
             const was = await written(page);
             const landed = await doubleTap(page, again, 150, () => run(page, UNGUARD[opener.surface]));

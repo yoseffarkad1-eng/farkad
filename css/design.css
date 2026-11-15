@@ -987,7 +987,7 @@ body.journey-on #sederModal { z-index: 60; }
 .wcard-move-date { color: var(--ink-2); font-size: 15px; }
 .wcard-move-amount { flex: 0 0 auto; font-weight: 650; font-variant-numeric: tabular-nums; }
 .wcard-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px 12px; }
-.wcard-day { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 30px; }
+.wcard-day { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; min-height: 30px; }
 .wcard-day-when { flex: 0 0 auto; color: var(--ink-2); font-size: 15px; font-variant-numeric: tabular-nums; }
 .wcard-day-where { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .wcard-site { display: inline-flex; gap: 4px; max-width: 100%; padding: 2px 8px; border: 1px solid; border-radius: 8px; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
@@ -1779,6 +1779,8 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
    to 14 - and the date under the day's name, which is read before anything else on the screen,
    to 15. The markers stay as they are, for tests/mobile.test.mjs's reason: a diamond, an arrow,
    a dash or a plus is decoration beside a word that is spelled out. */
+/* The worker card's day may wrap (its rule, above, says flex-wrap since v200): its date at 15px
+   and twice the text size left «—» past the card's edge at 375 (tests/workercard.browser.mjs). */
 .topbar .sync-chip { font-size: 14px; }
 .drawer-week-title { font-size: 14px; }
 .dd-name .badge { font-size: 14px; }

@@ -614,7 +614,10 @@ try {
         const inBand = [];
         const failed = [];
         let days = 0;
-        for (const sites of [1, 2, 3]) for (const crew of [1, 2, 3, 4, 6, 8, 10]) for (const mode of ['sites', 'workers']) {
+        // Every crew from one to ten. MOVED in v200 (the day's header 17px shorter at rest, the
+        // owner's 2026-11-15): with 1, 2, 3, 4, 6, 8 and 10 no day's end fell in 375x667's band
+        // any more, so the sweep proved nothing there; the odd crews put days back in it.
+        for (const sites of [1, 2, 3]) for (const crew of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) for (const mode of ['sites', 'workers']) {
             days += 1;
             const day = `${sites} site${sites > 1 ? 's' : ''}, ${crew} m${crew > 1 ? 'en' : 'an'} ${mode === 'sites' ? 'by site' : 'by worker'}`;
             const top = await dayOfLength(page, crew, sites, mode);
