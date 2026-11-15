@@ -1,4 +1,10 @@
-## v200 — the look, a second pass: the week's names whole, a tighter day header, no word under 14px (not served)
+## v200 — the look, a second pass: the week's names whole, a tighter day header, no word under 14px (candidate, not served)
+
+The release commit moves the three stamps to v200 and adds one «מה חדש» item («שמות מלאים וכתב גדול יותר», go: 'week', proposed). The owner said yes to the three changes on 2026-11-15 and was sent the before/after pictures of the week, the day's header, the worker card and ⋯ the same day; it is published only after he has seen them. v199 was served on 2026-11-15 (PR 81, merge 78e6832, Pages run 101). The text of the branch below is kept as it was written before this commit.
+
+The gate on the release commit (7318707) found a fourth suite that measured the old header's place: `tests/usual.browser.mjs`, whose double tap on a usual-site chip low on a 375x667 phone must meet «בטל» under the second tap in at least one layout. Its five name sets cannot scroll (the page is shorter than the screen), so the chip stood where the header put it; 15px higher, the finger met the bar's padding above «בטל» in all five and the precondition said "never". MOVED ON PURPOSE: the five stay, and a sixth layout is built to the case - one page measures where «בטל» comes up after a single tap on the chip, a fresh page puts a spacer of exactly that distance above the tray, and the same five checks are made with «בטל» under the second tap (345/345). The app is unchanged by it.
+
+One repair rides with it, in `js/ui/reports.js` only (no figure, key, writer or word): a «תיקון-היפוך» row of «היסטוריה מלאה» showed «תיקון», which opened the form, took a reason and was refused by the model ('a correction of a correction') - seen on the owner's phone on 2026-11-16, an advance of 2,200 with a cash repayment, a deduction and an advance-level reversal, each a «תיקון». The button is now offered only where `eventReversalProblems`, the model's own question, has nothing against it (a correction, a transaction already corrected, one nobody can read or with no date); the save asks again with the real reason. `tests/forms.browser.mjs` holds it: after a repayment is corrected, the correction's row and the repayment offer no «תיקון» and the advance still does - red on v200's reports.js, green here. The owner's own record is not touched; he was told, in Arabic, to correct that repayment and that deduction by hand (the two corrections bring the advance to zero and leave the closed period's payslip as it was - reproduced on a synthetic copy of his entries first).
 
 **NOT SERVED, AND NOT A RELEASE YET.** A branch (`look-polish-2`, on `78e6832`, v199 served
 2026-11-15) whose three build stamps still say v199. The owner said yes on 2026-11-15 to three
@@ -110,7 +116,7 @@ reportnames, owes, weeklyclose, polish, doubletap - green. `npm run test:all` an
 `test:release` were NOT run as chains, and the emulator suites not at all (nothing under
 `js/sync` or `firestore.rules` moved).
 
-## v199 — the look, a first pass: colour, lines and alignment only (candidate, not served)
+## v199 — the look, a first pass: colour, lines and alignment only (served 2026-11-15)
 
 The release commit moves the three stamps to v199 and adds one «מה חדש» item («מראה ברור יותר», go: 'day', proposed). The owner was sent before/after pictures of six screens on 2026-11-15 and asked whether to publish; this commit is held until he answers. The note below was written on the branch, before the stamps moved:
 
