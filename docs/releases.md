@@ -1,3 +1,115 @@
+## v200 — the look, a second pass: the week's names whole, a tighter day header, no word under 14px (not served)
+
+**NOT SERVED, AND NOT A RELEASE YET.** A branch (`look-polish-2`, on `78e6832`, v199 served
+2026-11-15) whose three build stamps still say v199. The owner said yes on 2026-11-15 to three
+of v199's questions - the week's names, the day's header and the small text - and sees the
+result as pictures, before and after, before anything is published. When he says yes, the
+release that carries it moves the three stamps, adds its «מה חדש» line (or `items: []`) and
+re-runs the gate on that commit.
+
+**What changed in the app: `css/design.css` and `css/large.css`. Nothing else** (three
+suites moved too, below). No file of `js/`, no `index.html`, no `sw.js`, no stamp, no Hebrew
+string, no element added, removed or moved, no control in another place, nothing hidden, and
+nothing on paper, in the shared picture or in a file: every rule is in design.css's `@media screen`, and the week's picture draws its names off
+their text with its own widths (js/ui/printout.js), not off the screen's column. One block at
+the end of design.css (no dashed heading, v199's reason), four sizes raised where design.css
+already set them, and every size restated in css/large.css.
+
+1. **The week's names whole** (design.css, v200 block 1). The name column takes, up to 120px,
+   whatever six 48px days leave of the screen (100vw - 288px; the box runs edge to edge) and is
+   never narrower than app.css's `clamp(66px, 21vw, 88px)`; a name wraps between its words and
+   is cut by app.css's ellipsis only past a third line (`-webkit-line-clamp: 3`). Measured on
+   tests/screens.mjs's seeded crew of 14 (names whose text box overflows):
+
+   | phone | column before → after | names cut before → after | whole days |
+   |---|---|---|---|
+   | 320x568 | 67 → 67 | 10 → 0 | 5 of 6, as before |
+   | 360x740 | 76 → 76 | 6 → 0 | 5 of 6, as before |
+   | 375x812 | 79 → 87 | 6 → 0 | 6 of 6, as before (each day 49 → 48) |
+   | 390x844 | 82 → 102 | 5 → 0 | 6 of 6 |
+   | 440x956 | 88 → 120 | 4 → 0 | 6 of 6 (each day 58.5 → 53.2) |
+
+   Rows stay 48px, but for «מוחמד אבו ראס חוסיין» at 320 and 360, who takes three lines and
+   whose row alone is 59px - there the column is what keeps five days whole and the sixth's
+   edge on the glass, so it does not widen. «תצוגה גדולה» keeps its own column and its own
+   wrapping (no clamp: large.css undoes it); measured unchanged, 0 cut at every width. Paper
+   (`@media print` in app.css: the names wrap, never clipped) and the shared picture (names
+   wrapped in a 160-300px column) did not cut names before either, and are not touched.
+
+2. **The day's header, tighter at rest** (design.css, v200 block 2; `(max-width: 700px) and
+   (min-height: 501px)`, so not the landscape bar). The top strip (the sync chip and
+   «הגדרות») loses the 4px above and below its 44px button and keeps 4px under it (52 + 6 →
+   44 + 4; 4 and not 2, because that margin collapses with the 4px over «צוות»'s heading and at
+   2 the crew screen opened 2px further down than the screen before it - tests/holiday.browser.mjs
+   caught it); the header's top inset is `max(2px, env(safe-area-inset-top))` (was 4px - law 8
+   kept: env() is still the floor); the tools row has no top margin and 2px between its lines.
+   Every line keeps its 44px controls; no control moved; the fold on a scroll is app.css's.
+   «תצוגה גדולה» keeps the air it was reviewed with (css/large.css gives it back app.css's
+   values): its header is what it was, measured to the tenth of a pixel. Measured, the top of
+   the first site / first man:
+
+   | phone | before | after |
+   |---|---|---|
+   | 375x812, by site | 206px (25.4%) | 191px (23.5%) |
+   | 375x812, by worker | 212 | 197 |
+   | 320x568, by site | 206 (36.3%) | 191 (33.6%) |
+   | 440x956, by site | 206 (21.5%) | 191 (20.0%) |
+   | 375x812, «תצוגה גדולה» | 243.4 | 243.4 (unchanged) |
+
+   The header itself 148 → 143 (folded 51 → 49), the strip 52 → 44. That is all the air there
+   was: the header is four lines of 44-48px controls, and what is left is those lines. Getting
+   more back means putting two of those lines on one, which moves controls - a question, not
+   done.
+
+3. **No word under 14px, for everybody** (design.css, v200 block 3, and in place). The ruler of
+   tests/screens.mjs, every screen of its list at 375x812 light, 320x568 light and 440x956
+   dark: every visible text node with a letter or digit under 14px, before → after:
+   «שגיאת סנכרון» (the sync chip, every screen) 12 → 14; the week's day letters «ו׳» and dates
+   «06/11» 12 → 14; its foot «סה"כ עובדים» and totals 12 → 14; the letter in a week's colour
+   block 13 → 14; «+2» beside a site on the day by workers 11 → 14; «היום» in the drawer 11 →
+   14 and «החשבון הנוכחי» 13.5 → 14; «14 עובדים ברשימה» in the reports' picker 13 → 14; in ⋯ the
+   carry card's «היום 500 ₪ · אחרי 300 ₪» and the warning under it 12 → 14, «חזרה למצב של:»
+   and the restore point's date 13 → 14; «או בחר אתר:» in the migration's questions 13 → 14.
+   After: none left at the three phones. And where it is read first: the date under the day's
+   name 14 → 15 (it fits the 44px line), the worker card's labels («נוכחות», «ימי שכר»…) 14 →
+   16 and its dates 14 → 15. NOT raised: the markers - ◆ (8-10px), the ▸ ▾ of a fold, the
+   dash of an absence and the + of extra hours - for tests/mobile.test.mjs's reason: they carry
+   no letter, and the word beside them is spelled out. In css/large.css every new size is
+   said again (block 3's end, all 18px), and the card's label copy 18 → 20 by the table. The
+   card's day row may wrap (`flex-wrap`), because at 15px and twice the text size its «—» went
+   past the card's edge at 375 (tests/workercard.browser.mjs). What the larger labels cost,
+   seen in the picture: «נוכה מהשכר» is two lines in its tile at 375, and that row of tiles is
+   taller.
+
+**Pictures:** before | after, «לפני» on the right, at 375x812 scale 2 from tests/screens.mjs's
+seeded phone, the tree of `78e6832` and this branch: the week (light, dark, and at 320), the
+day at rest (light, dark, and at 320), the worker card, ⋯ at the carry card, and the sync chip
+close up. Chromium; NOT a real phone - an iPhone's Hebrew font is not Chromium's, so where a
+name breaks is measured here and not there - and nobody far-sighted has looked at them.
+
+**Three suites measured the old header's place, and each moved on purpose** (each with its
+reason beside it): `tests/largetext.browser.mjs`'s pinned sample of the base (the strip 52 → 44,
+the day's date 14 → 15, the week block's letter 13 → 14); `tests/holiday.browser.mjs`, whose
+sweep had one day landing in 375x667's band by a pixel (74 in 73-106) and none once the header
+was shorter - every phone with a band now also draws one day made to end in its middle, under
+the same checks and the same finger; and `tests/doubletap.browser.mjs`, whose control for the
+tally «נרשמו X מתוך Y» pressed its middle, now above the sheet's first site on the one layout
+that put a writer under it - it presses at 0.9 of the tally's height, still the tally. And one
+fault the suites found in this pass, repaired in it: a 2px margin under the strip collapsed
+with «צוות»'s own 4px and opened that screen 2px further down than the one before it
+(holiday's «nothing leaks»); the margin is 4.
+
+**Tests, on this branch, one suite at a time, no emulator** (the counts belong to the commit
+the hand-off names and are not repeated here): the node chain of `npm test` suite by suite -
+everything green except `build` and `gate-integrity`, red ONLY because `css/design.css` and
+`css/large.css` changed while the three stamps stayed on v199 ("no cached file has changed
+since the three stamps last moved"); they go green in the release that moves the stamps. The
+browser suites asked for - mobile, design, declutter, largetext, scroll, removepace, smoke,
+holiday, week, week-print, print, bars-stale, journey, workercard, settings-order,
+reportnames, owes, weeklyclose, polish, doubletap - green. `npm run test:all` and
+`test:release` were NOT run as chains, and the emulator suites not at all (nothing under
+`js/sync` or `firestore.rules` moved).
+
 ## v199 — the look, a first pass: colour, lines and alignment only (candidate, not served)
 
 The release commit moves the three stamps to v199 and adds one «מה חדש» item («מראה ברור יותר», go: 'day', proposed). The owner was sent before/after pictures of six screens on 2026-11-15 and asked whether to publish; this commit is held until he answers. The note below was written on the branch, before the stamps moved:
