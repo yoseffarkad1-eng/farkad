@@ -682,8 +682,12 @@ try {
     // js/ui/sheet.js). So a pair is judged only if the PAGE saw its presses under 300 ms apart (it
     // was 700) with its first tap on the chip; otherwise it is made again in a fresh page, and a
     // third such try fails.
-    async function lowAndDouble(one, fraction) {
+    async function lowAndDouble(one, fraction, lift = 0) {
         const { page } = one;
+        // A spacer of `lift` px above the tray: the layout built to put the chip on «בטל»'s line.
+        if (lift > 0) await page.evaluate(([find, lift]) => { const tray = (0, eval)(find)().closest('.tray');
+            const spacer = document.createElement('div'); spacer.style.height = lift + 'px'; spacer.className = 'test-lift';
+            tray.parentNode.insertBefore(spacer, tray); }, [CHIP, lift]);
         for (let pass = 0; pass < 3; pass += 1) {
             await page.evaluate(([find, fraction]) => { const node = (0, eval)(find)();
                 window.scrollTo(0, Math.max(0, scrollY + node.getBoundingClientRect().top - innerHeight * fraction)); }, [CHIP, fraction]);
@@ -706,13 +710,33 @@ try {
     {
         const N5 = ['עבד אל רחמן אבו חוסיין', 'מוחמד', 'יוסי', 'אבו', 'רון', 'דני', 'אבי בן שושן', 'משה'];
         const onBar = [];
-        for (const names of [N1, N2, N3, N4, N5]) {
-            const tag = `375x667, ${names[0]}…, the chip at 85% of the screen`;
+        // MOVED ON PURPOSE (v200): the five name sets landed the chip on «בטל»'s line by the
+        // header's height alone - none of them can scroll (the page is shorter than the screen,
+        // scrollY 0), so "85%" was where the chip already stood. v200's day header is 15px
+        // shorter, the chip stood 15px higher, and the finger met the bar's padding above «בטל»
+        // in all five: the precondition below said "never". The five stay as they were; a sixth
+        // layout is BUILT to the case: one page measures where «בטל» comes up after a single tap
+        // on the chip, and a fresh page puts a spacer of exactly that distance above the tray, so
+        // the pair is judged with «בטל» under the second tap on any header the app may have.
+        const liftOnto = async names => {
+            const one = await crew(375, 667, names, [], 0);
+            await settle(one.page, 600);
+            const chip = await one.page.evaluate(find => __centre((0, eval)(find)()), CHIP);
+            await one.page.touchscreen.tap(chip.x, chip.y);
+            await settle(one.page, 400);
+            const button = await one.page.evaluate(() => { const node = [...document.querySelectorAll('#undoBar button')].find(one => one.textContent === 'בטל');
+                return node ? __centre(node) : null; });
+            await one.context.close();
+            return button ? Math.max(0, Math.round(button.y - chip.y)) : 0;
+        };
+        const layouts = [N1, N2, N3, N4, N5].map(names => ({ names, lift: 0, tag: `375x667, ${names[0]}…, the chip at 85% of the screen` }));
+        layouts.push({ names: N1, lift: await liftOnto(N1), tag: `375x667, ${N1[0]}…, the chip lowered onto «בטל»'s line` });
+        for (const { names, lift, tag } of layouts) {
             let judged = null;
             for (let attempt = 1; attempt <= 3 && !judged; attempt += 1) {
                 const one = await crew(375, 667, names, [], 0);
                 const before = { day: await one.page.evaluate(() => __day()), paths: await one.page.evaluate(() => FarkadSync.pendingPaths().slice()) };
-                const tapped = await lowAndDouble(one, 0.85);
+                const tapped = await lowAndDouble(one, 0.85, lift);
                 if (!tapped.ok) {
                     if (attempt === 3) check(`${tag}: a double tap reached the chip in one of three fresh pages`, false, JSON.stringify(tapped.hits));
                     await one.context.close();
