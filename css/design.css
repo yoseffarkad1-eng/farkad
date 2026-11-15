@@ -1761,15 +1761,18 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
    quarter of an 812px screen: the strip of the sync chip and «הגדרות» (52 and 6 under it),
    then the header, whose four lines of controls are each a 44px target and stay one. What
    gives is only the air between them: the strip loses its 4px above and below the 44px button
-   and keeps 2px under it, the header's own top inset is 2px (still never less than the notch's
+   and keeps 4px under it, the header's own top inset is 2px (still never less than the notch's
    env() - law 8), and the line of the switcher sits on the date's line with no margin and 2px
-   between it and undo's. No control moves, nothing is hidden, the folded header on a scroll
-   is app.css's (one line, the track under it). Not the phone held sideways: its one-row bar is
+   between it and undo's. 4 under the strip and not 2: that margin collapses with the 4px over
+   «צוות»'s heading (app.css, .crew-header), and at 2 the crew screen began 2px lower than the
+   others and opened 2px further down than the screen before it (tests/holiday.browser.mjs,
+   nothing leaks). No control moves, nothing is hidden, the folded header on a scroll is
+   app.css's (one line, the track under it). Not the phone held sideways: its one-row bar is
    app.css's own, last in that file. And not «תצוגה גדולה», which keeps the air it was reviewed
    with (css/large.css, the day's header). Measured at 375x812 and 320x568: the first site at
-   189px where it was at 206. */
+   191px where it was at 206. */
 @media (max-width: 700px) and (min-height: 501px) {
-    .topbar { padding-block: 0; margin-bottom: 2px; }
+    .topbar { padding-block: 0; margin-bottom: 4px; }
     .day-header { padding-top: max(2px, env(safe-area-inset-top)); }
     .day-header .day-tools { margin-top: 0; row-gap: 2px; }
 }
