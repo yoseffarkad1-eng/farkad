@@ -735,7 +735,7 @@ input, select, textarea { border-radius: 12px; }
    that said which site a colour was. Now the block carries the site's first letter
    (data-initial, js/ui/week.js), so a row reads «ה ת ר» without the eye leaving it.
 
-   The block grows from 16 to 20px to hold a 13px letter, and becomes a row: the cycle
+   The block grows from 16 to 20px to hold a 14px letter (13 until v200), and becomes a row: the cycle
    diamond (when the palette has wrapped), the letter, then the rate mark - the white dot
    of a doubled day or the plus of extra hours, which used to sit in the middle of the
    block and now stand after the letter instead of through it. Nothing overlaps, so the
@@ -763,7 +763,7 @@ input, select, textarea { border-radius: 12px; }
     .week-cell .cell-line[data-initial]::before {
         content: attr(data-initial);
         color: #fff;
-        font-size: 13px;
+        font-size: 14px;
         font-weight: 800;
         line-height: 1;
     }
@@ -974,7 +974,7 @@ body.journey-on #sederModal { z-index: 60; }
 .wcard-aside { color: var(--ink-2); font-size: 15px; font-weight: 500; }
 .wcard-figures { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
 .wcard-pair { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
-.wcard-label { color: var(--ink-2); font-size: 14px; overflow-wrap: anywhere; }
+.wcard-label { color: var(--ink-2); font-size: 16px; overflow-wrap: anywhere; }
 .wcard-value { font-size: 20px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .wcard-owed { flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; margin-bottom: 6px; }
 .wcard-owed .wcard-label { font-size: 16px; }
@@ -983,11 +983,11 @@ body.journey-on #sederModal { z-index: 60; }
 .wcard-move { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
 .wcard-move:last-child { border-bottom: 0; }
 .wcard-move-what { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
-.wcard-move-date { color: var(--ink-2); font-size: 14px; }
+.wcard-move-date { color: var(--ink-2); font-size: 15px; }
 .wcard-move-amount { flex: 0 0 auto; font-weight: 650; font-variant-numeric: tabular-nums; }
 .wcard-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px 12px; }
 .wcard-day { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 30px; }
-.wcard-day-when { flex: 0 0 auto; color: var(--ink-2); font-size: 14px; font-variant-numeric: tabular-nums; }
+.wcard-day-when { flex: 0 0 auto; color: var(--ink-2); font-size: 15px; font-variant-numeric: tabular-nums; }
 .wcard-day-where { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .wcard-site { display: inline-flex; gap: 4px; max-width: 100%; padding: 2px 8px; border: 1px solid; border-radius: 8px; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .wcard-day-none { color: var(--ink-3); }
@@ -1720,5 +1720,79 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
    The label stays at the top of its cell and the figure goes to the cell's foot, so the
    four figures share one line whatever the labels do. */
 .weekly-close-cell { align-content: space-between; }
+
+/* v200 (not served): THE LOOK, A SECOND PASS - the three answers the owner gave on 2026-11-15
+   to v199's questions (docs/releases.md, v199 and v200). Again no dashed heading, for v199's
+   reason. Nothing moves to another place, no word or number changes, and paper, the shared
+   picture and every file are untouched: this whole file is screen only. Every size set here
+   is said again in css/large.css (block 3, at its end), and a size this pass raised where it
+   was already set in this file (the worker card, the week's letter) was raised there, in
+   place, with its copy. */
+
+/* 1. THE WEEK'S NAMES WHOLE. The owner, on the picture of «מוחמד ...», «אחמד נ...»: the days
+   had room and the names did not. Measured on the seeded crew at 375: six days of 49px and a
+   79px column that cut 6 of 14 names; at 440, days of 58px and 4 of 14 cut.
+   LINES INSTEAD OF ONE: the name wraps between its words and is cut (with app.css's ellipsis,
+   still there) only past a third line. A 48px row holds two lines of 14px, and every name of
+   the seeded crew takes two from 375 up; at 320 and 360 «מוחמד אבו ראס חוסיין» takes three
+   and his row alone grows to 59px, because the column there is what keeps five days whole
+   and the sixth showing its edge.
+   AND THE ROOM THE DAYS DO NOT NEED: the column is never narrower than app.css's (66-88px, the
+   rule that keeps a day whole on the smallest phone) and takes, up to 120px, whatever is left
+   once the six days have their 48px - 100vw less 6 x 48, because the box runs edge to edge
+   (app.css). So no day that was whole on the screen leaves it: at 320 the column is what it
+   was and five days are whole, from 354 up all six are and the names have the rest. The grid
+   draws six days; Saturday is never a column (js/ui/week.js). «תצוגה גדולה» keeps its own
+   column and its own wrapping (css/large.css, the week on a phone). */
+@media (max-width: 700px) {
+    #weekView { --week-name-w: max(clamp(66px, 21vw, 88px), min(100vw - 288px, 120px)); }
+    .week-table .name-clip {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
+        white-space: normal;
+        overflow-wrap: break-word;
+        line-height: 1.2;
+    }
+}
+
+/* 2. THE DAY'S HEADER, TIGHTER AT REST. 206px stood above the first site on every phone - a
+   quarter of an 812px screen: the strip of the sync chip and «הגדרות» (52 and 6 under it),
+   then the header, whose four lines of controls are each a 44px target and stay one. What
+   gives is only the air between them: the strip loses its 4px above and below the 44px button
+   and keeps 2px under it, the header's own top inset is 2px (still never less than the notch's
+   env() - law 8), and the line of the switcher sits on the date's line with no margin and 2px
+   between it and undo's. No control moves, nothing is hidden, the folded header on a scroll
+   is app.css's (one line, the track under it). Not the phone held sideways: its one-row bar is
+   app.css's own, last in that file. */
+@media (max-width: 700px) and (min-height: 501px) {
+    .topbar { padding-block: 0; margin-bottom: 2px; }
+    .day-header { padding-top: max(2px, env(safe-area-inset-top)); }
+    .day-header .day-tools { margin-top: 0; row-gap: 2px; }
+}
+
+/* 3. NO WORD UNDER 14px, FOR EVERYBODY. Every text node with a letter or a digit in it that the
+   ruler of tests/screens.mjs measured under 14px on the app's screens at 375x812 (v199), raised
+   to 14 - and the date under the day's name, which is read before anything else on the screen,
+   to 15. The markers stay as they are, for tests/mobile.test.mjs's reason: a diamond, an arrow,
+   a dash or a plus is decoration beside a word that is spelled out. */
+.topbar .sync-chip { font-size: 14px; }
+.drawer-week-title { font-size: 14px; }
+.dd-name .badge { font-size: 14px; }
+#dayView .tag-place .tag-rate { font-size: 14px; }
+.report-search-count { font-size: 14px; }
+.wday-note { font-size: 14px; }
+.restore-label { font-size: 14px; }
+.restore-points button { font-size: 14px; }
+.issue-label { font-size: 14px; }
+@media (max-width: 700px) and (min-height: 501px) {
+    .day-header .day-date { font-size: 15px; }
+}
+@media (max-width: 700px) {
+    .week-table thead .day-initial { font-size: 14px; }
+    .week-table thead small { font-size: 14px; letter-spacing: 0; }
+    .week-table tfoot td { font-size: 14px; }
+    .week-table tfoot .name-cell { font-size: 14px; }
+}
 
 }
