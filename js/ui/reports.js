@@ -3683,9 +3683,21 @@ function renderLedgerEntry(entry) {
     // CORRECTING THIS TRANSACTION, offered here and nowhere else - this is the only place
     // in the app where the immutable id of one event is on the screen, and the id is what
     // a correction has to name. Behind the writing gate, like every other writer.
+    //
+    // AND ONLY WHERE THE MODEL WOULD TAKE ONE. eventReversalRoom says how much is left to
+    // correct and nothing about whether this KIND of entry can be corrected at all, so a
+    // «תיקון-היפוך» row - a correction, which the model refuses to correct ('a correction
+    // of a correction') - showed the button, opened the form, took a reason and refused it
+    // (the owner's phone, 2026-11-16: four rows of one advance, a button on every one).
+    // The model's own question is asked, with a stand-in for the reason the form asks for;
+    // every other rule it holds (a target nobody can read, no readable date) hides the
+    // button the same way, and the save still asks it again with the real reason.
     if (typeof eventReversalRoom === 'function'
         && financialWritingEnabled(State.schedule)
-        && eventReversalRoom(State.schedule, entry.id) > 0) {
+        && eventReversalRoom(State.schedule, entry.id) > 0
+        && (typeof eventReversalProblems !== 'function'
+            || eventReversalProblems(State.schedule, entry.id,
+                eventReversalRoom(State.schedule, entry.id), '-').length === 0)) {
         row.appendChild(button('תיקון', 'btn-secondary',
             () => openEventReversalForm(entry, row),
             `תיקון-היפוך של ${LEDGER_KIND_LABELS[entry.kind] || entry.kind}`));

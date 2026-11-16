@@ -247,7 +247,15 @@ const canWrite = page => page.evaluate(() =>
         const made = Object.keys(State.schedule.ledger.advances)
             .map(key => State.schedule.ledger.advances[key])
             .filter(entry => entry.kind === 'reversed');
+        // What the history offers AFTER the correction: the history is drawn again from
+        // the record, so it is asked again here, row by row, whether it has a «תיקון».
+        openWorkerDays('w_01');
+        await new Promise(wait => setTimeout(wait, 350));
+        const offers = [...document.querySelectorAll('.ledger-entry')].map(node => [
+            (node.querySelector('.ledger-kind') || {}).textContent || '',
+            [...node.querySelectorAll('button')].some(one => one.textContent.trim() === 'תיקון')]);
         return {
+            offers,
             row: true, button: true, form: true,
             amountFields: inputs.length,
             dates,
@@ -280,6 +288,20 @@ const canWrite = page => page.evaluate(() =>
     check('and the correction is dated on the transaction it corrects',
         done.date === '2026-08-26' && done.date === done.targetDate,
         JSON.stringify([done.date, done.targetDate]));
+    // A CORRECTION IS NOT OFFERED A CORRECTION (the owner's phone, 2026-11-16: a
+    // «תיקון-היפוך» row showed «תיקון», took a reason and was refused by the model - 'a
+    // correction of a correction'). Nor is a transaction already corrected; the advance
+    // itself, never corrected, still is.
+    const offered = kind => (done.offers || []).filter(one => one[0] === kind).map(one => one[1]);
+    check('after it, the correction\'s own row offers no «תיקון»',
+        offered('תיקון-היפוך').length === 1 && offered('תיקון-היפוך')[0] === false,
+        JSON.stringify(done.offers));
+    check('nor does the repayment it corrected',
+        offered('הוחזר במזומן').length === 1 && offered('הוחזר במזומן')[0] === false,
+        JSON.stringify(done.offers));
+    check('while the advance, never corrected, still does',
+        offered('ניתנה מקדמה').length >= 1 && offered('ניתנה מקדמה').every(Boolean),
+        JSON.stringify(done.offers));
 
     await page.context().close();
 }
