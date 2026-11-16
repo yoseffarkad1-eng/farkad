@@ -1,3 +1,103 @@
+## v201 — «לסדר את המקדמה»: an over-settled advance sorted by one button, and the advance-level «תיקון» only while something is left (candidate, not served)
+
+**NOT SERVED, AND NOT A RELEASE YET.** A branch (`overpaid-fix`, on `f27af79`, v200 a
+candidate) whose three build stamps still say v200. The release that carries it moves them;
+its «מה חדש» item is already at the top of WHATSNEW_BUILDS (proposed), and
+`tests/whatsnew.test.mjs`'s guard says SKIP while the block is ahead of the stamps.
+
+**Why.** The owner's phone, 2026-11-16. One man on 550 a day, one advance of 2,200, and in
+«היסטוריה מלאה» four lines of it, written in this order: the advance (dated 23/10); «הוחזר
+במזומן» 2,200 (10/11, the repayment form); the close of 16/10-29/10, made after it, writing
+«נוכה מהשכר» 2,200 (29/10); and «תיקון-היפוך» 2,200 at the ADVANCE's level, no target, reason
+«העובד החזיר» - offered because that form's «תיקון» stood on any advance whose `given` was
+above zero, settled or not. The fold then says given 0, settled 4,400, over-settled by 4,400:
+the pay sheet shows «יתרת זכות מחשבון קודם 2200», «יתרת זכות 4400» and «החשבון דורש בדיקה ·
+ההחזרים עולים על החוב הפתוח ב-4400 ₪», and the closing box refuses ('overpaid') with «תקן קודם,
+ואז סגור» and offers nothing to do it with. The truth, in his words: the man owes nothing and
+is owed nothing; and (in Arabic) "make this simple in the app, I don't want it this
+complicated; leave this worker's case as it is so I can try it after you fix it". So his
+record is NOT touched by this branch: he presses the new button himself.
+
+**What changed in the app: `js/ui/reports.js` and `js/ui/whatsnew.js`. Nothing in `js/model`,
+`js/sync`, `js/state.js`, `js/store.js`, `js/recovery.js` or `firestore.rules`;** no key, no
+field path, no entry kind, no writer of its own, no stamp.
+
+1. **One button, «לסדר את המקדמה»**, where the app used to dead-end on an over-settled
+   advance: under the closing box's 'overpaid' sentence (his account, from «דוחות»), on the
+   advance row of his days dialog beside «עודף … טעון בדיקה», and on the over-settled card of
+   «מקדמות». It works out, per over-settled advance (`overpaidFixPlan`), which settling lines
+   to correct: the repayments and deductions of that advance the model would let be corrected
+   now (`eventReversalRoom` > 0 and `eventReversalProblems` empty - the history row's own
+   «תיקון» rule), and of those the set whose amounts add up EXACTLY to the excess, in agorot
+   (`overpaidFixSubset`; a correction is the whole line or nothing, so a set that only comes
+   close would leave the account still wrong). Of several exact sets: the fewest deductions (a
+   deduction is a line on a payslip somebody was handed), then the fewest lines, then the
+   newest; the newest sixteen lines of an advance are the ones looked at (2^16 sets). On the
+   owner's record that is the repayment and the deduction - the advance-level reversal itself
+   can never be corrected ('a correction of a correction').
+   - The press asks the app's own question (askConfirm, the destructive kind, `names`, focus on
+     «ביטול», the double-tap hold): «לסדר את המקדמה?», what happened in one sentence, each line
+     that will be cancelled by its kind, day and amount, and «שום דבר לא נמחק: לצד כל רישום נכתב
+     תיקון. התלוש של חשבון שכבר נסגר לא משתנה.»
+   - «כן, לסדר» writes every line with the EXISTING writer `recordEventReversed`, the fixed
+     reason «נרשם יותר מפעם אחת - סודר אוטומטית», all of them in ONE commit through
+     `saveFinancialAction` (one `State.commitMany`, one journal batch, one cloud transaction),
+     and rolls memory back and writes nothing if any line is refused or the advance does not
+     then read over-settled by exactly 0. The screen it was pressed on is drawn again.
+   - It refuses, by name: a phone that is not «מסונכרן בין המכשירים» or cannot keep a write
+     (`weeklyCloseReadyWord`, the closes' own question, asked before the question and again at
+     the answer); a record that moved between the question and the answer (every line of every
+     advance of his compared); a second press while the first is asking or writing. With both
+     gates shut (`financialWritingEnabled`) there is no plan and no button.
+   - No exact set: no button, and one sentence where it would be - «את העודף הזה האפליקציה לא
+     יכולה לסדר לבד. פתח את «היסטוריה מלאה» ותקן ידנית את הרישום הכפול.»
+2. **Prevention.** The advance-level «תיקון» on the days dialog's row, and «תיקון טעות» on
+   «מקדמות», are offered only while something is left on the advance (`left` > 0), and the form's
+   ceiling is what is left owed as well as what is left unreversed (`reversalCap`), asked again
+   at «שמור תיקון» - a repayment that lands from the other phone while the form is open is
+   refused with «על המקדמה הזו לא נשאר חוב. אם נרשם החזר או ניכוי בטעות, תקן אותו ב«היסטוריה
+   מלאה».» A mistake in a repayment or a deduction is corrected on that line, in «היסטוריה
+   מלאה», as before. The repayment form already stops at what is left (confirmed, not changed).
+
+**What the owner's record reads after the press** (tests/overpaidfix.test.mjs F2): two new lines,
+both «תיקון-היפוך», one of the repayment and one of the deduction; every line that was there
+byte for byte; over-settled by 0; nothing owed on the ledger; the account 30/10-12/11 closes
+with no reason against it; the judge (`closureProblems`, `impossibleClosures`) condemns
+nothing. The closed fortnight 16/10-29/10 keeps every figure of its payslip (given 2,200,
+deducted 2,200, gross 6,600, net 4,400, carried 0) and stops handing on the 2,200 credit it
+handed on before - which is the «יתרת זכות מחשבון קודם 2200» that goes away. The second
+calculator (`tests/oracle.mjs`) agrees on both accounts, field by field, and says the next one
+closes.
+
+**What it does NOT do.** It does not decide whose story is true: on a real credit (a man who
+really handed back money beyond what he owed) the set it finds would cancel his real
+repayment, and the question says exactly which lines it will cancel so the person can say no.
+It does not touch the advance-level reversal (the model refuses a correction of a correction),
+does not sort an excess no exact set of whole lines adds up to, does not add a button to the
+pay sheet's own warning or to paper, and changes no rule of the model - an over-settled advance
+still stops the automatic deduction and refuses a close until it is sorted.
+
+**Its Hebrew is PROPOSED** - the owner has not read it - and pinned word for word in
+`tests/overpaidfix.test.mjs` (F9) and `tests/whatsnew.test.mjs`: the button, the question's
+title, its two sentences with figures, each line's words, the footer, «כן, לסדר», the fixed
+reason, the sentence when it cannot, three refusals, and the correction form's new refusal.
+
+**Tests.** `tests/overpaidfix.test.mjs` (new, in `npm test`): F1 the owner's four lines as the
+screens read them and the button on all three; F2 the press through the screen's own button -
+the question word for word, ONE commit, exactly two corrections, append-only, over-settled by
+0, the next account closes, the judge, the closed payslip, a reopen, the oracle; F3 which lines
+(repayments first, fewer, newest, agora-exact) and no exact set - no button, one sentence,
+nothing written; two over-settled advances in one question and one commit; F4 the record moved
+between the question and the answer; F5 not synced before the question and at the answer, and
+a phone that cannot keep a write; F6 a double press and «ביטול»; F7 both gates shut, and the
+unapproved migration following the model's gate exactly; F8 the prevention, through the forms'
+own fields and buttons; F9 the words. `tests/overpaidfix.browser.mjs` (new, in `test:all`): the
+same in Chromium at 375x812 light and 320x568 dark - the button on the closing box and on the
+card (44px, 16px), a finger's tap to the app's question (destructive, «ביטול» focused, two
+lines), «כן» after the hold, the warning and the button gone and the box offering the close;
+«ביטול» writes nothing. NOT a real phone. Pictures (375x812, scale 2, light, synthetic names):
+the account with the button, the question, the account after.
+
 ## v200 — the look, a second pass: the week's names whole, a tighter day header, no word under 14px (candidate, not served)
 
 The release commit moves the three stamps to v200 and adds one «מה חדש» item («שמות מלאים וכתב גדול יותר», go: 'week', proposed). The owner said yes to the three changes on 2026-11-15 and was sent the before/after pictures of the week, the day's header, the worker card and ⋯ the same day; it is published only after he has seen them. v199 was served on 2026-11-15 (PR 81, merge 78e6832, Pages run 101). The text of the branch below is kept as it was written before this commit.
