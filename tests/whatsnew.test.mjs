@@ -87,6 +87,11 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    { build: 'v201', items: [
+        { title: 'מקדמה שנרשמה פעמיים: לסדר בלחיצה',
+            text: 'כשמקדמה נרשמה כמוחזרת יותר מפעם אחת, הכפתור «לסדר את המקדמה» מבטל אחרי שאלה את הרישום הכפול, והחשבון נסגר כרגיל.',
+            where: 'מקדמות, ובחשבון של העובד בדוחות', go: 'advances' }
+    ] },
     { build: 'v200', items: [
         { title: 'שמות מלאים וכתב גדול יותר',
             text: 'במסך השבוע רואים את השם המלא של כל עובד, הכותרת של היום תופסת פחות מקום, ואין יותר כתב קטן מדי.',
