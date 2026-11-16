@@ -1,9 +1,9 @@
 ## v201 — «לסדר את המקדמה»: an over-settled advance sorted by one button, and the advance-level «תיקון» only while something is left (candidate, not served)
 
-**NOT SERVED, AND NOT A RELEASE YET.** A branch (`overpaid-fix`, on `f27af79`, v200 a
-candidate) whose three build stamps still say v200. The release that carries it moves them;
-its «מה חדש» item is already at the top of WHATSNEW_BUILDS (proposed), and
-`tests/whatsnew.test.mjs`'s guard says SKIP while the block is ahead of the stamps.
+**NOT SERVED.** A candidate on v200 (itself a candidate); this commit moves the three build
+stamps to v201, and its «מה חדש» item is at the top of WHATSNEW_BUILDS (proposed). Money is
+written by it, so it is published only on the owner's explicit yes, after he has seen the
+pictures.
 
 **Why.** The owner's phone, 2026-11-16. One man on 550 a day, one advance of 2,200, and in
 «היסטוריה מלאה» four lines of it, written in this order: the advance (dated 23/10); «הוחזר
