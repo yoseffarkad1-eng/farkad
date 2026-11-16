@@ -95,7 +95,7 @@ own fields and buttons; F9 the words. `tests/overpaidfix.browser.mjs` (new, in `
 same in Chromium at 375x812 light and 320x568 dark - the button on the closing box and on the
 card (44px, 16px), a finger's tap to the app's question (destructive, «ביטול» focused, two
 lines), «כן» after the hold, the warning and the button gone and the box offering the close;
-«ביטול» writes nothing. NOT a real phone. Pictures (375x812, scale 2, light, synthetic names):
+«ביטול» writes nothing. NOT a real phone. `tests/reports.speed.test.mjs` (v196's comparison with v195's bytes) moved on purpose: the advance-level «תיקון» / «תיקון טעות» buttons and «לסדר את המקדמה» are taken out on both sides and counted - on its eight seeded records v195 drew 131 of the first and this build 119 (none on an advance with nothing left), and it may never draw more. Pictures (375x812, scale 2, light, synthetic names):
 the account with the button, the question, the account after.
 
 ## v200 — the look, a second pass: the week's names whole, a tighter day header, no word under 14px (candidate, not served)

@@ -261,7 +261,27 @@ const orderRefusal = (device, node) => Boolean(device.orderTexts) && PERIOD_CLOS
 const orderExplained = (before, after) => after.indexOf(ORDER_MARKER) !== -1
     && (after.split(ORDER_MARKER).join(ORDER_GENERAL) === before
         || after.split(`,${ORDER_MARKER}`).join('').split(`${ORDER_MARKER},`).join('').split(ORDER_MARKER).join('') === before);
+// v201, THE OWNER'S PHONE (2026-11-16): the advance-level «תיקון» on a man's days dialog and
+// «תיקון טעות» on his card of «מקדמות» are drawn only while something is LEFT on the advance
+// (an advance repaid in full and then reversed at its level read 2,200 over-settled and refused
+// every close); and where an advance IS over-settled, «לסדר את המקדמה» (or its one sentence)
+// is drawn beside the warning. Those buttons - and only those - are taken out of the comparison
+// on BOTH sides here and COUNTED: this build may draw fewer of the first two than v195 did and
+// never more, and v195 drew none of the third. What they do is tests/overpaidfix.test.mjs's.
+const ADVANCE_REVERSAL_LABEL = 'תיקון-היפוך של מקדמה שנרשמה בטעות';
+const advanceReversal = node => node.tagName === 'BUTTON'
+    && ((node.textContent === 'תיקון' && node.getAttribute && node.getAttribute('aria-label') === ADVANCE_REVERSAL_LABEL)
+        || node.textContent === 'תיקון טעות');
+const OVERPAID_FIX = /(^|\s)(overpaid-fix|overpaid-fix-cannot)(\s|$)/;
 const withoutWeekly = (device, nodes) => nodes.filter(node => {
+    if (advanceReversal(node)) {
+        device.advanceReversals = (device.advanceReversals || 0) + 1;
+        return false;
+    }
+    if (OVERPAID_FIX.test(node.className || '')) {
+        device.overpaidFixes = (device.overpaidFixes || 0) + 1;
+        return false;
+    }
     if (OWES_MOVED.test(node.className || '')) {
         device.owesMoved = (device.owesMoved || 0) + 1;
         return false;
@@ -274,7 +294,15 @@ const withoutWeekly = (device, nodes) => nodes.filter(node => {
         device.orderRefused = (device.orderRefused || 0) + 1;
         return { tag: 'ORDER-REFUSAL' };
     }
-    return node.children.length ? Object.assign(snap(node), { kids: withoutWeekly(device, node.children) }) : snap(node);
+    if (!node.children.length) return snap(node);
+    const kids = withoutWeekly(device, node.children);
+    if (kids.length) return Object.assign(snap(node), { kids });
+    // Everything in it taken out (v201: a row of actions that held only «תיקון טעות»): read
+    // as the empty node this build draws in its place.
+    const empty = snap(node);
+    delete empty.kids;
+    empty.text = '';
+    return empty;
 });
 const drawnIn = (device, id) => JSON.stringify(withoutWeekly(device, device.dom.getElementById(id).children));
 
@@ -408,6 +436,13 @@ const READINGS = [
             tally.owesMoved = (tally.owesMoved || 0) + (pair[1].owesMoved || 0);
             tally.orderRefused = (tally.orderRefused || 0) + (pair[1].orderRefused || 0);
             if (pair[0].orderRefused) tally.wrong.push(`seed ${seed}, ${name}: v195 drew an order refusal`);
+            // v201: never more advance-level corrections offered than v195 offered, and the
+            // sorting button nowhere in v195.
+            tally.reversalsOld = (tally.reversalsOld || 0) + (pair[0].advanceReversals || 0);
+            tally.reversalsNow = (tally.reversalsNow || 0) + (pair[1].advanceReversals || 0);
+            tally.fixes = (tally.fixes || 0) + (pair[1].overpaidFixes || 0);
+            if ((pair[1].advanceReversals || 0) > (pair[0].advanceReversals || 0)) tally.wrong.push(`seed ${seed}, ${name}: more «תיקון» than v195`);
+            if (pair[0].overpaidFixes) tally.wrong.push(`seed ${seed}, ${name}: v195 drew «לסדר את המקדמה»`);
             // «סגירת שבוע»'s button: never in v195; in this build once per draw of «לפי עובד»
             // and of the board on top of «מקדמות», exactly when the record may be closed (the
             // per-man box's own gate), and never on «לפי אתר» or a man's own page.
@@ -429,6 +464,10 @@ const READINGS = [
     console.log(`        (${JSON.stringify(tally.states)}; ${tally.closes} closes, ${tally.repaid} repayments)`);
     console.log(`        (v198: ${tally.owesMoved} nodes of the board's flags, its attention count and «שים לב» taken out of the comparison)`);
     check('the board\'s moved nodes were there to take out (the owner\'s 2026-11-14 answer is exercised by these records)', tally.owesMoved > 0, String(tally.owesMoved));
+    console.log(`        (v201: advance-level «תיקון» / «תיקון טעות» drawn ${tally.reversalsOld} times by v195 and ${tally.reversalsNow} by this build; `
+        + `«לסדר את המקדמה» ${tally.fixes} times - all taken out of the comparison)`);
+    check('v201: the advance-level corrections taken out were there, and this build offers fewer (none on a settled advance) but still some',
+        tally.reversalsNow > 0 && tally.reversalsNow < tally.reversalsOld, `${tally.reversalsOld} -> ${tally.reversalsNow}`);
     tally.orderRefused = tally.orderRefused || 0;
     console.log(`        (v198: ${tally.orderRefused} closing boxes refusing a close out of order - fix (a) - drawn as a marker; `
         + `${tally.excused.count} readings excused only because v195's own drawing in its place makes them the same bytes)`);
