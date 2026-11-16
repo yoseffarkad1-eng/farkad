@@ -409,10 +409,14 @@ for (const [width, height] of PHONES) {
 // v186's (9846d7f) but the reports' card, which v189 rebuilt to tell the account (a man's
 // name 19/750 then, his «נותר לתשלום» 30/800, a label 16/400). MOVED in v192, on purpose: a
 // man's name on that card is the owner's 26/900 (it was v189's 21/800) - the first thing on
-// his card, in his group's colour; the mode restates it at 29/900 (css/large.css).
-const BASE = { body: '18/400', tab: '15/700', wrowName: '19/700', wrowTag: '16/650', wrow: 56, dayLabel: '20/800', dayDate: '14/400',
-    dock: '14/800', tabs: 63, topbar: 52, siteName: '18/700', assignName: '20/700', rima: '15/600', rimaInput: '16/400',
-    weekName: '14/700', weekCell: 48, weekLetter: '13px', rosterName: '19/750', rosterMeta: '16/400',
+// his card, in his group's colour; the mode restates it at 29/900 (css/large.css). MOVED in
+// v200, on purpose (the owner, 2026-11-15: the day's header tighter, no word under 14px): the
+// top strip 52 -> 44 (the 4px above and below its 44px button taken out), the date under the
+// day's name 14 -> 15, the letter in a week's colour block 13 -> 14 (css/design.css, its last
+// block and the week's block). The mode keeps its strip at 52 (css/large.css, the day's header).
+const BASE = { body: '18/400', tab: '15/700', wrowName: '19/700', wrowTag: '16/650', wrow: 56, dayLabel: '20/800', dayDate: '15/400',
+    dock: '14/800', tabs: 63, topbar: 44, siteName: '18/700', assignName: '20/700', rima: '15/600', rimaInput: '16/400',
+    weekName: '14/700', weekCell: 48, weekLetter: '14px', rosterName: '19/750', rosterMeta: '16/400',
     advanceName: '19/500', advanceSum: '20/800', advanceRow: 58,
     tileName: '26/900', tileValue: '32/800', tileLabel: '16/600', seat: '16/700', seatEmpty: '15/700', chip: '16/700', seatBox: 66,
     settingsRow: 60, settingsTitle: '17/700', settingsHint: '14/400' };

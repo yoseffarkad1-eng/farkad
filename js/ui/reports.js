@@ -418,8 +418,16 @@ function renderSimpleAdvance(item) {
     if (financialWritingEnabled(State.schedule)) {
         if (state.left > 0 && !state.overpaid) actions.appendChild(button('העובד החזיר כסף', 'btn-secondary',
             () => openRepaymentForm(item, state, card)));
-        if (reversalRoom(State.schedule, item.id) > 0) actions.appendChild(button('תיקון טעות', 'btn-secondary',
+        // Only while something is left on it (v201) - see renderAdvanceRow: a reversal of an
+        // advance already settled is a second story about money that is already back.
+        if (reversalRoom(State.schedule, item.id) > 0 && state.left > 0) actions.appendChild(button('תיקון טעות', 'btn-secondary',
             () => openReversalForm(item, state, card, true)));
+        // The over-settled card's way out (v201), under the sentence that says it is
+        // over-settled - see sortOverpaidAdvance.
+        if (state.overpaid > 0) {
+            const fix = overpaidFixControl(item.workerId, item.id);
+            if (fix) card.appendChild(fix);
+        }
     }
     card.appendChild(actions);
     return card;
@@ -2737,6 +2745,11 @@ function renderPeriodClosure(worker) {
         box.appendChild(el('p', 'hint hint-warn',
             'יש עודף בהחזרי המקדמות של העובד הזה. אי אפשר לסגור חשבון שלא מסתדר - '
             + 'תקן קודם, ואז סגור.'));
+        // NOT A DEAD END (v201): «תקן קודם» named a repair and offered none, and finding the
+        // double entry in «היסטוריה מלאה» by hand is what the owner could not do. The button
+        // works out which lines to correct and asks first - see sortOverpaidAdvance.
+        const fix = overpaidFixControl(worker.id);
+        if (fix) box.appendChild(fix);
         return box;
     }
     // THE PHONE'S OWN CLOCK, said out loud. A closure written from here would be sound
@@ -2985,6 +2998,9 @@ function renderAdvanceRow(item) {
         what.appendChild(el('span', 'wday-note wday-review',
             `הוחזר ${moneyText(settled.settled)} ₪ מתוך ${moneyText(settled.given)} ₪ - `
             + `עודף ${moneyText(settled.overpaid)} ₪ טעון בדיקה`));
+        // And the way out of it, on the row that says it (v201) - see sortOverpaidAdvance.
+        const fix = overpaidFixControl(item.workerId, item.id);
+        if (fix) what.appendChild(fix);
     } else if (settled && settled.left > 0) {
         what.appendChild(button('החזר', 'btn-secondary',
             () => openRepaymentForm(item, settled, row), 'רישום החזר מזומן'));
@@ -3001,7 +3017,14 @@ function renderAdvanceRow(item) {
     // both rows stay on the screen. Behind the same two gates as the repayment, and for
     // the same argument: a build that has no way to record a correction the other phones
     // can read must not offer one.
-    if (settled && settled.given > 0 && financialWritingEnabled(State.schedule)) {
+    //
+    // AND ONLY WHILE SOMETHING IS LEFT ON IT (v201). This was offered whenever `given` was
+    // above zero, so an advance already repaid in full could be reversed as well: the owner's
+    // phone, 2026-11-16 - 2,200 handed back, 2,200 off a closed wage, and then 2,200 reversed
+    // here «העובד החזיר», which made it 4,400 over-settled and refused every close. A debt
+    // nothing is left on has no amount this form can say was never handed over; a mistake in
+    // a repayment or a deduction is corrected on that line, in «היסטוריה מלאה».
+    if (settled && settled.given > 0 && settled.left > 0 && financialWritingEnabled(State.schedule)) {
         what.appendChild(button('תיקון', 'btn-secondary',
             () => openReversalForm(item, settled, row), 'תיקון-היפוך של מקדמה שנרשמה בטעות'));
     }
@@ -3123,6 +3146,18 @@ function openRepaymentForm(item, settled, row) {
     host.insertBefore(form, row.nextSibling);
 }
 
+// What an advance-level reversal may take, at most: what is left unreversed AND what is left
+// owed (v201) - `settled` as the form was opened with it, or null to read the record now.
+function reversalCap(item, settled) {
+    const now = settled || advanceSettled(State.schedule, item.id);
+    const unreversed = typeof reversalRoom === 'function'
+        ? reversalRoom(State.schedule, item.id) : now.given;
+    return agoraRound(Math.max(0, Math.min(unreversed, Number(now.left) || 0)));
+}
+// The form's refusal when nothing is left owed on the advance any more (v201). PROPOSED, and
+// pinned in tests/overpaidfix.test.mjs.
+const REVERSAL_NOTHING_LEFT = 'על המקדמה הזו לא נשאר חוב. אם נרשם החזר או ניכוי בטעות, תקן אותו ב«היסטוריה מלאה».';
+
 // TIKUN-HIPUKH: an advance that should not have been recorded, corrected in place.
 //
 // The same shape as the repayment form beside it, because it is the same gesture, and
@@ -3142,8 +3177,11 @@ function openReversalForm(item, settled, row, simple = false) {
     const host = row.parentNode;
     if (!host || host.querySelector('.advance-form')) return;
 
-    const room = typeof reversalRoom === 'function'
-        ? reversalRoom(State.schedule, item.id) : settled.given;
+    // NEVER MORE THAN IS LEFT ON IT (v201). The ceiling was what is left UNREVERSED, so an
+    // advance already repaid or deducted in full still offered all of itself: reversed, it
+    // was over-settled by exactly that much and every close refused. What is left owed is
+    // the most this advance can have been recorded in error by, once the rest of it came back.
+    const room = reversalCap(item, settled);
 
     const form = el('div', 'advance-form');
     form.appendChild(el('div', 'advance-form-title',
@@ -3220,7 +3258,21 @@ function openReversalForm(item, settled, row, simple = false) {
                 ? reversalRoom(State.schedule, item.id) : room;
             error.textContent = left <= 0
                 ? 'המקדמה הזו כבר תוקנה במלואה. תיקון נוסף יבטל כסף שכבר בוטל.'
-                : `אפשר לתקן עד ${moneyText(left)} ₪ מהמקדמה הזו.`;
+                : `אפשר לתקן עד ${moneyText(Math.min(left, reversalCap(item, null)))} ₪ מהמקדמה הזו.`;
+            amountInput.focus();
+            return;
+        }
+        // AND WHAT IS LEFT OWED, asked again now (v201): a repayment that landed from the
+        // other phone while this form was open settled part of it, and the model alone would
+        // take a reversal that pushes it over-settled.
+        const cap = reversalCap(item, null);
+        if (!(cap > 0)) {
+            error.textContent = REVERSAL_NOTHING_LEFT;
+            amountInput.focus();
+            return;
+        }
+        if (amount > cap + 1e-6) {
+            error.textContent = `אפשר לתקן עד ${moneyText(cap)} ₪ מהמקדמה הזו.`;
             amountInput.focus();
             return;
         }
@@ -3248,6 +3300,264 @@ function openReversalForm(item, settled, row, simple = false) {
     buttons.appendChild(button('ביטול', 'btn-secondary', () => form.remove()));
     form.appendChild(buttons);
     host.insertBefore(form, row.nextSibling);
+}
+
+// ------------------------------------------------ «לסדר את המקדמה» (v201): an over-settled advance, sorted
+//
+// THE DEAD END. An advance that more has come off than was ever put on it stops everything
+// that would settle the man: the closing box says «יש עודף בהחזרי המקדמות... תקן קודם»
+// (planPeriodClosure: 'overpaid'), the advance row says «עודף ... טעון בדיקה», and the only
+// way forward was to find, in «היסטוריה מלאה», which of the four or five lines of one advance
+// was the second story about the same money and correct exactly that one, whole, with a
+// reason typed by hand. The owner's phone, 2026-11-16: one advance of 2,200 recorded as given,
+// as handed back in cash, as taken off a closed period's wage AND reversed at the advance's
+// level - three settlements of one debt, 4,400 over, a close refused - and his words: make it
+// simple, I don't want it this complicated.
+//
+// SO THE APP WORKS OUT WHICH LINES TO CORRECT, AND ASKS. Per over-settled advance: of its
+// repayments and deductions that the model would let be corrected (eventReversalRoom and
+// eventReversalProblems - the history row's own «תיקון» rule), the set whose amounts add up to
+// EXACTLY what it is over-settled by, in agorot. A correction is the whole transaction or
+// nothing (eventReversalProblems), so a set that only comes close would leave the account
+// still wrong - and the app then says it cannot sort this one by itself instead of guessing.
+// Of several exact sets: the fewest deductions (a deduction is a line on a payslip somebody
+// was handed; a repayment is not), then the fewest lines, then the newest. It writes NOTHING
+// of its own: every line is recordEventReversed - the history row's own writer - with one
+// fixed reason, all of them in ONE commit through saveFinancialAction, so the record moves
+// whole or not at all. Nothing is deleted (iron law 1), and a closed period's frozen payslip
+// is not touched - the correction is an entry beside it.
+//
+// AND IT REFUSES, by name, never by forcing: a phone that is not «מסונכרן בין המכשירים» or
+// that cannot keep a write (weeklyCloseReadyWord, js/ui/weeklyclose.js - the closes' own
+// question: two phones correcting one advance on two different stories is the race the rule
+// is there for); a record that moved between the question and the answer; a second press
+// while the first is still asking or writing; and both gates (financialWritingEnabled),
+// shut, offer nothing at all.
+
+// Every Hebrew word of it, in one block. PROPOSED - the owner has not read them - and pinned
+// word for word in tests/overpaidfix.test.mjs, so changing one is a decision.
+const OVERPAID_FIX_TEXT = Object.freeze({
+    button: 'לסדר את המקדמה',
+    title: 'לסדר את המקדמה?',
+    message: (amount, date, extra) => `המקדמה של ${amount} ₪ מ-${date} נרשמה כמוחזרת יותר מפעם אחת, `
+        + `ולכן יש עודף של ${extra} ₪. כדי לסדר, יבוטלו:`,
+    messageMany: (count, extra) => `${count} מקדמות נרשמו כמוחזרות יותר מפעם אחת, `
+        + `ולכן יש עודף של ${extra} ₪. כדי לסדר, יבוטלו:`,
+    item: (kind, date, amount) => `${kind} · ${date} · ${amount} ₪`,
+    footer: 'שום דבר לא נמחק: לצד כל רישום נכתב תיקון. התלוש של חשבון שכבר נסגר לא משתנה.',
+    ok: 'כן, לסדר',
+    // The reason every correction it writes carries, in the ledger and on his statement.
+    reason: 'נרשם יותר מפעם אחת - סודר אוטומטית',
+    cannot: 'את העודף הזה האפליקציה לא יכולה לסדר לבד. פתח את «היסטוריה מלאה» ותקן ידנית את הרישום הכפול.',
+    notSynced: 'מסדרים מקדמה רק כשמופיע «מסונכרן בין המכשירים». לא נרשם דבר.',
+    noDisk: 'הטלפון הזה לא מצליח כרגע לשמור את הרישום. לא נרשם דבר.',
+    moved: 'הרישום השתנה מאז השאלה. לא נרשם דבר. בדוק שוב.',
+    notWritten: 'לא נשמר דבר. נסה שוב.'
+});
+
+// Brute force over the candidates of one advance is 2^n sets: sixteen is 65,536, a blink on a
+// phone, and an advance with more lines that settle it than that is not a double entry this
+// can name - the newest sixteen are the ones looked at.
+const OVERPAID_FIX_CANDIDATES = 16;
+
+function overpaidFixCents(value) {
+    return Math.round((Number(value) || 0) * 100);
+}
+
+// The lines of one advance that may be corrected whole: a repayment or a deduction the model
+// would take a correction of now (the history row's own test, with a stand-in for the reason).
+function overpaidFixCandidates(schedule, advanceId) {
+    if (typeof advanceHistory !== 'function' || typeof eventReversalRoom !== 'function'
+        || typeof eventReversalProblems !== 'function') return [];
+    return advanceHistory(schedule, advanceId)
+        .filter(entry => entry && (entry.kind === 'repaid' || entry.kind === 'deducted'))
+        .filter(entry => {
+            const room = eventReversalRoom(schedule, entry.id);
+            return room > 0 && eventReversalProblems(schedule, entry.id, room, '-').length === 0;
+        })
+        .map(entry => ({ id: String(entry.id), kind: String(entry.kind), date: String(entry.date),
+            at: String(entry.at || ''), amount: eventReversalRoom(schedule, entry.id) }))
+        // Newest first, so the cap keeps the newest and a tie between two sets falls to them.
+        .sort((a, b) => (a.at !== b.at ? (a.at < b.at ? 1 : -1) : (a.id < b.id ? 1 : -1)))
+        .slice(0, OVERPAID_FIX_CANDIDATES);
+}
+
+// The set that adds up EXACTLY to `cents`, or null. Ranked: fewest deductions, fewest lines,
+// then the newest (the candidates are newest first, so the earlier positions win).
+function overpaidFixSubset(candidates, cents) {
+    let best = null;
+    let bestKey = null;
+    const n = candidates.length;
+    for (let mask = 1; mask < (1 << n); mask += 1) {
+        let sum = 0;
+        const picked = [];
+        for (let i = 0; i < n; i += 1) {
+            if (mask & (1 << i)) { sum += overpaidFixCents(candidates[i].amount); picked.push(i); }
+        }
+        if (sum !== cents) continue;
+        const key = [picked.filter(i => candidates[i].kind === 'deducted').length, picked.length].concat(picked);
+        let better = bestKey === null;
+        for (let k = 0; !better && k < key.length && k < bestKey.length; k += 1) {
+            if (key[k] !== bestKey[k]) { better = key[k] < bestKey[k]; break; }
+        }
+        if (better) { best = picked.map(i => candidates[i]); bestKey = key; }
+    }
+    return best;
+}
+
+// WHAT IT WOULD DO for one man (or one advance of his): { fixable: [{ advanceId, given, date,
+// overpaid, picks }], stuck: [{ advanceId, overpaid }] }. A reading: it writes nothing. Both
+// gates shut - or a record whose accounts nobody has looked at yet - and it has nothing to say.
+function overpaidFixPlan(schedule, workerId, advanceId) {
+    const out = { fixable: [], stuck: [] };
+    if (typeof overpaidAdvances !== 'function' || typeof financialWritingEnabled !== 'function'
+        || !financialWritingEnabled(schedule)) return out;
+    overpaidAdvances(schedule, workerId)
+        .filter(state => advanceId === undefined || String(state.id) === String(advanceId))
+        .forEach(state => {
+            const picks = overpaidFixSubset(overpaidFixCandidates(schedule, state.id),
+                overpaidFixCents(state.overpaid));
+            if (!picks) { out.stuck.push({ advanceId: String(state.id), overpaid: state.overpaid }); return; }
+            const origin = advanceHistory(schedule, state.id).filter(entry => entry.kind === 'given')[0] || {};
+            out.fixable.push({ advanceId: String(state.id), given: state.givenGross,
+                date: String(origin.date || ''), overpaid: state.overpaid, picks });
+        });
+    return out;
+}
+
+// What the question was asked about: the plan and every line of every advance of the man. Any
+// line added, on this phone or from another, between the question and the answer moves it.
+function overpaidFixSig(schedule, workerId, plan) {
+    const ids = workerAdvanceIdsOf(schedule, workerId);
+    return JSON.stringify([plan, ids.map(id => advanceHistory(schedule, id))]);
+}
+function workerAdvanceIdsOf(schedule, workerId) {
+    const ids = [];
+    ledgerEntries(schedule).forEach(entry => {
+        if (String(entry.workerId || '') !== String(workerId)) return;
+        if (ids.indexOf(String(entry.advanceId)) === -1) ids.push(String(entry.advanceId));
+    });
+    overpaidAdvances(schedule, workerId).forEach(state => {
+        if (ids.indexOf(String(state.id)) === -1) ids.push(String(state.id));
+    });
+    return ids.sort();
+}
+
+// The one sentence a phone that may not write now is told, or null.
+function overpaidFixNotReady() {
+    // No question to ask means no way to know the phone is synced - and a correction of money
+    // written blind is the race this question exists for. Refused, not assumed.
+    if (typeof weeklyCloseReadyWord !== 'function') return OVERPAID_FIX_TEXT.notSynced;
+    const word = weeklyCloseReadyWord();
+    if (!word) return null;
+    if (typeof WEEKLY_CLOSE_TEXT === 'object' && word === WEEKLY_CLOSE_TEXT.noDisk) return OVERPAID_FIX_TEXT.noDisk;
+    if (typeof WEEKLY_CLOSE_TEXT === 'object' && word === WEEKLY_CLOSE_TEXT.otherWindow) return word;
+    return OVERPAID_FIX_TEXT.notSynced;
+}
+
+// THE WRITE, in one synchronous block: the plan asked again of the record as it is now and
+// compared with what the question showed, then every correction in ONE commit. Answers
+// { notReady } | { moved } | { failed } | { saved, written: [ids] }.
+function overpaidFixWrite(workerId, advanceId, shown) {
+    const result = { notReady: null, moved: false, failed: false, saved: false, written: [] };
+    const notReady = overpaidFixNotReady();
+    if (notReady) { result.notReady = notReady; return result; }
+    const plan = overpaidFixPlan(State.schedule, workerId, advanceId);
+    if (!plan.fixable.length || overpaidFixSig(State.schedule, workerId, plan) !== shown) {
+        result.moved = true;
+        return result;
+    }
+    const at = new Date().toISOString();
+    const by = syncDeviceId();
+    let failed = false;
+    const saved = saveFinancialAction(() => {
+        const built = [];
+        for (const fix of plan.fixable) {
+            for (const pick of fix.picks) {
+                const change = recordEventReversed(State.schedule, pick.id, pick.amount, pick.date,
+                    OVERPAID_FIX_TEXT.reason, at, by);
+                if (!change) { failed = true; break; }
+                built.push(change);
+            }
+            if (failed) break;
+            // And the advance reads settled exactly, or nothing of this commit is kept: a set
+            // that added up on paper and not in the fold is not a repair.
+            if (advanceOutstanding(State.schedule, fix.advanceId).overpaid !== 0) { failed = true; break; }
+        }
+        if (failed) {
+            // Memory back to what the disk and the journal hold: the entries appended as it
+            // went are gone with it, and nothing was journalled.
+            State.rollback();
+            return [];
+        }
+        return built;
+    });
+    result.failed = failed;
+    result.saved = Boolean(saved) && !failed;
+    if (result.saved) result.written = plan.fixable.map(fix => fix.picks.map(pick => pick.id));
+    return result;
+}
+
+let OVERPAID_FIX_BUSY = false;
+
+// THE PRESS: work it out, ask, and write only on «כן». A second press while the first is
+// asking or writing does nothing - a double tap is one repair, not a question asked twice.
+async function sortOverpaidAdvance(workerId, advanceId, redraw) {
+    if (OVERPAID_FIX_BUSY) return false;
+    OVERPAID_FIX_BUSY = true;
+    try {
+        const early = overpaidFixNotReady();
+        if (early) { await askTell(early); return false; }
+        const plan = overpaidFixPlan(State.schedule, workerId, advanceId);
+        // Nothing to sort any more (another press, another phone) is said by the screen
+        // redrawn; a set that does not add up is said in words.
+        if (!plan.fixable.length) {
+            if (plan.stuck.length) await askTell(OVERPAID_FIX_TEXT.cannot);
+            return false;
+        }
+        const shown = overpaidFixSig(State.schedule, workerId, plan);
+        const extra = agoraRound(plan.fixable.reduce((sum, fix) => sum + fix.overpaid, 0));
+        const one = plan.fixable.length === 1 ? plan.fixable[0] : null;
+        const day = date => (parseLocalDate(date) ? formatFullDate(parseLocalDate(date)) : date);
+        const names = [];
+        plan.fixable.forEach(fix => fix.picks.forEach(pick => names.push(OVERPAID_FIX_TEXT.item(
+            LEDGER_KIND_LABELS[pick.kind] || pick.kind, day(pick.date), moneyText(pick.amount)))));
+        const yes = await askConfirm({
+            title: OVERPAID_FIX_TEXT.title,
+            message: one ? OVERPAID_FIX_TEXT.message(moneyText(one.given), day(one.date), moneyText(extra))
+                : OVERPAID_FIX_TEXT.messageMany(plan.fixable.length, moneyText(extra)),
+            names,
+            footer: OVERPAID_FIX_TEXT.footer,
+            ok: OVERPAID_FIX_TEXT.ok,
+            // «ביטול» holds the focus: this writes money, and Enter on a question read too fast
+            // must answer no.
+            danger: true,
+            hold: typeof DOUBLE_TAP_GUARD_MS === 'number' ? DOUBLE_TAP_GUARD_MS : 0
+        });
+        if (yes !== true) return false;
+        const done = overpaidFixWrite(workerId, advanceId, shown);
+        if (done.notReady) { await askTell(done.notReady); return false; }
+        if (done.moved) { await askTell(OVERPAID_FIX_TEXT.moved); return false; }
+        if (done.failed) { await askTell(OVERPAID_FIX_TEXT.notWritten); return false; }
+        if (!done.saved) return false;
+        if (typeof redraw === 'function') redraw();
+        else refreshWorkerFinance(workerId);
+        return true;
+    } finally {
+        OVERPAID_FIX_BUSY = false;
+    }
+}
+
+// The button - or, where no exact set exists, the sentence that says so - for a surface that
+// shows an over-settled advance. null when there is nothing over-settled to say anything about.
+function overpaidFixControl(workerId, advanceId, redraw) {
+    const plan = overpaidFixPlan(State.schedule, workerId, advanceId);
+    if (plan.fixable.length) {
+        return button(OVERPAID_FIX_TEXT.button, 'btn-secondary overpaid-fix',
+            () => sortOverpaidAdvance(workerId, advanceId, redraw));
+    }
+    if (plan.stuck.length) return el('p', 'hint hint-warn overpaid-fix-cannot', OVERPAID_FIX_TEXT.cannot);
+    return null;
 }
 
 // THE ONE ACCOUNT READER, and every surface in this file goes through it.
@@ -3683,9 +3993,21 @@ function renderLedgerEntry(entry) {
     // CORRECTING THIS TRANSACTION, offered here and nowhere else - this is the only place
     // in the app where the immutable id of one event is on the screen, and the id is what
     // a correction has to name. Behind the writing gate, like every other writer.
+    //
+    // AND ONLY WHERE THE MODEL WOULD TAKE ONE. eventReversalRoom says how much is left to
+    // correct and nothing about whether this KIND of entry can be corrected at all, so a
+    // «תיקון-היפוך» row - a correction, which the model refuses to correct ('a correction
+    // of a correction') - showed the button, opened the form, took a reason and refused it
+    // (the owner's phone, 2026-11-16: four rows of one advance, a button on every one).
+    // The model's own question is asked, with a stand-in for the reason the form asks for;
+    // every other rule it holds (a target nobody can read, no readable date) hides the
+    // button the same way, and the save still asks it again with the real reason.
     if (typeof eventReversalRoom === 'function'
         && financialWritingEnabled(State.schedule)
-        && eventReversalRoom(State.schedule, entry.id) > 0) {
+        && eventReversalRoom(State.schedule, entry.id) > 0
+        && (typeof eventReversalProblems !== 'function'
+            || eventReversalProblems(State.schedule, entry.id,
+                eventReversalRoom(State.schedule, entry.id), '-').length === 0)) {
         row.appendChild(button('תיקון', 'btn-secondary',
             () => openEventReversalForm(entry, row),
             `תיקון-היפוך של ${LEDGER_KIND_LABELS[entry.kind] || entry.kind}`));

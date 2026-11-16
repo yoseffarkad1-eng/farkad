@@ -614,10 +614,32 @@ try {
         const inBand = [];
         const failed = [];
         let days = 0;
-        for (const sites of [1, 2, 3]) for (const crew of [1, 2, 3, 4, 6, 8, 10]) for (const mode of ['sites', 'workers']) {
+        // MOVED in v200 (the owner, 2026-11-15: the day's header 17px shorter at rest). The days
+        // the sweep draws end where the layout puts them, and at 375x667 a day by worker ends 56px
+        // apart (1, 57, 113...) - one of them had fallen in the band by a pixel (74), and with the
+        // shorter header none did, so the sweep proved nothing there. So every phone now also
+        // draws ONE day made to end in the middle of its band: two men by worker, and under their
+        // list a block of the height that puts the end there - what a longer list would add - with
+        // the foot, «עוד ⋯» and the dock as the day draws them. Same checks, same finger.
+        const shapes = [];
+        for (const sites of [1, 2, 3]) for (const crew of [1, 2, 3, 4, 6, 8, 10]) for (const mode of ['sites', 'workers']) shapes.push({ sites, crew, mode });
+        if (banding) shapes.push({ sites: 1, crew: 2, mode: 'workers', midBand: Math.round((band.on + band.off + band.collapse) / 2) });
+        for (const { sites, crew, mode, midBand } of shapes) {
             days += 1;
-            const day = `${sites} site${sites > 1 ? 's' : ''}, ${crew} m${crew > 1 ? 'en' : 'an'} ${mode === 'sites' ? 'by site' : 'by worker'}`;
-            const top = await dayOfLength(page, crew, sites, mode);
+            const day = `${sites} site${sites > 1 ? 's' : ''}, ${crew} m${crew > 1 ? 'en' : 'an'} ${mode === 'sites' ? 'by site' : 'by worker'}${midBand ? `, made to end at ${midBand}px` : ''}`;
+            let top = await dayOfLength(page, crew, sites, mode);
+            if (midBand) {
+                top = await page.evaluate(async want => {
+                    const list = document.querySelector('#dayView .worker-list');
+                    const pad = document.createElement('div');
+                    pad.className = 'band-pad';
+                    pad.style.height = `${Math.max(0, want - (document.documentElement.scrollHeight - document.documentElement.clientHeight))}px`;
+                    list.after(pad);
+                    await new Promise(done => setTimeout(done, 120));
+                    return { end: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+                        full: !document.body.classList.contains('day-compact') };
+                }, midBand);
+            }
             const banded = top.end > band.on && top.end <= band.off + band.collapse;
             if (banded) inBand.push(`${day} (${top.end}px)`);
             await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));

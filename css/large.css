@@ -737,7 +737,7 @@
 :root.display-large .wcard-who { font-size: 20px; }
 :root.display-large .wcard-head { font-size: 21px; }
 :root.display-large .wcard-aside { font-size: 18px; font-weight: 500; }
-:root.display-large .wcard-label { font-size: 18px; }
+:root.display-large .wcard-label { font-size: 20px; }
 :root.display-large .wcard-value { font-size: 23px; }
 :root.display-large .wcard-owed .wcard-label { font-size: 20px; }
 :root.display-large .wcard-sub { font-size: 18px; }
@@ -995,6 +995,29 @@
 :root.display-large .advance-reset-done-row { font-size: 20px; font-weight: 500; line-height: 1.45; }
 :root.display-large .advance-reset-board { font-size: 21px; font-weight: 800; line-height: 1.45; }
 :root.display-large .advance-reset-closures { font-size: 21px; font-weight: 700; }
+/* v200: the second pass of the look (css/design.css, its last block) - each size it sets,
+   said again in its order, behind its media query, by this block's table. */
+@media (max-width: 700px) {
+:root.display-large .week-table .name-clip { line-height: 1.4; }
+}
+@media (max-width: 700px) and (min-height: 501px) {
+:root.display-large .day-header .day-date { font-size: 18px; }
+}
+:root.display-large .topbar .sync-chip { font-size: 18px; }
+:root.display-large .drawer-week-title { font-size: 18px; }
+:root.display-large .dd-name .badge { font-size: 18px; }
+:root.display-large #dayView .tag-place .tag-rate { font-size: 18px; }
+:root.display-large .report-search-count { font-size: 18px; }
+:root.display-large .wday-note { font-size: 18px; }
+:root.display-large .restore-label { font-size: 18px; }
+:root.display-large .restore-points button { font-size: 18px; }
+:root.display-large .issue-label { font-size: 18px; }
+@media (max-width: 700px) {
+:root.display-large .week-table thead .day-initial { font-size: 18px; }
+:root.display-large .week-table thead small { font-size: 18px; }
+:root.display-large .week-table tfoot td { font-size: 18px; }
+:root.display-large .week-table tfoot .name-cell { font-size: 18px; }
+}
 
 /* ---- 4. THE SHAPES ------------------------------------------------------------------ */
 
@@ -1212,6 +1235,9 @@
 @media (max-width: 700px) {
     :root.display-large #weekView { --week-name-w: clamp(112px, 31vw, 150px) !important; }
     :root.display-large .week-table .name-clip { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere; line-height: 1.4; }
+    /* v200 let everybody's names wrap, to three lines at most and then an ellipsis
+       (css/design.css); here a name keeps every line it needs, as before. */
+    :root.display-large .week-table .name-clip { display: block !important; -webkit-line-clamp: none !important; }
     :root.display-large .week-table .name-cell { overflow: visible !important; padding: 8px !important; font-weight: 700 !important; }
     :root.display-large .week-table td.week-cell,
     :root.display-large .week-table th:not(.corner) { min-width: 64px !important; }
@@ -1219,6 +1245,17 @@
     :root.display-large .week-cell .cell-line { min-width: 30px !important; height: 30px !important; padding: 0 5px !important; border-radius: 8px !important; margin: 2px auto !important; }
     :root.display-large .week-cell .cell-line[data-initial]::before { font-size: 18px !important; }
     :root.display-large .week-cell .cell-line .site-mark { font-size: 18px !important; }
+}
+
+/* THE DAY'S HEADER KEEPS ITS AIR HERE (v200). css/design.css took the air out from between the
+   day header's lines for everybody (its last block): the top strip's 4px above and below its
+   button, the header's 4px inset, the switcher's margin. This mode was measured and reviewed
+   with that air (v191), and the strip is the one bar tests/largetext.browser.mjs requires to
+   be taller with the mode than without; so here it is what app.css gave it, as before. */
+@media (max-width: 700px) and (min-height: 501px) {
+    :root.display-large .topbar { padding-block: 4px !important; margin-bottom: 6px !important; }
+    :root.display-large .day-header { padding-top: max(4px, env(safe-area-inset-top)) !important; }
+    :root.display-large .day-header .day-tools { margin-top: 2px !important; row-gap: 3px !important; }
 }
 
 }
