@@ -58,7 +58,7 @@ const SINCE = 'מה שנוסף מאז העדכון האחרון שראית, מה
 const ALL = 'כל מה שנוסף לאחרונה, מהחדש לישן.';
 const SHOW = 'הראה לי';
 // The builds that have news, newest first (tests/whatsnew.test.mjs pins the block).
-const NEWS = [202, 201, 200, 199, 198, 197, 196, 195, 194, 192, 191, 190, 189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
+const NEWS = [203, 201, 200, 199, 198, 197, 196, 195, 194, 192, 191, 190, 189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
 
 // SYNTHETIC. Fourteen invented men on three invented sites.
 const NAMES = ['אחמד', 'מוחמד', 'יוסי', 'סמיר', 'עלי', 'Ali Hassan', 'ראמי', 'דוד', 'עבד אל-רחמן', 'מחמוד', 'חאלד', 'נביל', 'זיאד', 'כרים'];
@@ -468,7 +468,7 @@ for (const rides of [false, true]) {
         display: s => s.settings && s.folds.includes('displayLargeCard') && s.modals.length === 0 && !s.transport,
         // v198: the row of «איפוס מקדמות», open on the sheet - and the tool NOT opened.
         advanceReset: s => s.settings && s.folds.includes('settingsFoldAdvanceReset') && s.modals.length === 0 && !s.transport,
-        // v202: the row of «תזכורת לסגירת חשבונות», open on the sheet - and its switch NOT pressed.
+        // v203: the row of «תזכורת לסגירת חשבונות», open on the sheet - and its switch NOT pressed.
         closeReminder: s => s.settings && s.folds.includes('closeReminderCard') && s.modals.length === 0 && !s.transport
     };
     // Each way once from the card as ⋯ opens it; a first disk reading is taken after the

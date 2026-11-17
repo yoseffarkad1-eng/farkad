@@ -491,7 +491,7 @@ await block('every word of the line and the card, and no other', async () => {
     check('nor writes markup from a string', !/innerHTML|insertAdjacentHTML|outerHTML/.test(code));
     check('nor touches the record\'s writers', !/State\.(commit|commitMany|save|persist)\b|FarkadSync\./.test(code));
     // v191: «תצוגה גדולה» is a per-phone switch too - shown by its «הראה לי», never pressed.
-    // v202: and so is «תזכורת לסגירת חשבונות» - shown, never switched, never put away.
+    // v203: and so is «תזכורת לסגירת חשבונות» - shown, never switched, never put away.
     check('nor turns a per-phone switch on, nor starts a journey or a seder run',
         !/transportSetEnabled|displaySetLarge|closeReminderSetOff|closeReminderDismiss|journeyStart|journeyGo|sederMarkOpened|FarkadReminders\.enable/.test(code));
     check('nor opens a reading of money for a period by itself, nor a payslip run',

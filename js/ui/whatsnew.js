@@ -574,7 +574,7 @@ const WHATSNEW_GO = Object.freeze({
     // NOT pressed. The tool writes money for every man (js/ui/advancereset.js); it is opened
     // only by a person's own tap on that button, never by being told about it.
     advanceReset: () => whatsNewSettings('settingsFoldAdvanceReset', 'settingsBackups'),
-    // v202: «תזכורת לסגירת חשבונות» - its row in ⋯ ← «כללי», opened and shown, the switch NOT
+    // v203: «תזכורת לסגירת חשבונות» - its row in ⋯ ← «כללי», opened and shown, the switch NOT
     // pressed (js/ui/closereminder.js): it is on by default, and whether this phone keeps it
     // on is the person's own tap.
     closeReminder: () => whatsNewSettings('closeReminderCard', 'settingsDaily')

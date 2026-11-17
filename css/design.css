@@ -1226,7 +1226,7 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
    owner's and long, so the line WRAPS: where the sentence would get less than 11em beside
    the two buttons, they go under it. Kept on one row at any width, the sentence stood five
    lines tall beside them on the 320px phone with «תצוגה גדולה» on - 291px of a 568px screen,
-   and not one man of the day under it (measured on v202's branch). */
+   and not one man of the day under it (measured on v203's branch). */
 #closeReminderBanner { flex-wrap: wrap; gap: 6px; font-size: 16px; font-weight: 600; padding: 6px 10px; }
 #closeReminderBanner span { flex: 1 1 11em; min-width: 0; overflow-wrap: anywhere; }
 #closeReminderBanner button { flex: none; min-height: 44px; min-width: 44px; font-size: 16px; }

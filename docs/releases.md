@@ -1,10 +1,12 @@
-## v202 — «תזכורת לסגירת חשבונות»: a quiet line from Thursday while men's accounts are still open (candidate, not served)
+## v203 — «תזכורת לסגירת חשבונות»: a quiet line from Thursday while men's accounts are still open (candidate, not served)
 
-**NOT SERVED, AND NOT A RELEASE YET.** A branch on v201 (cd2cce1) whose three build stamps still
-say v201: `js/ui/closereminder.js` is a new file of the shell, so `tests/build.test.mjs` and
-`tests/gate.integrity.test.mjs` each fail exactly one check ("nothing in the shell has changed
-since") until the release commit moves the stamps. Its «מה חדש» item is already at the top of
-WHATSNEW_BUILDS (v202, ahead of the stamps; the guard prints SKIP until they move).
+**NOT SERVED, AND NOT A RELEASE YET.** Written as a branch on v201 (cd2cce1), to be rebased
+onto v202 (the workbook), whose three build stamps it does not move: `js/ui/closereminder.js`
+is a new file of the shell and `sw.js` lists it, so on the branch `tests/build.test.mjs` fails
+two checks (the shell and the worker changed since the stamps) and
+`tests/gate.integrity.test.mjs` one, until the release commit moves the stamps to v203. Its
+«מה חדש» item is already at the top of WHATSNEW_BUILDS (v203, ahead of the stamps; the guard
+prints SKIP until they move).
 
 **Why.** The owner, 2026-11-17: "a reminder - on Thursday, 'there are 4 men whose account is
 still not closed', so I don't forget to close accounts". The app has no server of its own, and

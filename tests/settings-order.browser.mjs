@@ -24,7 +24,7 @@
 // inventory gains its one button and its four runs of words, and "ten cards" says eleven.
 // Nothing that was on the sheet moved or changed a word.
 //
-// v202 (candidate): a TWELFTH card, «תזכורת לסגירת חשבונות», in «כללי» straight before
+// v203 (candidate): a TWELFTH card, «תזכורת לסגירת חשבונות», in «כללי» straight before
 // «תזכורות בטלפון» (so «תצוגה גדולה» still follows the reminders) - the per-phone switch of the in-app line that says how many men's
 // accounts are still open (js/ui/closereminder.js; the owner, 2026-11-17). On by default. A
 // moved expectation, on purpose and listed: ORDER, POSTURE, FOLD and the "every reason
@@ -63,7 +63,7 @@ const ORDER = [
     {id: 'settingsHelp', section: 'מכשיר ועזרה', cards: ['עדכון וגרסה', 'מצב המכשיר', 'מידע טכני']}
 ];
 // 'card' is the one that is not a row and cannot be shut.
-const POSTURE = {'ענן וסנכרון': 'card', 'תזכורות בטלפון': false, 'תזכורת לסגירת חשבונות': false, 'תצוגה גדולה': false, 'הסעות': false,
+const POSTURE = {'ענן וסנכרון': 'card', 'תזכורת לסגירת חשבונות': false, 'תזכורות בטלפון': false, 'תצוגה גדולה': false, 'הסעות': false,
     'גיבוי': true, 'ייבוא ושחזור': false, 'שחזור חירום': false, 'איפוס מקדמות': false,
     'עדכון וגרסה': false, 'מצב המכשיר': false, 'מידע טכני': false};
 const FOLD = {'תזכורות בטלפון': 'settingsFoldReminders', 'תזכורת לסגירת חשבונות': 'closeReminderCard', 'תצוגה גדולה': 'displayLargeCard', 'הסעות': 'transportSwitchCard',
@@ -91,7 +91,7 @@ const CONTROLS = [
     'button |  | 💾 שמור קובץ גיבוי | exportBackup()',
     "button |  | 📂 טען קובץ גיבוי | document.getElementById('importInput').click()",
     'button |  | 🔄 בדוק עדכון | checkForUpdate()',
-    // v202, MOVED ON PURPOSE: «תזכורת לסגירת חשבונות» (js/ui/closereminder.js), its row's one button.
+    // v203, MOVED ON PURPOSE: «תזכורת לסגירת חשבונות» (js/ui/closereminder.js), its row's one button.
     'button | closeReminderSwitch | כיבוי התזכורת במכשיר הזה | ',
     'button | diagnosticCopy | העתק | ',
     'button | diagnosticToggle | הסתר מידע טכני | ',
@@ -653,7 +653,7 @@ try {
         await openSheet(everything);
         await everything.waitForFunction(() => document.getElementById('settingsFoldReminders').open);
         same('every reason standing: תזכורת לסגירת חשבונות, הסעות, תצוגה גדולה, איפוס מקדמות and מידע טכני are still shut, everything else is open',
-            await posture(everything), {'ענן וסנכרון': 'card', 'תזכורות בטלפון': true, 'תזכורת לסגירת חשבונות': false, 'תצוגה גדולה': false, 'הסעות': false,
+            await posture(everything), {'ענן וסנכרון': 'card', 'תזכורת לסגירת חשבונות': false, 'תזכורות בטלפון': true, 'תצוגה גדולה': false, 'הסעות': false,
                 'גיבוי': true, 'ייבוא ושחזור': true, 'שחזור חירום': true, 'איפוס מקדמות': false,
                 'עדכון וגרסה': true, 'מצב המכשיר': true, 'מידע טכני': false});
         await everything.context().close();
@@ -698,7 +698,7 @@ try {
                             .filter(node => getComputedStyle(node).display !== 'flex').length
                     };
                 });
-                // v202, MOVED ON PURPOSE: eleven rows - «תזכורת לסגירת חשבונות» is the new one.
+                // v203, MOVED ON PURPOSE: eleven rows - «תזכורת לסגירת חשבונות» is the new one.
                 check(`${tag}, ${state}: every row is at least 56px tall and wider than a finger`,
                     measured.rows.length === 11 && measured.rows.every(([, w, h]) => h >= 56 && w >= 44),
                     JSON.stringify(measured.rows));
