@@ -277,7 +277,7 @@ await block('a change goes up, the other phone draws it - and the record knows n
     same('the first phone drew the second\'s change', seats(a), 'tv_01=w_01+[w_02] tv_05=w_04+[w_03]');
     check('nobody was put aside and nobody was told anything', a.raw(asideKey(DOC)) === null && b.raw(asideKey(DOC)) === null
         && shareOf(a).notices(DAY).length === 0 && shareOf(b).notices(DAY).length === 0);
-    // v202: the rides' report and «מי היה ברכב?» read what the phone HOLDS - so a day it
+    // v204: the rides' report and «מי היה ברכב?» read what the phone HOLDS - so a day it
     // heard from the other phone is in them, word for word as on the phone that planned it.
     const readOf = device => [device.call('transportReportText', 'thisWeek', DAY),
         JSON.stringify(device.call('transportLookupLines', 'tv_01', DAY, DAY)), JSON.stringify(device.call('transportLookupLines', 'tv_05', DAY, DAY))];

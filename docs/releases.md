@@ -1,9 +1,9 @@
-## v202 — «דוח הסעות» as the owner asked: «מי היה ברכב?», the vehicles and the drivers on one page, and plans kept up to 400 days (candidate, not served)
+## v204 — «דוח הסעות» as the owner asked: «מי היה ברכב?», the vehicles and the drivers on one page, and plans kept up to 400 days (candidate, not served)
 
-**NOT SERVED.** A candidate on v201 (itself a candidate). The three build stamps are NOT moved
-by it - they stay v201, so tests/build.test.mjs and tests/gate.integrity.test.mjs each fail
+**NOT SERVED.** A candidate written on main at v201 and numbered v204: v202 (the Excel workbook) and v203 (the close reminder) are taken. The three build stamps are NOT moved
+by it - on this branch they stay v201, so tests/build.test.mjs and tests/gate.integrity.test.mjs each fail
 exactly one check ("nothing in the shell has changed since") until the release commit moves
-them; its «מה חדש» items are at the top of WHATSNEW_BUILDS under 'v202' (proposed), and the
+them; its «מה חדש» items are at the top of WHATSNEW_BUILDS under 'v204' (proposed), and the
 guard of tests/whatsnew.test.mjs says SKIP until the stamps reach it.
 
 **Why.** The owner, 2026-11-17 (in Arabic): "I want a report for the vehicles: where each
@@ -53,7 +53,7 @@ range of MORE than a month - which the store's 35 days could not give.
    went to, and a car none of whose men had a site goes to «בלי אתר ברישום». A correction of the
    record made later moves the report with it, which is the point: the record is the truth.
 3. **A vehicle taken off the list** («הוצאה מהרשימה», `active: false`) is counted on the days
-   BEFORE TODAY that its stored plans seat men in it - until v202 it vanished from every report
+   BEFORE TODAY that its stored plans seat men in it - until v204 it vanished from every report
    the moment it was retired, and a fine for a sold car could not be answered. From today on it
    is not one of the day's vehicles, as on the screen; it is never listed as idle. KNOWN EDGE: a
    plan written for a future day before the vehicle was retired, and never touched after, still
@@ -74,7 +74,7 @@ range of MORE than a month - which the store's 35 days could not give.
    shut (`renderTransportIfOpen` refreshes it).
 
 **RETENTION - THE PLANS ARE KEPT UP TO 400 DAYS, AND THE RECORD STILL WINS THE DISK.** Until
-v202 every day older than 35 was removed when the screen opened. Measured (tests/transport.test.mjs,
+v204 every day older than 35 was removed when the screen opened. Measured (tests/transport.test.mjs,
 charged as `Store.used()` charges, two bytes a UTF-16 unit, key and value):
 
 | a day's plan | bytes | days in 512 KiB |
@@ -100,7 +100,7 @@ favour, applied where pruning always was (`transportPrune`, when the screen open
   «מתוכם N ימים עד dd/mm/yyyy: שיבוצים ישנים נמחקו מהמכשיר הזה כדי לפנות מקום לרישום העבודה.»
   and «מי היה ברכב?» says the same, instead of "no plan".
 - The 35-day WORKING WINDOW is unchanged (`TRANSPORT_KEEP_DAYS`): js/ui/transport-share.js
-  shares, owes, listens to and puts aside only those days, exactly as in v186-v201. A day older
+  shares, owes, listens to and puts aside only those days, exactly as in v186-v203. A day older
   than the window is never sent, never compared with the cloud and never adopted from it.
 
 **NOT DONE, and to be decided by the owner:**
@@ -113,10 +113,10 @@ favour, applied where pruning always was (`transportPrune`, when the screen open
   full day). Rewriting old days is a write on every opening, and was not worth the risk.
 - The limits are checked when the הסעות screen opens; between openings the record can grow past
   60% while up to 512 KiB of history sits there - bounded, and said.
-- **What was pruned before v202 is gone.** A phone's history begins 35 days before it took v202.
-- **ROLLOUT:** a v201-or-older window that opens the הסעות screen on a phone prunes at 35 days
-  and deletes that phone's history. So: no older window beside a v202 one on a phone whose
-  history matters, and the phone that answers fines takes v202 first. Nothing else crosses
+- **What was pruned before v204 is gone.** A phone's history begins 35 days before it took v204.
+- **ROLLOUT:** a v203-or-older window that opens the הסעות screen on a phone prunes at 35 days
+  and deletes that phone's history. So: no older window beside a v204 one on a phone whose
+  history matters, and the phone that answers fines takes v204 first. Nothing else crosses
   builds: the shared documents and their 35-day window are v186's, unchanged.
 
 **The words, all PROPOSED** (pinned in tests/transport.test.mjs, the news in

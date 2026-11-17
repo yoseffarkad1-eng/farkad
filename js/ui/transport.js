@@ -219,9 +219,9 @@ const TRANSPORT_TEXT = Object.freeze({
 
     // --- the report of a period: the button on the screen, and its dialog. The four
     // ranges are the pay report's own words (js/ui/reports.js), and so are the fifth and
-    // its two fields (v202: «תאריכים אחרים», «מתאריך», «עד תאריך»); the dialog's four
+    // its two fields (v204: «תאריכים אחרים», «מתאריך», «עד תאריך»); the dialog's four
     // buttons are the summary's (`summarySend`, `summaryCopy`, `summaryPicture`,
-    // `summaryClose`). `reportTitle` is also the row of «דוחות» ← «הפקת דוח» (v202).
+    // `summaryClose`). `reportTitle` is also the row of «דוחות» ← «הפקת דוח» (v204).
     reportButton: 'דוח הסעות לתקופה',
     reportTitle: 'דוח הסעות',
     reportRanges: 'בחירת תקופה',
@@ -232,7 +232,7 @@ const TRANSPORT_TEXT = Object.freeze({
     reportCustom: 'תאריכים אחרים',
     reportFrom: 'מתאריך',
     reportTo: 'עד תאריך',
-    // v202: the page shows the two lists; the text that leaves is folded under this,
+    // v204: the page shows the two lists; the text that leaves is folded under this,
     // as «סיכום חודש» folds its own (js/ui/monthsummary.js, «הסיכום כטקסט»).
     reportAsText: 'הדוח כטקסט',
     // a chosen range longer than the page reads is cut from its start, and said
@@ -240,7 +240,7 @@ const TRANSPORT_TEXT = Object.freeze({
     // the name of the picture's file; the dates as the record writes them
     reportFile: (from, to) => `farkad-דוח-הסעות-${from}_${to}.png`,
 
-    // --- v202: «מי היה ברכב?» - one vehicle on one date, at the top of the same page.
+    // --- v204: «מי היה ברכב?» - one vehicle on one date, at the top of the same page.
     // The owner, 2026-11-17: a traffic fine arrives for a vehicle on a date, weeks or
     // months later, and he must know who drove it and who was in it.
     //   רכב: ⁧טויוטה קורולה 2013⁩ – יום ראשון 08/11/2026
@@ -261,7 +261,7 @@ const TRANSPORT_TEXT = Object.freeze({
     lookupOld: keep => `שיבוצים ישנים מ-${keep} ימים אינם נשמרים במכשיר הזה.`,
     lookupTrimmed: date => `שיבוצים עד ${date} נמחקו מהמכשיר הזה כדי לפנות מקום לרישום העבודה.`,
 
-    // --- the report itself (v202: the owner, 2026-11-17 - "two lists: one, the days of
+    // --- the report itself (v204: the owner, 2026-11-17 - "two lists: one, the days of
     // the vehicles; the second, who was driving, where exactly he went, and whom he took
     // with him"). Names, days and sites only: no money, no rate, nothing of pay.
     //   דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:
@@ -370,10 +370,10 @@ const TRANSPORT_DAY_PREFIX = 'farkadTransport:day:';
 // Where bytes that would not read are put before anything is written over them.
 const TRANSPORT_UNREADABLE = ':unreadable';
 // THE WORKING WINDOW: five weeks. What is shared, owed, listened to and put aside
-// (js/ui/transport-share.js) is about these days and no older ones, and until v202 a day
+// (js/ui/transport-share.js) is about these days and no older ones, and until v204 a day
 // older than this was removed whenever the screen was opened.
 const TRANSPORT_KEEP_DAYS = 35;
-// v202 - THE HISTORY. The owner, 2026-11-17: a traffic fine arrives for a vehicle weeks
+// v204 - THE HISTORY. The owner, 2026-11-17: a traffic fine arrives for a vehicle weeks
 // or months after the day, and he must know who drove it; and the vehicles' days are
 // for their expenses and for billing. So a day's plan is no longer removed at five
 // weeks. It is kept up to TRANSPORT_HISTORY_DAYS, as it was written (nothing older than
@@ -1245,7 +1245,7 @@ function transportKeydown(event) {
 
 function renderTransportIfOpen() {
     if (transportIsOpen() && transportEnabled()) renderTransport();
-    // v202: the report opened from «דוחות», with this screen shut, follows the record too.
+    // v204: the report opened from «דוחות», with this screen shut, follows the record too.
     else transportReportRefresh();
 }
 
@@ -1872,7 +1872,7 @@ function transportDoor(date, vehicleId, number, text) {
 // ================================================================== the report of a period
 //
 // The owner, 2026-11-10: "is there a report for the cars?" v179 answered for one day and
-// v182 for a week and a month. v202 is the owner's own shape for it (2026-11-17): "a
+// v182 for a week and a month. v204 is the owner's own shape for it (2026-11-17): "a
 // report for the vehicles - where each vehicle went; and who was driving - just names.
 // On the same page, two lists: one, the number of days of the vehicles; the second, who
 // was driving, where exactly he went, and whom he took with him." And on top of the same
@@ -1893,7 +1893,7 @@ function transportDoor(date, vehicleId, number, text) {
 // WHAT IT CAN KNOW IS WHAT THIS PHONE KEPT, AND IT SAYS SO.
 //   - A day this phone has no plan for is COUNTED AND SAID, and adds nothing to any
 //     vehicle: "no plan here" is never shown as "stayed home". Among them, the days on
-//     which the record has men working are NAMED by date (v202) - those are the days a
+//     which the record has men working are NAMED by date (v204) - those are the days a
 //     plan was made somewhere else, or never.
 //   - The store keeps TRANSPORT_HISTORY_DAYS (400) days, inside two limits that give the
 //     disk back to the record (transportPrune, "THE HISTORY" above). A day removed by
@@ -1908,7 +1908,7 @@ function transportDoor(date, vehicleId, number, text) {
 // OFF is on the list still: the days before the day it is off from are counted as they
 // were stored, and from that day on it did not go out. A vehicle TAKEN OFF the list
 // (`active: false`) is counted on the days BEFORE TODAY that its stored plans seat men in
-// it (v202 - until then it vanished from every report the moment it was retired, and a
+// it (v204 - until then it vanished from every report the moment it was retired, and a
 // fine for a car since sold could not be answered); from today on it is not one of the
 // day's vehicles, as on the screen.
 //
@@ -2237,7 +2237,7 @@ function transportLookupLines(vehicleId, date, today) {
 // (js/ui/printout.js), whose reader (readTransportPrintout, below) reads whichever of
 // the two dialogs is open.
 //
-// TWO WAYS IN (v202): the button under the last car on the הסעות screen, as since v182,
+// TWO WAYS IN (v204): the button under the last car on the הסעות screen, as since v182,
 // and the row «דוח הסעות» of «דוחות» ← «הפקת דוח» (transportReportEntry), which is drawn
 // only on a phone that turned הסעות on.
 let transportReportKey = 'thisWeek';
@@ -2564,7 +2564,7 @@ function transportSummaryPicture() {
 //
 // The report of a period is read the same way off ITS dialog's field (folded or not, the
 // field holds the page's words); only one of the two can be open at a time. Its two
-// lists' titles (v202) are named in `titles`, by their place among the blocks, so the
+// lists' titles (v204) are named in `titles`, by their place among the blocks, so the
 // drawing gives each list a heading of its own; and the report may run to `columns`.
 function readTransportPrintout() {
     const report = transportReportIsOpen();
@@ -2591,7 +2591,7 @@ function readTransportPrintout() {
 // shows whole; a line too long for it wraps and is never cut - a cut line here would be
 // a man missing from his car. `layout.rows` is one box per block.
 //
-// THE REPORT RUNS TO COLUMNS (v202). A week of the drivers' list, day by day, is a few
+// THE REPORT RUNS TO COLUMNS (v204). A week of the drivers' list, day by day, is a few
 // hundred lines, and one column of them is a picture taller than js/ui/printout.js will
 // draw at full size (PRINTOUT_MAX_SIDE): it would come out shrunk past reading. So when
 // `spec.columns` is set and one column would be taller than COLUMN_MAX, the blocks are

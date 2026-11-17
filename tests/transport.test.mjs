@@ -732,7 +732,7 @@ await block('the report of a period: each vehicle, each driver, and every day th
     same('a range nobody offers, or a day that is not one, is no range', [range('year'), range('thisWeek', '2026-13-40'),
         text('year'), text('thisWeek', 'tomorrow')], [null, null, '', '']);
 
-    // --- nothing kept yet. MOVED in v202: the day the record has men working and this
+    // --- nothing kept yet. MOVED in v204: the day the record has men working and this
     // phone has no plan for is now NAMED by its date - the crew works on DAY.
     same('with no plan on the phone it says so for every day, names the day men worked, and names no vehicle at all', lines('thisWeek'),
         ['דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:', '',
@@ -776,7 +776,7 @@ await block('the report of a period: each vehicle, each driver, and every day th
     const schedule = JSON.stringify(again.State.schedule);
     const held = Object.keys(again.global('transportDays')).sort().join();
     const week = again.call('transportReportText', 'thisWeek', DAY).split('\n');
-    // MOVED in v202 (the owner, 2026-11-17: two lists on one page - the vehicles' days and
+    // MOVED in v204 (the owner, 2026-11-17: two lists on one page - the vehicles' days and
     // where they went; who drove, where, and whom he took). Counted by hand off the plans
     // staged above and the crew's days: every man worked at הרצליה on 08, 09 and 11; on
     // DAY אחמד at הרצליה and Ali Hassan at פרדסיה. The seats and the per-vehicle drivers
@@ -844,7 +844,7 @@ await block('the report of a period: each vehicle, each driver, and every day th
     check('and the vehicles named as carrying nobody are named only for «ימים עם שיבוץ»',
         week.filter(line => line.includes('סוואנה')).every(line => line.startsWith('רכבים בלי עובדים בימים עם שיבוץ: ')));
 
-    // --- the month, and the month before it against the store's horizon. MOVED in v202:
+    // --- the month, and the month before it against the store's horizon. MOVED in v204:
     // the store keeps 400 days, not 35 (the owner, 2026-11-17 - a fine arrives months
     // late), so the October before DAY is whole and nothing is said about deletion.
     same('this month: the same four days out of thirty, twenty-five with no plan, the one worked day named, and nothing said about deletion',
@@ -969,7 +969,7 @@ await block('the report of a period: each vehicle, each driver, and every day th
         peek.match(/Store\.\w+|transportLoad|transportWrite|transportDays\[date\]\s*=|transportUnreadableSeen\s*=|transportHeld\[/g) || [], ['Store.get']);
 });
 
-// v202. WHERE A VEHICLE WENT: every site of every man in it that day, by the day record -
+// v204. WHERE A VEHICLE WENT: every site of every man in it that day, by the day record -
 // the owner's answer of 2026-11-17 ("all the sites of the men in the car, not only the
 // driver's"). A man in a seat with no site is said by name. And «מי היה ברכב?»: one
 // vehicle, one date - for the traffic fine that arrives months later.
@@ -1267,7 +1267,7 @@ await block('a disk that refuses it keeps the session going, says so, and spends
     same('after a reopen only what reached the disk is there', tripsOf(reopen(device)), 'tv_01=w_01+[]');
 });
 
-// MOVED in v202. Until then a day's plan was removed at 35 days. The owner, 2026-11-17: a
+// MOVED in v204. Until then a day's plan was removed at 35 days. The owner, 2026-11-17: a
 // traffic fine arrives for a vehicle months after the day, and he must know who drove it.
 // So the store keeps 400 days - under two limits that give the disk back to the record,
 // which the reclaim ladder (js/ui/backup.js) cannot do for it: the days older than the
@@ -1282,7 +1282,7 @@ await block('it keeps 400 days of plans - within 512 KiB, and only while the rec
     stage('2025-10-05');                 // 401 days before DAY
     stage('2025-10-05', ':unreadable');  // and the copy of an unreadable one
     stage('2025-10-06');                 // 400 days before: the edge, kept
-    stage('2026-10-05');                 // 36 days before: removed until v202, kept now
+    stage('2026-10-05');                 // 36 days before: removed until v204, kept now
     stage('2026-11-09');
     stage('2026-11-20');                 // a plan for next week
     device.putRaw('farkadTransport:day:not-a-date', '{"version":1}');
@@ -1887,7 +1887,7 @@ await block('the words, every one of them, and no other', async () => {
         sEmpty: [['סוואנה, קורולה'], 'רכבים ריקים: סוואנה, קורולה'],
         sHome: [['סוואנה, קורולה'], 'רכבים שלא זמינים היום: סוואנה, קורולה'],
         // The report of a period: the button, the dialog and its ranges (the pay report's
-        // own words), the picture's file, and the lines of the report. MOVED in v202: the
+        // own words), the picture's file, and the lines of the report. MOVED in v204: the
         // owner's two lists and «מי היה ברכב?» (all PROPOSED). Gone with v182's shape:
         // `reportLabel` (the page shows the lists; the field is folded under
         // `reportAsText`), `rSeats`, `rDriver` and `rDriverVehicle`; `rDriversTitle` and
