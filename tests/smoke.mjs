@@ -5157,9 +5157,13 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // מקדמות», last in «גיבוי ושחזור» - the owner's one-time reset of the advances, put out of
   // easy reach at his word (js/ui/advancereset.js). The ten that were here are in the order
   // they were.
-  check('the sheet has the eleven groups, including the phone reminders, the transport switch, the large display and the advances reset, in the board order',
+  // v203 (candidate): A TWELFTH, and the list moves because that is the change: «תזכורת
+  // לסגירת חשבונות», in the first section straight before «תזכורות בטלפון» - the switch of the
+  // in-app line that counts the accounts still open (js/ui/closereminder.js). The eleven that
+  // were here are in the order they were.
+  check('the sheet has the twelve groups, including the close reminder, the phone reminders, the transport switch, the large display and the advances reset, in the board order',
     JSON.stringify(heads) === JSON.stringify(
-      ['ענן וסנכרון', 'תזכורות בטלפון', 'תצוגה גדולה', 'הסעות', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'איפוס מקדמות',
+      ['ענן וסנכרון', 'תזכורת לסגירת חשבונות', 'תזכורות בטלפון', 'תצוגה גדולה', 'הסעות', 'גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'איפוס מקדמות',
                 'עדכון וגרסה', 'מצב המכשיר', 'מידע טכני']),
     JSON.stringify(heads));
 
