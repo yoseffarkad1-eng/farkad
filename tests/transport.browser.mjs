@@ -545,11 +545,12 @@ async function summary(page, where) {
     await page.locator('#transportSummaryClose').tap();
 }
 
-// ------------------------------------------------------------------ the report of a period
+// ------------------------------------------------------------------ the rides' report (v202)
 
 // Two more days of plans for the week of DAY, as the screen would have kept them. Put on
 // the disk by this file and taken off again by it: the evening's own account of what the
-// feature wrote (three names) is taken after.
+// feature wrote (three names) is taken after. Nobody has a site in the record on either
+// day - so both say «בלי אתר ברישום», which is the truth of this fixture.
 const STAGED = {
     '2026-11-08': { version: 1, unavailable: {}, status: {}, marks: {},
         trips: { tv_01: { driver: 'w_01', passengers: ['w_02'], seats: { w_02: 2 } }, tv_03: { driver: 'w_04', passengers: [], seats: {} } } },
@@ -559,71 +560,169 @@ const STAGED = {
 
 // What the report must say, WORKED OUT FROM THE DISK by this file's own hand: every day
 // key of the range parsed, a vehicle out when its stored trip has a man in it and the day
-// does not keep it home, the vehicles' names and order off the stored list, the men's
-// names off this file's own roster. The pinned words of tests/transport.test.mjs.
-const reportFromDisk = (page, label, from, to, pruned) => page.evaluate(([label, from, to, workers, pruned]) => {
+// does not keep it home, the men in the order of their seat numbers, each man's sites off
+// the record's own bytes (scheduleData:v2: his entries that day, none if he is absent),
+// the vehicles' names and order off the stored list, the men's names off this file's own
+// roster. The pinned words of tests/transport.test.mjs. No vehicle in this fixture is
+// turned off, and none taken off the list carries anybody.
+const reportFromDisk = (page, label, from, to) => page.evaluate(([label, from, to, workers, seven]) => {
+    const iso = at => `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
     const full = date => `${date.slice(8)}/${date.slice(5, 7)}/${date.slice(0, 4)}`;
+    const short = date => `${date.slice(8)}/${date.slice(5, 7)}`;
+    const dayNames = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
     const count = n => (n === 1 ? 'יום אחד' : `${n} ימים`);
     const within = n => (n === 1 ? 'ביום אחד' : `ב-${n} ימים`);
-    const vehicles = JSON.parse(localStorage.getItem('farkadTransport:settings')).vehicles.filter(v => v.active !== false);
+    const record = JSON.parse(localStorage.getItem('scheduleData:v2'));
+    const places = record.places;
+    const placeRank = id => places.findIndex(place => place.id === id);
+    const sitesOf = (date, id) => {
+        const one = ((record.days[date] || {}).actual || {})[id];
+        if (!one || one.absent) return [];
+        return [...new Set((one.entries || []).map(entry => entry.placeId))].filter(site => placeRank(site) !== -1);
+    };
+    // A list nobody on this phone changed is not on the disk: it is the seven every phone starts with.
+    const stored = localStorage.getItem('farkadTransport:settings');
+    const vehicles = stored ? JSON.parse(stored).vehicles : seven.map((name, i) => ({ id: `tv_0${i + 1}`, name, active: true }));
     const rank = id => workers.findIndex(w => w.id === id);
     const nameOf = id => workers[rank(id)].name;
-    const cars = vehicles.map(v => ({ id: v.id, name: v.name, days: 0, seats: 0, noDriver: 0, drivers: {} }));
+    const cars = vehicles.map(v => ({ id: v.id, name: v.name, active: v.active !== false, days: 0, noSite: 0, noDriver: 0, sites: {} }));
     const men = {};
+    const worked = [];
     let total = 0;
     let planned = 0;
     const start = new Date(Number(from.slice(0, 4)), Number(from.slice(5, 7)) - 1, Number(from.slice(8)), 12);
     const end = new Date(Number(to.slice(0, 4)), Number(to.slice(5, 7)) - 1, Number(to.slice(8)), 12);
     for (const at = new Date(start); at <= end; at.setDate(at.getDate() + 1)) {
         total += 1;
-        const date = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+        const date = iso(at);
         const raw = localStorage.getItem(`farkadTransport:day:${date}`);
         const day = raw ? JSON.parse(raw) : null;
         const sitting = trip => (trip.driver ? 1 : 0) + trip.passengers.length;
-        if (!day || !Object.values(day.trips || {}).some(trip => sitting(trip) > 0)) continue;
+        if (!day || !Object.values(day.trips || {}).some(trip => sitting(trip) > 0)) {
+            if (workers.some(w => sitesOf(date, w.id).length > 0)) worked.push(date);
+            continue;
+        }
         planned += 1;
         cars.forEach(car => {
             const trip = day.trips[car.id];
             if (!trip || (day.unavailable || {})[car.id] || sitting(trip) === 0) return;
+            const passengers = trip.passengers.slice().sort((a, b) => trip.seats[a] - trip.seats[b]);
+            const riding = (trip.driver ? [trip.driver] : []).concat(passengers);
+            const sites = [...new Set(riding.flatMap(id => sitesOf(date, id)))].sort((a, b) => placeRank(a) - placeRank(b));
             car.days += 1;
-            car.seats += sitting(trip);
+            sites.forEach(site => { car.sites[site] = (car.sites[site] || 0) + 1; });
+            if (riding.some(id => sitesOf(date, id).length === 0)) car.noSite += 1;
             if (!trip.driver) { car.noDriver += 1; return; }
-            car.drivers[trip.driver] = (car.drivers[trip.driver] || 0) + 1;
-            men[trip.driver] = men[trip.driver] || {};
-            men[trip.driver][car.id] = (men[trip.driver][car.id] || 0) + 1;
+            men[trip.driver] = men[trip.driver] || [];
+            men[trip.driver].push({ date, car, sites, alone: sitesOf(date, trip.driver).length === 0,
+                passengers: passengers.map(id => (sitesOf(date, id).length ? nameOf(id) : `${nameOf(id)} (בלי אתר ברישום)`)) });
         });
     }
     const said = [`ימים עם שיבוץ שמור במכשיר הזה: ${planned} מתוך ${total}`];
     if (total - planned > 0) said.push(total - planned === 1 ? 'ביום אחד אין שיבוץ שמור במכשיר הזה.' : `ב-${total - planned} ימים אין שיבוץ שמור במכשיר הזה.`);
-    if (pruned) said.push(pruned);
+    if (worked.length) said.push(`ימים שעבדו בהם ואין להם שיבוץ במכשיר הזה: ${worked.map(short).join(', ')}`);
     const blocks = [[`דוח הסעות – ${label}, ${full(from)} עד ${full(to)}:`], said];
     if (planned === 0) return blocks.map(block => block.join('\n')).join('\n\n');
-    const most = (a, b) => b[1] - a[1] || rank(a[0]) - rank(b[0]);
+    blocks.push(['רכבים – כמה ימים יצא כל רכב ולאן']);
     const out = cars.filter(car => car.days > 0);
-    if (out.length === 0) blocks.push(['בימים עם שיבוץ אף רכב לא יצא עם עובדים.']);
+    if (out.length === 0) {
+        blocks.push(['בימים עם שיבוץ אף רכב לא יצא עם עובדים.']);
+        return blocks.map(block => block.join('\n')).join('\n\n');
+    }
     out.forEach(car => {
         const lines = [`רכב: ${car.name} – יצא ${within(car.days)}`];
-        Object.entries(car.drivers).sort(most).forEach(([id, n]) => lines.push(`נהג: ${nameOf(id)} – ${count(n)}`));
+        Object.keys(car.sites).sort((a, b) => car.sites[b] - car.sites[a] || placeRank(a) - placeRank(b))
+            .forEach(site => lines.push(`- ${places[placeRank(site)].name} – ${count(car.sites[site])}`));
+        if (car.noSite) lines.push(`- עובד בלי אתר ברישום – ${count(car.noSite)}`);
         if (car.noDriver) lines.push(`בלי נהג – ${count(car.noDriver)}`);
-        lines.push(`מושבים תפוסים: ${car.seats} בסך הכול, ${Math.round(car.seats / car.days * 10) / 10} בממוצע ליום`);
         blocks.push(lines);
     });
-    const idle = cars.filter(car => car.days === 0);
-    if (out.length && idle.length) blocks.push([`רכבים בלי עובדים בימים עם שיבוץ: ${idle.map(car => car.name).join(', ')}`]);
-    const drivers = Object.keys(men).map(id => [id, Object.values(men[id]).reduce((a, b) => a + b, 0)]).sort(most);
+    const idle = cars.filter(car => car.days === 0 && car.active);
+    if (idle.length) blocks.push([`רכבים בלי עובדים בימים עם שיבוץ: ${idle.map(car => car.name).join(', ')}`]);
+    const drivers = Object.keys(men).sort((a, b) => men[b].length - men[a].length || rank(a) - rank(b));
     if (drivers.length) {
-        blocks.push(['נהגים בתקופה:'].concat(drivers.map(([id, n]) =>
-            `- ${nameOf(id)} – ${count(n)}: ${cars.filter(car => men[id][car.id]).map(car => `${car.name} (${men[id][car.id]})`).join(', ')}`)));
+        blocks.push(['נהגים – מי נהג, לאן ועם מי']);
+        drivers.forEach(id => {
+            const lines = [`נהג: ${nameOf(id)} – ${count(men[id].length)}`];
+            men[id].forEach(trip => {
+                const at = new Date(Number(trip.date.slice(0, 4)), Number(trip.date.slice(5, 7)) - 1, Number(trip.date.slice(8)), 12);
+                const where = trip.sites.length ? trip.sites.map(site => places[placeRank(site)].name).join(', ') : 'בלי אתר ברישום';
+                lines.push(`- יום ${dayNames[at.getDay()]} ${short(trip.date)}: ${trip.car.name} – ${trip.alone && trip.sites.length ? `${where} (הנהג בלי אתר ברישום)` : where}`);
+                lines.push(trip.passengers.length ? `נוסעים: ${trip.passengers.join(', ')}` : 'בלי נוסעים.');
+            });
+            blocks.push(lines);
+        });
     }
     return blocks.map(block => block.join('\n')).join('\n\n');
-}, [label, from, to, WORKERS, pruned || '']);
+}, [label, from, to, WORKERS, VEHICLES]);
+// «מי היה ברכב?» for one vehicle and one date, worked out again off the disk and the record
+// (a car that went out with a driver; the other answers are pinned word for word above).
+const lookupFromDisk = (page, vehicle, date) => page.evaluate(([vehicle, date, workers]) => {
+    const record = JSON.parse(localStorage.getItem('scheduleData:v2'));
+    const places = record.places;
+    const placeRank = id => places.findIndex(place => place.id === id);
+    const sitesOf = id => {
+        const one = ((record.days[date] || {}).actual || {})[id];
+        if (!one || one.absent) return [];
+        return [...new Set((one.entries || []).map(entry => entry.placeId))].filter(site => placeRank(site) !== -1);
+    };
+    const nameOf = id => { const w = workers.find(one => one.id === id); const n = w ? w.name : 'עובד שנמחק'; return sitesOf(id).length ? n : `${n} (בלי אתר ברישום)`; };
+    const trip = JSON.parse(localStorage.getItem(`farkadTransport:day:${date}`)).trips[vehicle];
+    const name = JSON.parse(localStorage.getItem('farkadTransport:settings')).vehicles.find(v => v.id === vehicle).name;
+    const passengers = trip.passengers.slice().sort((a, b) => trip.seats[a] - trip.seats[b]);
+    const riding = [trip.driver].concat(passengers);
+    const sites = [...new Set(riding.flatMap(sitesOf))].sort((a, b) => placeRank(a) - placeRank(b)).map(id => places[placeRank(id)].name);
+    const days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    const at = new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8)), 12);
+    return [`רכב: ${name} – יום ${days[at.getDay()]} ${date.slice(8)}/${date.slice(5, 7)}/${date.slice(0, 4)}`, `נהג: ${nameOf(trip.driver)}`,
+        passengers.length ? `נוסעים: ${passengers.map(nameOf).join(', ')}` : 'בלי נוסעים.', `יעדים: ${sites.length ? sites.join(', ') : 'בלי אתר ברישום'}`];
+}, [vehicle, date, WORKERS]);
 const reportField = page => page.evaluate(() => document.getElementById('transportReportText').value);
+// The page as it is drawn: every line of the two lists, read off the glass in order.
+const reportPage = page => page.evaluate(() => [...document.querySelectorAll('#transportReportBody p, #transportReportBody h4')]
+    .map(node => node.textContent));
 const reportOpen = page => visible(page, '#transportReportModal');
+const lookupLines = page => page.evaluate(() => [...document.querySelectorAll('#transportLookupResult p')].map(node => node.textContent));
 const pressed = page => page.evaluate(() => [...document.querySelectorAll('#transportReportRanges button')]
     .filter(node => node.getAttribute('aria-pressed') === 'true').map(node => node.dataset.range).join());
+const REPORT_PAGE_WORDS = { title: 'דוח הסעות', ranges: ['השבוע', 'שבוע קודם', 'החודש', 'חודש שעבר', 'תאריכים אחרים'],
+    rangesLabel: 'בחירת תקופה', lookupTitle: 'מי היה ברכב?', lookupLead: 'למשל לדוח תנועה: בוחרים רכב ותאריך.',
+    vehicle: 'רכב', date: 'תאריך', from: 'מתאריך', to: 'עד תאריך', fold: 'הדוח כטקסט',
+    actions: ['שליחה בוואטסאפ', 'העתקה', 'שיתוף כתמונה', 'סגירה'] };
+
+// The floors of the open dialog, every control brought onto the glass first (the page is
+// longer than the phone): 44px both ways, 16px words, on the glass and under nothing, no
+// two overlapping, nothing off the side.
+const reportFloors = page => page.evaluate(() => {
+    const modal = document.getElementById('transportReportModal');
+    const content = modal.querySelector('.modal-content');
+    const seen = node => { const b = node.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(node).display !== 'none'; };
+    const controls = [...modal.querySelectorAll('button, select, input, textarea')].filter(seen);
+    const before = content.scrollTop;
+    const unreachable = [];
+    controls.forEach(node => {
+        node.scrollIntoView({ block: 'nearest' });
+        const b = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        if (!(hit === node || node.contains(hit))) unreachable.push(node.id || node.textContent);
+    });
+    content.scrollTop = before;
+    const boxes = controls.map(node => node.getBoundingClientRect());
+    const lines = [...modal.querySelectorAll('p, h3, h4, label, span')].filter(seen).filter(node => node.textContent.trim());
+    return {
+        small: controls.filter((node, i) => boxes[i].width < 43.5 || boxes[i].height < 43.5).map(node => node.id || node.textContent),
+        smallFont: controls.filter(node => parseFloat(getComputedStyle(node).fontSize) < 16).map(node => node.id || node.textContent),
+        smallText: lines.filter(node => parseFloat(getComputedStyle(node).fontSize) < 16).map(node => node.textContent.slice(0, 20)),
+        unreachable,
+        overlap: boxes.some((a, i) => boxes.some((b, j) => i < j && !(a.right <= b.left + 0.5 || b.right <= a.left + 0.5
+            || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5))),
+        inside: content.getBoundingClientRect().left >= -0.5 && content.getBoundingClientRect().right <= window.innerWidth + 0.5,
+        sideways: content.scrollWidth > content.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+    };
+});
 
 async function periodReport(page, where, small) {
-    suite(`${where}: the report of a period - one button, four ranges, the stored plans counted, three ways out, nothing written`);
+    suite(`${where}: the rides' report - «מי היה ברכב?», five ranges, the two lists off the stored plans and the record, three ways out, nothing written`);
     await page.evaluate(staged => {
         Object.keys(staged).forEach(date => localStorage.setItem(`farkadTransport:day:${date}`, JSON.stringify(staged[date])));
     }, STAGED);
@@ -643,92 +742,129 @@ async function periodReport(page, where, small) {
         return after(cars[cars.length - 1], node) && after(node, document.getElementById('transportFleet'))
             && document.getElementById('transportSummaryOpen').nextElementSibling !== node;
     }));
-    same('and nowhere else in the app is there a way to it', await page.evaluate(word =>
+    // MOVED in v202: one other way in - the row of «דוחות» ← «הפקת דוח» (reportsRow, below).
+    same('and the only other way to it in the app is the row of «דוחות»', await page.evaluate(word =>
         [...document.querySelectorAll('button, a, summary')].filter(node => node.textContent.includes(word) || /transportReport|openTransportReport/.test(node.getAttribute('onclick') || ''))
-            .filter(node => !node.closest('#transportPanel') && !node.closest('#transportReportModal')).length, 'דוח הסעות'), 0);
+            .filter(node => !node.closest('#transportPanel') && !node.closest('#transportReportModal')).map(node => node.id), 'דוח הסעות'),
+        await page.evaluate(() => (document.getElementById('transportReportEntry') ? ['transportReportEntry'] : [])));
     await page.locator('#transportReportOpen').scrollIntoViewIfNeeded();
     const size = await page.locator('#transportReportOpen').boundingBox();
     check('44px at least, both ways, and the width of the list', size.height >= 43.5 && size.width >= 200, JSON.stringify(size));
-    check('scrolled to, it is on the glass and under nothing', await page.evaluate(() => {
-        const node = document.getElementById('transportReportOpen');
-        const box = node.getBoundingClientRect();
-        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-        return hit === node || node.contains(hit);
-    }));
     await floors(page, 'with the report\'s button on the panel', small ? 56 : 44);
 
     await page.locator('#transportReportOpen').tap();
     await page.locator('#transportReportModal').waitFor({ state: 'visible' });
     await page.waitForTimeout(300);
-    same('it opens the app\'s own dialog: its title, the four ranges by the pay report\'s words, the label, and the summary\'s four buttons',
-        [await text(page, '#transportReportTitle'), (await page.locator('#transportReportRanges button').allTextContents()).map(bare),
-            await page.locator('#transportReportRanges').getAttribute('aria-label'), await text(page, '#transportReportLabel'),
-            (await page.locator('#transportReportModal .modal-actions button').allTextContents()).map(bare)],
-        ['דוח הסעות', ['השבוע', 'שבוע קודם', 'החודש', 'חודש שעבר'], 'בחירת תקופה', 'תצוגה מקדימה של הדוח',
-            ['שליחה בוואטסאפ', 'העתקה', 'שיתוף כתמונה', 'סגירה']]);
-    same('it opens on this week', await pressed(page), 'thisWeek');
-    const shape = await page.evaluate(() => {
-        const modal = document.getElementById('transportReportModal');
-        const field = document.getElementById('transportReportText');
-        const box = field.getBoundingClientRect();
-        const content = modal.querySelector('.modal-content').getBoundingClientRect();
-        const buttons = [...modal.querySelectorAll('button')];
-        const boxes = buttons.map(node => node.getBoundingClientRect());
-        const on = modal.querySelector('#transportReportRanges button[aria-pressed="true"]');
-        const offButton = modal.querySelector('#transportReportRanges button[aria-pressed="false"]');
-        const probe = document.createElement('span');
-        probe.style.cssText = 'position:absolute;background:var(--accent)';
-        modal.appendChild(probe);
-        const accent = getComputedStyle(probe).backgroundColor;
-        probe.remove();
-        return { onTop: document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) === field,
-            panelOpen: document.getElementById('transportPanel').classList.contains('open'),
-            readOnly: field.readOnly, font: parseFloat(getComputedStyle(field).fontSize),
-            small: boxes.filter(one => one.width < 43.5 || one.height < 43.5).length,
-            smallFont: buttons.filter(node => parseFloat(getComputedStyle(node).fontSize) < 16).length,
-            reachable: buttons.every(node => { const b = node.getBoundingClientRect(); const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return hit === node || node.contains(hit); }),
-            apart: boxes.every((a, i) => boxes.every((b, j) => i >= j || a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5)),
-            inside: content.left >= -0.5 && content.right <= window.innerWidth + 0.5 && content.top >= -0.5 && content.bottom <= window.innerHeight + 0.5,
-            pageFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
-            chosenDiffers: getComputedStyle(on).backgroundColor !== getComputedStyle(offButton).backgroundColor,
-            chosenFilled: getComputedStyle(on).backgroundColor === accent };
-    });
-    check('the dialog is OVER the panel, which stays open behind it', shape.onTop && shape.panelOpen, JSON.stringify(shape));
-    check('the text is in a field nobody types in, at 16px or more', shape.readOnly && shape.font >= 16, JSON.stringify(shape));
-    same('no button of it - a range or a way out - is under 44px either way, or under 16px', [shape.small, shape.smallFont], [0, 0]);
-    check('every button is on the glass, under no other, and no two overlap', shape.reachable && shape.apart, JSON.stringify(shape));
-    check('it is whole on the glass and the page does not scroll sideways', shape.inside && shape.pageFits, JSON.stringify(shape));
-    check('the chosen range is told from the others without a filled button', shape.chosenDiffers && !shape.chosenFilled, JSON.stringify(shape));
+    same('it opens the app\'s own dialog: its title, «מי היה ברכב?» with its two fields, the five ranges by the pay report\'s words, the fold and the summary\'s four buttons',
+        { title: await text(page, '#transportReportTitle'), ranges: (await page.locator('#transportReportRanges button').allTextContents()).map(bare),
+            rangesLabel: await page.locator('#transportReportRanges').getAttribute('aria-label'), lookupTitle: await text(page, '#transportLookupTitle'),
+            lookupLead: await text(page, '#transportLookupLead'), vehicle: await text(page, '#transportLookupVehicleLabel'),
+            date: await text(page, '#transportLookupDateLabel'), from: await text(page, '#transportReportFromLabel'),
+            to: await text(page, '#transportReportToLabel'), fold: await text(page, '#transportReportFold'),
+            actions: (await page.locator('#transportReportModal .modal-actions button').allTextContents()).map(bare) },
+        REPORT_PAGE_WORDS);
+    same('it opens on this week, with the two chosen dates put away and the text folded',
+        [await pressed(page), await visible(page, '#transportReportCustom'), await visible(page, '#transportReportText'),
+            await page.locator('#transportReportFold').getAttribute('aria-expanded')], ['thisWeek', false, false, 'false']);
+    check('the dialog is OVER the panel, which stays open behind it', await page.evaluate(() => {
+        const title = document.getElementById('transportReportTitle').getBoundingClientRect();
+        const hit = document.elementFromPoint(title.left + title.width / 2, title.top + title.height / 2);
+        return Boolean(hit && hit.closest('#transportReportModal')) && document.getElementById('transportPanel').classList.contains('open');
+    }));
+    const shape = await reportFloors(page);
+    same('no control of it - a field, a range, the fold or a way out - is under 44px either way or 16px, and no line of it under 16px',
+        [shape.small, shape.smallFont, shape.smallText], [[], [], []]);
+    check('every control can be scrolled to and touched, no two overlap, and nothing runs off the side',
+        shape.unreachable.length === 0 && !shape.overlap && shape.inside && !shape.sideways, JSON.stringify(shape));
 
+    // --- the page IS the text: the lists drawn are the words that leave, line for line.
     const field = await reportField(page);
+    same('THE PAGE IS THE TEXT: every line drawn is a line of the text that leaves, in its order',
+        await reportPage(page), field.split('\n').filter(Boolean));
+    same('both lists have their heading on the page', await page.locator('#transportReportBody h4').allTextContents(),
+        ['רכבים – כמה ימים יצא כל רכב ולאן', 'נהגים – מי נהג, לאן ועם מי']);
     const want = await reportFromDisk(page, 'השבוע', '2026-11-06', '2026-11-12');
-    same('THE WORDS ARE THE PLANS ON THE DISK: three days of seven, each vehicle\'s days, drivers and seats, each driver\'s vehicles - counted again by this file',
+    same('THE WORDS ARE THE PLANS ON THE DISK AND THE RECORD: each vehicle\'s days and sites, each driver\'s days, vehicles, sites and men - worked out again by this file',
         bare(field).split('\n'), want.split('\n'));
-    check('and that is a report with something in it: a vehicle out on two days with two drivers, a driver in two vehicles, a day with nobody at the wheel, four days said to have no plan',
-        want.includes('יצא ב-2 ימים') && want.includes('ב-4 ימים אין שיבוץ שמור במכשיר הזה.') && want.includes('נהגים בתקופה:')
-        && /- סמיר – 2 ימים: [^\n]+ \(1\), [^\n]+ \(1\)/.test(want)
-        && want.includes('בלי נהג – יום אחד'), want);
+    check('and that is a report with something in it: a vehicle out on two days, a driver in two vehicles, a day with nobody at the wheel, men with no site said, a worked day with no plan',
+        want.includes('יצא ב-2 ימים') && want.includes('בלי נהג – יום אחד') && want.includes('(בלי אתר ברישום)')
+        && /נהג: סמיר – 2 ימים/.test(want) && want.includes('נהגים – מי נהג, לאן ועם מי'), want);
     check('a vehicle\'s name is held right-to-left in it, a man\'s is isolated, and no line begins with a vehicle', field.includes(`${RLI}`) && field.includes(`${FSI}`)
         && field.split('\n').every(line => !line.startsWith(RLI) && !/^[A-Za-z]/.test(line)));
     check('a day with no plan is never called a vehicle that stayed home', !/לא זמין|נשאר|בבית|לא יצא/.test(field));
+    check('and nothing of money is on it', !/₪|שכר|תעריף|תשלום/.test(field + await page.locator('#transportReportModal').textContent()));
 
     // --- the ranges
     await page.locator('#transportReportRanges button[data-range="thisMonth"]').tap();
     same('«החודש» is the pressed one, and the only one', await pressed(page), 'thisMonth');
     const month = await reportField(page);
-    same('and the field is the month, counted off the same disk', bare(month).split('\n'),
+    same('and the page is the month, counted off the same disk', bare(month).split('\n'),
         (await reportFromDisk(page, 'החודש', '2026-11-01', '2026-11-30')).split('\n'));
+    same('drawn as it is sent', await reportPage(page), month.split('\n').filter(Boolean));
     await page.locator('#transportReportRanges button[data-range="lastWeek"]').tap();
     same('«שבוע קודם»: nothing was kept for it, and it says so for all seven days and names no vehicle',
         [await pressed(page), bare(await reportField(page)).split('\n')],
         ['lastWeek', ['דוח הסעות – שבוע קודם, 30/10/2026 עד 05/11/2026:', '', 'ימים עם שיבוץ שמור במכשיר הזה: 0 מתוך 7', 'ב-7 ימים אין שיבוץ שמור במכשיר הזה.']]);
+    // MOVED in v202: plans are kept 400 days, so October on the 10th is not cut short.
     await page.locator('#transportReportRanges button[data-range="lastMonth"]').tap();
-    same('«חודש שעבר» on the 10th says that its first five days are older than the store keeps',
+    same('«חודש שעבר» on the 10th: nothing kept, and nothing said about deletion - the store keeps 400 days now',
         [await pressed(page), bare(await reportField(page)).split('\n')],
-        ['lastMonth', (await reportFromDisk(page, 'חודש שעבר', '2026-10-01', '2026-10-31',
-            'מתוכם 5 ימים לפני 06/10/2026: שיבוצים ישנים מ-35 ימים נמחקים מהמכשיר הזה.')).split('\n')]);
+        ['lastMonth', (await reportFromDisk(page, 'חודש שעבר', '2026-10-01', '2026-10-31')).split('\n')]);
+    await page.locator('#transportReportRanges button[data-range="custom"]').tap();
+    same('«תאריכים אחרים» shows its two fields, the last thirty days', [await pressed(page), await visible(page, '#transportReportCustom'),
+        await page.locator('#transportReportFrom').inputValue(), await page.locator('#transportReportTo').inputValue()],
+        ['custom', true, '2026-10-12', '2026-11-10']);
+    await page.locator('#transportReportFrom').fill('2026-11-08');
+    await page.locator('#transportReportTo').fill('2026-11-09');
+    await page.waitForTimeout(100);
+    same('two dates chosen: the page is those days, counted off the disk', bare(await reportField(page)).split('\n'),
+        (await reportFromDisk(page, 'תאריכים אחרים', '2026-11-08', '2026-11-09')).split('\n'));
     await page.locator('#transportReportRanges button[data-range="thisWeek"]').tap();
-    same('back on «השבוע» it says what it said', await reportField(page), field);
+    same('back on «השבוע» it says what it said, and the two fields are put away', [await reportField(page), await visible(page, '#transportReportCustom')], [field, false]);
+
+    // --- «מי היה ברכב?»
+    const options = await page.locator('#transportLookupVehicle option').allTextContents();
+    check('every vehicle of the list is offered - the ones taken off it too, said so', options.length >= 8
+        && VEHICLES.every(name => options.map(bare).includes(name)) && options.map(bare).includes('מיניבוס (הוצא מהרשימה)'), options.map(bare).join(' | '));
+    same('it opens on today\'s date and the first vehicle', [await page.locator('#transportLookupDate').inputValue(),
+        await page.locator('#transportLookupVehicle').inputValue()], [DAY, 'tv_01']);
+    await page.locator('#transportLookupDate').fill('2026-11-09');
+    await page.waitForTimeout(100);
+    same('a vehicle and a date: its driver, the men in the order of their seats, and where - here nobody had a site that day, and it says so by name',
+        (await lookupLines(page)).map(bare),
+        ['רכב: טויוטה קורולה 2013 – יום שני 09/11/2026', 'נהג: סמיר (בלי אתר ברישום)',
+            'נוסעים: יוסי (בלי אתר ברישום), אחמד (בלי אתר ברישום)', 'יעדים: בלי אתר ברישום']);
+    const drivers = bare(field).split('\n');
+    check('and it agrees with the drivers\' list for the same car and day',
+        drivers.includes('- יום שני 09/11: טויוטה קורולה 2013 – בלי אתר ברישום') && drivers.includes('נוסעים: יוסי (בלי אתר ברישום), אחמד (בלי אתר ברישום)'));
+    await page.locator('#transportLookupVehicle').selectOption('tv_03');
+    await page.waitForTimeout(100);
+    same('a vehicle kept home that day is said to be', (await lookupLines(page)).map(bare).slice(1), ['בשיבוץ השמור במכשיר הזה BYD סיל U 2025 סומן «לא זמין היום».']);
+    await page.locator('#transportLookupDate').fill('2026-11-07');
+    await page.waitForTimeout(100);
+    same('a day this phone holds no plan for is said', (await lookupLines(page)).map(bare).slice(1), ['אין במכשיר הזה שיבוץ ליום הזה.']);
+    // The most crowded car of the evening, whichever this walk left it.
+    const busiest = await page.evaluate(key => {
+        const trips = JSON.parse(localStorage.getItem(key)).trips;
+        return Object.keys(trips).filter(id => trips[id].driver).sort((a, b) => trips[b].passengers.length - trips[a].passengers.length)[0];
+    }, DAY_KEY);
+    await page.locator('#transportLookupVehicle').selectOption(busiest);
+    await page.locator('#transportLookupDate').fill(DAY);
+    await page.waitForTimeout(100);
+    const tonight = (await lookupLines(page)).map(bare);
+    same('on today\'s date it is the car as the plan on the disk seats it, with every site its men went to',
+        tonight, await lookupFromDisk(page, busiest, DAY));
+    given('and that is a car with men from more than one site', tonight[3].split(',').length > 1, tonight.join(' | '));
+
+    // --- the fold: the text, as it leaves.
+    await page.locator('#transportReportFold').tap();
+    same('«הדוח כטקסט» opens the text: a field nobody types in, 16px or more', await page.evaluate(() => {
+        const node = document.getElementById('transportReportText');
+        return [node.hidden, node.readOnly, parseFloat(getComputedStyle(node).fontSize) >= 16,
+            document.getElementById('transportReportFold').getAttribute('aria-expanded')];
+    }), [false, true, true, 'true']);
+    await page.locator('#transportReportFold').tap();
+    same('and folds it again', await page.locator('#transportReportFold').getAttribute('aria-expanded'), 'false');
 
     // --- WhatsApp, by the day message's own door, through recorders.
     await page.evaluate(() => {
@@ -761,12 +897,15 @@ async function periodReport(page, where, small) {
     // --- copy
     await page.locator('#transportReportOpen').tap();
     await page.locator('#transportReportModal').waitFor({ state: 'visible' });
-    same('opened again it is on this week, with nothing said', [await pressed(page), await text(page, '#transportReportStatus')], ['thisWeek', '']);
+    same('opened again it is on this week and today, with nothing said and the text folded',
+        [await pressed(page), await text(page, '#transportReportStatus'), await page.locator('#transportLookupDate').inputValue(),
+            await visible(page, '#transportReportText')], ['thisWeek', '', DAY, false]);
     await page.evaluate(() => { window.__copied = null; navigator.clipboard.writeText = value => { window.__copied = value; return Promise.resolve(); }; });
     await page.locator('#transportReportCopy').tap();
     await page.waitForTimeout(150);
-    same('«העתקה» puts the same text on the clipboard, and says it did', [await page.evaluate(() => window.__copied), await text(page, '#transportReportStatus')],
-        [field, '✔️ הועתק']);
+    same('«העתקה» puts the same text on the clipboard, says it did, and shows the text it copied',
+        [await page.evaluate(() => window.__copied), await text(page, '#transportReportStatus'), await visible(page, '#transportReportText')],
+        [field, '✔️ הועתק', true]);
 
     // --- the picture: read off this dialog, drawn by the printout's own machinery.
     const picture = await page.evaluate(() => {
@@ -784,9 +923,31 @@ async function periodReport(page, where, small) {
         same('the picture is a PNG named for the range', [picture.name, picture.type, picture.size > 2000],
             ['farkad-דוח-הסעות-2026-11-06_2026-11-12.png', 'image/png', true]);
         same('it has a title and one box for every block under it', [picture.title, picture.rows], [true, field.split('\n\n').length - 1]);
-        same('and every word drawn in it is a word of the dialog, in the dialog\'s order - nothing added, nothing left out',
+        same('and every word drawn in it is a word of the page, in the page\'s order - nothing added, nothing left out',
             bare(picture.seen.join(' ')), bare(field.split('\n').filter(Boolean).join(' ')));
     }
+    // A report too long for one column is laid out in columns, right to left, and never
+    // drawn smaller than the page; the summary of a day is never.
+    const columns = await page.evaluate(() => {
+        const probe = document.createElement('canvas').getContext('2d');
+        const family = printoutFontFamily();
+        const blocks = [];
+        for (let i = 0; i < 40; i += 1) blocks.push([`נהג: ${i}`].concat(Array.from({ length: 6 }, (x, j) => `- יום ${j}: רכב – אתר`)));
+        const one = planTransportPrintout({ title: 'x', name: 'x', blocks }, probe, family);
+        const many = planTransportPrintout({ title: 'x', name: 'x', blocks, columns: true, titles: [0] }, probe, family);
+        const canvas = document.createElement('canvas');
+        canvas.width = many.width; canvas.height = many.height;
+        const ctx = canvas.getContext('2d');
+        ctx.direction = 'rtl'; ctx.textBaseline = 'middle';
+        const layout = many.draw(ctx);
+        const rights = [...new Set(layout.rows.map(row => row.x + row.w))];
+        return { oneWidth: one.width, oneHeight: one.height, width: many.width, height: many.height, rows: layout.rows.length,
+            columns: rights.length, firstRight: layout.rows[0].x + layout.rows[0].w, inside: layout.rows.every(row => row.x >= 0
+                && row.x + row.w <= many.width && row.y + row.h <= many.height) };
+    });
+    check('a report too tall for one column runs to columns: the first on the right, every block inside, short enough to draw at full size',
+        columns.columns > 1 && columns.width > columns.oneWidth && columns.height < columns.oneHeight && columns.height <= 4096
+        && columns.width <= 4096 && columns.rows === 40 && columns.firstRight === columns.width - 24 && columns.inside, JSON.stringify(columns));
     await page.evaluate(() => {
         window.__file = null;
         navigator.canShare = () => true;
@@ -811,8 +972,9 @@ async function periodReport(page, where, small) {
         return was;
     }, DAY);
     const after = await reportField(page);
-    check('the open dialog was brought up to date: one seat fewer', after !== field, after);
-    same('and is again exactly what the disk holds', bare(after).split('\n'), (await reportFromDisk(page, 'השבוע', '2026-11-06', '2026-11-12')).split('\n'));
+    check('the open dialog was brought up to date: one man fewer', after !== field, after);
+    same('and is again exactly what the disk holds, on the page as in the text', [bare(after).split('\n'), await reportPage(page)],
+        [(await reportFromDisk(page, 'השבוע', '2026-11-06', '2026-11-12')).split('\n'), after.split('\n').filter(Boolean)]);
     await page.evaluate(([day, was]) => { transportPlace(day, was.id, was.vehicle, was.n); renderTransportIfOpen(); }, [DAY, moved]);
     same('put back, it says what it said', await reportField(page), field);
 
@@ -828,7 +990,8 @@ async function periodReport(page, where, small) {
             small: buttons.filter(node => node.getBoundingClientRect().width < 43.5 || node.getBoundingClientRect().height < 43.5).length,
             sideways: content.scrollWidth > content.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
             inside: content.getBoundingClientRect().left >= -0.5 && content.getBoundingClientRect().right <= window.innerWidth + 0.5,
-            scrolls: content.scrollHeight <= content.clientHeight + 1 || /auto|scroll/.test(getComputedStyle(content).overflowY)
+            scrolls: content.scrollHeight <= content.clientHeight + 1 || /auto|scroll/.test(getComputedStyle(content).overflowY),
+            lines: [...modal.querySelectorAll('#transportReportBody p')].filter(node => node.scrollWidth > node.clientWidth + 1).length
         };
         const close = document.getElementById('transportReportClose');
         close.scrollIntoView({ block: 'nearest' });
@@ -840,8 +1003,8 @@ async function periodReport(page, where, small) {
         return result;
     });
     same('at 200% text no button\'s words are cut', big.clipped, []);
-    check('nothing runs off the side, every button is still 44px, and «סגירה» can be scrolled to and touched',
-        big.small === 0 && !big.sideways && big.inside && big.scrolls && big.closeReached, JSON.stringify(big));
+    check('nothing runs off the side, no line of the lists is cut, every button is still 44px, and «סגירה» can be scrolled to and touched',
+        big.small === 0 && !big.sideways && big.inside && big.scrolls && big.lines === 0 && big.closeReached, JSON.stringify(big));
 
     // --- the way out, and what it all cost: nothing.
     await page.keyboard.press('Escape');
@@ -850,6 +1013,7 @@ async function periodReport(page, where, small) {
     await page.locator('#transportReportOpen').tap();
     await page.locator('#transportReportModal').waitFor({ state: 'visible' });
     await page.locator('#transportReportClose').tap();
+    await page.waitForTimeout(50);
     check('«סגירה» closes it too, and the keyboard is back on the button that opened it', !(await reportOpen(page))
         && (await page.evaluate(() => document.activeElement && document.activeElement.id)) === 'transportReportOpen');
     same('NOTHING WAS WRITTEN: the same keys on the disk, and every transport key byte for byte', await diskOf(page), disk);
@@ -863,6 +1027,57 @@ async function periodReport(page, where, small) {
     await page.locator('#transportSummaryClose').tap();
 
     await page.evaluate(staged => { Object.keys(staged).forEach(date => localStorage.removeItem(`farkadTransport:day:${date}`)); }, STAGED);
+}
+
+// v202: the row «דוח הסעות» in «דוחות» ← «הפקת דוח» - on a phone where הסעות is on, and on no
+// other; it opens the same page over the reports screen, with the הסעות screen shut.
+async function reportsRow(width, height, scheme) {
+    const where = `${width}x${height} ${scheme}`;
+    const { page, context, errors, away } = await open(width, height, scheme);
+    suite(`${where}: «דוח הסעות» in «דוחות» - only where הסעות is on, the same page, nothing written`);
+    const rows = async () => {
+        await page.evaluate(() => { showView('reports'); render(); });
+        await page.waitForTimeout(150);
+        await page.locator('#reportsView .report-output-actions > summary').tap();
+        await page.waitForTimeout(100);
+        return page.locator('#reportsView .report-output-actions .range-actions > *').evaluateAll(nodes => nodes.map(node => node.textContent.trim()));
+    };
+    const off = await rows();
+    check('with הסעות off the menu has no such row', !off.some(row => row.includes('הסעות')), off.join(' | '));
+    await page.evaluate(() => { document.querySelector('#reportsView .report-output-actions').open = false; transportSetEnabled(true); });
+    await page.evaluate(staged => {
+        Object.keys(staged).forEach(date => localStorage.setItem(`farkadTransport:day:${date}`, JSON.stringify(staged[date])));
+    }, STAGED);
+    const on = await rows();
+    same('turned on, it is one row more, last, by its words', [on.length, on[on.length - 1]], [off.length + 1, 'דוח הסעות']);
+    const row = await page.locator('#transportReportEntry').boundingBox();
+    check('44px at least, both ways', row && row.height >= 43.5 && row.width >= 44, JSON.stringify(row));
+    const record = await recordBytes(page);
+    const disk = await diskOf(page);
+    await page.locator('#transportReportEntry').tap();
+    await page.locator('#transportReportModal').waitFor({ state: 'visible' });
+    await page.waitForTimeout(300);
+    same('it opens the same page, with the הסעות screen shut behind it',
+        [await text(page, '#transportReportTitle'), await visible(page, '#transportPanel'), await pressed(page),
+            await page.evaluate(() => document.querySelector('#reportsView .report-output-actions').open)], ['דוח הסעות', false, 'thisWeek', false]);
+    const field = await reportField(page);
+    same('and its lists are the plans on the disk', bare(field).split('\n'), (await reportFromDisk(page, 'השבוע', '2026-11-06', '2026-11-12')).split('\n'));
+    same('drawn as they are sent', await reportPage(page), field.split('\n').filter(Boolean));
+    const shape = await reportFloors(page);
+    same('over «דוחות»: no control under 44px or 16px, no line under 16px', [shape.small, shape.smallFont, shape.smallText], [[], [], []]);
+    check('every control reachable, no overlap, nothing off the side', shape.unreachable.length === 0 && !shape.overlap && shape.inside && !shape.sideways, JSON.stringify(shape));
+    // A record that changes under it - another phone's snapshot, a correction - is followed.
+    await page.evaluate(() => { State.schedule.days['2026-11-09'] = { actual: { w_04: { entries: [{ placeId: 'p_02' }] } } }; render(); });
+    check('a change of the record under it is followed with the הסעות screen shut',
+        bare(await reportField(page)).includes('- יום שני 09/11: טויוטה קורולה 2013 – חיפה'), bare(await reportField(page)));
+    await page.evaluate(() => { delete State.schedule.days['2026-11-09']; render(); });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    check('Escape closes it and the keyboard is back on «הפקת דוח»', !(await reportOpen(page)) && await page.evaluate(() =>
+        document.activeElement === document.querySelector('#reportsView .report-output-actions > summary')));
+    same('nothing was written by it', [await diskOf(page), await recordBytes(page)], [disk, record]);
+    same('no error on the page, and nothing asked of another host', [errors, away], [[], []]);
+    await context.close();
 }
 
 async function shot(page, name) {
@@ -1858,6 +2073,8 @@ for (const [width, height] of [[440, 956], [375, 667]]) {
 for (const [width, height] of [[440, 956], [375, 667]]) {
     for (const scheme of ['dark', 'light']) await vehicleOff(width, height, scheme);
 }
+// v202: the row of «דוחות», on the three phones the floors are held on.
+for (const [width, height, scheme] of [[320, 568, 'dark'], [375, 667, 'light'], [440, 956, 'dark']]) await reportsRow(width, height, scheme);
 if (SHOTS) await pictures();
 
 await browser.close();
