@@ -396,8 +396,9 @@ async function staged(options = {}) {
         writeFile: (wb, name) => wrote.push(name)
     };
     await book.run('exportReports()');
+    // v202 MOVED: «סיכום» first - and it, too, is read below for a vehicle word.
     same('the workbook is the three Hebrew sheets', written.map(s => s.name),
-        ['שכר', 'חיוב', 'פירוט']);
+        ['סיכום', 'שכר', 'חיוב', 'פירוט']);
     check('and no sheet in it carries a vehicle heading or a vehicle number',
         JSON.stringify(written).indexOf('רכב') === -1,
         JSON.stringify(written[0].rows[0]));

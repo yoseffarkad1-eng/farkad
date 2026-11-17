@@ -529,8 +529,16 @@ function heldCards(box) {
         const book = books[0] || null;
         if (!book) return null;
         const sheets = {};
-        book.names.filter(name => name !== GEVES_SHEET).forEach(name => { sheets[name] = book.sheets[name]; });
-        return { filename: book.filename, names: book.names.filter(name => name !== GEVES_SHEET), sheets, views: book.views };
+        // v202: «סיכום», the file's first sheet, ends in a block of the list's own - so it is
+        // held apart here, by name and order only, and tests/xlsxlook.test.mjs proves it is
+        // the same overview with that block cut off its end, every figure above it unmoved.
+        // Likewise the one print title the list's own sheet adds to the workbook's names.
+        book.names.filter(name => name !== GEVES_SHEET && name !== 'סיכום')
+            .forEach(name => { sheets[name] = book.sheets[name]; });
+        const views = book.views && book.views.Names
+            ? Object.assign({}, book.views, { Names: book.views.Names.filter(one => one.Ref.indexOf(GEVES_SHEET) === -1) })
+            : book.views;
+        return { filename: book.filename, names: book.names.filter(name => name !== GEVES_SHEET), sheets, views };
     };
     const surfaces = async () => {
         const out = {
@@ -688,10 +696,11 @@ function heldCards(box) {
     check('it names nobody and pays nobody', !names.some(name => JSON.stringify(sheet).includes(name))
         && !/400|350|500/.test(JSON.stringify(sheet)), JSON.stringify(sheet));
 
+    // v202 MOVED: «סיכום» first; the list's own sheet still last.
     books.length = 0;
     await run(d, 'exportReports()');
     same('in the real workbook it is the last sheet, under the list\'s own name',
-        [books.length, books[0] && books[0].names], [1, ['שכר', 'חיוב', 'בלי עובדי רימא', 'פירוט', 'רימא', GEVES_SHEET]]);
+        [books.length, books[0] && books[0].names], [1, ['סיכום', 'שכר', 'חיוב', 'בלי עובדי רימא', 'פירוט', 'רימא', GEVES_SHEET]]);
     run(d, "REPORT_SECTION = 'sites'; INVOICE_PLACE = 'p_01';");
     same('one client\'s file does not carry it: the billing grid, it without Rima, that site\'s Rima',
         Object.keys(run(d, 'reportSheets()')), ['invoice', 'withoutRima', 'rima']);

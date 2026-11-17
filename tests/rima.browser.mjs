@@ -966,8 +966,9 @@ async function open(width, height = 844) {
     });
     // The hand-over dialog that follows the file; closed, it writes nothing (askChoice).
     await page.keyboard.press('Escape');
+    // v202 MOVED: «סיכום» first, every other sheet where it was.
     same('its sheets: בלי עובדי רימא right after חיוב, רימא last', book && book.names,
-        ['שכר', 'חיוב', 'בלי עובדי רימא', 'פירוט', 'רימא']);
+        ['סיכום', 'שכר', 'חיוב', 'בלי עובדי רימא', 'פירוט', 'רימא']);
     same('the sheet without Rima: the billing grid\'s days and sites, his men only, as numbers', book && book.own, [
         ['תאריך', 'Site A', 'Site B', 'Site C', 'Site H', 'סה״כ'],
         ['2026-10-12', 1, 1, 0, 0, 2], ['2026-10-13', 0, 0, 0, 0, 0], ['2026-10-14', 0, 0, 1, 0, 1],

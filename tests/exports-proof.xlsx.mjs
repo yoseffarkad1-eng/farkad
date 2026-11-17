@@ -181,7 +181,8 @@ const DANGEROUS = [
         places: [{ id: 'p_01', name: 'הרצליה', active: true }]
     });
     const workbook = await one.exportOnce();
-    same('three sheets, named in Hebrew', workbook.names, ['שכר', 'חיוב', 'פירוט']);
+    // v202 MOVED: «סיכום» first (tests/xlsxlook.test.mjs), the three after it as they were.
+    same('three sheets, named in Hebrew', workbook.names, ['סיכום', 'שכר', 'חיוב', 'פירוט']);
     same('one row of pay, and it is his', workbook.sheets['שכר'].values.slice(1),
         [['דוד', 3, 3, 0, 0, 0, 400, 1200, 0, 1200, '', 'דו־שבועי']]);
     same('the billing grid is the three days and their total',
@@ -345,16 +346,27 @@ const DANGEROUS = [
     same('and the billing grid bills every day the other two priced',
         billed, detail.filter(row => row[4] !== 'נעדר').length);
 
-    // WHAT THE FILE CAN ANSWER, asked as a check rather than as a given: nothing here
-    // sets a column width (there is no !cols anywhere in js/ui/reports.js), so every
-    // column opens at the viewer's default. A given at the end of a block protects
-    // nothing below it and stops the whole run instead of reporting - tests/
-    // nonassertions.test.mjs calls that V6, and it was right about this line.
+    // WHAT THE FILE CAN ANSWER, asked as a check rather than as a given. Until v202 nothing
+    // set a column width and every column opened at the viewer's default - 1,237.5 in a
+    // column eight characters wide. v202 MOVED: the pay sheet now says a width for every
+    // column, and the wage column is wide enough for its widest figure as its format draws
+    // it («1,237.50 ₪», ten characters). A given at the end of a block protects nothing
+    // below it and stops the whole run instead of reporting - tests/nonassertions.test.mjs
+    // calls that V6, and it was right about this line.
     //
     // What is still NOT here, because a file cannot answer it: whether «###» lands over a
     // long number on a real device. The board's XlsxAcceptance list is where that belongs.
-    check('the app writes no column widths, so width is the viewer\'s default',
-        book.parts['xl/worksheets/sheet1.xml'].toString('utf8').indexOf('<cols>') === -1, '');
+    const payPart = (() => {
+        const rels = {};
+        tags(book.parts['xl/_rels/workbook.xml.rels'].toString('utf8'), 'Relationship')
+            .forEach(rel => { rels[attr(rel, 'Id')] = attr(rel, 'Target'); });
+        const tag = tags(book.parts['xl/workbook.xml'].toString('utf8'), 'sheet')
+            .find(one => attr(one, 'name') === 'שכר');
+        return tag ? book.parts['xl/' + String(rels[attr(tag, 'r:id')]).replace(/^\/?xl\//, '')].toString('utf8') : '';
+    })();
+    const wageWidth = (tags(payPart, 'col').find(col => attr(col, 'min') === String(earnedAt + 1)) || '');
+    check('the pay sheet says its column widths, the wage column wider than «1,237.50 ₪»',
+        payPart.indexOf('<cols>') !== -1 && Number(attr(wageWidth, 'width')) >= 10, wageWidth);
 }
 
 // ---------------------------------------------- a closed fortnight, exported again later

@@ -307,8 +307,10 @@ check('the file begins PK, the way a zip does, and holds an OPC content-types pa
     book.bytes[0] === 0x50 && book.bytes[1] === 0x4b &&
     book.parts['[Content_Types].xml'] !== undefined,
     book.bytes.subarray(0, 2).toString('latin1'));
-same('one worksheet part per sheet the app appended', book.worksheets.length, 3);
-same('named in Hebrew, in the order the app appends them', book.names, ['שכר', 'חיוב', 'פירוט']);
+// v202 MOVED: «סיכום» is the file's first sheet (an overview, tests/xlsxlook.test.mjs);
+// every sheet that was here before it is here after it, in the same order, cell for cell.
+same('one worksheet part per sheet the app appended', book.worksheets.length, 4);
+same('named in Hebrew, in the order the app appends them', book.names, ['סיכום', 'שכר', 'חיוב', 'פירוט']);
 
 // ---------------------------------------------------------------- the question
 
@@ -837,8 +839,9 @@ const RIMA_SHEET_NOTE = 'עובדי רימא בלבד. אינם נכללים ב�
     const withRima = phone(FORTNIGHT + RIMA);
     const workbook = await withRima.exportOnce();
     // v167 MOVED: «בלי עובדי רימא» right after the billing grid, whenever there is Rima.
+    // v202 MOVED: «סיכום» first, every other sheet where it was.
     same('the workbook: שכר, חיוב, בלי עובדי רימא right after it, פירוט, then רימא last', workbook.names,
-        ['שכר', 'חיוב', 'בלי עובדי רימא', 'פירוט', 'רימא']);
+        ['סיכום', 'שכר', 'חיוב', 'בלי עובדי רימא', 'פירוט', 'רימא']);
     const sheet = workbook.sheets['רימא'];
     same('header: the date, the two sites that had Rima, the total', sheet.values[0],
         ['תאריך', 'הרצליה', 'תל אביב', 'סה״כ']);
@@ -904,8 +907,9 @@ const RIMA_SHEET_NOTE = 'עובדי רימא בלבד. אינם נכללים ב�
         ['דוד', 'שרה'].filter(name => file.text.includes(name)), []);
 
     suite('no Rima in the range, no רימא sheet');
+    // v202 MOVED: the three, after «סיכום».
     same('the plain fortnight\'s workbook is still exactly three sheets', book.names,
-        ['שכר', 'חיוב', 'פירוט']);
+        ['סיכום', 'שכר', 'חיוב', 'פירוט']);
 }
 
 // ---------------------------------------------------------------- one man chosen
@@ -922,7 +926,8 @@ const RIMA_SHEET_NOTE = 'עובדי רימא בלבד. אינם נכללים ב�
     check('the workbook is written', thrown === null && chosen.caught.length === 1,
         JSON.stringify([thrown, chosen.caught.length, chosen.told]));
     const file = chosen.caught.length === 1 ? workbookOf(Buffer.from(chosen.caught[0].bytes)) : null;
-    same('his pay sheet and his days, and no client invoice', file ? file.names : null, ['שכר', 'פירוט']);
+    // v202 MOVED: «סיכום» first - his pay, summed; still no client invoice anywhere.
+    same('his pay sheet and his days, and no client invoice', file ? file.names : null, ['סיכום', 'שכר', 'פירוט']);
     check('and the pay sheet is his alone', Boolean(file) && file.text.includes('דוד') && !file.text.includes('שרה'),
         file ? file.text.slice(0, 200) : '');
 

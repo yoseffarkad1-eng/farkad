@@ -1,3 +1,98 @@
+## v202 — the workbook made easier to read: «סיכום» first, widths, ₪, filters, the header on every page (candidate, not served)
+
+**NOT SERVED YET.** A candidate on v201 (main, cd2cce1). The release commit moves the three
+build stamps to v202; its «מה חדש» item is at the top of WHATSNEW_BUILDS (proposed). The owner
+saw the pictures and the file itself and said to publish (2026-11-17).
+
+**Why.** The owner, 2026-11-16, about the file «📊 יצוא» writes: it "could be developed more,
+more organised and polished - I don't know how, show me your creativity". The file opened with
+every column at the viewer's default width (a date cut to «2026-11-0», two site names printed
+over each other, a wage of 2062.5 with its agora half-shown), nothing said in shekels, no
+way to sort or narrow a table, and nothing to read first.
+
+**What changed in the app: `js/ui/reports.js` (the export only) and `js/ui/whatsnew.js`.
+Nothing in `js/model`, `js/sync`, `js/state.js`, `js/store.js`, `js/recovery.js`,
+`firestore.rules` or `functions`;** no key, no field path, no writer, no stamp. `reportSheets()`
+and every row it returns are untouched; the look is laid on the worksheet objects after
+`aoa_to_sheet` (`buildReportWorkbook`, `dressSheet`, `sheetLook`, `workbookSummary`).
+
+WHAT SHEETJS CE 0.18.5 WRITES, each read back out of a generated file before anything was
+built on it: column widths (`<cols>`), a number format per cell (`numFmt` through the cell's
+style index), a filter on a header row (`<autoFilter>`, with `_xlnm._FilterDatabase`), a named
+print title (`_xlnm.Print_Titles`), a link to a place in the file (`<hyperlink location>`).
+WHAT IT DOES NOT, so nothing here pretends to: bold, colour, fills, borders, wrapped text,
+alignment, a frozen header row (its `sheetView` carries `rightToLeft` and nothing else), page
+orientation or fit-to-page.
+
+1. **Every column as wide as what is in it** - its widest cell as its format draws it, plus two,
+   at least 6 and at most 100 characters; a row of one cell (a note, a heading) runs on over the
+   empty cells beside it and widens nothing.
+2. **Money in shekels**: «שכר יומי», «נצבר», the deduction column (whatever the gate names it),
+   «לתשלום» and «שכר רכב» on «שכר», and «לתשלום ליום» on «פירוט», as `#,##0 "₪"` - 2,250 ₪,
+   -300 ₪ - and as `#,##0.00 "₪"` only on a cell that holds agorot (2,062.50 ₪). The stored
+   number is the app's own: a SUM, a sort and the bar above the grid read 2062.5.
+3. **The four date-by-site grids** («חיוב», «בלי עובדי רימא», «רימא», «עובדי יוסף גבס»): every
+   count as `0_);-0_);"–"_)` - a zero is drawn as a dash so the days a site was worked stand
+   out, and the cell still holds 0; the `_)` keeps the count off the date beside it, which
+   LibreOffice lays against its cell's left edge.
+4. **A filter on every table's header row** - all of «שכר» and «פירוט»; the grids' from the
+   header to the last date, stopping ABOVE the total line, so a sort never moves the total in
+   among the days.
+5. **The header row on every printed page** of every table (a print title per sheet).
+6. **«סיכום», a new FIRST sheet** in the bookkeeper's file and in the chosen-men file - NOT in
+   the client's file, which stays the billing grid alone (no overview, no pay, no name). Each
+   block's heading is the name of the sheet it reads and links to it. In order: «סיכום הדוח»,
+   the period, the day it was made, «בקובץ רק העובדים שנבחרו.» in the chosen-men file, one
+   sentence on where the figures come from; «שכר» - per pay cycle (שבועי, דו־שבועי) and «סה״כ»:
+   how many men have a row of figures, and the sum of «נצבר», of the deduction column and of
+   «לתשלום», each under the pay sheet's own heading, then, when there are any, how many men have
+   no daily rate (their wage is in no sum); «פירוט» - one line; «חיוב» - each site's figure from
+   the total line, the grand total, and «בלי עובדי רימא»'s grand total; «רימא» - each site, its
+   total and the sheet's own note; and LAST, «עובדי יוסף גבס» - each site, its total and its own
+   note, never added to anything and never a column of another block (with the list off the
+   record, the overview is the same rows with that block cut off its end). Every figure is a
+   cell of another sheet of the file or a sum of one of its columns, put back to the agora;
+   nothing is priced or counted anew. Values, not formulas.
+7. **A fault in the look never costs the file**: the workbook is then written as v201 wrote it
+   and the fault goes to the console.
+
+**The CSV fallback is untouched** - byte for byte v201's (tests/xlsxlook.test.mjs).
+
+**Its Hebrew is PROPOSED** - the owner has not read it - and pinned word for word in
+`tests/xlsxlook.test.mjs`: the sheet's name «סיכום»; «סיכום הדוח»; «תקופה: …»; «הופק: …»;
+«בקובץ רק העובדים שנבחרו.»; «כל מספר כאן נספר או חובר מהגיליון ששמו בכותרת שמעליו, והכותרת
+מקשרת אליו.»; «עובדים»; «עובדים בלי שכר יומי, שהשכר שלהם אינו בסכום: N»; «כל יום עבודה של כל
+עובד»; «אתר»; «ימי עובד־אתר»; «עובדי רימא»; and the «מה חדש» item («קובץ ה-Excel מסודר יותר»).
+Every other word on the sheet is an existing one (the pay sheet's headings, «סה״כ», the
+Rima and יוסף גבס totals and notes, the sheet names).
+
+**What it does NOT do, and what is not known.** No sheet that was in the file gains, loses or
+changes a cell; no heading says ₪ (the headings are pinned values). A note in «הערה» that
+begins with a figure («300 ₪ מקדמות חדשות») is laid out left to right by LibreOffice, and a
+long one is cut at the column's 100 characters where «מחזור תשלום» stands beside it - the
+values are not this build's to change, and CE writes no wrapping. The dates are text (as
+since v1) and LibreOffice lays them against the left of their cell. NOBODY HAS OPENED THESE
+FILES IN EXCEL, Numbers or a phone's preview: the pictures were drawn by LibreOffice, every
+sheet before and after, each fitted to one A3 landscape page FOR THE PICTURE ONLY.
+
+**Tests.** `tests/xlsxlook.test.mjs` (new, at the end of `npm test`): one synthetic crew
+(`xlsxlook.seed.mjs`) in eight shapes - the page as it opens (both cycles, Rima, יוסף גבס), no
+counts, Rima without the list, two clients' files, two men chosen, an explicit month, the gates
+shut - each exported by v201's reports.js out of Git (cd2cce1) and by this one through the
+shipped library, every sheet v201 wrote read back out of the zip and held cell for cell (value,
+type, address, extent, right to left, no formula); the look in the XML; «סיכום» figure by figure
+against its sheets and against hand-worked literals; the list in no total; the client's file; a
+fault in the look or the overview giving v201's file; the CSV fallback; every word. Two
+mutations (the dresser moving a value; the list's 13 added into the billing total) each turned
+it red. Pinned expectations MOVED, on purpose, because the list of sheets is the point:
+`tests/xlsx.test.mjs`, `exports-proof.xlsx.mjs`, `exports-proof.offline.mjs`,
+`vehicles.test.mjs`, `smoke.mjs`, `rima.browser.mjs`, `yosefgeves.browser.mjs` and
+`yosefgeves.test.mjs` see «סיכום» first; `exports-proof.xlsx.mjs`'s «the app writes no column
+widths» is now «the wage column is wider than 1,237.50 ₪»; `yosefgeves.test.mjs` holds every
+sheet that existed cell for cell and keeps «סיכום» and the list's print title apart (proved
+above instead). `xlsxlook.render.mjs <dir>` writes the record's before.xlsx and after.xlsx for
+the pictures and asserts nothing.
+
 ## v201 — «לסדר את המקדמה»: an over-settled advance sorted by one button, and the advance-level «תיקון» only while something is left (candidate, not served)
 
 **NOT SERVED.** A candidate on v200 (itself a candidate); this commit moves the three build

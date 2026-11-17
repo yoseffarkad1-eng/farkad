@@ -73,6 +73,11 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    { build: 'v202', items: [
+        { title: 'קובץ ה-Excel מסודר יותר',
+            text: 'בקובץ יש עכשיו גיליון «סיכום» ראשון, עמודות ברוחב הנכון, סכומים עם ₪ ומסננים בשורת הכותרת, והמספרים עצמם לא השתנו.',
+            where: 'דוחות ← הפקת דוח ← יצוא', go: 'reportsMenu' }
+    ] },
     { build: 'v201', items: [
         { title: 'מקדמה שנרשמה פעמיים: לסדר בלחיצה',
             text: 'כשמקדמה נרשמה כמוחזרת יותר מפעם אחת, הכפתור «לסדר את המקדמה» מבטל אחרי שאלה את הרישום הכפול, והחשבון נסגר כרגיל.',
