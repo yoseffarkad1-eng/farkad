@@ -36,7 +36,10 @@ const corpus = readdirSync(HERE).filter(name => name.endsWith('.mjs')).sort();
 const HELPERS = ['network-guard.mjs', 'census.mjs', 'emulator-host.mjs', 'exports-proof.lib.mjs', 'harness.mjs', 'moneydom.mjs', 'nodes.mjs',
     'oracle.mjs', 'owes.seed.mjs', 'pace.mjs', 'pdf.mjs', 'readability.audit.mjs', 'runner.mjs', 'screens.mjs', 'serve.mjs', 'shell.mjs', 'shot.mjs', 'treecheck.mjs',
     // «סגירת שבוע»'s crew for tests/weeklyclose.browser.mjs (and the pictures made for the owner).
-    'weeklyclose.seed.mjs'];
+    'weeklyclose.seed.mjs',
+    // v202: the workbook's crew and exporting phone for tests/xlsxlook.test.mjs, and the
+    // before/after files written from it for the pictures (asserts nothing).
+    'xlsxlook.seed.mjs', 'xlsxlook.render.mjs'];
 
 // Suites that are RED ON PURPOSE and therefore in no gate: each one proves, on fixtures,
 // a case where the app parts from a documented rule, found by tests/oracle.test.mjs and
