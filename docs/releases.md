@@ -39,8 +39,8 @@ line's sizes in `css/design.css` and again in `css/large.css`, and the item in
    as «מה חדש» waits, and comes when that ends. It does NOT ask whether the phone is «מסונכרן
    בין המכשירים»: the line only reminds, and the dialog refuses an unsynced phone in its own
    sentence (D4) - a reminder that went quiet whenever the signal did would be quiet on site.
-5. **THE ROW IN ⋯ ← «כללי»**, «תזכורת לסגירת חשבונות», after «תזכורות בטלפון» and before
-   «תצוגה גדולה»: a shut row like every other (v172; `settingsFoldReasons` names no reason for it),
+5. **THE ROW IN ⋯ ← «כללי»**, «תזכורת לסגירת חשבונות», straight before «תזכורות בטלפון» (so
+   «תצוגה גדולה» still follows the reminders and «הסעות» is still last): a shut row like every other (v172; `settingsFoldReasons` names no reason for it),
    its lead, its state and one switch. ON by default.
 6. **TWO PER-PHONE KEYS, through Store, optional:** `farkadCloseReminder:off` (exactly '1' is off;
    absent, damaged or anything else is on) and `farkadCloseReminder:dismissed` (the local date

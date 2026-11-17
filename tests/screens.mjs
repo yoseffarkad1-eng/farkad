@@ -149,6 +149,10 @@ function seedMoney() {
     const banner = document.getElementById('accountBanner');
     const putAway = banner && banner.style.display !== 'none' && banner.querySelector(':scope > .btn-icon');
     if (putAway) putAway.click();
+    // v202: the same for «תזכורת לסגירת חשבונות» - this record has accounts nobody closed, and
+    // its line, like the account banner's, is put away for the day by its ✕ (the line itself
+    // is measured as a screen of its own below, and by tests/closereminder.browser.mjs).
+    if (typeof closeReminderDismiss === 'function') closeReminderDismiss();
 }
 
 // ---------------------------------------------------------------------------- the screens

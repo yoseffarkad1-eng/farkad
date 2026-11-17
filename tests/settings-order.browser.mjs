@@ -24,8 +24,8 @@
 // inventory gains its one button and its four runs of words, and "ten cards" says eleven.
 // Nothing that was on the sheet moved or changed a word.
 //
-// v202 (candidate): a TWELFTH card, «תזכורת לסגירת חשבונות», in «כללי» after «תזכורות בטלפון»
-// and before «תצוגה גדולה» - the per-phone switch of the in-app line that says how many men's
+// v202 (candidate): a TWELFTH card, «תזכורת לסגירת חשבונות», in «כללי» straight before
+// «תזכורות בטלפון» (so «תצוגה גדולה» still follows the reminders) - the per-phone switch of the in-app line that says how many men's
 // accounts are still open (js/ui/closereminder.js; the owner, 2026-11-17). On by default. A
 // moved expectation, on purpose and listed: ORDER, POSTURE, FOLD and the "every reason
 // standing" posture gain the row (shut, and shut with every reason standing: it has none), the
@@ -58,7 +58,7 @@ const errors = [];
 
 // THE ORDER, as the owner asked for it on 2026-11-09 and as index.html now has it.
 const ORDER = [
-    {id: 'settingsDaily', section: 'כללי', cards: ['ענן וסנכרון', 'תזכורות בטלפון', 'תזכורת לסגירת חשבונות', 'תצוגה גדולה', 'הסעות']},
+    {id: 'settingsDaily', section: 'כללי', cards: ['ענן וסנכרון', 'תזכורת לסגירת חשבונות', 'תזכורות בטלפון', 'תצוגה גדולה', 'הסעות']},
     {id: 'settingsBackups', section: 'גיבוי ושחזור', cards: ['גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'איפוס מקדמות']},
     {id: 'settingsHelp', section: 'מכשיר ועזרה', cards: ['עדכון וגרסה', 'מצב המכשיר', 'מידע טכני']}
 ];
@@ -698,8 +698,9 @@ try {
                             .filter(node => getComputedStyle(node).display !== 'flex').length
                     };
                 });
+                // v202, MOVED ON PURPOSE: eleven rows - «תזכורת לסגירת חשבונות» is the new one.
                 check(`${tag}, ${state}: every row is at least 56px tall and wider than a finger`,
-                    measured.rows.length === 10 && measured.rows.every(([, w, h]) => h >= 56 && w >= 44),
+                    measured.rows.length === 11 && measured.rows.every(([, w, h]) => h >= 56 && w >= 44),
                     JSON.stringify(measured.rows));
                 same(`${tag}, ${state}: nothing a finger lands on is under 44px either way`, measured.small, []);
                 same(`${tag}, ${state}: no field under 16px`, measured.fine, []);

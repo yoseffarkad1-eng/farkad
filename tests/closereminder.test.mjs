@@ -434,8 +434,8 @@ await block('R4 the ✕: not again today, back tomorrow', async () => {
 await block('R5 the switch in ⋯: on by default, one byte when off', async () => {
     const d = three();
     const section = d.doc.getElementById('settingsDailySection');
-    same('the row is in «כללי», after «תזכורות בטלפון» and before «תצוגה גדולה»', section.children.map(node => node.id),
-        ['settingsFoldReminders', 'closeReminderCard', 'displayLargeCard', 'transportSwitchCard']);
+    same('the row is in «כללי», straight before «תזכורות בטלפון»', section.children.map(node => node.id),
+        ['closeReminderCard', 'settingsFoldReminders', 'displayLargeCard', 'transportSwitchCard']);
     const card = d.doc.getElementById('closeReminderCard');
     same('a row like every other of the sheet: a shut <details> with a summary', [card.tagName, card.open, card.children[0].tagName,
         card.classList.contains('settings-fold')], ['DETAILS', false, 'SUMMARY', true]);

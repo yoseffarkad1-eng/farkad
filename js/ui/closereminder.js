@@ -331,8 +331,9 @@ function closeReminderOpen() {
 
 // ================================================================== the row in ⋯
 //
-// In «כללי», after «תזכורות בטלפון» and before «תצוגה גדולה»: the other reminder, and the
-// same kind of row as every other of that sheet (v172) - a <details> shut when the sheet
+// In «כללי», straight BEFORE «תזכורות בטלפון» - the other reminder - so that «תצוגה גדולה»
+// still stands between the reminders and «הסעות», where its own suite pins it
+// (tests/largetext.browser.mjs), and «הסעות» is still the last row. The same kind of row as every other of that sheet (v172) - a <details> shut when the sheet
 // opens, opened by a tap and by nothing else (settingsFoldReasons names no reason for it).
 
 function closeReminderCardIcon() {
@@ -380,8 +381,8 @@ function closeReminderInstallSwitch() {
     toggle.id = 'closeReminderSwitch';
     body.appendChild(toggle);
     card.appendChild(body);
-    // Before «תצוגה גדולה», else before «הסעות», else at the end of the section.
-    const next = ['displayLargeCard', 'transportSwitchCard'].map(id => document.getElementById(id))
+    // Before «תזכורות בטלפון», else before «תצוגה גדולה» or «הסעות», else at the end.
+    const next = ['settingsFoldReminders', 'displayLargeCard', 'transportSwitchCard'].map(id => document.getElementById(id))
         .filter(node => node && node.parentNode === host)[0];
     if (next) host.insertBefore(card, next);
     else host.appendChild(card);

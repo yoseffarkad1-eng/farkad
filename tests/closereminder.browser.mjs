@@ -14,7 +14,7 @@
 //     comes when that ends;
 //   - the ✕ puts it away until tomorrow - a reload keeps it away, the next morning it is back -
 //     and writes one key and no other byte;
-//   - the row in ⋯ ← «כללי», between «תזכורות בטלפון» and «תצוגה גדולה», shut when the sheet
+//   - the row in ⋯ ← «כללי», straight before «תזכורות בטלפון», shut when the sheet
 //     opens; its switch turns the line off for this phone and on again;
 //   - the floors at 320x568, 375x667 and 440x956, dark and light: 44px both ways for its two
 //     buttons, 16px words, 4.5:1 on the ground painted under them, no sideways scroll, no
@@ -252,7 +252,7 @@ function measureScope(selector) {
     await page.waitForTimeout(250);
     const titles = await page.evaluate(() => [...document.querySelectorAll('#settingsDailySection > .settings-group h3, #settingsDailySection > details.settings-group h3')]
         .map(node => node.textContent.trim()));
-    same('the cards of «כללי», in order', titles, ['ענן וסנכרון', 'תזכורות בטלפון', 'תזכורת לסגירת חשבונות', 'תצוגה גדולה', 'הסעות']);
+    same('the cards of «כללי», in order', titles, ['ענן וסנכרון', 'תזכורת לסגירת חשבונות', 'תזכורות בטלפון', 'תצוגה גדולה', 'הסעות']);
     same('the row is shut when the sheet opens', await page.evaluate(() => document.getElementById('closeReminderCard').open), false);
     await tapOn(page, '#closeReminderCard > summary');
     await page.waitForTimeout(200);
