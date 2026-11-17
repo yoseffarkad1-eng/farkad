@@ -424,7 +424,7 @@ for (const rides of [false, true]) {
     if (rides) await page.evaluate(() => transportSetEnabled(true));
     given(`הסעות is ${rides ? 'on' : 'off'}`, await page.evaluate(() => transportEnabled()) === rides);
     const ways = await page.evaluate(() => Object.keys(WHATSNEW_GO).sort());
-    same('the ways there are', ways, ['advanceReset', 'advances', 'backup', 'day', 'dayCheck', 'dayFoot', 'display', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
+    same('the ways there are', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'day', 'dayCheck', 'dayFoot', 'display', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
     const reset = () => page.evaluate(() => {
         [...document.querySelectorAll('.modal')].filter(node => node.style.display === 'flex').forEach(node => {
             const close = MODAL_CLOSERS[node.id];
@@ -467,7 +467,9 @@ for (const rides of [false, true]) {
         // v191: the row of «תצוגה גדולה», open on the sheet - and the mode NOT turned on.
         display: s => s.settings && s.folds.includes('displayLargeCard') && s.modals.length === 0 && !s.transport,
         // v198: the row of «איפוס מקדמות», open on the sheet - and the tool NOT opened.
-        advanceReset: s => s.settings && s.folds.includes('settingsFoldAdvanceReset') && s.modals.length === 0 && !s.transport
+        advanceReset: s => s.settings && s.folds.includes('settingsFoldAdvanceReset') && s.modals.length === 0 && !s.transport,
+        // v202: the row of «תזכורת לסגירת חשבונות», open on the sheet - and its switch NOT pressed.
+        closeReminder: s => s.settings && s.folds.includes('closeReminderCard') && s.modals.length === 0 && !s.transport
     };
     // Each way once from the card as ⋯ opens it; a first disk reading is taken after the
     // phone has seen the build, so the note is not a difference either.
@@ -509,6 +511,12 @@ for (const rides of [false, true]) {
                 [await page.evaluate(() => document.documentElement.classList.contains('display-large')),
                     await page.evaluate(() => localStorage.getItem('farkadDisplay:large')),
                     await page.locator('#displayLargeSwitch').isVisible()], [false, null, true]);
+        }
+        if (way === 'closeReminder') {
+            same('closeReminder: he is shown the row with its switch on the glass, and nothing is switched - no key, the reminder still on',
+                [await page.locator('#closeReminderSwitch').isVisible(),
+                    await page.evaluate(() => localStorage.getItem('farkadCloseReminder:off')),
+                    await page.evaluate(() => closeReminderOff())], [true, null, false]);
         }
         if (way === 'advanceReset') {
             same('advanceReset: he is shown the row with its button on the glass, and the tool is NOT opened - no dialog, nothing written',

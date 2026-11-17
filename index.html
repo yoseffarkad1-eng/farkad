@@ -164,6 +164,11 @@
     <div class="banner banner-warn" id="offlineBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-warn" id="migrationBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-info" id="installBanner" role="status" aria-live="polite" style="display:none"></div>
+    <!-- «תזכורת לסגירת חשבונות» (js/ui/closereminder.js): one quiet line while men whose last
+         finished period is open could be closed in «סגירת שבוע» - read after the first paint,
+         never put up while somebody is typing, put away until tomorrow by its ✕, and off for
+         good on a phone that turned it off in ⋯. Above «מה חדש»: it is about money. -->
+    <div class="banner banner-info" id="closeReminderBanner" role="status" aria-live="polite" style="display:none"></div>
     <!-- «מה חדש» (js/ui/whatsnew.js): one quiet line after an update that has something to
          tell, never on a first install and never put up while somebody is typing. Last of
          the banners: it is the least urgent thing this area ever says. -->
@@ -1182,6 +1187,11 @@
 <!-- «מה חדש»: after offline.js (midEdit) and settings.js (the sheet it sends to); it calls
      the screens it shows only when «הראה לי» is pressed. -->
 <script src="js/ui/whatsnew.js"></script>
+<!-- «תזכורת לסגירת חשבונות»: after weeklyclose.js (the list it counts and the dialog its
+     button opens), owes.js (the key a reading is kept under), offline.js (midEdit) and
+     display.js (whose row in ⋯ it stands before). Reads nothing at load; app.js asks it at
+     boot and after every draw, through typeof. -->
+<script src="js/ui/closereminder.js"></script>
 <!-- The usual site: after day.js (the tray that calls it, the double-tap guard) and
      sheet.js (sheetPickPlace, the one write it borrows); called at render and at a tap. -->
 <script src="js/ui/usual.js"></script>

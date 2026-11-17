@@ -824,6 +824,8 @@
 :root.display-large body.journey-day .day-actions > #copyDayBtn { font-size: 20px !important; }
 :root.display-large #whatsNewBanner { font-size: 20px; font-weight: 600; }
 :root.display-large #whatsNewBanner button { font-size: 20px; }
+:root.display-large #closeReminderBanner { font-size: 20px; font-weight: 600; }
+:root.display-large #closeReminderBanner button { font-size: 20px; }
 :root.display-large #whatsNewRow { font-size: 20px; font-weight: 700; }
 :root.display-large #whatsNewModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
 :root.display-large #whatsNewContext { font-size: 20px; }

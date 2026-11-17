@@ -447,6 +447,11 @@ export const SCREENS = [
     { name: 'the «מה חדש» line', scope: ['#whatsNewBanner'],
         open: async page => { await home(page); await run(page, () => whatsNewShowLine()); await pause(page); },
         close: page => run(page, () => whatsNewHideLine()) },
+    // v202: «תזכורת לסגירת חשבונות» (js/ui/closereminder.js) - its line, drawn with a count of
+    // four by its own function (the reading behind the count is tests/closereminder.*).
+    { name: 'the close reminder line', scope: ['#closeReminderBanner'],
+        open: async page => { await home(page); await run(page, () => closeReminderShow(4)); await pause(page); },
+        close: page => run(page, () => closeReminderHide()) },
     { name: 'what is new', scope: ['#whatsNewModal'],
         open: async page => { await home(page); await run(page, () => { openWhatsNew('all'); }); await pause(page, 300); },
         close: page => run(page, () => closeWhatsNew()) },

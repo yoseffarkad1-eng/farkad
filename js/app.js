@@ -173,6 +173,9 @@ function render() {
     // And for the finder (js/ui/find.js): a man added or turned off on another phone is
     // found, or not, as the record has him now.
     if (typeof renderFindIfOpen === 'function') renderFindIfOpen();
+    // «תזכורת לסגירת חשבונות» (js/ui/closereminder.js): nothing is read here - its line is
+    // taken down at once if it is no longer wanted, and otherwise read once the draws stop.
+    if (typeof closeReminderAfterRender === 'function') closeReminderAfterRender();
 
     // Last, because the two bars it measures have just been shown or hidden by the lines
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not
@@ -841,6 +844,9 @@ function bootOnce() {
     // «מה חדש» (js/ui/whatsnew.js): last, after everything the boot itself reopens - the
     // quiet line waits for whatever dialog one of them put up.
     if (typeof whatsNewBoot === 'function') whatsNewBoot();
+    // «תזכורת לסגירת חשבונות» (js/ui/closereminder.js): read after the first paint, never
+    // before it, and put up only when nobody is in the middle of something.
+    if (typeof closeReminderBoot === 'function') closeReminderBoot();
 }
 
 if (document.readyState === 'loading') {

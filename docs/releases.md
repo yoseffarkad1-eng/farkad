@@ -1,3 +1,90 @@
+## v202 — «תזכורת לסגירת חשבונות»: a quiet line from Thursday while men's accounts are still open (candidate, not served)
+
+**NOT SERVED, AND NOT A RELEASE YET.** A branch on v201 (cd2cce1) whose three build stamps still
+say v201: `js/ui/closereminder.js` is a new file of the shell, so `tests/build.test.mjs` and
+`tests/gate.integrity.test.mjs` each fail exactly one check ("nothing in the shell has changed
+since") until the release commit moves the stamps. Its «מה חדש» item is already at the top of
+WHATSNEW_BUILDS (v202, ahead of the stamps; the guard prints SKIP until they move).
+
+**Why.** The owner, 2026-11-17: "a reminder - on Thursday, 'there are 4 men whose account is
+still not closed', so I don't forget to close accounts". The app has no server of its own, and
+a shut phone hears nothing from it, so this is not a notification: it is a line inside the app.
+
+**What changed in the app: `js/ui/closereminder.js` (new), one banner in `index.html`, two
+lines in `js/app.js` (render() and bootOnce() ask it, through typeof), `sw.js`'s shell, the
+line's sizes in `css/design.css` and again in `css/large.css`, and the item in
+`js/ui/whatsnew.js`. Nothing in `js/model`, `js/sync`, `js/state.js`, `js/store.js`,
+`js/recovery.js` or `firestore.rules`;** no field path, no entry kind, no writer, no stamp.
+
+1. **ONE quiet line** in the banner area, above «מה חדש»'s: «יש 4 עובדים שהחשבון שלהם עוד לא
+   נסגר» (one man: «יש עובד אחד שהחשבון שלו עוד לא נסגר»), a button «לסגירת שבוע» that opens
+   the existing «סגירת שבוע» dialog (`openWeeklyClose`, the opener «דוחות» and «מקדמות» use) over
+   whatever screen is showing, and a ✕ («הסתר עד מחר»).
+2. **THE COUNT IS THE DIALOG'S OWN.** `weeklyCloseRead(schedule, today, now)` - the men it
+   would OFFER (`held` null): his last finished period open and a day of work in it. A man the
+   dialog shows as «לא ייסגר» (his period ends today and today is not recorded, an earlier
+   period with work left open, any reason the per-man box refuses) is not counted. Its gate is
+   the dialog's: with `financialWritingEnabled` false (the carry shut, the writer shut, a record
+   nobody approved) the list is empty and there is no line.
+3. **WHICH DAYS** - no calendar rule of its own; the dialog's target already is one. On
+   THURSDAY a weekly man's week (and every other week a fortnightly man's fortnight) ends, and
+   he counts from the moment today is recorded for him - so the line comes up on Thursday once
+   the day is written, not at dawn. FRIDAY TO WEDNESDAY his last finished period ended on a
+   Thursday before today: open, it is a forgotten close and the line says so every day until it
+   is closed; closed, there is nothing to say. A fortnightly man in the week his fortnight does
+   not end is counted only if the fortnight before is still open.
+4. **WHEN IT IS NOT PUT UP:** the switch in ⋯ off; ✕ pressed today; no crew (a first install
+   says nothing); a count of 0; a reading that throws (nothing shown, nothing thrown); and never
+   under somebody's hands - while a field is typed in or a dialog is open (`midEdit`) it waits,
+   as «מה חדש» waits, and comes when that ends. It does NOT ask whether the phone is «מסונכרן
+   בין המכשירים»: the line only reminds, and the dialog refuses an unsynced phone in its own
+   sentence (D4) - a reminder that went quiet whenever the signal did would be quiet on site.
+5. **THE ROW IN ⋯ ← «כללי»**, «תזכורת לסגירת חשבונות», after «תזכורות בטלפון» and before
+   «תצוגה גדולה»: a shut row like every other (v172; `settingsFoldReasons` names no reason for it),
+   its lead, its state and one switch. ON by default.
+6. **TWO PER-PHONE KEYS, through Store, optional:** `farkadCloseReminder:off` (exactly '1' is off;
+   absent, damaged or anything else is on) and `farkadCloseReminder:dismissed` (the local date
+   of the ✕; anything not today is not dismissed). Never the record, the outbox, the fence, the
+   cloud, a backup, a restore point or the rescue file.
+7. **WHAT IT COSTS.** `weeklyCloseRead` walks every man's history (649 ms in Node for fourteen
+   men on half a year of days). It is never read before the first paint or inside a draw: at
+   boot after the frame that paints the page, and after a draw only once the draws have stopped
+   for 1.5 s. A reading is kept under the record itself (`owesKey`: the write tick, today, both
+   gates, the record as text), so an unmoved record reads nothing. ON THE DAY SCREEN a write
+   does not make it read again, except on a day that ends somebody's period - the one day a
+   write to today moves the count; elsewhere (where accounts are closed) every settled draw of a
+   moved record reads again; a start, a return to the app, a new calendar day, a change of
+   screen and the switch turned on read again. THE PRICE, said: a PAST day typed on the day
+   screen between Friday and Wednesday can leave the count behind until one of those happens.
+   Off, or put away today, nothing is read at all.
+
+**Its Hebrew:** the line's sentence is the owner's own; every other word is PROPOSED and pinned
+in `tests/closereminder.test.mjs` (R8) and `tests/whatsnew.test.mjs`: «לסגירת שבוע», «הסתר עד
+מחר», «תזכורת לסגירת חשבונות», «שורה כשיש חשבונות שלא נסגרו», the lead («מיום חמישי, כשהשבוע
+נגמר, ועד שהחשבונות נסגרים, מופיעה למעלה שורה עם מספר העובדים שהחשבון שלהם עוד לא נסגר. ✕
+מסתיר אותה עד מחר. פועל במכשיר הזה בלבד.»), «מופעלת במכשיר הזה», «כבויה במכשיר הזה», «הפעלת
+התזכורת במכשיר הזה», «כיבוי התזכורת במכשיר הזה», and the «מה חדש» item.
+
+**Tests.** `tests/closereminder.test.mjs` (new, in `npm test`): R1 the count equal to
+weeklyCloseRead's offered men on seeded records (both cycles, a man held, men closed one by one
+down to none, a man with no day of work, both gates, an unapproved record); R2 a week walked day
+by day (nothing Friday-Wednesday with last week closed, nothing on Thursday before today is
+written, one man after, every day after until closed, the fortnight's own Thursday); R3 the
+line's parts and words, its button calling the dialog's opener and writing nothing, no crew,
+typing or a dialog (waits, then comes), a reading that throws; R4 the ✕ (today, a reload, the
+next day, a damaged note, a disk that refuses it); R5 the row's place and words and the switch;
+R6 the two keys and no other byte - record, outbox, fence, cloud, backup, rescue file; R7 the
+cost; R8 the words and what the file may not do. `tests/closereminder.browser.mjs` (new, in
+`test:all`): the line coming up by itself after a start, its button opening «סגירת שבוע» at its
+title with exactly the men counted, a dialog and a typed field holding it, the ✕ through a
+reload and the next morning, the row in ⋯ and its switch, and the floors at 320x568, 375x667
+and 440x956 in both schemes with and without «תצוגה גדולה» (16/18px, 4.5:1/7:1, 44/52px, nothing
+past its button, no sideways scroll). MOVED ON PURPOSE: `tests/settings-order.browser.mjs` (a
+twelfth card, its button and five runs of words), `tests/whatsnew.*` (the item and the way
+`closeReminder`, which shows the row and switches nothing), `tests/screens.mjs` (the line, so
+the large display's walk measures it). NOT a real phone. Pictures (375x812, scale 2, light and
+dark, synthetic names): the line on the day, «סגירת שבוע» after its button, the row in ⋯.
+
 ## v202 — the workbook made easier to read: «סיכום» first, widths, ₪, filters, the header on every page (candidate, not served)
 
 **NOT SERVED YET.** A candidate on v201 (main, cd2cce1). The release commit moves the three

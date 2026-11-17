@@ -120,6 +120,7 @@ const SHELL = [
     './js/ui/install.js',
     './js/ui/settings.js',
     './js/ui/whatsnew.js',
+    './js/ui/closereminder.js',
     './js/ui/usual.js',
     './js/ui/reminders.js',
     './js/app.js',

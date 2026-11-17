@@ -1221,6 +1221,12 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 #whatsNewBanner { flex-wrap: nowrap; gap: 6px; font-size: 16px; font-weight: 600; padding: 6px 10px; }
 #whatsNewBanner span { min-width: 0; overflow-wrap: anywhere; }
 #whatsNewBanner button { flex: none; min-height: 44px; min-width: 44px; font-size: 16px; }
+/* ---- «תזכורת לסגירת חשבונות» (js/ui/closereminder.js): the same kind of line as «מה חדש»'s,
+   one of the page's own banners, with the same floor for its two buttons. The sentence wraps
+   and the buttons never do. */
+#closeReminderBanner { flex-wrap: nowrap; gap: 6px; font-size: 16px; font-weight: 600; padding: 6px 10px; }
+#closeReminderBanner span { min-width: 0; overflow-wrap: anywhere; }
+#closeReminderBanner button { flex: none; min-height: 44px; min-width: 44px; font-size: 16px; }
 #whatsNewRow { width: 100%; min-height: 48px; margin-top: 10px; font-size: 16px; font-weight: 700; }
 #whatsNewModal { z-index: 60; }
 #whatsNewModal .modal-content { padding-bottom: 0; }
