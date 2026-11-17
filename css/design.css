@@ -813,6 +813,40 @@ input, select, textarea { border-radius: 12px; }
 .transport-report-ranges button { min-height: 44px; min-width: 44px; font-size: 16px; font-weight: 700; touch-action: manipulation; overflow-wrap: anywhere; }
 .transport-report-ranges button[aria-pressed="true"] { background: var(--accent-soft) !important; box-shadow: inset 0 0 0 3px var(--accent); }
 #transportReportText { min-height: 140px; height: clamp(140px, 34dvh, 420px); line-height: 1.65; padding: 12px; background: var(--surface-2); font-family: inherit; font-size: 16px; white-space: pre-wrap; }
+/* v202: THE RIDES' REPORT AS A PAGE. «מי היה ברכב?» on a ground of its own at the top (two
+   fields side by side where they fit, one over the other on the 320px phone); the fifth
+   range across the row; the two lists as headed blocks - a vehicle or a driver in the
+   ink and heavier, each day of a driver a line of its own and the men he took under it
+   in the second ink; the text folded under its button as «סיכום חודש» folds its own.
+   Everything wraps, nothing has a fixed height, and a name may break inside a word. */
+.transport-report-ranges button[data-range="custom"] { grid-column: 1 / -1; }
+.transport-lookup { margin: 0 0 14px; padding: 12px; border-radius: 14px; background: var(--surface-2); }
+#transportLookupTitle { margin: 0 0 4px; font-size: 19px; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; }
+.transport-lookup-lead { margin: 0 0 8px; color: var(--ink-2); font-size: 16px; line-height: 1.45; }
+.transport-lookup-fields, .transport-report-custom { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 8px; }
+.transport-report-custom { margin: 0 0 12px; }
+.transport-report-custom[hidden] { display: none; }
+.transport-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--ink-2); font-size: 16px; font-weight: 600; }
+.transport-field select, .transport-field input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); font-family: inherit; font-size: 16px; }
+.transport-field input[type="date"] { text-align: right; }
+.transport-lookup-result { margin-top: 10px; }
+.transport-lookup-result:empty { display: none; }
+.transport-lookup-head { margin: 0 0 4px; color: var(--ink); font-size: 17px; font-weight: 750; line-height: 1.45; overflow-wrap: anywhere; }
+.transport-lookup-line { margin: 0; color: var(--ink); font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; }
+.transport-report-body { margin: 0 0 4px; }
+.transport-report-block { margin: 0 0 12px; }
+.transport-report-car, .transport-report-driver { padding-bottom: 10px; border-bottom: 1px solid var(--line-soft); }
+.transport-report-line { margin: 0; color: var(--ink); font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; }
+.transport-report-head { font-size: 18px; font-weight: 800; }
+.transport-report-said, .transport-report-note, .transport-report-with { color: var(--ink-2); font-size: 16px; }
+.transport-report-name { font-size: 18px; font-weight: 750; }
+.transport-report-day { margin-top: 6px; font-weight: 650; }
+.transport-report-with { padding-inline-start: 14px; }
+.transport-report-title { margin: 18px 0 10px; padding-top: 12px; border-top: 2px solid var(--line); color: var(--ink); font-size: 20px; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; }
+.transport-report-fold { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.transport-report-fold > button { min-height: 48px; font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
+#transportReportText[hidden] { display: none; }
+.report-output-actions .transport-report-entry { font-size: 16px; }
 #transportReportModal .modal-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; border-top: 1px solid var(--line); padding-top: 12px; }
 #transportReportModal .modal-actions button { min-height: 44px; min-width: 44px; font-size: 16px; }
 #transportReportSend, #transportReportClose, #transportReportStatus { grid-column: 1 / -1; }

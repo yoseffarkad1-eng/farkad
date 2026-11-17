@@ -218,8 +218,10 @@ const TRANSPORT_TEXT = Object.freeze({
     sHome: list => `רכבים שלא זמינים היום: ${list}`,
 
     // --- the report of a period: the button on the screen, and its dialog. The four
-    // ranges are the pay report's own words (js/ui/reports.js); the dialog's four buttons
-    // are the summary's (`summarySend`, `summaryCopy`, `summaryPicture`, `summaryClose`).
+    // ranges are the pay report's own words (js/ui/reports.js), and so are the fifth and
+    // its two fields (v202: «תאריכים אחרים», «מתאריך», «עד תאריך»); the dialog's four
+    // buttons are the summary's (`summarySend`, `summaryCopy`, `summaryPicture`,
+    // `summaryClose`). `reportTitle` is also the row of «דוחות» ← «הפקת דוח» (v202).
     reportButton: 'דוח הסעות לתקופה',
     reportTitle: 'דוח הסעות',
     reportRanges: 'בחירת תקופה',
@@ -227,45 +229,92 @@ const TRANSPORT_TEXT = Object.freeze({
     reportLastWeek: 'שבוע קודם',
     reportThisMonth: 'החודש',
     reportLastMonth: 'חודש שעבר',
-    reportLabel: 'תצוגה מקדימה של הדוח',
+    reportCustom: 'תאריכים אחרים',
+    reportFrom: 'מתאריך',
+    reportTo: 'עד תאריך',
+    // v202: the page shows the two lists; the text that leaves is folded under this,
+    // as «סיכום חודש» folds its own (js/ui/monthsummary.js, «הסיכום כטקסט»).
+    reportAsText: 'הדוח כטקסט',
+    // a chosen range longer than the page reads is cut from its start, and said
+    reportTooLong: n => `אפשר לבחור עד ${n} ימים, ולכן מוצגים ${n} הימים האחרונים של הטווח.`,
     // the name of the picture's file; the dates as the record writes them
     reportFile: (from, to) => `farkad-דוח-הסעות-${from}_${to}.png`,
 
-    // --- the report itself. It borrows nothing but the buttons.
+    // --- v202: «מי היה ברכב?» - one vehicle on one date, at the top of the same page.
+    // The owner, 2026-11-17: a traffic fine arrives for a vehicle on a date, weeks or
+    // months later, and he must know who drove it and who was in it.
+    //   רכב: ⁧טויוטה קורולה 2013⁩ – יום ראשון 08/11/2026
+    //   נהג: אחמד
+    //   נוסעים: מוחמד, יוסי (בלי אתר ברישום)
+    //   יעדים: הרצליה, חיפה
+    lookupTitle: 'מי היה ברכב?',
+    lookupLead: 'למשל לדוח תנועה: בוחרים רכב ותאריך.',
+    lookupVehicle: 'רכב',
+    lookupDate: 'תאריך',
+    lookupRetired: v => `${v} (הוצא מהרשימה)`,
+    lookupHead: (v, day, date) => `רכב: ${v} – ${day} ${date}`,
+    lookupNone: 'אין במכשיר הזה שיבוץ ליום הזה.',
+    lookupUnreadable: 'השיבוץ של היום הזה שמור במכשיר ולא נקרא.',
+    lookupHome: v => `בשיבוץ השמור במכשיר הזה ${v} סומן «לא זמין היום».`,
+    lookupEmpty: v => `בשיבוץ השמור במכשיר הזה אף עובד לא שובץ ב${v} ביום הזה.`,
+    lookupOff: (v, date) => `ברשימת הרכבים ${v} כבוי החל מ-${date}.`,
+    lookupOld: keep => `שיבוצים ישנים מ-${keep} ימים אינם נשמרים במכשיר הזה.`,
+    lookupTrimmed: date => `שיבוצים עד ${date} נמחקו מהמכשיר הזה כדי לפנות מקום לרישום העבודה.`,
+
+    // --- the report itself (v202: the owner, 2026-11-17 - "two lists: one, the days of
+    // the vehicles; the second, who was driving, where exactly he went, and whom he took
+    // with him"). Names, days and sites only: no money, no rate, nothing of pay.
     //   דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:
     //
     //   ימים עם שיבוץ שמור במכשיר הזה: 3 מתוך 7
     //   ב-4 ימים אין שיבוץ שמור במכשיר הזה.
+    //   ימים שעבדו בהם ואין להם שיבוץ במכשיר הזה: 06/11, 11/11
     //
-    //   רכב: טויוטה קורולה 2016 – יצא ב-3 ימים
-    //   נהג: סאמר – 2 ימים
-    //   נהג: ראמי – יום אחד
-    //   מושבים תפוסים: 11 בסך הכול, 3.7 בממוצע ליום
+    //   רכבים – כמה ימים יצא כל רכב ולאן
+    //
+    //   רכב: טויוטה קורולה 2013 – יצא ב-3 ימים
+    //   - הרצליה – 3 ימים
+    //   - חיפה – יום אחד
+    //   - עובד בלי אתר ברישום – יום אחד
+    //   בלי נהג – יום אחד
     //
     //   רכבים בלי עובדים בימים עם שיבוץ: סוואנה 2010
     //
-    //   נהגים בתקופה:
-    //   - סאמר – 3 ימים: טויוטה קורולה 2016 (2), פולקסווגן 2018 (1)
+    //   נהגים – מי נהג, לאן ועם מי
+    //
+    //   נהג: אחמד – 2 ימים
+    //   - יום ראשון 08/11: טויוטה קורולה 2013 – הרצליה
+    //   נוסעים: מוחמד
+    //   - יום שלישי 10/11: טויוטה קורולה 2013 – הרצליה
+    //   בלי נוסעים.
     // A DAY WITH NO STORED PLAN IS SAID TO HAVE NONE. It is never counted as a day a
     // vehicle stayed home: this phone not having a plan is a fact about the phone.
-    // As in the summary, a vehicle's name never starts a line.
+    // As in the summary, a vehicle's name never starts a line. `driver`'s neighbours
+    // `mAlone` and `mDestinations` are borrowed from the driver's message.
     rCount: n => (n === 1 ? 'יום אחד' : `${n} ימים`),
     rIn: n => (n === 1 ? 'ביום אחד' : `ב-${n} ימים`),
     rHeading: (range, from, to) => `דוח הסעות – ${range}, ${from} עד ${to}:`,
     rDays: (a, b) => `ימים עם שיבוץ שמור במכשיר הזה: ${a} מתוך ${b}`,
     rMissing: n => (n === 1 ? 'ביום אחד אין שיבוץ שמור במכשיר הזה.' : `ב-${n} ימים אין שיבוץ שמור במכשיר הזה.`),
     rPruned: (days, date, keep) => `מתוכם ${days} לפני ${date}: שיבוצים ישנים מ-${keep} ימים נמחקים מהמכשיר הזה.`,
+    rTrimmed: (days, date) => `מתוכם ${days} עד ${date}: שיבוצים ישנים נמחקו מהמכשיר הזה כדי לפנות מקום לרישום העבודה.`,
     rUnreadable: n => (n === 1 ? 'שיבוץ של יום אחד שמור במכשיר ולא נקרא, ולא נספר.'
         : `שיבוצים של ${n} ימים שמורים במכשיר ולא נקראו, ולא נספרו.`),
+    rWorkedNoPlan: list => `ימים שעבדו בהם ואין להם שיבוץ במכשיר הזה: ${list}`,
+    rVehiclesTitle: 'רכבים – כמה ימים יצא כל רכב ולאן',
     rVehicle: (v, days) => `רכב: ${v} – יצא ${days}`,
-    rDriverDays: (name, days) => `נהג: ${name} – ${days}`,
+    rSite: (site, days) => `- ${site} – ${days}`,
+    rNoSiteDays: days => `- עובד בלי אתר ברישום – ${days}`,
     rNoDriverDays: days => `בלי נהג – ${days}`,
-    rSeats: (total, average) => `מושבים תפוסים: ${total} בסך הכול, ${average} בממוצע ליום`,
     rNoneOut: 'בימים עם שיבוץ אף רכב לא יצא עם עובדים.',
     rIdle: list => `רכבים בלי עובדים בימים עם שיבוץ: ${list}`,
-    rDriversTitle: 'נהגים בתקופה:',
-    rDriver: (name, days, vehicles) => `- ${name} – ${days}: ${vehicles}`,
-    rDriverVehicle: (v, n) => `${v} (${n})`,
+    rDriversTitle: 'נהגים – מי נהג, לאן ועם מי',
+    rDriverDays: (name, days) => `נהג: ${name} – ${days}`,
+    rDriverDay: (day, v, sites) => `- ${day}: ${v} – ${sites}`,
+    rWith: names => `נוסעים: ${names}`,
+    noSite: 'בלי אתר ברישום',
+    rManNoSite: name => `${name} (בלי אתר ברישום)`,
+    rDriverNoSite: sites => `${sites} (הנהג בלי אתר ברישום)`,
 
     // --- SHARED (js/ui/transport-share.js; shown only where that file's gate is open).
     // PROPOSED. The switch's sentence in ⋯ when the plan is shared, in place of
@@ -320,10 +369,38 @@ const TRANSPORT_SETTINGS_KEY = 'farkadTransport:settings';
 const TRANSPORT_DAY_PREFIX = 'farkadTransport:day:';
 // Where bytes that would not read are put before anything is written over them.
 const TRANSPORT_UNREADABLE = ':unreadable';
-// Five weeks of plans. Older days are removed when the screen is opened: nobody sends
-// last month's ride, and a store that only grows is a full disk on the phone that does
-// the payroll. (Pruning is deletion, so it is said in docs/releases.md.)
+// THE WORKING WINDOW: five weeks. What is shared, owed, listened to and put aside
+// (js/ui/transport-share.js) is about these days and no older ones, and until v202 a day
+// older than this was removed whenever the screen was opened.
 const TRANSPORT_KEEP_DAYS = 35;
+// v202 - THE HISTORY. The owner, 2026-11-17: a traffic fine arrives for a vehicle weeks
+// or months after the day, and he must know who drove it; and the vehicles' days are
+// for their expenses and for billing. So a day's plan is no longer removed at five
+// weeks. It is kept up to TRANSPORT_HISTORY_DAYS, as it was written (nothing older than
+// the window is rewritten or compacted - a rewrite is a write), UNDER TWO LIMITS, BOTH
+// IN FAVOUR OF THE RECORD. A ride plan is an OPTIONAL write and never spends a restore
+// point (js/store.js) - but neither is it ever spent BY the reclaim ladder, which knows
+// only restore points (js/ui/backup.js). So a plan that is kept is space the record
+// cannot get back by itself, and these limits are what give it back:
+//   - TRANSPORT_HISTORY_BYTES: the days older than the window together, charged the way
+//     Store.used() charges (two bytes a UTF-16 unit, key and value), never above 512 KiB
+//     - a tenth of the 5 MiB Store plans against. A day with every one of the seven
+//     vehicles full (39 men) and a «נפתח» mark on each is 4,154 bytes, so the cap holds
+//     some 126 such days; a day of 20 men about half that (tests/transport.test.mjs
+//     measures both). The oldest go first.
+//   - TRANSPORT_ROOM_SHARE: when the whole of what this origin holds is above 60% of
+//     that budget, or Store has said the disk is FULL, the days older than the window go,
+//     oldest first, until it is not - all of them if need be. The record wins the disk.
+// Both are applied where pruning always was, when the screen is opened (transportPrune),
+// and a day removed by either is remembered by its date alone
+// (TRANSPORT_TRIMMED_KEY), so the report and «מי היה ברכב?» say that it was removed to
+// make room and do not call it a day nobody planned. NOT DONE, and said in
+// docs/releases.md: the shared documents in the cloud are never deleted (the rules allow
+// no delete), but this build does not read a day older than the window back from them.
+const TRANSPORT_HISTORY_DAYS = 400;
+const TRANSPORT_HISTORY_BYTES = 512 * 1024;
+const TRANSPORT_ROOM_SHARE = 0.6;
+const TRANSPORT_TRIMMED_KEY = 'farkadTransport:trimmed';
 const TRANSPORT_MAX_SEATS = 20;
 const TRANSPORT_NAME_MAX = 60;
 
@@ -604,22 +681,59 @@ function transportSaveDay(date) {
 function transportWasKept() { return transportKept; }
 function transportSawUnreadable() { return transportUnreadableSeen; }
 
-// Day records (and the copies of unreadable ones) older than TRANSPORT_KEEP_DAYS before
-// `today`. A key under the prefix that does not carry a real date is left alone: it is
-// not this function's to judge.
+// Day records (and the copies of unreadable ones) older than TRANSPORT_HISTORY_DAYS
+// before `today`; then, among the days older than the working window, the oldest first
+// while they are above TRANSPORT_HISTORY_BYTES or the disk wants the room (above, "THE
+// HISTORY"). A key under the prefix that does not carry a real date is left alone: it is
+// not this function's to judge. Answers how many keys it removed.
 function transportPrune(today) {
     if (!transportEnabled() || !isRealDate(today)) return 0;
-    const cutoff = addDays(today, -TRANSPORT_KEEP_DAYS);
+    const horizon = addDays(today, -TRANSPORT_HISTORY_DAYS);
+    const working = addDays(today, -TRANSPORT_KEEP_DAYS);
     let removed = 0;
-    Store.keys().forEach(key => {
-        if (key.indexOf(TRANSPORT_DAY_PREFIX) !== 0) return;
-        const date = key.slice(TRANSPORT_DAY_PREFIX.length, TRANSPORT_DAY_PREFIX.length + 10);
-        if (!isRealDate(date) || !(date < cutoff)) return;
+    const drop = (key, date) => {
         Store.remove(key);
         delete transportDays[date];
         removed += 1;
+    };
+    const history = [];
+    Store.keys().forEach(key => {
+        if (key.indexOf(TRANSPORT_DAY_PREFIX) !== 0) return;
+        const date = key.slice(TRANSPORT_DAY_PREFIX.length, TRANSPORT_DAY_PREFIX.length + 10);
+        if (!isRealDate(date)) return;
+        if (date < horizon) { drop(key, date); return; }
+        if (!(date < working)) return;
+        let raw = null;
+        try { raw = Store.get(key); } catch (error) { raw = null; }
+        history.push({ key, date, bytes: raw === null || raw === undefined ? 0 : (key.length + String(raw).length) * 2 });
     });
+    history.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    let kept = history.reduce((sum, one) => sum + one.bytes, 0);
+    let used = null;
+    const crowded = () => {
+        if (Store.full === true) return true;
+        if (used === null) used = typeof Store.used === 'function' ? Store.used() : 0;
+        return used > (Store.budget || 0) * TRANSPORT_ROOM_SHARE;
+    };
+    let trimmed = '';
+    while (history.length > 0 && (kept > TRANSPORT_HISTORY_BYTES || crowded())) {
+        const one = history.shift();
+        drop(one.key, one.date);
+        kept -= one.bytes;
+        if (used !== null) used -= one.bytes;
+        if (one.date > trimmed) trimmed = one.date;
+    }
+    if (trimmed && trimmed > transportTrimmedBefore()) {
+        try { Store.setVerified(TRANSPORT_TRIMMED_KEY, trimmed, { optional: true }); } catch (error) { /* said by nobody: the days are gone either way */ }
+    }
     return removed;
+}
+
+// The newest date whose plan was removed to make room, or ''. A reading.
+function transportTrimmedBefore() {
+    let raw = null;
+    try { raw = Store.get(TRANSPORT_TRIMMED_KEY); } catch (error) { raw = null; }
+    return typeof raw === 'string' && isRealDate(raw) ? raw : '';
 }
 
 
@@ -1131,6 +1245,8 @@ function transportKeydown(event) {
 
 function renderTransportIfOpen() {
     if (transportIsOpen() && transportEnabled()) renderTransport();
+    // v202: the report opened from «דוחות», with this screen shut, follows the record too.
+    else transportReportRefresh();
 }
 
 // A button of this panel, tonal: this screen has no filled button at all - the picture
@@ -1756,45 +1872,67 @@ function transportDoor(date, vehicleId, number, text) {
 // ================================================================== the report of a period
 //
 // The owner, 2026-11-10: "is there a report for the cars?" v179 answered for one day and
-// said a week and a month could follow. This is that: over a range, each vehicle - on how
-// many days it went out, who drove it and on how many days each, how many seats were
-// filled - and each driver - how many days, in which vehicles.
+// v182 for a week and a month. v202 is the owner's own shape for it (2026-11-17): "a
+// report for the vehicles - where each vehicle went; and who was driving - just names.
+// On the same page, two lists: one, the number of days of the vehicles; the second, who
+// was driving, where exactly he went, and whom he took with him." And on top of the same
+// page one vehicle on one date - «מי היה ברכב?» - because a traffic fine arrives for a
+// vehicle and a date, weeks or months after the day (the owner again, the same day: the
+// fines, the vehicles' expenses, billing the client, and knowing what happened).
+//
+// WHERE A VEHICLE WENT IS DERIVED, NEVER STORED AND NEVER GUESSED. A plan keeps who sat
+// where and nothing about a destination; the destination of a vehicle on a day is EVERY
+// site the men in it worked at that day, by the day record AS IT IS NOW (the owner's
+// answer 2: all the sites of the men in the car, not only the driver's) - a man on two
+// sites gives the vehicle both. A man in a seat with no site that day is SAID, by name,
+// and no site is invented for him. Sites are read from the whole list of places, the
+// ones since archived included: a site closed in March was still where a car went in
+// February (transportReportContext; the screen itself reads only the active ones, which
+// is the same answer for any day nobody archived a site after).
 //
 // WHAT IT CAN KNOW IS WHAT THIS PHONE KEPT, AND IT SAYS SO.
-//   - The plans are this phone's own and are in no record, cloud or backup. A day this
-//     phone has no plan for is COUNTED AND SAID («ב-4 ימים אין שיבוץ שמור במכשיר הזה»)
-//     and adds nothing to any vehicle: "no plan here" is never shown as "stayed home".
-//   - The store keeps TRANSPORT_KEEP_DAYS (35) days and removes older ones whenever the
-//     screen is opened (transportPrune). So «חודש שעבר» is whole only in the first days
-//     of a month; on any other day its beginning is gone, and the report names the date
-//     before which nothing is kept and how many of the missing days fall there. The
-//     horizon itself is NOT changed here: that is a decision about deletion.
+//   - A day this phone has no plan for is COUNTED AND SAID, and adds nothing to any
+//     vehicle: "no plan here" is never shown as "stayed home". Among them, the days on
+//     which the record has men working are NAMED by date (v202) - those are the days a
+//     plan was made somewhere else, or never.
+//   - The store keeps TRANSPORT_HISTORY_DAYS (400) days, inside two limits that give the
+//     disk back to the record (transportPrune, "THE HISTORY" above). A day removed by
+//     either is said as removed, with the date up to which, and why.
 //   - A day whose bytes will not read is said, and neither counted nor touched.
+//   - On a phone that shares the plan (js/ui/transport-share.js) the days the others
+//     planned are on this phone once it has heard them - the working window's days, while
+//     the app is open. What it never heard is "no plan here", and said so.
 //
 // "WENT OUT" is: somebody is drawn in it, by the one reading of a stored plan there is
-// (TransportEngine.layout) against the day record AS IT IS NOW and the list of vehicles
-// AS IT IS NOW. So a vehicle since taken off the list is not in the report, and a man
-// whose day was changed after he was seated still counts where he sits - as on the screen.
-// A vehicle that is turned OFF is on the list still: the days before the day it is off
-// from are counted as they were stored, and from that day on it did not go out
-// (transportContext, per day - the same reading the screen makes of each of them).
+// (TransportEngine.layout), against the list of vehicles AS IT IS NOW. A vehicle turned
+// OFF is on the list still: the days before the day it is off from are counted as they
+// were stored, and from that day on it did not go out. A vehicle TAKEN OFF the list
+// (`active: false`) is counted on the days BEFORE TODAY that its stored plans seat men in
+// it (v202 - until then it vanished from every report the moment it was retired, and a
+// fine for a car since sold could not be answered); from today on it is not one of the
+// day's vehicles, as on the screen.
 //
 // IT IS A READING AND NOTHING ELSE: transportPeekDay for the days, the engine for the
 // picture. Nothing here writes, marks, prunes or remembers; tests/transport.test.mjs
 // compares every key on the disk before and after.
 
-const TRANSPORT_REPORT_RANGES = Object.freeze(['thisWeek', 'lastWeek', 'thisMonth', 'lastMonth']);
+const TRANSPORT_REPORT_RANGES = Object.freeze(['thisWeek', 'lastWeek', 'thisMonth', 'lastMonth', 'custom']);
+// The longest chosen range the page reads: a quarter. A day is a few lines of the
+// drivers' list per car that went out, and a year of them is not a page anybody reads.
+const TRANSPORT_REPORT_MAX_DAYS = 92;
 
 function transportReportRangeLabel(key) {
     const T = TRANSPORT_TEXT;
     return { thisWeek: T.reportThisWeek, lastWeek: T.reportLastWeek, thisMonth: T.reportThisMonth,
-        lastMonth: T.reportLastMonth }[key] || '';
+        lastMonth: T.reportLastMonth, custom: T.reportCustom }[key] || '';
 }
 
-// { from, to } for one of the four ranges, or null. The week is the app's own - Friday
+// { from, to } for one of the ranges, or null. The week is the app's own - Friday
 // through Thursday, cut by snapToWeekStart (js/dates.js) like the week grid and the pay
 // report; the month is the calendar's. Local dates, built at noon, never toISOString.
-function transportReportRange(key, today) {
+// 'custom' is `chosen` ({ from, to }, two dates in either order); longer than
+// TRANSPORT_REPORT_MAX_DAYS it is cut from its start and comes back with `cut: true`.
+function transportReportRange(key, today, chosen) {
     const now = isRealDate(today) ? parseLocalDate(today) : null;
     if (!now) return null;
     if (key === 'thisWeek' || key === 'lastWeek') {
@@ -1807,143 +1945,316 @@ function transportReportRange(key, today) {
         return { from: toLocalDateStr(new Date(now.getFullYear(), month, 1, 12, 0, 0, 0)),
             to: toLocalDateStr(new Date(now.getFullYear(), month + 1, 0, 12, 0, 0, 0)) };
     }
+    if (key === 'custom') {
+        const pick = chosen || transportReportChosen;
+        if (!pick || !isRealDate(pick.from) || !isRealDate(pick.to)) return null;
+        const from = pick.from <= pick.to ? pick.from : pick.to;
+        const to = pick.from <= pick.to ? pick.to : pick.from;
+        const earliest = addDays(to, -(TRANSPORT_REPORT_MAX_DAYS - 1));
+        return from < earliest ? { from: earliest, to, cut: true } : { from, to };
+    }
     return null;
 }
 
-// Every day of the range, as this phone has it: { date, state } and, for a day with a
-// plan, what the engine needs to draw it. Never more than a month and a bit.
-function transportReportDays(from, to) {
+// The day as the report reads it: the engine's context, but every site of every man
+// (`sitesOf`, his day's own order), the sites from the whole list of places, and the
+// vehicles of the list as they stood that day (above: a vehicle taken off the list still
+// counts before today). `attendance` is each man's first site, as the screen's is.
+function transportReportContext(date, today) {
+    const schedule = State.schedule || {};
+    const places = (schedule.places || []).filter(place => place && isSafeId(place.id));
+    const known = transportMap();
+    places.forEach(place => { known[place.id] = true; });
+    const workers = (schedule.workers || []).filter(worker => worker && isSafeId(worker.id))
+        .map(worker => ({ id: worker.id, name: worker.name, phone: worker.phone }));
+    const sitesOf = transportMap();
+    const attendance = transportMap();
+    workers.forEach(worker => {
+        if (isAbsent(schedule, date, worker.id, State.layer)) return;
+        const seen = [];
+        entriesFor(schedule, date, worker.id, State.layer).forEach(entry => {
+            const id = entry && entry.placeId;
+            if (typeof id === 'string' && known[id] && seen.indexOf(id) === -1) seen.push(id);
+        });
+        if (seen.length) { sitesOf[worker.id] = seen; attendance[worker.id] = seen[0]; }
+    });
+    const before = isRealDate(today) && date < today;
+    const rank = transportMap();
+    const vehicles = transportSettings().vehicles.filter((vehicle, i) => {
+        rank[vehicle.id] = i;
+        return (vehicle.active || before) && !transportVehicleOffOn(vehicle, date);
+    });
+    return { workers, vehicles, sites: places.map(place => ({ id: place.id, name: place.name })),
+        attendance, sitesOf, rank };
+}
+
+// Every day of the range, as this phone has it: { date, state, worked } and, for a day
+// with a plan, what the engine needs to draw it. Never more than TRANSPORT_REPORT_MAX_DAYS.
+function transportReportDays(from, to, today) {
     const days = [];
     if (!transportEnabled() || !isRealDate(from) || !isRealDate(to)) return days;
-    for (let date = from; date && date <= to && days.length < 62; date = addDays(date, 1)) {
+    const now = isRealDate(today) ? today : todayStr();
+    for (let date = from; date && date <= to && days.length < TRANSPORT_REPORT_MAX_DAYS; date = addDays(date, 1)) {
         const seen = transportPeekDay(date);
-        if (seen.state === 'plan') days.push({ date, state: 'plan', ctx: transportContext(date), day: seen.day });
-        else days.push({ date, state: seen.state });
+        const ctx = transportReportContext(date, now);
+        const worked = Object.keys(ctx.sitesOf).length > 0;
+        if (seen.state === 'plan') days.push({ date, state: 'plan', worked, ctx, day: seen.day });
+        else days.push({ date, state: seen.state, worked });
     }
     return days;
 }
 
+// Every site of the men in a car, in the order of the list of places.
+function transportReportSites(ctx, men) {
+    const order = transportMap();
+    ctx.sites.forEach((site, i) => { order[site.id] = i; });
+    const out = [];
+    men.forEach(id => (ctx.sitesOf[id] || []).forEach(site => { if (out.indexOf(site) === -1) out.push(site); }));
+    return out.sort((a, b) => (order[a] === undefined ? 1e9 : order[a]) - (order[b] === undefined ? 1e9 : order[b]));
+}
+
+function transportReportSiteName(ctx, id) {
+    const site = transportFind(ctx.sites, id);
+    return site ? site.name : '';
+}
+
 // PURE. The counting, with no word in it:
-//   { total, planned, missing, unreadable,
-//     vehicles: [{ id, name, days, seats, noDriver, drivers: [{ id, name, days }] }],   list order
-//     drivers:  [{ id, name, days, vehicles: [{ id, name, days }] }] }                 most days first
+//   { total, planned, missing, unreadable, worked: [dates with work and no plan],
+//     vehicles: [{ id, name, active, days, noSite, noDriver, sites: [{ id, name, days }] }],   list order
+//     drivers:  [{ id, name, days, trips: [{ date, vehicle: {id, name}, sites: [names],
+//                 alone: bool, passengers: [{ id, name, noSite }] }] }]       most days first
 // A vehicle is here whether it went out or not (days: 0), so the text can name the ones
-// that did not. Drivers with the same number of days are in roster order.
+// that did not. Drivers with the same number of days are in roster order; a driver's
+// trips in the order of their dates; a vehicle's sites most days first, then by the list.
+// `alone` is a driver who has no site himself that day.
 function transportReportCount(days) {
-    const out = { total: days.length, planned: 0, missing: 0, unreadable: 0, vehicles: [], drivers: [] };
+    const out = { total: days.length, planned: 0, missing: 0, unreadable: 0, worked: [], vehicles: [], drivers: [] };
     const cars = transportMap();
     const men = transportMap();
     const rank = transportMap();
-    const tally = (list, index, id, name) => {
-        if (!index[id]) { index[id] = { id, name, days: 0 }; list.push(index[id]); }
-        index[id].name = name;
-        index[id].days += 1;
-    };
+    const carRank = transportMap();
+    const siteRank = transportMap();
     days.forEach(one => {
         if (one.state === 'unreadable') { out.unreadable += 1; return; }
-        if (one.state !== 'plan') { out.missing += 1; return; }
+        if (one.state !== 'plan') {
+            out.missing += 1;
+            if (one.worked) out.worked.push(one.date);
+            return;
+        }
         out.planned += 1;
-        one.ctx.workers.forEach((worker, i) => { rank[worker.id] = i; });
-        const picture = TransportEngine.layout(one.ctx, one.day);
-        one.ctx.vehicles.forEach(vehicle => {
+        const ctx = one.ctx;
+        ctx.workers.forEach((worker, i) => { rank[worker.id] = i; });
+        ctx.sites.forEach((site, i) => { siteRank[site.id] = i; });
+        Object.keys(ctx.rank || {}).forEach(id => { carRank[id] = ctx.rank[id]; });
+        const name = id => transportWorkerName(ctx, id);
+        const picture = TransportEngine.layout(ctx, one.day);
+        ctx.vehicles.forEach(vehicle => {
             if (!cars[vehicle.id]) {
-                cars[vehicle.id] = { car: { id: vehicle.id, name: vehicle.name, days: 0, seats: 0, noDriver: 0, drivers: [] },
-                    by: transportMap() };
+                cars[vehicle.id] = { car: { id: vehicle.id, name: vehicle.name, active: vehicle.active !== false, days: 0,
+                    noSite: 0, noDriver: 0, sites: [] }, by: transportMap() };
                 out.vehicles.push(cars[vehicle.id].car);
             }
             const entry = cars[vehicle.id];
             entry.car.name = vehicle.name;
+            entry.car.active = vehicle.active !== false;
             const seats = picture.cars[vehicle.id];
-            const riding = seats ? seats.filter(Boolean).length : 0;
-            if (riding === 0) return;
+            const riding = seats ? seats.filter(Boolean) : [];
+            if (riding.length === 0) return;
             entry.car.days += 1;
-            entry.car.seats += riding;
+            const sites = transportReportSites(ctx, riding);
+            sites.forEach(id => {
+                if (!entry.by[id]) { entry.by[id] = { id, name: '', days: 0 }; entry.car.sites.push(entry.by[id]); }
+                entry.by[id].name = transportReportSiteName(ctx, id);
+                entry.by[id].days += 1;
+            });
+            if (riding.some(id => !ctx.sitesOf[id])) entry.car.noSite += 1;
             const driver = seats[1];
             if (!driver) { entry.car.noDriver += 1; return; }
-            const name = transportWorkerName(one.ctx, driver);
-            tally(entry.car.drivers, entry.by, driver, name);
             if (!men[driver]) {
-                men[driver] = { man: { id: driver, name, days: 0, vehicles: [] }, by: transportMap() };
-                out.drivers.push(men[driver].man);
+                men[driver] = { id: driver, name: name(driver), days: 0, trips: [] };
+                out.drivers.push(men[driver]);
             }
-            men[driver].man.name = name;
-            men[driver].man.days += 1;
-            tally(men[driver].man.vehicles, men[driver].by, vehicle.id, vehicle.name);
+            men[driver].name = name(driver);
+            men[driver].days += 1;
+            men[driver].trips.push({ date: one.date, vehicle: { id: vehicle.id, name: vehicle.name },
+                sites: sites.map(id => transportReportSiteName(ctx, id)), alone: !ctx.sitesOf[driver],
+                passengers: seats.slice(2).filter(Boolean).map(id => ({ id, name: name(id), noSite: !ctx.sitesOf[id] })) });
         });
     });
-    const place = id => (rank[id] === undefined ? 1e9 : rank[id]);
-    const order = (a, b) => b.days - a.days || place(a.id) - place(b.id) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-    out.vehicles.forEach(car => car.drivers.sort(order));
-    out.drivers.sort(order);
-    const listed = transportMap();
-    out.vehicles.forEach((car, i) => { listed[car.id] = i; });
-    out.drivers.forEach(man => man.vehicles.sort((a, b) => listed[a.id] - listed[b.id]));
+    const place = (map, id) => (map[id] === undefined ? 1e9 : map[id]);
+    const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    out.vehicles.sort((a, b) => place(carRank, a.id) - place(carRank, b.id) || byId(a, b));
+    out.vehicles.forEach(car => car.sites.sort((a, b) => b.days - a.days || place(siteRank, a.id) - place(siteRank, b.id) || byId(a, b)));
+    out.drivers.sort((a, b) => b.days - a.days || place(rank, a.id) - place(rank, b.id) || byId(a, b));
     return out;
 }
 
-// PURE. The report as blocks of lines, from `spec`:
-//   { label, from, to, days (transportReportDays), cutoff, keep }
-// `cutoff` is the date before which the store keeps nothing (today less `keep` days).
-function transportReportBlocks(spec) {
+// PURE. The report as sections, each { kind, lines: [{ text, kind }] }, from `spec`:
+//   { label, from, to, days (transportReportDays), cutoff, keep, trimmed, cut }
+// `cutoff` is the date before which the store keeps nothing (today less `keep` days);
+// `trimmed` the newest date a plan was removed for room ('' for none); `cut` that a
+// chosen range was longer than the page reads. A section is a paragraph of the text, a
+// box of the picture, and a block of the page (transportReportDraw).
+function transportReportSections(spec) {
     const T = TRANSPORT_TEXT;
     const full = date => formatFullDate(parseLocalDate(date));
+    const short = date => formatShortDate(parseLocalDate(date));
     const count = transportReportCount(spec.days);
-    const blocks = [[T.rHeading(spec.label, full(spec.from), full(spec.to))]];
+    const sections = [];
+    const section = (kind, lines) => { sections.push({ kind, lines }); return lines; };
+    const line = (text, kind) => ({ text, kind });
+    section('head', [line(T.rHeading(spec.label, full(spec.from), full(spec.to)), 'head')]);
 
-    const said = [T.rDays(count.planned, count.total)];
-    if (count.missing > 0) said.push(T.rMissing(count.missing));
-    const gone = isRealDate(spec.cutoff)
-        ? spec.days.filter(one => one.state === 'none' && one.date < spec.cutoff).length : 0;
-    if (gone > 0) said.push(T.rPruned(T.rCount(gone), full(spec.cutoff), spec.keep));
-    if (count.unreadable > 0) said.push(T.rUnreadable(count.unreadable));
-    blocks.push(said);
-    if (count.planned === 0) return blocks;
+    const said = section('said', [line(T.rDays(count.planned, count.total), 'said')]);
+    if (spec.cut) said.push(line(T.reportTooLong(TRANSPORT_REPORT_MAX_DAYS), 'said'));
+    if (count.missing > 0) said.push(line(T.rMissing(count.missing), 'said'));
+    const cutoff = isRealDate(spec.cutoff) ? spec.cutoff : '';
+    const trimmed = isRealDate(spec.trimmed) ? spec.trimmed : '';
+    const isGone = one => Boolean(one.state === 'none' && cutoff && one.date < cutoff);
+    const isTrimmed = one => Boolean(one.state === 'none' && !isGone(one) && trimmed && one.date <= trimmed);
+    const gone = spec.days.filter(isGone).length;
+    const room = spec.days.filter(isTrimmed).length;
+    if (gone > 0) said.push(line(T.rPruned(T.rCount(gone), full(cutoff), spec.keep), 'said'));
+    if (room > 0) said.push(line(T.rTrimmed(T.rCount(room), full(trimmed)), 'said'));
+    if (count.unreadable > 0) said.push(line(T.rUnreadable(count.unreadable), 'said'));
+    const removed = transportMap();
+    spec.days.forEach(one => { if (isGone(one) || isTrimmed(one)) removed[one.date] = true; });
+    const worked = count.worked.filter(date => !removed[date]);
+    if (worked.length > 0) said.push(line(T.rWorkedNoPlan(worked.map(short).join(', ')), 'said'));
+    if (count.planned === 0) return sections;
 
+    // --- the first list: the vehicles, their days and where they went
+    section('title', [line(T.rVehiclesTitle, 'title')]);
     const out = count.vehicles.filter(car => car.days > 0);
-    if (out.length === 0) blocks.push([T.rNoneOut]);
-    out.forEach(car => {
-        const lines = [T.rVehicle(transportRli(car.name), T.rIn(car.days))];
-        car.drivers.forEach(man => lines.push(T.rDriverDays(isolate(man.name), T.rCount(man.days))));
-        if (car.noDriver > 0) lines.push(T.rNoDriverDays(T.rCount(car.noDriver)));
-        lines.push(T.rSeats(car.seats, String(Math.round(car.seats / car.days * 10) / 10)));
-        blocks.push(lines);
-    });
-    // With no vehicle out at all the line above has said so; the whole list adds nothing.
-    const idle = count.vehicles.filter(car => car.days === 0);
-    if (out.length > 0 && idle.length > 0) blocks.push([T.rIdle(idle.map(car => transportRli(car.name)).join(', '))]);
-    if (count.drivers.length > 0) {
-        blocks.push([T.rDriversTitle].concat(count.drivers.map(man => T.rDriver(isolate(man.name), T.rCount(man.days),
-            man.vehicles.map(car => T.rDriverVehicle(transportRli(car.name), car.days)).join(', ')))));
+    if (out.length === 0) {
+        section('note', [line(T.rNoneOut, 'note')]);
+        return sections;
     }
-    return blocks;
+    out.forEach(car => {
+        const lines = [line(T.rVehicle(transportRli(car.name), T.rIn(car.days)), 'name')];
+        car.sites.forEach(site => lines.push(line(T.rSite(isolate(site.name), T.rCount(site.days)), 'item')));
+        if (car.noSite > 0) lines.push(line(T.rNoSiteDays(T.rCount(car.noSite)), 'item'));
+        if (car.noDriver > 0) lines.push(line(T.rNoDriverDays(T.rCount(car.noDriver)), 'note'));
+        section('car', lines);
+    });
+    // Vehicles on the list that carried nobody. One taken off the list is named only on
+    // a day it went out: having been sold is not a day at home.
+    const idle = count.vehicles.filter(car => car.days === 0 && car.active);
+    if (idle.length > 0) section('note', [line(T.rIdle(idle.map(car => transportRli(car.name)).join(', ')), 'note')]);
+
+    // --- the second list: each driver, day by day, where and with whom
+    if (count.drivers.length > 0) {
+        section('title', [line(T.rDriversTitle, 'title')]);
+        count.drivers.forEach(man => {
+            const lines = [line(T.rDriverDays(isolate(man.name), T.rCount(man.days)), 'name')];
+            man.trips.forEach(trip => {
+                const parsed = parseLocalDate(trip.date);
+                const sites = trip.sites.length ? trip.sites.map(isolate).join(', ') : T.noSite;
+                lines.push(line(T.rDriverDay(`${hebrewDayName(parsed)} ${short(trip.date)}`, transportRli(trip.vehicle.name),
+                    trip.alone && trip.sites.length ? T.rDriverNoSite(sites) : sites), 'day'));
+                lines.push(line(trip.passengers.length === 0 ? T.mAlone : T.rWith(trip.passengers
+                    .map(one => (one.noSite ? T.rManNoSite(isolate(one.name)) : isolate(one.name))).join(', ')), 'with'));
+            });
+            section('driver', lines);
+        });
+    }
+    return sections;
 }
 
-// The report as the text that is shown, sent and copied. `today` decides what "this
-// week" is and where the store's horizon lies.
-function transportReportText(key, today) {
-    if (!transportEnabled()) return '';
-    const range = transportReportRange(key, today);
-    if (!range) return '';
-    return transportReportBlocks({ label: transportReportRangeLabel(key), from: range.from, to: range.to,
-        days: transportReportDays(range.from, range.to), cutoff: addDays(today, -TRANSPORT_KEEP_DAYS),
-        keep: TRANSPORT_KEEP_DAYS }).map(block => block.join('\n')).join('\n\n');
+// PURE. The same report as blocks of lines - the text's paragraphs.
+function transportReportBlocks(spec) {
+    return transportReportSections(spec).map(one => one.lines.map(line => line.text));
+}
+
+// The report's spec for a range and a day, read off this phone. `today` decides what
+// "this week" is and where the store's horizon lies; `chosen` is «תאריכים אחרים»'s two
+// dates when they are not the dialog's.
+function transportReportSpec(key, today, chosen) {
+    if (!transportEnabled()) return null;
+    const range = transportReportRange(key, today, chosen);
+    if (!range) return null;
+    return { label: transportReportRangeLabel(key), from: range.from, to: range.to, cut: range.cut === true,
+        days: transportReportDays(range.from, range.to, today), cutoff: addDays(today, -TRANSPORT_HISTORY_DAYS),
+        keep: TRANSPORT_HISTORY_DAYS, trimmed: transportTrimmedBefore() };
+}
+
+// The report as the text that is shown, sent and copied.
+function transportReportText(key, today, chosen) {
+    const spec = transportReportSpec(key, today, chosen);
+    return spec ? transportReportBlocks(spec).map(block => block.join('\n')).join('\n\n') : '';
+}
+
+// ------------------------------------------------------------------ «מי היה ברכב?»
+//
+// One vehicle on one date: its driver, the men with him in the order of their seats, and
+// where it went - by the same readings as the lists below it (transportPeekDay, the
+// engine, transportReportContext), so the two can never tell one day two ways. Every
+// vehicle of the list is offered, the ones taken off it too (a fine for a car since sold).
+// A date this phone holds no plan for is SAID - and why, when the reason is known.
+// It writes nothing. Lines, the first the heading.
+function transportLookupLines(vehicleId, date, today) {
+    const T = TRANSPORT_TEXT;
+    if (!transportEnabled() || !isRealDate(date)) return [];
+    const vehicle = transportFind(transportSettings().vehicles, vehicleId);
+    if (!vehicle) return [];
+    const parsed = parseLocalDate(date);
+    const car = transportRli(vehicle.name);
+    const now = isRealDate(today) ? today : todayStr();
+    const lines = [T.lookupHead(car, hebrewDayName(parsed), formatFullDate(parsed))];
+    const seen = transportPeekDay(date);
+    if (seen.state === 'unreadable') return lines.concat(T.lookupUnreadable);
+    if (seen.state !== 'plan') {
+        lines.push(T.lookupNone);
+        const trimmed = transportTrimmedBefore();
+        if (date < addDays(now, -TRANSPORT_HISTORY_DAYS)) lines.push(T.lookupOld(TRANSPORT_HISTORY_DAYS));
+        else if (trimmed && date <= trimmed) lines.push(T.lookupTrimmed(formatFullDate(parseLocalDate(trimmed))));
+        return lines;
+    }
+    if (transportVehicleOffOn(vehicle, date)) return lines.concat(T.lookupOff(car, formatFullDate(parseLocalDate(vehicle.off))));
+    if (seen.day.unavailable[vehicle.id]) return lines.concat(T.lookupHome(car));
+    // A vehicle taken off the list and asked about today or later is not one of the day's
+    // vehicles (transportReportContext), as on the screen: it is said to carry nobody.
+    const ctx = transportReportContext(date, now);
+    const seats = TransportEngine.layout(ctx, seen.day).cars[vehicle.id];
+    const riding = seats ? seats.filter(Boolean) : [];
+    if (riding.length === 0) return lines.concat(T.lookupEmpty(car));
+    const man = id => (ctx.sitesOf[id] ? isolate(transportWorkerName(ctx, id)) : T.rManNoSite(isolate(transportWorkerName(ctx, id))));
+    lines.push(seats[1] ? T.driver(man(seats[1])) : T.driverNone);
+    const passengers = seats.slice(2).filter(Boolean);
+    lines.push(passengers.length === 0 ? T.mAlone : T.rWith(passengers.map(man).join(', ')));
+    const sites = transportReportSites(ctx, riding).map(id => isolate(transportReportSiteName(ctx, id)));
+    lines.push(T.mDestinations(sites.length ? sites.join(', ') : T.noSite));
+    return lines;
 }
 
 // ------------------------------------------------------------------ the report's dialog
 //
 // The summary's dialog over again (index.html, #transportReportModal - a `.modal`, so
-// Escape, the Tab trap and the focus return are js/ui/modal.js's), with four buttons
-// above the field that choose the range. The same three ways out: shareTextOut and
-// copyTextOut (js/ui/share.js) and sharePrintout('transport') (js/ui/printout.js), whose
-// reader (readTransportPrintout, below) reads whichever of the two dialogs is open.
+// Escape, the Tab trap and the focus return are js/ui/modal.js's): «מי היה ברכב?» on top,
+// the five ranges, the page itself (the two lists, drawn from the very sections the text
+// is joined from), the text folded under «הדוח כטקסט», and the same three ways out:
+// shareTextOut and copyTextOut (js/ui/share.js) and sharePrintout('transport')
+// (js/ui/printout.js), whose reader (readTransportPrintout, below) reads whichever of
+// the two dialogs is open.
+//
+// TWO WAYS IN (v202): the button under the last car on the הסעות screen, as since v182,
+// and the row «דוח הסעות» of «דוחות» ← «הפקת דוח» (transportReportEntry), which is drawn
+// only on a phone that turned הסעות on.
 let transportReportKey = 'thisWeek';
+let transportReportChosen = null;      // { from, to } for «תאריכים אחרים»
+let transportLookupVehicle = null;
+let transportLookupDate = null;
 
 function transportReportParts() {
     const get = id => document.getElementById(id);
     return { modal: get('transportReportModal'), title: get('transportReportTitle'), ranges: get('transportReportRanges'),
-        label: get('transportReportLabel'), text: get('transportReportText'), send: get('transportReportSend'),
+        custom: get('transportReportCustom'), fromLabel: get('transportReportFromLabel'), toLabel: get('transportReportToLabel'),
+        from: get('transportReportFrom'), to: get('transportReportTo'), body: get('transportReportBody'),
+        fold: get('transportReportFold'), text: get('transportReportText'), send: get('transportReportSend'),
         copy: get('transportReportCopy'), picture: get('transportReportPicture'), close: get('transportReportClose'),
-        status: get('transportReportStatus') };
+        status: get('transportReportStatus'), lookupTitle: get('transportLookupTitle'), lookupLead: get('transportLookupLead'),
+        vehicleLabel: get('transportLookupVehicleLabel'), vehicle: get('transportLookupVehicle'),
+        dateLabel: get('transportLookupDateLabel'), date: get('transportLookupDate'), result: get('transportLookupResult') };
 }
 
 function transportReportIsOpen() {
@@ -1952,44 +2263,124 @@ function transportReportIsOpen() {
     return Boolean(modal && modal.style && modal.style.display === 'flex');
 }
 
-// The field, and which of the four buttons is the pressed one.
+// The page: one block per section, every line a paragraph of its own with its kind as a
+// class, its words exactly the text's.
+function transportReportDraw(body, sections) {
+    clear(body);
+    sections.forEach(one => {
+        if (one.kind === 'title') {
+            body.appendChild(el('h4', 'transport-report-title', one.lines[0].text));
+            return;
+        }
+        const block = el('div', `transport-report-block transport-report-${one.kind}`);
+        one.lines.forEach(line => block.appendChild(el('p', `transport-report-line transport-report-${line.kind}`, line.text)));
+        body.appendChild(block);
+    });
+}
+
+function transportLookupShow() {
+    const parts = transportReportParts();
+    if (!parts.result) return;
+    if (parts.vehicle && parts.vehicle.value) transportLookupVehicle = parts.vehicle.value;
+    if (parts.date && isRealDate(parts.date.value)) transportLookupDate = parts.date.value;
+    const lines = transportLookupLines(transportLookupVehicle, transportLookupDate, todayStr());
+    clear(parts.result);
+    lines.forEach((text, i) => parts.result.appendChild(el('p', i === 0 ? 'transport-lookup-head' : 'transport-lookup-line', text)));
+}
+
+// The vehicles of the list for the lookup's field: the ones on it, then the ones taken
+// off it, each by its name held right-to-left.
+function transportLookupOptions(select) {
+    const T = TRANSPORT_TEXT;
+    const vehicles = transportSettings().vehicles;
+    const ordered = vehicles.filter(one => one.active).concat(vehicles.filter(one => !one.active));
+    clear(select);
+    ordered.forEach(vehicle => {
+        const option = document.createElement('option');
+        option.value = vehicle.id;
+        option.textContent = vehicle.active ? transportRli(vehicle.name) : T.lookupRetired(transportRli(vehicle.name));
+        select.appendChild(option);
+    });
+    if (!transportFind(vehicles, transportLookupVehicle)) transportLookupVehicle = ordered.length ? ordered[0].id : null;
+    if (transportLookupVehicle) select.value = transportLookupVehicle;
+}
+
+// The page, the field, which range is pressed, and the two chosen dates.
 function transportReportShow() {
     const parts = transportReportParts();
-    if (!parts.text) return;
-    const now = transportReportText(transportReportKey, todayStr());
-    if (parts.text.value !== now) { parts.text.value = now; parts.text.scrollTop = 0; }
+    if (!parts.text || !parts.body) return;
+    const spec = transportReportSpec(transportReportKey, todayStr());
+    const sections = spec ? transportReportSections(spec) : [];
+    const now = sections.map(one => one.lines.map(line => line.text).join('\n')).join('\n\n');
+    if (parts.text.value !== now || parts.body.childNodes.length === 0) {
+        parts.text.value = now;
+        parts.text.scrollTop = 0;
+        transportReportDraw(parts.body, sections);
+    }
     [...parts.ranges.querySelectorAll('button')].forEach(node => {
         node.textContent = transportReportRangeLabel(node.dataset.range);
         node.setAttribute('aria-pressed', node.dataset.range === transportReportKey ? 'true' : 'false');
     });
+    if (parts.custom) parts.custom.hidden = transportReportKey !== 'custom';
+    if (transportReportChosen) {
+        if (parts.from && parts.from.value !== transportReportChosen.from) parts.from.value = transportReportChosen.from;
+        if (parts.to && parts.to.value !== transportReportChosen.to) parts.to.value = transportReportChosen.to;
+    }
 }
 
-// Only from the open screen, so only on a phone that turned הסעות on. It opens on this
-// week, every time: which range was looked at last is not kept anywhere.
+// From the open screen, or from «דוחות» - so only on a phone that turned הסעות on. It
+// opens on this week and on today's date for the lookup, every time: what was looked at
+// last is not kept anywhere.
 function openTransportReport() {
-    if (!transportEnabled() || !transportIsOpen()) return false;
+    if (!transportEnabled()) return false;
     const parts = transportReportParts();
-    if (!parts.modal || !parts.text) return false;
+    if (!parts.modal || !parts.text || !parts.body) return false;
     const T = TRANSPORT_TEXT;
+    const today = todayStr();
     transportReportKey = 'thisWeek';
+    transportReportChosen = { from: addDays(today, -29), to: today };
+    transportLookupDate = today;
     parts.title.textContent = T.reportTitle;
     parts.ranges.setAttribute('aria-label', T.reportRanges);
-    parts.label.textContent = T.reportLabel;
+    parts.fromLabel.textContent = T.reportFrom;
+    parts.toLabel.textContent = T.reportTo;
+    parts.fold.textContent = T.reportAsText;
+    parts.text.setAttribute('aria-label', T.reportAsText);
+    transportReportShowText(false);
+    parts.lookupTitle.textContent = T.lookupTitle;
+    parts.lookupLead.textContent = T.lookupLead;
+    parts.vehicleLabel.textContent = T.lookupVehicle;
+    parts.dateLabel.textContent = T.lookupDate;
+    transportLookupOptions(parts.vehicle);
+    parts.date.value = today;
     parts.send.textContent = T.summarySend;
     parts.copy.textContent = T.summaryCopy;
     parts.picture.textContent = T.summaryPicture;
     parts.close.textContent = T.summaryClose;
     parts.status.textContent = '';
+    clear(parts.body);
     transportReportShow();
+    transportLookupShow();
     parts.modal.style.display = 'flex';
-    parts.text.scrollTop = 0;
+    const content = parts.modal.querySelector('.modal-content');
+    if (content) content.scrollTop = 0;
     return true;
 }
 
 function closeTransportReport() {
     if (typeof document === 'undefined' || !document.getElementById) return;
     const modal = document.getElementById('transportReportModal');
-    if (modal && modal.style) modal.style.display = 'none';
+    if (!modal || !modal.style || modal.style.display !== 'flex') return;
+    modal.style.display = 'none';
+    // Opened from «דוחות»: the focus goes back to the menu's trigger (js/ui/modal.js gives
+    // it back to what had it; a redraw of that screen meanwhile replaced the node).
+    setTimeout(() => {
+        if (transportReportIsOpen()) return;
+        const active = document.activeElement;
+        if (active && active !== document.body && !modal.contains(active)) return;
+        const trigger = document.querySelector('#reportsView .report-output-actions > summary');
+        if (trigger && trigger.offsetParent !== null) trigger.focus({ preventScroll: true });
+    }, 0);
 }
 
 function transportReportPick(key) {
@@ -1999,8 +2390,35 @@ function transportReportPick(key) {
     transportReportShow();
 }
 
+// «מתאריך» / «עד תאריך» typed or picked. A field left empty keeps the date it had.
+function transportReportCustomTyped() {
+    if (!transportReportIsOpen() || !transportReportChosen) return;
+    const parts = transportReportParts();
+    const from = parts.from && isRealDate(parts.from.value) ? parts.from.value : transportReportChosen.from;
+    const to = parts.to && isRealDate(parts.to.value) ? parts.to.value : transportReportChosen.to;
+    transportReportChosen = { from, to };
+    parts.status.textContent = '';
+    transportReportShow();
+}
+
+// A record or a plan changed under the open dialog: both readings follow it.
 function transportReportRefresh() {
-    if (transportReportIsOpen()) transportReportShow();
+    if (!transportReportIsOpen()) return;
+    transportReportShow();
+    transportLookupShow();
+}
+
+// The text, folded away until asked for: a button and not a <details>, because the
+// dialogs' Tab trap (js/ui/modal.js) knows buttons and fields («סיכום חודש»'s own rule).
+function transportReportShowText(show) {
+    const parts = transportReportParts();
+    if (parts.text) parts.text.hidden = !show;
+    if (parts.fold) parts.fold.setAttribute('aria-expanded', show ? 'true' : 'false');
+}
+
+function transportReportToggleText() {
+    const parts = transportReportParts();
+    if (parts.text) transportReportShowText(parts.text.hidden === true);
 }
 
 function transportReportSend() {
@@ -2009,8 +2427,11 @@ function transportReportSend() {
     shareTextOut(parts.text.value, parts.status, closeTransportReport);
 }
 
+// The field has to be on the screen to be selected - the copy's last resort is the
+// person's own long press on it.
 function transportReportCopy() {
     if (!transportReportIsOpen()) return;
+    transportReportShowText(true);
     const parts = transportReportParts();
     copyTextOut(parts.text, parts.status);
 }
@@ -2019,6 +2440,24 @@ function transportReportCopy() {
 function transportReportPicture() {
     if (!transportReportIsOpen()) return;
     sharePrintout('transport');
+}
+
+// The row of «דוחות» ← «הפקת דוח» (js/ui/reports.js asks for it, as it asks
+// js/ui/monthsummary.js for «סיכום חודש»). Null on a phone where הסעות is off, and then
+// nothing about הסעות is read to find that out but the switch.
+function transportReportEntry() {
+    if (!transportEnabled()) return null;
+    const entry = button(TRANSPORT_TEXT.reportTitle, 'btn-secondary transport-report-entry', () => {
+        // The menu shuts behind the dialog, and the focus is left on the menu's own
+        // trigger - a button inside a shut menu cannot take the focus back afterwards.
+        const menu = entry.closest ? entry.closest('details') : null;
+        const trigger = menu ? menu.querySelector('summary') : null;
+        if (menu) menu.open = false;
+        if (trigger && trigger.focus) trigger.focus({ preventScroll: true });
+        openTransportReport();
+    });
+    entry.id = 'transportReportEntry';
+    return entry;
 }
 
 // ================================================================== the summary's dialog
@@ -2123,8 +2562,10 @@ function transportSummaryPicture() {
 // same algorithm and the marks add nothing there); a vehicle's RLI…PDI stays, as a date
 // range's isolate stays in the week's picture, because that one changes what is read.
 //
-// The report of a period is read the same way off ITS dialog's field; only one of the two
-// can be open at a time, both being opened from the panel they cover.
+// The report of a period is read the same way off ITS dialog's field (folded or not, the
+// field holds the page's words); only one of the two can be open at a time. Its two
+// lists' titles (v202) are named in `titles`, by their place among the blocks, so the
+// drawing gives each list a heading of its own; and the report may run to `columns`.
 function readTransportPrintout() {
     const report = transportReportIsOpen();
     if (!report && (!transportSummaryIsOpen() || !transportSummaryFor)) return null;
@@ -2136,12 +2577,28 @@ function readTransportPrintout() {
         .map(block => block.split('\n').map(clean).filter(Boolean)).filter(block => block.length > 0);
     if (blocks.length === 0) return null;
     const name = report ? TRANSPORT_TEXT.reportFile(range.from, range.to) : TRANSPORT_TEXT.summaryFile(transportSummaryFor);
-    return { title: blocks[0].join(' '), name, blocks: blocks.slice(1) };
+    const spec = { title: blocks[0].join(' '), name, blocks: blocks.slice(1) };
+    if (report) {
+        const heads = [TRANSPORT_TEXT.rVehiclesTitle, TRANSPORT_TEXT.rDriversTitle].map(clean);
+        spec.titles = spec.blocks.map((block, i) => (block.length === 1 && heads.indexOf(block[0]) !== -1 ? i : -1))
+            .filter(i => i !== -1);
+        spec.columns = true;
+    }
+    return spec;
 }
 
 // Sizes in CSS pixels, everything from the RIGHT edge. A fixed width a phone's chat
 // shows whole; a line too long for it wraps and is never cut - a cut line here would be
 // a man missing from his car. `layout.rows` is one box per block.
+//
+// THE REPORT RUNS TO COLUMNS (v202). A week of the drivers' list, day by day, is a few
+// hundred lines, and one column of them is a picture taller than js/ui/printout.js will
+// draw at full size (PRINTOUT_MAX_SIDE): it would come out shrunk past reading. So when
+// `spec.columns` is set and one column would be taller than COLUMN_MAX, the blocks are
+// laid out in columns of the same width, the first on the RIGHT as a page is read, each
+// block whole in one column, the title across the top. The summary of a day never sets
+// it and is drawn exactly as before. A list's title (`spec.titles`) is drawn in the
+// title's size, under the heavier rule.
 function planTransportPrintout(spec, probe, family) {
     const PAD = 24;
     const INNER = 520;
@@ -2149,23 +2606,42 @@ function planTransportPrintout(spec, probe, family) {
     const HEAD = { weight: 700, size: 18, line: 28 };
     const LINE = { weight: 500, size: 17, line: 26 };
     const GAP = 14;
+    const COLUMN_GAP = 40;
+    const COLUMN_MAX = 2400;
+    const titles = Array.isArray(spec.titles) ? spec.titles : [];
     const wrap = (text, style) => {
         probe.font = printoutFont(style.weight, style.size, family);
         return printoutWrap(probe, text, INNER).map(piece => ({ text: piece, style }));
     };
     const title = wrap(spec.title, TITLE);
-    const blocks = spec.blocks.map(block => [].concat(...block.map((line, i) =>
-        wrap(line, i === 0 && block.length > 1 ? HEAD : LINE))));
+    const blocks = spec.blocks.map((block, b) => [].concat(...block.map((line, i) =>
+        wrap(line, titles.indexOf(b) !== -1 ? TITLE : i === 0 && block.length > 1 ? HEAD : LINE))));
     const tall = lines => lines.reduce((sum, line) => sum + line.style.line, 0);
-    const width = PAD * 2 + INNER;
-    const height = PAD + tall(title) + blocks.reduce((sum, block) => sum + GAP * 2 + tall(block), 0) + PAD;
+    const heights = blocks.map(block => GAP * 2 + tall(block));
+    const total = heights.reduce((sum, h) => sum + h, 0);
+    // Which column each block is in: the first, unless the report is too tall for one.
+    const column = blocks.map(() => 0);
+    let columns = 1;
+    if (spec.columns && total > COLUMN_MAX) {
+        const target = Math.max(Math.max(...heights), Math.ceil(total / Math.ceil(total / COLUMN_MAX)));
+        let filled = 0;
+        heights.forEach((h, i) => {
+            if (filled > 0 && filled + h > target) { columns += 1; filled = 0; }
+            column[i] = columns - 1;
+            filled += h;
+        });
+    }
+    const sums = new Array(columns).fill(0);
+    heights.forEach((h, i) => { sums[column[i]] += h; });
+    const width = PAD * 2 + INNER * columns + COLUMN_GAP * (columns - 1);
+    const height = PAD + tall(title) + Math.max(0, ...sums) + PAD;
 
     const draw = ctx => {
         const paper = PRINTOUT_PAPER;
-        const right = width - PAD;
         const layout = { title: null, header: null, rows: [], chips: [] };
         ctx.textAlign = 'right';
         let y = PAD;
+        let right = width - PAD;
         const write = (lines, colour) => lines.forEach(line => {
             ctx.fillStyle = colour(line);
             ctx.font = printoutFont(line.style.weight, line.style.size, family);
@@ -2173,14 +2649,19 @@ function planTransportPrintout(spec, probe, family) {
             y += line.style.line;
         });
         write(title, () => paper.ink);
-        layout.title = { x: PAD, y: PAD, w: INNER, h: y - PAD };
+        layout.title = { x: PAD, y: PAD, w: width - PAD * 2, h: y - PAD };
+        const top = y;
         blocks.forEach((block, i) => {
+            if (i > 0 && column[i] !== column[i - 1]) y = top;
+            right = width - PAD - column[i] * (INNER + COLUMN_GAP);
+            const left = right - INNER;
+            const heavy = i === 0 || titles.indexOf(i) !== -1;
             y += GAP;
-            printoutLine(ctx, PAD, y - 0.5, right, y - 0.5, i === 0 ? paper.ink : paper.line, i === 0 ? 1.5 : 1);
+            printoutLine(ctx, left, y - 0.5, right, y - 0.5, heavy ? paper.ink : paper.line, heavy ? 1.5 : 1);
             y += GAP;
-            const top = y;
-            write(block, line => (line.style === HEAD ? paper.ink : paper.ink2));
-            layout.rows.push({ x: PAD, y: top, w: INNER, h: y - top });
+            const at = y;
+            write(block, line => (line.style === LINE ? paper.ink2 : paper.ink));
+            layout.rows.push({ x: left, y: at, w: INNER, h: y - at });
         });
         return layout;
     };

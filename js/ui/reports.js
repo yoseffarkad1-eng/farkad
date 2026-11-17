@@ -782,6 +782,9 @@ function renderReportActions() {
     // man. A row of this menu on «לפי עובד» and nothing under «לפי אתר» - that file decides.
     const slips = typeof payslipsEntryButton === 'function' ? payslipsEntryButton() : null;
     if (slips) actions.appendChild(slips);
+    // «דוח הסעות» (js/ui/transport.js, v202): a row only on a phone that turned הסעות on.
+    const rides = typeof transportReportEntry === 'function' ? transportReportEntry() : null;
+    if (rides) actions.appendChild(rides);
     menu.appendChild(actions);
     return menu;
 }

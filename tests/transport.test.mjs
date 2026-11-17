@@ -732,10 +732,12 @@ await block('the report of a period: each vehicle, each driver, and every day th
     same('a range nobody offers, or a day that is not one, is no range', [range('year'), range('thisWeek', '2026-13-40'),
         text('year'), text('thisWeek', 'tomorrow')], [null, null, '', '']);
 
-    // --- nothing kept yet
-    same('with no plan on the phone it says so for every day, and names no vehicle at all', lines('thisWeek'),
+    // --- nothing kept yet. MOVED in v202: the day the record has men working and this
+    // phone has no plan for is now NAMED by its date - the crew works on DAY.
+    same('with no plan on the phone it says so for every day, names the day men worked, and names no vehicle at all', lines('thisWeek'),
         ['דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:', '',
-            'ימים עם שיבוץ שמור במכשיר הזה: 0 מתוך 7', 'ב-7 ימים אין שיבוץ שמור במכשיר הזה.']);
+            'ימים עם שיבוץ שמור במכשיר הזה: 0 מתוך 7', 'ב-7 ימים אין שיבוץ שמור במכשיר הזה.',
+            'ימים שעבדו בהם ואין להם שיבוץ במכשיר הזה: 10/11']);
 
     // --- a week of plans. The crew works on four more days; then:
     //   Fri 06  a vehicle kept home and nobody seated          -> NOT a plan
@@ -774,25 +776,40 @@ await block('the report of a period: each vehicle, each driver, and every day th
     const schedule = JSON.stringify(again.State.schedule);
     const held = Object.keys(again.global('transportDays')).sort().join();
     const week = again.call('transportReportText', 'thisWeek', DAY).split('\n');
-    same('THE WEEK, line for line: the days counted, each vehicle that went out - its days, its drivers and how often each, its seats - the ones that did not, then each driver and his vehicles',
+    // MOVED in v202 (the owner, 2026-11-17: two lists on one page - the vehicles' days and
+    // where they went; who drove, where, and whom he took). Counted by hand off the plans
+    // staged above and the crew's days: every man worked at הרצליה on 08, 09 and 11; on
+    // DAY אחמד at הרצליה and Ali Hassan at פרדסיה. The seats and the per-vehicle drivers
+    // of v182 are gone - who drove is the second list, day by day.
+    same('THE WEEK, line for line: the days counted and the day men worked with no plan named; then each vehicle that went out - its days and every site it went to - the ones that did not; then each driver, day by day, with his vehicle, his sites and the men in the order of their seats',
         week, ['דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:', '',
             'ימים עם שיבוץ שמור במכשיר הזה: 4 מתוך 7',
             'ב-2 ימים אין שיבוץ שמור במכשיר הזה.',
-            'שיבוץ של יום אחד שמור במכשיר ולא נקרא, ולא נספר.', '',
+            'שיבוץ של יום אחד שמור במכשיר ולא נקרא, ולא נספר.',
+            'ימים שעבדו בהם ואין להם שיבוץ במכשיר הזה: 06/11', '',
+            'רכבים – כמה ימים יצא כל רכב ולאן', '',
             `רכב: ${car('טויוטה קורולה 2013')} – יצא ב-4 ימים`,
-            `נהג: ${named('אחמד')} – 3 ימים`,
-            `נהג: ${named('סמיר')} – יום אחד`,
-            'מושבים תפוסים: 9 בסך הכול, 2.3 בממוצע ליום', '',
+            `- ${named('הרצליה')} – 4 ימים`, '',
             `רכב: ${car('BYD סיל U 2025')} – יצא ביום אחד`,
-            `נהג: ${named('סמיר')} – יום אחד`,
-            'מושבים תפוסים: 1 בסך הכול, 1 בממוצע ליום', '',
+            `- ${named('הרצליה')} – יום אחד`, '',
             `רכב: ${car('פולקסווגן 2018')} – יצא ביום אחד`,
-            'בלי נהג – יום אחד',
-            'מושבים תפוסים: 1 בסך הכול, 1 בממוצע ליום', '',
+            `- ${named('פרדסיה')} – יום אחד`,
+            'בלי נהג – יום אחד', '',
             `רכבים בלי עובדים בימים עם שיבוץ: ${car('טויוטה קורולה 2016')}, ${car('BYD אטו 3 2025')}, ${car('סוואנה 2010')}, ${car('ליפמוטור C10 2026')}`, '',
-            'נהגים בתקופה:',
-            `- ${named('אחמד')} – 3 ימים: ${car('טויוטה קורולה 2013')} (3)`,
-            `- ${named('סמיר')} – 2 ימים: ${car('טויוטה קורולה 2013')} (1), ${car('BYD סיל U 2025')} (1)`]);
+            'נהגים – מי נהג, לאן ועם מי', '',
+            `נהג: ${named('אחמד')} – 3 ימים`,
+            `- יום ראשון 08/11: ${car('טויוטה קורולה 2013')} – ${named('הרצליה')}`,
+            `נוסעים: ${named('מוחמד')}`,
+            `- יום שלישי 10/11: ${car('טויוטה קורולה 2013')} – ${named('הרצליה')}`,
+            'בלי נוסעים.',
+            `- יום רביעי 11/11: ${car('טויוטה קורולה 2013')} – ${named('הרצליה')}`,
+            `נוסעים: ${named('מוחמד')}, ${named('יוסי')}`, '',
+            `נהג: ${named('סמיר')} – 2 ימים`,
+            `- יום ראשון 08/11: ${car('BYD סיל U 2025')} – ${named('הרצליה')}`,
+            'בלי נוסעים.',
+            `- יום שני 09/11: ${car('טויוטה קורולה 2013')} – ${named('הרצליה')}`,
+            `נוסעים: ${named('יוסי')}, ${named('אחמד')}`]);
+    check('no figure of money is in it: no shekel, no rate, no wage word', !/₪|שכר|תעריף|תשלום|\d+\.\d/.test(week.join('\n')));
     check('a vehicle is always named after a Hebrew word and held right-to-left: no line begins with its name',
         week.every(line => !line.startsWith(RLI) && !/^[A-Za-z]/.test(line))
         && week.join('\n').includes(`${RLI}BYD`) && !week.join('\n').includes(`${FSI}BYD`));
@@ -804,14 +821,16 @@ await block('the report of a period: each vehicle, each driver, and every day th
         ['06:none', '07:none', '08:plan', '09:plan', '10:plan', '11:plan', '12:unreadable']);
     const count = plain(again.call('transportReportCount', days));
     same('the days add up to the range', [count.total, count.planned, count.missing, count.unreadable], [7, 4, 2, 1]);
-    same('per vehicle: days out, seats filled, days with nobody at the wheel - a vehicle that never went out has zeros, in the order of the list',
-        count.vehicles.map(v => `${v.id}:${v.days}:${v.seats}:${v.noDriver}`),
-        ['tv_01:4:9:0', 'tv_02:0:0:0', 'tv_03:1:1:0', 'tv_04:0:0:0', 'tv_05:1:1:1', 'tv_06:0:0:0', 'tv_07:0:0:0']);
-    same('who drove each, most days first', count.vehicles.filter(v => v.days > 0).map(v => v.drivers.map(d => `${d.id}x${d.days}`).join('+')),
-        ['w_01x3+w_04x1', 'w_04x1', '']);
-    same('per driver: his days, and each vehicle with its days - a driver across two vehicles is one driver',
-        count.drivers.map(d => `${d.id}:${d.days}:${d.vehicles.map(v => `${v.id}x${v.days}`).join('+')}`),
-        ['w_01:3:tv_01x3', 'w_04:2:tv_01x1+tv_03x1']);
+    same('and the one day without a plan on which men worked is named', count.worked, ['2026-11-06']);
+    same('per vehicle: days out, days a man in it had no site, days with nobody at the wheel - a vehicle that never went out has zeros, in the order of the list',
+        count.vehicles.map(v => `${v.id}:${v.days}:${v.noSite}:${v.noDriver}`),
+        ['tv_01:4:0:0', 'tv_02:0:0:0', 'tv_03:1:0:0', 'tv_04:0:0:0', 'tv_05:1:0:1', 'tv_06:0:0:0', 'tv_07:0:0:0']);
+    same('where each went, and on how many days', count.vehicles.filter(v => v.days > 0).map(v => v.sites.map(s => `${s.id}x${s.days}`).join('+')),
+        ['p_01x4', 'p_01x1', 'p_03x1']);
+    same('per driver: his days, and each trip by date, vehicle, sites and the men in the order of their seats - a driver across two vehicles is one driver',
+        count.drivers.map(d => `${d.id}:${d.days}:` + d.trips.map(t => `${t.date.slice(8)}/${t.vehicle.id}/${t.sites.join('+')}/${t.passengers.map(p => p.id).join('+')}`).join(' ')),
+        ['w_01:3:08/tv_01/הרצליה/w_02 10/tv_01/הרצליה/ 11/tv_01/הרצליה/w_02+w_03',
+            'w_04:2:08/tv_03/הרצליה/ 09/tv_01/הרצליה/w_03+w_01']);
     check('a vehicle kept home that day is not counted as out, even with a man its old plan left in it (v171, the 11th)',
         count.vehicles[2].days === 1);
     check('a seat count is the men DRAWN in the car: v171\'s day is its driver and two men',
@@ -825,38 +844,54 @@ await block('the report of a period: each vehicle, each driver, and every day th
     check('and the vehicles named as carrying nobody are named only for «ימים עם שיבוץ»',
         week.filter(line => line.includes('סוואנה')).every(line => line.startsWith('רכבים בלי עובדים בימים עם שיבוץ: ')));
 
-    // --- the month, and the month before it against the store's horizon.
-    same('this month: the same four days out of thirty, twenty-five with no plan, and nothing said about deletion - it is all inside the five weeks',
-        again.call('transportReportText', 'thisMonth', DAY).split('\n').slice(0, 5),
+    // --- the month, and the month before it against the store's horizon. MOVED in v202:
+    // the store keeps 400 days, not 35 (the owner, 2026-11-17 - a fine arrives months
+    // late), so the October before DAY is whole and nothing is said about deletion.
+    same('this month: the same four days out of thirty, twenty-five with no plan, the one worked day named, and nothing said about deletion',
+        again.call('transportReportText', 'thisMonth', DAY).split('\n').slice(0, 6),
         ['דוח הסעות – החודש, 01/11/2026 עד 30/11/2026:', '',
             'ימים עם שיבוץ שמור במכשיר הזה: 4 מתוך 30', 'ב-25 ימים אין שיבוץ שמור במכשיר הזה.',
-            'שיבוץ של יום אחד שמור במכשיר ולא נקרא, ולא נספר.']);
-    same('LAST MONTH ON THE 10TH CANNOT BE WHOLE, AND SAYS WHY: the store keeps 35 days, so the first five days of October are gone - counted, dated, explained',
+            'שיבוץ של יום אחד שמור במכשיר ולא נקרא, ולא נספר.',
+            'ימים שעבדו בהם ואין להם שיבוץ במכשיר הזה: 06/11']);
+    // On the 20th of October nobody has a site in the record: the car went out and where
+    // it went is not known, and that is what is said - by name, with no site invented.
+    same('LAST MONTH: one day, a car whose men had no site that day - said for the car, for the driver and for the man he took',
         again.call('transportReportText', 'lastMonth', DAY).split('\n'),
         ['דוח הסעות – חודש שעבר, 01/10/2026 עד 31/10/2026:', '',
             'ימים עם שיבוץ שמור במכשיר הזה: 1 מתוך 31',
-            'ב-30 ימים אין שיבוץ שמור במכשיר הזה.',
-            'מתוכם 5 ימים לפני 06/10/2026: שיבוצים ישנים מ-35 ימים נמחקים מהמכשיר הזה.', '',
+            'ב-30 ימים אין שיבוץ שמור במכשיר הזה.', '',
+            'רכבים – כמה ימים יצא כל רכב ולאן', '',
             `רכב: ${car('פולקסווגן 2018')} – יצא ביום אחד`,
-            `נהג: ${named('מוחמד')} – יום אחד`,
-            'מושבים תפוסים: 2 בסך הכול, 2 בממוצע ליום', '',
+            '- עובד בלי אתר ברישום – יום אחד', '',
             `רכבים בלי עובדים בימים עם שיבוץ: ${car('טויוטה קורולה 2013')}, ${car('טויוטה קורולה 2016')}, ${car('BYD סיל U 2025')}, ${car('BYD אטו 3 2025')}, ${car('סוואנה 2010')}, ${car('ליפמוטור C10 2026')}`, '',
-            'נהגים בתקופה:',
-            `- ${named('מוחמד')} – יום אחד: ${car('פולקסווגן 2018')} (1)`]);
-    const pruned = today => again.call('transportReportText', 'lastMonth', today).split('\n').filter(line => line.startsWith('מתוכם'));
-    same('the date in that line is the horizon the store itself prunes at', again.call('addDays', DAY, -again.global('TRANSPORT_KEEP_DAYS')), '2026-10-06');
-    same('on the 5th the whole of October is still inside the five weeks and nothing is said; on the 6th one day is gone; at the end of the month, every day before the 26th that is not on the disk (the 20th still is - it is read, not presumed gone)',
-        [pruned('2026-11-05'), pruned('2026-11-06'), pruned('2026-11-30')],
-        [[], ['מתוכם יום אחד לפני 02/10/2026: שיבוצים ישנים מ-35 ימים נמחקים מהמכשיר הזה.'],
-            ['מתוכם 24 ימים לפני 26/10/2026: שיבוצים ישנים מ-35 ימים נמחקים מהמכשיר הזה.']]);
-    check('this week, last week and this month are never past the horizon, on any day of a year',
+            'נהגים – מי נהג, לאן ועם מי', '',
+            `נהג: ${named('מוחמד')} – יום אחד`,
+            `- יום שלישי 20/10: ${car('פולקסווגן 2018')} – בלי אתר ברישום`,
+            `נוסעים: ${named('יוסי')} (בלי אתר ברישום)`]);
+    same('the date in the deletion line is the horizon the store itself prunes at', again.call('addDays', DAY, -again.global('TRANSPORT_HISTORY_DAYS')), '2025-10-06');
+    // October 2026 read a year later, by «תאריכים אחרים»: the days before the horizon are
+    // counted, dated and explained; the one plan still inside it is read.
+    const october = today => again.call('transportReportText', 'custom', today, { from: '2026-10-01', to: '2026-10-31' }).split('\n');
+    same('read on 2027-11-05 the whole of October 2026 is still inside the 400 days and nothing is said; on the 6th one day is gone; on 2027-11-25 every day before the 21st that is not on the disk (the 20th still is - it is read, not presumed gone)',
+        [october('2027-11-05').filter(line => line.startsWith('מתוכם')), october('2027-11-06').filter(line => line.startsWith('מתוכם')),
+            october('2027-11-25').filter(line => line.startsWith('מתוכם'))],
+        [[], ['מתוכם יום אחד לפני 02/10/2026: שיבוצים ישנים מ-400 ימים נמחקים מהמכשיר הזה.'],
+            ['מתוכם 19 ימים לפני 21/10/2026: שיבוצים ישנים מ-400 ימים נמחקים מהמכשיר הזה.']]);
+    check('this week, last week, this month and last month are never past the horizon, on any day of a year',
         (() => {
             for (let date = '2026-11-01'; date < '2027-11-01'; date = again.call('addDays', date, 1)) {
-                if (['thisWeek', 'lastWeek', 'thisMonth'].some(key => again.call('transportReportRange', key, date).from
-                    < again.call('addDays', date, -35))) return false;
+                if (['thisWeek', 'lastWeek', 'thisMonth', 'lastMonth'].some(key => again.call('transportReportRange', key, date).from
+                    < again.call('addDays', date, -again.global('TRANSPORT_HISTORY_DAYS')))) return false;
             }
             return true;
         })());
+    // «תאריכים אחרים»: two dates in either order; longer than the page reads, cut from its start and said.
+    const chosen = (from, to) => { const r = again.call('transportReportRange', 'custom', DAY, { from, to }); return r ? `${r.from}..${r.to}${r.cut ? ' cut' : ''}` : null; };
+    same('a chosen range is the two dates, in either order; past 92 days it keeps its last 92 and says so',
+        [chosen('2026-10-01', '2026-10-31'), chosen('2026-10-31', '2026-10-01'), chosen('2026-01-01', '2026-11-10'), chosen('2026-10-01', 'x')],
+        ['2026-10-01..2026-10-31', '2026-10-01..2026-10-31', '2026-08-11..2026-11-10 cut', null]);
+    check('and the cut is said in the report', again.call('transportReportText', 'custom', DAY, { from: '2026-01-01', to: '2026-11-10' }).split('\n')
+        .includes('אפשר לבחור עד 92 ימים, ולכן מוצגים 92 הימים האחרונים של הטווח.'));
 
     // --- IT IS A READING. Four ranges, twice, the counting and the days: nothing moved.
     ['thisWeek', 'lastWeek', 'thisMonth', 'lastMonth', 'thisWeek', 'lastMonth'].forEach(key => again.call('transportReportText', key, DAY));
@@ -890,9 +925,10 @@ await block('the report of a period: each vehicle, each driver, and every day th
     // in a vehicle that is kept home.
     const idle = crewPhone('d_report_idle');
     idle.putRaw(DAY_KEY, JSON.stringify({ version: 1, unavailable: { tv_01: true }, trips: { tv_01: { driver: 'w_01', passengers: [], seats: {} } } }));
-    same('a plan in which nobody is drawn in any vehicle says so, once, and lists no vehicle', reopen(idle).call('transportReportText', 'thisWeek', DAY).split('\n'),
+    same('a plan in which nobody is drawn in any vehicle says so, once, and lists no vehicle and no driver', reopen(idle).call('transportReportText', 'thisWeek', DAY).split('\n'),
         ['דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:', '',
             'ימים עם שיבוץ שמור במכשיר הזה: 1 מתוך 7', 'ב-6 ימים אין שיבוץ שמור במכשיר הזה.', '',
+            'רכבים – כמה ימים יצא כל רכב ולאן', '',
             'בימים עם שיבוץ אף רכב לא יצא עם עובדים.']);
 
     // --- a driver who has left the roster is still a driver, under the name the screen gives him.
@@ -907,9 +943,10 @@ await block('the report of a period: each vehicle, each driver, and every day th
     const get = off.Store.get.bind(off.Store);
     off.Store.get = key => { reads.push(String(key)); return get(key); };
     load(off);
-    same('with the switch off there is no report, no days and no dialog',
-        [off.call('transportReportText', 'thisWeek', DAY), plain(off.call('transportReportDays', '2026-11-06', '2026-11-12')), off.call('openTransportReport')],
-        ['', [], false]);
+    same('with the switch off there is no report, no days, no lookup, no dialog and no row in «דוחות»',
+        [off.call('transportReportText', 'thisWeek', DAY), plain(off.call('transportReportDays', '2026-11-06', '2026-11-12')),
+            plain(off.call('transportLookupLines', 'tv_01', DAY, DAY)), off.call('openTransportReport'), off.call('transportReportEntry')],
+        ['', [], [], false, null]);
     same('and the only transport key read is the switch', [...new Set(reads.filter(key => /transport/i.test(key)))], [ENABLED]);
 
     // --- the code that counts, composes, shows, sends and copies it calls nothing that
@@ -919,8 +956,10 @@ await block('the report of a period: each vehicle, each driver, and every day th
     const code = section('== the report of a period', '== the summary\'s dialog');
     given('the report\'s section was found in the screen\'s file', /function transportReportCount/.test(code)
         && /function transportReportBlocks/.test(code) && /function openTransportReport/.test(code) && /function transportReportPick/.test(code));
+    // `transportSettings` is the list of vehicles, read as the screen and transportContext
+    // (v182's way in) read it; the setters beside it (transportSetAvailable, …) are not.
     same('nothing in it writes, marks, loads, prunes, commits or touches the store',
-        code.match(/transportKeep|transportSaveDay|transportSaveSettings|transportWrite|transportMarkOpened|transportRedrawn|transportDayOf|transportLoad|transportPrune|transportPlace|transportUnseat|transportSet\w+|Store\.|localStorage|State\.(commit|commitMany|save|persist)|FarkadSync|window\.print/g) || [], []);
+        code.match(/transportKeep|transportSaveDay|transportSaveSettings|transportWrite|transportMarkOpened|transportRedrawn|transportDayOf|transportLoad|transportPrune|transportPlace|transportUnseat|transportSet(?!tings\b)\w+|Store\.|localStorage|State\.(commit|commitMany|save|persist)|FarkadSync|window\.print/g) || [], []);
     check('the text goes out by the day message\'s own two doors, and the picture by the printout\'s',
         /shareTextOut\(/.test(code) && /copyTextOut\(/.test(code) && /sharePrintout\('transport'\)/.test(code)
         && !/navigator\.share|wa\.me|clipboard|execCommand|window\.open/.test(code));
@@ -928,6 +967,93 @@ await block('the report of a period: each vehicle, each driver, and every day th
     given('the function that looks at a day was found', /Store\.get\(TRANSPORT_DAY_PREFIX \+ date\)/.test(peek));
     same('the one function that looks at a day asks the store to READ and nothing else',
         peek.match(/Store\.\w+|transportLoad|transportWrite|transportDays\[date\]\s*=|transportUnreadableSeen\s*=|transportHeld\[/g) || [], ['Store.get']);
+});
+
+// v202. WHERE A VEHICLE WENT: every site of every man in it that day, by the day record -
+// the owner's answer of 2026-11-17 ("all the sites of the men in the car, not only the
+// driver's"). A man in a seat with no site is said by name. And «מי היה ברכב?»: one
+// vehicle, one date - for the traffic fine that arrives months later.
+await block('where each vehicle went, a man with no site, a vehicle since retired, and «מי היה ברכב?»', async () => {
+    const device = crewPhone('d_where');
+    // On DAY: אחמד at הרצליה; מוחמד at הרצליה AND חיפה; יוסי and סמיר at חיפה; Ali Hassan at
+    // פרדסיה; עלי marked absent - no site. The plan, as a phone would have kept it:
+    //   קורולה 2013: עלי at the wheel (no site), מוחמד on 2, יוסי on 3
+    //   קורולה 2016: סמיר at the wheel, אחמד on 4
+    //   BYD סיל: kept home
+    device.putRaw(DAY_KEY, JSON.stringify({ version: 1, unavailable: { tv_03: true }, status: {}, marks: {}, trips: {
+        tv_01: { driver: 'w_05', passengers: ['w_02', 'w_03'], seats: { w_02: 2, w_03: 3 } },
+        tv_02: { driver: 'w_04', passengers: ['w_01'], seats: { w_01: 4 } } } }));
+    // The day before: Ali Hassan alone in the 9-seater, and nobody of the crew working.
+    device.putRaw('farkadTransport:day:2026-11-09', JSON.stringify({ version: 1, trips: { tv_05: { driver: 'w_06', passengers: [], seats: {} } } }));
+    const again = reopen(device);
+    const disk = JSON.stringify(again.dump());
+    const week = again.call('transportReportText', 'thisWeek', DAY).split('\n');
+    const from = (head, n) => week.slice(week.indexOf(head), week.indexOf(head) + n);
+    same('a vehicle goes to EVERY site of every man in it: מוחמד\'s two and יוסי\'s one - and the man with no site is said',
+        from(`רכב: ${car('טויוטה קורולה 2013')} – יצא ביום אחד`, 4),
+        [`רכב: ${car('טויוטה קורולה 2013')} – יצא ביום אחד`, `- ${named('הרצליה')} – יום אחד`, `- ${named('חיפה')} – יום אחד`,
+            '- עובד בלי אתר ברישום – יום אחד']);
+    same('the driver\'s site is not the vehicle\'s: סמיר at חיפה took אחמד to הרצליה',
+        from(`רכב: ${car('טויוטה קורולה 2016')} – יצא ביום אחד`, 3),
+        [`רכב: ${car('טויוטה קורולה 2016')} – יצא ביום אחד`, `- ${named('הרצליה')} – יום אחד`, `- ${named('חיפה')} – יום אחד`]);
+    same('a driver with no site of his own is said beside the sites his men went to',
+        from(`נהג: ${named('עלי')} – יום אחד`, 3),
+        [`נהג: ${named('עלי')} – יום אחד`, `- יום שלישי 10/11: ${car('טויוטה קורולה 2013')} – ${named('הרצליה')}, ${named('חיפה')} (הנהג בלי אתר ברישום)`,
+            `נוסעים: ${named('מוחמד')}, ${named('יוסי')}`]);
+    same('and a car nobody in which has a site that day goes to no site, said so',
+        from(`נהג: ${named('Ali Hassan')} – יום אחד`, 3),
+        [`נהג: ${named('Ali Hassan')} – יום אחד`, `- יום שני 09/11: ${car('פולקסווגן 2018')} – בלי אתר ברישום`, 'בלי נוסעים.']);
+    check('the vehicle kept home is not counted as out', !week.some(line => line.startsWith(`רכב: ${car('BYD סיל U 2025')}`)));
+
+    // «מי היה ברכב?»
+    const ask = (vehicle, date, today = DAY) => plain(again.call('transportLookupLines', vehicle, date, today));
+    same('one vehicle on one date: the driver, the men in the order of their seats, and every site they went to',
+        ask('tv_01', DAY), [`רכב: ${car('טויוטה קורולה 2013')} – יום שלישי 10/11/2026`, `נהג: ${named('עלי')} (בלי אתר ברישום)`,
+            `נוסעים: ${named('מוחמד')}, ${named('יוסי')}`, `יעדים: ${named('הרצליה')}, ${named('חיפה')}`]);
+    same('it says the same as the drivers\' list does, for the same car and day',
+        ask('tv_02', DAY).slice(1), [`נהג: ${named('סמיר')}`, `נוסעים: ${named('אחמד')}`, `יעדים: ${named('הרצליה')}, ${named('חיפה')}`]);
+    same('a vehicle kept home, a vehicle nobody sat in, and a day this phone holds no plan for - each said as what it is',
+        [ask('tv_03', DAY).slice(1), ask('tv_06', DAY).slice(1), ask('tv_01', '2026-11-08').slice(1)],
+        [[`בשיבוץ השמור במכשיר הזה ${car('BYD סיל U 2025')} סומן «לא זמין היום».`],
+            [`בשיבוץ השמור במכשיר הזה אף עובד לא שובץ ב${car('סוואנה 2010')} ביום הזה.`],
+            ['אין במכשיר הזה שיבוץ ליום הזה.']]);
+    same('a date older than the store keeps says that too',
+        ask('tv_01', '2025-10-01').slice(1), ['אין במכשיר הזה שיבוץ ליום הזה.', 'שיבוצים ישנים מ-400 ימים אינם נשמרים במכשיר הזה.']);
+    again.putRaw('farkadTransport:day:2026-11-07', '{"version":1,"trips":{"tv_0');
+    same('bytes that will not read are said, and left where they are', [ask('tv_01', '2026-11-07').slice(1), again.raw('farkadTransport:day:2026-11-07')],
+        [['השיבוץ של היום הזה שמור במכשיר ולא נקרא.'], '{"version":1,"trips":{"tv_0']);
+    same('a vehicle or a date that is not one is no answer', [ask('tv_99', DAY), ask('tv_01', 'yesterday')], [[], []]);
+    again.Store.remove('farkadTransport:day:2026-11-07');
+
+    // A site archived since is still where the car went; a vehicle taken off the list is
+    // still the vehicle a fine is about - on the days before today.
+    again.State.schedule.places[1].active = false;
+    check('a site archived since is still named', again.call('transportReportText', 'thisWeek', DAY).includes(`- ${named('חיפה')} – יום אחד`));
+    again.State.schedule.places[1].active = true;
+    check('taken off the list', again.call('transportRetireVehicle', 'tv_02') === true);
+    const retiredToday = again.call('transportReportText', 'thisWeek', DAY);
+    const retiredAfter = again.call('transportReportText', 'thisWeek', '2026-11-11');
+    check('from today on it is not one of the day\'s vehicles, as on the screen', !retiredToday.includes(car('טויוטה קורולה 2016')));
+    check('but read the next morning, the day it went out is counted and its driver named',
+        retiredAfter.includes(`רכב: ${car('טויוטה קורולה 2016')} – יצא ביום אחד`) && retiredAfter.includes(`נהג: ${named('סמיר')} – יום אחד`));
+    check('and it is never listed among the vehicles that carried nobody', !/רכבים בלי עובדים[^\n]*קורולה 2016/.test(retiredAfter));
+    same('«מי היה ברכב?» answers for it, the next morning', ask('tv_02', DAY, '2026-11-11').slice(1),
+        [`נהג: ${named('סמיר')}`, `נוסעים: ${named('אחמד')}`, `יעדים: ${named('הרצליה')}, ${named('חיפה')}`]);
+    // A vehicle turned off from a day: from that day on it did not go out.
+    again.call('transportSetVehicleOff', 'tv_01', DAY);
+    same('a vehicle turned off from that day is said to be off', ask('tv_01', DAY).slice(1), [`ברשימת הרכבים ${car('טויוטה קורולה 2013')} כבוי החל מ-10/11/2026.`]);
+
+    // The sections: what the page draws, the text's paragraphs, and their kinds.
+    const spec = plain(again.call('transportReportSpec', 'thisWeek', '2026-11-11'));
+    const sections = plain(again.call('transportReportSections', spec));
+    same('the page is the text: every section\'s lines are the text\'s paragraph, in order',
+        sections.map(one => one.lines.map(line => line.text).join('\n')).join('\n\n'), again.call('transportReportText', 'thisWeek', '2026-11-11'));
+    same('the kinds of the sections: the heading, what is said about the days, then each list under its title',
+        sections.map(one => one.kind), ['head', 'said', 'title', 'car', 'car', 'note', 'title', 'driver', 'driver']);
+    same('and the two titles are the two lists the owner asked for', sections.filter(one => one.kind === 'title').map(one => one.lines[0].text),
+        ['רכבים – כמה ימים יצא כל רכב ולאן', 'נהגים – מי נהג, לאן ועם מי']);
+    same('the reading wrote nothing but the two changes this block made to the list',
+        Object.keys(again.dump()).filter(key => again.raw(key) !== JSON.parse(disk)[key]), [SETTINGS]);
 });
 
 await block('a number becomes a wa.me number only by the seder\'s rule', async () => {
@@ -1141,25 +1267,124 @@ await block('a disk that refuses it keeps the session going, says so, and spends
     same('after a reopen only what reached the disk is there', tripsOf(reopen(device)), 'tv_01=w_01+[]');
 });
 
-await block('it keeps five weeks of days, not every day for ever', async () => {
+// MOVED in v202. Until then a day's plan was removed at 35 days. The owner, 2026-11-17: a
+// traffic fine arrives for a vehicle months after the day, and he must know who drove it.
+// So the store keeps 400 days - under two limits that give the disk back to the record,
+// which the reclaim ladder (js/ui/backup.js) cannot do for it: the days older than the
+// working window never above 512 KiB together, and all of them gone, oldest first, while
+// the origin holds more than 60% of the 5 MiB Store plans against or the disk is full.
+await block('it keeps 400 days of plans - within 512 KiB, and only while the record has room', async () => {
     const device = crewPhone('d_prune');
-    const keep = device.global('TRANSPORT_KEEP_DAYS');
-    same('the limit is 35 days', keep, 35);
-    const stage = (date, tail = '') => device.putRaw(`farkadTransport:day:${date}${tail}`, '{"version":1}');
-    stage('2026-10-05');                 // 36 days before DAY
-    stage('2026-10-05', ':unreadable');  // and the copy of an unreadable one
-    stage('2026-10-06');                 // 35 days before: the edge, kept
+    same('the working window is still 35 days, the history 400, the cap 512 KiB, the room 60%',
+        [device.global('TRANSPORT_KEEP_DAYS'), device.global('TRANSPORT_HISTORY_DAYS'), device.global('TRANSPORT_HISTORY_BYTES'),
+            device.global('TRANSPORT_ROOM_SHARE')], [35, 400, 524288, 0.6]);
+    const stage = (date, tail = '', value = '{"version":1}') => device.putRaw(`farkadTransport:day:${date}${tail}`, value);
+    stage('2025-10-05');                 // 401 days before DAY
+    stage('2025-10-05', ':unreadable');  // and the copy of an unreadable one
+    stage('2025-10-06');                 // 400 days before: the edge, kept
+    stage('2026-10-05');                 // 36 days before: removed until v202, kept now
     stage('2026-11-09');
     stage('2026-11-20');                 // a plan for next week
     device.putRaw('farkadTransport:day:not-a-date', '{"version":1}');
-    device.putRaw('scheduleData:snap:2026-08-01', '{}');
-    same('opening removes the days older than the limit, with their copies', device.call('transportPrune', DAY), 2);
+    device.putRaw('scheduleData:snap:2025-08-01', '{}');
+    same('opening removes the days older than 400, with their copies', device.call('transportPrune', DAY), 2);
     same('and leaves everything else exactly where it was',
         Object.keys(device.dump()).filter(key => key.startsWith('farkadTransport:day:')).sort(),
-        ['farkadTransport:day:2026-10-06', 'farkadTransport:day:2026-11-09', 'farkadTransport:day:2026-11-20',
-            'farkadTransport:day:not-a-date']);
+        ['farkadTransport:day:2025-10-06', 'farkadTransport:day:2026-10-05', 'farkadTransport:day:2026-11-09',
+            'farkadTransport:day:2026-11-20', 'farkadTransport:day:not-a-date']);
     check('a restore point of the same age is not this feature\'s to remove',
-        device.raw('scheduleData:snap:2026-08-01') === '{}');
+        device.raw('scheduleData:snap:2025-08-01') === '{}');
+    same('nothing was removed for room, and nothing says so', device.raw('farkadTransport:trimmed'), null);
+
+    // --- WHAT A DAY COSTS, charged as Store.used() charges it. The seven vehicles full -
+    // 39 men under ids of the length the app issues (w_ and twelve) - with a «נפתח» mark
+    // on every driver, and a day of 20 men with no marks.
+    const id = n => `w_${String(n).padStart(12, '0')}`;
+    const dayOf = (men, marks) => {
+        const trips = {};
+        let n = 0;
+        [5, 5, 5, 5, 9, 5, 5].forEach((seats, v) => {
+            if (n >= men) return;
+            const trip = { driver: id(n += 1), passengers: [], seats: {} };
+            for (let seat = 2; seat <= seats && n < men; seat += 1) { const man = id(n += 1); trip.passengers.push(man); trip.seats[man] = seat; }
+            trips[`tv_0${v + 1}`] = trip;
+        });
+        const marksOf = {};
+        if (marks) Object.keys(trips).forEach(v => { marksOf[v] = { sig: '1a2b3c4d', openedAt: 1794000000000 }; });
+        return JSON.stringify({ version: 1, unavailable: {}, status: {}, trips, marks: marksOf });
+    };
+    const bytes = (key, value) => (key.length + value.length) * 2;
+    const full = dayOf(39, true);
+    const twenty = dayOf(20, false);
+    const fullBytes = bytes('farkadTransport:day:2026-11-10', full);
+    const twentyBytes = bytes('farkadTransport:day:2026-11-10', twenty);
+    check('a full day with every mark is about 4 KB, and the cap holds over a hundred of them; a day of 20 men about 2 KB, over two hundred',
+        fullBytes > 3500 && fullBytes < 4500 && Math.floor(524288 / fullBytes) > 100
+        && twentyBytes > 1500 && twentyBytes < 2500 && Math.floor(524288 / twentyBytes) > 200,
+        `full ${fullBytes} B (${Math.floor(524288 / fullBytes)} days), twenty ${twentyBytes} B (${Math.floor(524288 / twentyBytes)} days)`);
+
+    // --- THE CAP. 200 full days in the history: the oldest go until 512 KiB is left.
+    const capped = crewPhone('d_prune_cap');
+    const history = [];
+    for (let back = 36; back < 236; back += 1) {
+        const date = capped.call('addDays', DAY, -back);
+        history.push(date);
+        capped.putRaw(`farkadTransport:day:${date}`, full);
+    }
+    capped.putRaw(DAY_KEY, full);
+    capped.putRaw('farkadTransport:day:2026-11-09', full);
+    const removed = capped.call('transportPrune', DAY);
+    const left = Object.keys(capped.dump()).filter(key => key.startsWith('farkadTransport:day:'))
+        .map(key => key.slice('farkadTransport:day:'.length)).sort();
+    const kept = history.filter(date => left.includes(date)).sort();
+    const keptBytes = kept.reduce((sum, date) => sum + bytes(`farkadTransport:day:${date}`, full), 0);
+    check('over the cap, the oldest go: what is left is inside 512 KiB and one more day would not be',
+        removed > 0 && keptBytes <= 524288 && keptBytes + fullBytes > 524288, `${removed} removed, ${kept.length} kept, ${keptBytes} B`);
+    check('and they are the NEWEST of the history, every one of them',
+        kept.length > 0 && kept.join() === history.slice(0, kept.length).sort().join());
+    check('the working window is not touched by it', left.includes(DAY) && left.includes('2026-11-09'));
+    same('the newest day removed for room is remembered, by its date alone',
+        capped.raw('farkadTransport:trimmed'), history.filter(date => !kept.includes(date)).sort().pop());
+    // Ninety-two days that straddle the line: the older part removed, the newer kept.
+    const from = capped.call('addDays', DAY, -235);
+    const to = capped.call('addDays', DAY, -144);
+    const said = capped.call('transportReportText', 'custom', DAY, { from, to }).split('\n');
+    const gone = history.filter(date => !kept.includes(date) && date >= from && date <= to).length;
+    given('some of those days were removed and some kept', gone > 0 && gone < 92, String(gone));
+    check('and the report says those days were removed to make room, up to that date - never that nobody planned them',
+        said.includes(`מתוכם ${gone} ימים עד ${capped.call('formatFullDate', capped.call('parseLocalDate', capped.raw('farkadTransport:trimmed')))}: שיבוצים ישנים נמחקו מהמכשיר הזה כדי לפנות מקום לרישום העבודה.`)
+        && said.includes(`ימים עם שיבוץ שמור במכשיר הזה: ${92 - gone} מתוך 92`), said.slice(0, 7).join(' | '));
+    const asked = capped.call('transportLookupLines', 'tv_01', history[history.length - 1], DAY);
+    same('«מי היה ברכב?» on such a day says the same', plain(asked).slice(1),
+        ['אין במכשיר הזה שיבוץ ליום הזה.', `שיבוצים עד ${capped.call('formatFullDate', capped.call('parseLocalDate', capped.raw('farkadTransport:trimmed')))} נמחקו מהמכשיר הזה כדי לפנות מקום לרישום העבודה.`]);
+    same('pruned again, nothing more goes', capped.call('transportPrune', DAY), 0);
+
+    // --- THE ROOM. Something of the record's - here a restore point - takes the origin over
+    // 60% of the budget: the history goes, oldest first, as far as it takes; the window stays.
+    const crowded = crewPhone('d_prune_room');
+    for (let back = 36; back < 46; back += 1) crowded.putRaw(`farkadTransport:day:${crowded.call('addDays', DAY, -back)}`, twenty);
+    crowded.putRaw(DAY_KEY, twenty);
+    const budget = crowded.Store.budget;
+    const over = Math.ceil((budget * 0.6 - crowded.Store.used()) / 2) + 3000;
+    crowded.putRaw('scheduleData:snap:2026-11-01', 'x'.repeat(over));
+    given('the origin is over 60% of the budget, by less than the ten history days', crowded.Store.used() > budget * 0.6
+        && crowded.Store.used() - budget * 0.6 < twentyBytes * 10, `${crowded.Store.used()} of ${budget}`);
+    const roomed = crowded.call('transportPrune', DAY);
+    const roomLeft = Object.keys(crowded.dump()).filter(key => key.startsWith('farkadTransport:day:')).sort();
+    check('days go, oldest first, until the origin is back under 60% - and not one more',
+        roomed > 0 && roomed < 10 && crowded.Store.used() <= budget * 0.6
+        && crowded.Store.used() + twentyBytes > budget * 0.6, `${roomed} removed, ${crowded.Store.used()} B`);
+    check('the working window\'s day is still there, and so is the restore point', roomLeft.includes(DAY_KEY)
+        && crowded.raw('scheduleData:snap:2026-11-01') !== null);
+    // A disk that has said it is FULL: every day of the history goes.
+    for (let back = 36; back < 46; back += 1) crowded.putRaw(`farkadTransport:day:${crowded.call('addDays', DAY, -back)}`, twenty);
+    crowded.putRaw('scheduleData:snap:2026-11-01', 'x');
+    crowded.Store.full = true;
+    crowded.call('transportPrune', DAY);
+    same('a disk Store has called full keeps no day older than the window', Object.keys(crowded.dump())
+        .filter(key => key.startsWith('farkadTransport:day:')).sort(), [DAY_KEY]);
+    crowded.Store.full = false;
+    check('pruning is never a required write: it spent no restore point', crowded.raw('scheduleData:snap:2026-11-01') === 'x');
 });
 
 await block('the switch: off is no entry, no reads and no writes', async () => {
@@ -1363,7 +1588,8 @@ await block('a vehicle turned off: gone from its day on, the list written and no
     const week = device.call('transportReportText', 'thisWeek', DAY).split('\n');
     same('the report counts it on the day before it was turned off, and on no day since',
         week.slice(week.indexOf(`רכב: ${car('טויוטה קורולה 2016')} – יצא ביום אחד`)).slice(0, 3),
-        [`רכב: ${car('טויוטה קורולה 2016')} – יצא ביום אחד`, `נהג: ${named('אחמד')} – יום אחד`, 'מושבים תפוסים: 2 בסך הכול, 2 בממוצע ליום']);
+        [`רכב: ${car('טויוטה קורולה 2016')} – יצא ביום אחד`, `- ${named('הרצליה')} – יום אחד`, '']);
+    check('and its driver drove it on that day only', week.includes(`נהג: ${named('אחמד')} – יום אחד`));
     same('the days with a plan are still the days somebody is DRAWN in a car: tomorrow, where only that car was filled, is not one',
         week[2], 'ימים עם שיבוץ שמור במכשיר הזה: 3 מתוך 7');
 
@@ -1660,8 +1886,12 @@ await block('the words, every one of them, and no other', async () => {
         sWaiting: [[2], 'ממתינים לשיבוץ (2):'],
         sEmpty: [['סוואנה, קורולה'], 'רכבים ריקים: סוואנה, קורולה'],
         sHome: [['סוואנה, קורולה'], 'רכבים שלא זמינים היום: סוואנה, קורולה'],
-        // The report of a period: the button, the dialog and its four ranges (the pay
-        // report's own words), the picture's file, and the lines of the report.
+        // The report of a period: the button, the dialog and its ranges (the pay report's
+        // own words), the picture's file, and the lines of the report. MOVED in v202: the
+        // owner's two lists and «מי היה ברכב?» (all PROPOSED). Gone with v182's shape:
+        // `reportLabel` (the page shows the lists; the field is folded under
+        // `reportAsText`), `rSeats`, `rDriver` and `rDriverVehicle`; `rDriversTitle` and
+        // `rPruned`'s number moved.
         reportButton: 'דוח הסעות לתקופה',
         reportTitle: 'דוח הסעות',
         reportRanges: 'בחירת תקופה',
@@ -1669,24 +1899,48 @@ await block('the words, every one of them, and no other', async () => {
         reportLastWeek: 'שבוע קודם',
         reportThisMonth: 'החודש',
         reportLastMonth: 'חודש שעבר',
-        reportLabel: 'תצוגה מקדימה של הדוח',
+        reportCustom: 'תאריכים אחרים',
+        reportFrom: 'מתאריך',
+        reportTo: 'עד תאריך',
+        reportAsText: 'הדוח כטקסט',
+        reportTooLong: [[92], 'אפשר לבחור עד 92 ימים, ולכן מוצגים 92 הימים האחרונים של הטווח.'],
         reportFile: [['2026-11-06', '2026-11-12'], 'farkad-דוח-הסעות-2026-11-06_2026-11-12.png'],
+        lookupTitle: 'מי היה ברכב?',
+        lookupLead: 'למשל לדוח תנועה: בוחרים רכב ותאריך.',
+        lookupVehicle: 'רכב',
+        lookupDate: 'תאריך',
+        lookupRetired: [['סוואנה'], 'סוואנה (הוצא מהרשימה)'],
+        lookupHead: [['סוואנה', 'יום שלישי', '10/11/2026'], 'רכב: סוואנה – יום שלישי 10/11/2026'],
+        lookupNone: 'אין במכשיר הזה שיבוץ ליום הזה.',
+        lookupUnreadable: 'השיבוץ של היום הזה שמור במכשיר ולא נקרא.',
+        lookupHome: [['סוואנה'], 'בשיבוץ השמור במכשיר הזה סוואנה סומן «לא זמין היום».'],
+        lookupEmpty: [['סוואנה'], 'בשיבוץ השמור במכשיר הזה אף עובד לא שובץ בסוואנה ביום הזה.'],
+        lookupOff: [['סוואנה', '10/11/2026'], 'ברשימת הרכבים סוואנה כבוי החל מ-10/11/2026.'],
+        lookupOld: [[400], 'שיבוצים ישנים מ-400 ימים אינם נשמרים במכשיר הזה.'],
+        lookupTrimmed: [['10/11/2026'], 'שיבוצים עד 10/11/2026 נמחקו מהמכשיר הזה כדי לפנות מקום לרישום העבודה.'],
         rCount: [[3], '3 ימים'],
         rIn: [[3], 'ב-3 ימים'],
         rHeading: [['השבוע', '06/11/2026', '12/11/2026'], 'דוח הסעות – השבוע, 06/11/2026 עד 12/11/2026:'],
         rDays: [[3, 7], 'ימים עם שיבוץ שמור במכשיר הזה: 3 מתוך 7'],
         rMissing: [[4], 'ב-4 ימים אין שיבוץ שמור במכשיר הזה.'],
-        rPruned: [['5 ימים', '06/10/2026', 35], 'מתוכם 5 ימים לפני 06/10/2026: שיבוצים ישנים מ-35 ימים נמחקים מהמכשיר הזה.'],
+        rPruned: [['5 ימים', '06/10/2025', 400], 'מתוכם 5 ימים לפני 06/10/2025: שיבוצים ישנים מ-400 ימים נמחקים מהמכשיר הזה.'],
+        rTrimmed: [['5 ימים', '06/10/2026'], 'מתוכם 5 ימים עד 06/10/2026: שיבוצים ישנים נמחקו מהמכשיר הזה כדי לפנות מקום לרישום העבודה.'],
         rUnreadable: [[2], 'שיבוצים של 2 ימים שמורים במכשיר ולא נקראו, ולא נספרו.'],
+        rWorkedNoPlan: [['06/11, 11/11'], 'ימים שעבדו בהם ואין להם שיבוץ במכשיר הזה: 06/11, 11/11'],
+        rVehiclesTitle: 'רכבים – כמה ימים יצא כל רכב ולאן',
         rVehicle: [['סוואנה', 'ב-3 ימים'], 'רכב: סוואנה – יצא ב-3 ימים'],
-        rDriverDays: [['אחמד', '2 ימים'], 'נהג: אחמד – 2 ימים'],
+        rSite: [['חיפה', '2 ימים'], '- חיפה – 2 ימים'],
+        rNoSiteDays: [['יום אחד'], '- עובד בלי אתר ברישום – יום אחד'],
         rNoDriverDays: [['יום אחד'], 'בלי נהג – יום אחד'],
-        rSeats: [[11, '3.7'], 'מושבים תפוסים: 11 בסך הכול, 3.7 בממוצע ליום'],
         rNoneOut: 'בימים עם שיבוץ אף רכב לא יצא עם עובדים.',
         rIdle: [['סוואנה, קורולה'], 'רכבים בלי עובדים בימים עם שיבוץ: סוואנה, קורולה'],
-        rDriversTitle: 'נהגים בתקופה:',
-        rDriver: [['אחמד', '3 ימים', 'סוואנה (2), קורולה (1)'], '- אחמד – 3 ימים: סוואנה (2), קורולה (1)'],
-        rDriverVehicle: [['סוואנה', 2], 'סוואנה (2)'],
+        rDriversTitle: 'נהגים – מי נהג, לאן ועם מי',
+        rDriverDays: [['אחמד', '2 ימים'], 'נהג: אחמד – 2 ימים'],
+        rDriverDay: [['יום ראשון 08/11', 'סוואנה', 'חיפה, חדרה'], '- יום ראשון 08/11: סוואנה – חיפה, חדרה'],
+        rWith: [['ראמי, דוד'], 'נוסעים: ראמי, דוד'],
+        noSite: 'בלי אתר ברישום',
+        rManNoSite: [['ראמי'], 'ראמי (בלי אתר ברישום)'],
+        rDriverNoSite: [['חיפה'], 'חיפה (הנהג בלי אתר ברישום)'],
         // MOVED (the shared plan): eighteen keys added, none changed. Shown only where
         // the gate of js/ui/transport-share.js is open; `switchLead` above stays the
         // sentence of a build where it is shut.
