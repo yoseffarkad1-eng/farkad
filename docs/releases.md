@@ -1,10 +1,24 @@
-## v204 — «דוח הסעות» as the owner asked: «מי היה ברכב?», the vehicles and the drivers on one page, and plans kept up to 400 days (candidate, not served)
+## v203 — «תזכורת לסגירת חשבונות» and «דוח הסעות»: two things the owner asked for on 2026-11-17, in one build (candidate, not served)
 
-**NOT SERVED.** A candidate written on main at v201 and numbered v204: v202 (the Excel workbook) and v203 (the close reminder) are taken. The three build stamps are NOT moved
-by it - on this branch they stay v201, so tests/build.test.mjs and tests/gate.integrity.test.mjs each fail
-exactly one check ("nothing in the shell has changed since") until the release commit moves
-them; its «מה חדש» items are at the top of WHATSNEW_BUILDS under 'v204' (proposed), and the
-guard of tests/whatsnew.test.mjs says SKIP until the stamps reach it.
+**NOT SERVED YET.** A candidate on v202 (main, d768b30). The release commit moves the three
+build stamps to v203. Its «מה חדש» entry is at the top of WHATSNEW_BUILDS (proposed), and it
+carries three items: one for the reminder and two for the rides' report. Both parts were written
+on v201 as two separate candidates, then rebased here as one release.
+- The owner saw the reminder's pictures and said it is fine (2026-11-17: "التذكير تمام").
+- He saw the rides report's pictures and said four months of history is enough for him (same
+  day: "٤ شهور بكفيني").
+- He had already said to publish what he approves.
+
+Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`,
+`firestore.rules` or `functions`.
+
+**THE ROLLOUT RULE.** Every phone (three) goes to v203, and no window of v202 or older stays open
+beside a v203 one on the same phone. The reason is the rides report. A v202-or-older window that
+opens the הסעות screen prunes the phone's plans back to 35 days, and so deletes the history this
+build keeps for 400 days. The phone that answers traffic fines takes v203 first. The reminder
+crosses no build: its two keys are per phone and read by nobody else.
+
+### 1. «דוח הסעות» as the owner asked: «מי היה ברכב?», the vehicles and the drivers on one page, and plans kept up to 400 days (candidate, not served)
 
 **Why.** The owner, 2026-11-17 (in Arabic): "I want a report for the vehicles: where each
 vehicle went. And a second report: who was driving the vehicle - just names. On the same page,
@@ -53,7 +67,7 @@ range of MORE than a month - which the store's 35 days could not give.
    went to, and a car none of whose men had a site goes to «בלי אתר ברישום». A correction of the
    record made later moves the report with it, which is the point: the record is the truth.
 3. **A vehicle taken off the list** («הוצאה מהרשימה», `active: false`) is counted on the days
-   BEFORE TODAY that its stored plans seat men in it - until v204 it vanished from every report
+   BEFORE TODAY that its stored plans seat men in it - until v203 it vanished from every report
    the moment it was retired, and a fine for a sold car could not be answered. From today on it
    is not one of the day's vehicles, as on the screen; it is never listed as idle. KNOWN EDGE: a
    plan written for a future day before the vehicle was retired, and never touched after, still
@@ -74,7 +88,7 @@ range of MORE than a month - which the store's 35 days could not give.
    shut (`renderTransportIfOpen` refreshes it).
 
 **RETENTION - THE PLANS ARE KEPT UP TO 400 DAYS, AND THE RECORD STILL WINS THE DISK.** Until
-v204 every day older than 35 was removed when the screen opened. Measured (tests/transport.test.mjs,
+v203 every day older than 35 was removed when the screen opened. Measured (tests/transport.test.mjs,
 charged as `Store.used()` charges, two bytes a UTF-16 unit, key and value):
 
 | a day's plan | bytes | days in 512 KiB |
@@ -113,10 +127,10 @@ favour, applied where pruning always was (`transportPrune`, when the screen open
   full day). Rewriting old days is a write on every opening, and was not worth the risk.
 - The limits are checked when the הסעות screen opens; between openings the record can grow past
   60% while up to 512 KiB of history sits there - bounded, and said.
-- **What was pruned before v204 is gone.** A phone's history begins 35 days before it took v204.
-- **ROLLOUT:** a v203-or-older window that opens the הסעות screen on a phone prunes at 35 days
-  and deletes that phone's history. So: no older window beside a v204 one on a phone whose
-  history matters, and the phone that answers fines takes v204 first. Nothing else crosses
+- **What was pruned before v203 is gone.** A phone's history begins 35 days before it took v203.
+- **ROLLOUT:** a v202-or-older window that opens the הסעות screen on a phone prunes at 35 days
+  and deletes that phone's history. So: no older window beside a v203 one on a phone whose
+  history matters, and the phone that answers fines takes v203 first. Nothing else crosses
   builds: the shared documents and their 35-day window are v186's, unchanged.
 
 **The words, all PROPOSED** (pinned in tests/transport.test.mjs, the news in
@@ -152,19 +166,13 @@ dialog, so tests/largetext.browser.mjs measures it with the mode on and off.
 
 **Not tried on a real phone; the owner has not read the words.**
 
-## v203 — «תזכורת לסגירת חשבונות»: a quiet line from Thursday while men's accounts are still open (candidate, not served)
-
-**NOT SERVED, AND NOT A RELEASE YET.** Written as a branch on v201 (cd2cce1), to be rebased
-onto v202 (the workbook), whose three build stamps it does not move: `js/ui/closereminder.js`
-is a new file of the shell and `sw.js` lists it, so on the branch `tests/build.test.mjs` fails
-two checks (the shell and the worker changed since the stamps) and
-`tests/gate.integrity.test.mjs` one, until the release commit moves the stamps to v203. Its
-«מה חדש» item is already at the top of WHATSNEW_BUILDS (v203, ahead of the stamps; the guard
-prints SKIP until they move).
+### 2. «תזכורת לסגירת חשבונות»: a quiet line from Thursday while men's accounts are still open (candidate, not served)
 
 **Why.** The owner, 2026-11-17: "a reminder - on Thursday, 'there are 4 men whose account is
-still not closed', so I don't forget to close accounts". The app has no server of its own, and
-a shut phone hears nothing from it, so this is not a notification: it is a line inside the app.
+still not closed', so I don't forget to close accounts". It is a line inside the app, not a
+notification. The phone's own «תזכורות בטלפון» is a server's push. Teaching that server to count
+open accounts would be a change to `functions`, and that needs the owner's approval; this build
+does not make it.
 
 **What changed in the app: `js/ui/closereminder.js` (new), one banner in `index.html`, two
 lines in `js/app.js` (render() and bootOnce() ask it, through typeof), `sw.js`'s shell, the

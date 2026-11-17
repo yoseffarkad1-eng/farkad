@@ -1,8 +1,9 @@
 // «תזכורת לסגירת חשבונות» - the in-app reminder that accounts are still open.
 //
 // The owner, 2026-11-17: "a reminder - on Thursday, 'there are 4 men whose account is still
-// not closed', so I don't forget to close accounts". The app has no server of its own and a
-// phone that is shut hears nothing from it, so this is not a notification: it is ONE quiet
+// not closed', so I don't forget to close accounts". It is not a notification: the phone's
+// own «תזכורות בטלפון» (js/ui/reminders.js) is a server's push, and teaching that server to
+// count open accounts is a change to functions this build does not make. It is ONE quiet
 // line in the banner area, the way «מה חדש» puts its own (js/ui/whatsnew.js), with one
 // button that opens «סגירת שבוע» (js/ui/weeklyclose.js) and a ✕.
 //

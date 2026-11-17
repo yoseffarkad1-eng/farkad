@@ -545,7 +545,7 @@ async function summary(page, where) {
     await page.locator('#transportSummaryClose').tap();
 }
 
-// ------------------------------------------------------------------ the rides' report (v204)
+// ------------------------------------------------------------------ the rides' report (v203)
 
 // Two more days of plans for the week of DAY, as the screen would have kept them. Put on
 // the disk by this file and taken off again by it: the evening's own account of what the
@@ -742,7 +742,7 @@ async function periodReport(page, where, small) {
         return after(cars[cars.length - 1], node) && after(node, document.getElementById('transportFleet'))
             && document.getElementById('transportSummaryOpen').nextElementSibling !== node;
     }));
-    // MOVED in v204: one other way in - the row of «דוחות» ← «הפקת דוח» (reportsRow, below).
+    // MOVED in v203: one other way in - the row of «דוחות» ← «הפקת דוח» (reportsRow, below).
     same('and the only other way to it in the app is the row of «דוחות»', await page.evaluate(word =>
         [...document.querySelectorAll('button, a, summary')].filter(node => node.textContent.includes(word) || /transportReport|openTransportReport/.test(node.getAttribute('onclick') || ''))
             .filter(node => !node.closest('#transportPanel') && !node.closest('#transportReportModal')).map(node => node.id), 'דוח הסעות'),
@@ -805,7 +805,7 @@ async function periodReport(page, where, small) {
     same('«שבוע קודם»: nothing was kept for it, and it says so for all seven days and names no vehicle',
         [await pressed(page), bare(await reportField(page)).split('\n')],
         ['lastWeek', ['דוח הסעות – שבוע קודם, 30/10/2026 עד 05/11/2026:', '', 'ימים עם שיבוץ שמור במכשיר הזה: 0 מתוך 7', 'ב-7 ימים אין שיבוץ שמור במכשיר הזה.']]);
-    // MOVED in v204: plans are kept 400 days, so October on the 10th is not cut short.
+    // MOVED in v203: plans are kept 400 days, so October on the 10th is not cut short.
     await page.locator('#transportReportRanges button[data-range="lastMonth"]').tap();
     same('«חודש שעבר» on the 10th: nothing kept, and nothing said about deletion - the store keeps 400 days now',
         [await pressed(page), bare(await reportField(page)).split('\n')],
@@ -1029,7 +1029,7 @@ async function periodReport(page, where, small) {
     await page.evaluate(staged => { Object.keys(staged).forEach(date => localStorage.removeItem(`farkadTransport:day:${date}`)); }, STAGED);
 }
 
-// v204: the row «דוח הסעות» in «דוחות» ← «הפקת דוח» - on a phone where הסעות is on, and on no
+// v203: the row «דוח הסעות» in «דוחות» ← «הפקת דוח» - on a phone where הסעות is on, and on no
 // other; it opens the same page over the reports screen, with the הסעות screen shut.
 async function reportsRow(width, height, scheme) {
     const where = `${width}x${height} ${scheme}`;
@@ -2073,7 +2073,7 @@ for (const [width, height] of [[440, 956], [375, 667]]) {
 for (const [width, height] of [[440, 956], [375, 667]]) {
     for (const scheme of ['dark', 'light']) await vehicleOff(width, height, scheme);
 }
-// v204: the row of «דוחות», on the three phones the floors are held on.
+// v203: the row of «דוחות», on the three phones the floors are held on.
 for (const [width, height, scheme] of [[320, 568, 'dark'], [375, 667, 'light'], [440, 956, 'dark']]) await reportsRow(width, height, scheme);
 if (SHOTS) await pictures();
 
