@@ -514,19 +514,19 @@ await block('the driver\'s message, composed exactly, and the mark', async () =>
     const text = device.call('transportDriverMessage', DAY, 'tv_03');
     // MOVED IN v174: the «איסוף: …» line is gone with pickup areas, and the passengers are
     // listed in the order of their SEATS (they were put in back to front above).
+    // MOVED IN v203: the owner's own shape (2026-11-17) - the day, the driver alone, each
+    // man and his site, the sites. No «שלום X,», no «הסעה ל…:», no vehicle line, no count.
     same('the message, line for line', text.split('\n'), [
-        `שלום ${named('סמיר')},`,
-        'הסעה ליום שלישי 10/11/2026:',
-        `רכב: ${car('BYD סיל U 2025')}`,
-        'נוסעים (4):',
-        `- ${named('אחמד')} – ${named('הרצליה')}`,
-        `- ${named('מוחמד')} – ${named('הרצליה')}`,
-        `- ${named('יוסי')} – ${named('חיפה')}`,
-        `- ${named('Ali Hassan')} – ${named('פרדסיה')}`,
-        `יעדים: ${named('הרצליה')}, ${named('חיפה')}, ${named('פרדסיה')}`
+        'ערב טוב, היום - יום שלישי 10/11',
+        named('סמיר'),
+        `${named('אחמד')} – ${named('הרצליה')}`,
+        `${named('מוחמד')} – ${named('הרצליה')}`,
+        `${named('יוסי')} – ${named('חיפה')}`,
+        `${named('Ali Hassan')} – ${named('פרדסיה')}`,
+        `${named('הרצליה')}, ${named('חיפה')}, ${named('פרדסיה')}`
     ]);
-    check('the vehicle\'s name is held right-to-left, not first-strong: it begins with a Latin letter',
-        text.includes(`${RLI}BYD`) && !text.includes(`${FSI}BYD`));
+    // MOVED IN v203: the vehicle is no longer named in the driver's message at all.
+    check('the vehicle is not named in the message', !text.includes('BYD') && !text.includes(RLI));
     same('the number is the seder\'s own rule', device.call('transportDriverNumber', DAY, 'tv_03'), '972501112233');
     same('and so is the address a tap is given',
         device.call('sederUrl', device.call('transportDriverNumber', DAY, 'tv_03'), text),
@@ -540,8 +540,10 @@ await block('the driver\'s message, composed exactly, and the mark', async () =>
 
     // The car's message changes: the mark is no longer believed.
     device.call('transportUnseat', DAY, 'w_06');
+    // MOVED IN v203: there is no count line any more - the man's own line is what goes.
     same('with a man out of the car the message carries one man fewer',
-        device.call('transportDriverMessage', DAY, 'tv_03').split('\n').slice(3, 4), ['נוסעים (3):']);
+        device.call('transportDriverMessage', DAY, 'tv_03').split('\n').slice(2, -1),
+        [`${named('אחמד')} – ${named('הרצליה')}`, `${named('מוחמד')} – ${named('הרצליה')}`, `${named('יוסי')} – ${named('חיפה')}`]);
     same('and a mark made on the old words is not believed for the new ones', device.call('transportMarkState', DAY, 'tv_03'), 'none');
     device.call('transportMarkOpened', DAY, 'tv_03');
     same('opening the new message is a new mark', device.call('transportMarkState', DAY, 'tv_03'), 'opened');
@@ -555,7 +557,7 @@ await block('the driver\'s message, composed exactly, and the mark', async () =>
     device.call('transportPlace', DAY, 'w_01', 'tv_03', 1);
     same('another man in the driver\'s seat is another message to another number',
         [device.call('transportDriverNumber', DAY, 'tv_03'), device.call('transportMarkState', DAY, 'tv_03'),
-            device.call('transportDriverMessage', DAY, 'tv_03').split('\n')[0]], ['972528841930', 'none', `שלום ${named('אחמד')},`]);
+            device.call('transportDriverMessage', DAY, 'tv_03').split('\n')[1]], ['972528841930', 'none', named('אחמד')]);
     device.call('transportUnseat', DAY, 'w_01');
     check('and with the driver\'s seat empty the mark is gone from the disk', keptDay(device).marks.tv_03 === undefined);
 
@@ -563,13 +565,111 @@ await block('the driver\'s message, composed exactly, and the mark', async () =>
     const lone = crewPhone('d_alone');
     lone.call('transportPlace', DAY, 'w_06', 'tv_01', 1);
     same('a driver alone', lone.call('transportDriverMessage', DAY, 'tv_01').split('\n'),
-        [`שלום ${named('Ali Hassan')},`, 'הסעה ליום שלישי 10/11/2026:', `רכב: ${car('טויוטה קורולה 2013')}`,
-            'בלי נוסעים.', `יעדים: ${named('פרדסיה')}`]);
+        ['ערב טוב, היום - יום שלישי 10/11', named('Ali Hassan'), named('פרדסיה')]);   // MOVED IN v203
     // A passenger whose site left the day after he was seated: named, and no site made up.
     lone.call('transportPlace', DAY, 'w_03', 'tv_01', 2);
     lone.State.commit(lone.call('markAbsent', lone.State.schedule, DAY, 'w_03', 'actual'));
-    same('a passenger with no site today is named with no site', lone.call('transportDriverMessage', DAY, 'tv_01').split('\n').slice(3),
-        ['נוסעים (1):', `- ${named('יוסי')}`, `יעדים: ${named('פרדסיה')}`]);
+    same('a passenger with no site today is named with no site', lone.call('transportDriverMessage', DAY, 'tv_01').split('\n').slice(2),
+        [named('יוסי'), named('פרדסיה')]);   // MOVED IN v203: his name alone, no «- »
+});
+
+// v203. The owner chose this exact shape for the driver's message on 2026-11-17 - for a plan
+// on Wednesday 18/11/2026:
+//   ערב טוב, היום - יום רביעי 18/11
+//   סאמר
+//   ראמי – חדרה
+//   ג'מיל – חיפה
+//   חסן – חדרה
+//   חדרה, חיפה
+// Pinned line for line in four cases, on the owner's own date; and the summary of the day,
+// which borrowed three of the old message's words, byte for byte what v202 (its real bytes,
+// out of Git) composes for the same plans.
+await block('the driver\'s message as the owner shaped it (v203), and the summary unmoved', async () => {
+    const WED = '2026-11-18';
+    const device = bare('d_owner_message', { [ENABLED]: '1' });
+    load(device);
+    device.setToday(WED);
+    device.State.schedule.workers = [
+        { id: 'w_11', name: 'סאמר', active: true, dailyRate: 400, hourlyRate: 0, phone: '0501112233' },
+        { id: 'w_12', name: 'ראמי', active: true, dailyRate: 400, hourlyRate: 0, phone: '' },
+        { id: 'w_13', name: 'ג\'מיל', active: true, dailyRate: 400, hourlyRate: 0, phone: '' },
+        { id: 'w_14', name: 'חסן', active: true, dailyRate: 400, hourlyRate: 0, phone: '' },
+        { id: 'w_15', name: 'נאדר', active: true, dailyRate: 400, hourlyRate: 0, phone: '0587654321' },
+        { id: 'w_16', name: 'כמאל', active: true, dailyRate: 400, hourlyRate: 0, phone: '' }];
+    device.State.schedule.places = [{ id: 'p_11', name: 'חדרה', active: true }, { id: 'p_12', name: 'חיפה', active: true }];
+    device.State.save({ silent: true });
+    const work = (workerId, placeId) => device.State.commit(device.call('assignPlace',
+        device.State.schedule, WED, workerId, 'actual', placeId));
+    [['w_11', 'p_11'], ['w_12', 'p_11'], ['w_13', 'p_12'], ['w_14', 'p_11'], ['w_15', 'p_12'], ['w_16', 'p_12']]
+        .forEach(([w, p]) => work(w, p));
+    same('the day\'s name is the app\'s own: Wednesday is «יום רביעי»',
+        device.call('hebrewDayName', device.call('parseLocalDate', WED)), 'יום רביעי');
+    const lines = vehicleId => device.call('transportDriverMessage', WED, vehicleId).split('\n');
+
+    // 1. passengers with sites - the owner's own example, seat by seat
+    device.call('transportPlace', WED, 'w_11', 'tv_01', 1);
+    device.call('transportPlace', WED, 'w_12', 'tv_01', 2);
+    device.call('transportPlace', WED, 'w_13', 'tv_01', 3);
+    device.call('transportPlace', WED, 'w_14', 'tv_01', 4);
+    same('passengers with sites: the owner\'s message, line for line', lines('tv_01'), [
+        'ערב טוב, היום - יום רביעי 18/11',
+        named('סאמר'),
+        `${named('ראמי')} – ${named('חדרה')}`,
+        `${named('ג\'מיל')} – ${named('חיפה')}`,
+        `${named('חסן')} – ${named('חדרה')}`,
+        `${named('חדרה')}, ${named('חיפה')}`]);
+
+    // 3. a driver alone: the day, his name, his site
+    device.call('transportPlace', WED, 'w_15', 'tv_02', 1);
+    same('a driver alone: the day, his name and the sites', lines('tv_02'),
+        ['ערב טוב, היום - יום רביעי 18/11', named('נאדר'), named('חיפה')]);
+
+    // 4. everyone on one site: that site once
+    device.call('transportPlace', WED, 'w_16', 'tv_02', 2);
+    same('everyone on one site: the site once on the last line', lines('tv_02'),
+        ['ערב טוב, היום - יום רביעי 18/11', named('נאדר'), `${named('כמאל')} – ${named('חיפה')}`, named('חיפה')]);
+
+    // The summary of the day, for the same plans, before the record loses anybody.
+    const summaryWith = before => before.call('transportSummaryText', WED);
+    const summaryNow = summaryWith(device);
+
+    // 2. a passenger with no site today: his name alone, and no site made up for him
+    device.State.commit(device.call('markAbsent', device.State.schedule, WED, 'w_13', 'actual'));
+    same('a passenger with no site today: his name alone', lines('tv_01'), [
+        'ערב טוב, היום - יום רביעי 18/11',
+        named('סאמר'),
+        `${named('ראמי')} – ${named('חדרה')}`,
+        named('ג\'מיל'),
+        `${named('חסן')} – ${named('חדרה')}`,
+        named('חדרה')]);
+    check('none of the old message\'s words is left in it',
+        !/שלום|הסעה ל|רכב:|נוסעים|בלי נוסעים|יעדים|^- /m.test([lines('tv_01'), lines('tv_02')].flat().join('\n')));
+    const summaryAbsent = summaryWith(device);
+
+    // The summary, against v202's own bytes for the same plans.
+    const git = (...args) => execFileSync('git', args, { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    let has = false;
+    try { git('cat-file', '-e', 'd768b30^{commit}'); has = true; } catch (error) { has = false; }
+    given('the v202 tree (d768b30) is in this clone', has, 'd768b30');
+    if (has) {
+        const sources = ['js/ui/seder.js', 'js/model/transport.js', 'js/ui/transport.js', 'js/ui/transport-share.js']
+            .map(file => [file, git('show', `d768b30:${file}`)]);
+        // the same disk, opened by v202's own transport files
+        const oldOf = (from, name) => {
+            const old = bare(name, from.dump());
+            sources.forEach(([file, code]) => vm.runInContext(code, old.ctx, { filename: `v202:${file}` }));
+            old.setToday(WED);
+            old.State.load();
+            return old;
+        };
+        const old = oldOf(device, 'd_owner_message_v202');
+        same('the summary of the day is byte for byte v202\'s, with a man without a site', summaryWith(old), summaryAbsent);
+        check('and v202\'s driver\'s message is the old one - the two builds differ only there',
+            old.call('transportDriverMessage', WED, 'tv_01').startsWith(`שלום ${named('סאמר')},`));
+        device.State.commit(device.call('assignPlace', device.State.schedule, WED, 'w_13', 'actual', 'p_12'));
+        same('and with every man on his site, v202\'s too', [summaryWith(device), summaryWith(oldOf(device, 'd_owner_message_v202b'))],
+            [summaryNow, summaryNow]);
+    }
 });
 
 // v179. The owner, 2026-11-10: "is there a report for the cars?" - the whole day on one
@@ -1861,10 +1961,13 @@ await block('the words, every one of them, and no other', async () => {
         openWhatsapp: 'פתיחה בוואטסאפ',
         opened: 'נפתח בוואטסאפ',
         noPhone: 'אין מספר טלפון תקין',
-        mHello: [['אחמד'], 'שלום אחמד,'],
-        mHeading: [['יום שלישי', '10/11/2026'], 'הסעה ליום שלישי 10/11/2026:'],
-        mVehicle: [['סוואנה'], 'רכב: סוואנה'],
-        mPassengers: [[2], 'נוסעים (2):'],
+        // v203: the driver's message as the owner shaped it; mHello, mHeading, mVehicle and
+        // mPassengers are gone with the old one (nothing reads them).
+        mGreeting: [['יום רביעי', '18/11'], 'ערב טוב, היום - יום רביעי 18/11'],
+        mDriverName: [['סאמר'], 'סאמר'],
+        mRider: [['ראמי', 'חדרה'], 'ראמי – חדרה'],
+        mRiderOnly: [['ראמי'], 'ראמי'],
+        mSites: [['חדרה, חיפה'], 'חדרה, חיפה'],
         mPassenger: [['ראמי', 'חדרה'], '- ראמי – חדרה'],
         mPassengerOnly: [['ראמי'], '- ראמי'],
         mAlone: 'בלי נוסעים.',

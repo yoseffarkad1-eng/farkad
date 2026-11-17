@@ -1,12 +1,14 @@
-## v203 — «תזכורת לסגירת חשבונות» and «דוח הסעות»: two things the owner asked for on 2026-11-17, in one build (candidate, not served)
+## v203 — «תזכורת לסגירת חשבונות», «דוח הסעות» and a shorter message to each driver: three things the owner asked for on 2026-11-17, in one build (candidate, not served)
 
 **NOT SERVED YET.** A candidate on v202 (main, d768b30). The release commit moves the three
 build stamps to v203. Its «מה חדש» entry is at the top of WHATSNEW_BUILDS (proposed), and it
-carries three items: one for the reminder and two for the rides' report. Both parts were written
-on v201 as two separate candidates, then rebased here as one release.
+carries four items: one for the reminder, two for the rides' report and one for the driver's
+message. The first two parts were written on v201 as two separate candidates, then rebased
+here as one release. The third was written here.
 - The owner saw the reminder's pictures and said it is fine (2026-11-17: "التذكير تمام").
 - He saw the rides report's pictures and said four months of history is enough for him (same
   day: "٤ شهور بكفيني").
+- He chose the driver's message's exact shape himself (same day; part 3).
 - He had already said to publish what he approves.
 
 Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`,
@@ -248,6 +250,68 @@ twelfth card, its button and five runs of words), `tests/whatsnew.*` (the item a
 `closeReminder`, which shows the row and switches nothing), `tests/screens.mjs` (the line, so
 the large display's walk measures it). NOT a real phone. Pictures (375x812, scale 2, light and
 dark, synthetic names): the line on the day, «סגירת שבוע» after its button, the row in ⋯.
+
+### 3. The driver's message as the owner shaped it
+
+**Why.** The owner, 2026-11-17, gave the exact shape of what a driver is sent from הסעות. For a
+plan on Wednesday 18/11/2026:
+
+    ערב טוב, היום - יום רביעי 18/11
+    סאמר
+    ראמי – חדרה
+    ג'מיל – חיפה
+    חסן – חדרה
+    חדרה, חיפה
+
+**What changed:** `transportDriverMessage` in `js/ui/transport.js`, its words in TRANSPORT_TEXT,
+and one «מה חדש» item. The lines are:
+1. `ערב טוב, היום - <the plan's day> <d/m>`. The day comes from `hebrewDayName`. The date comes
+   from `formatShortDate`, the app's own short date, which pads both parts to two digits: 18/11,
+   and 08/11 for the 8th.
+2. The driver (seat 1), alone on his line.
+3. One line per passenger, in the order of the seats: `name – site`. A passenger with no site
+   in today's record gets his name alone.
+4. The trip's sites (`TransportEngine.tripSites`, as before), joined by ", ". This line is left
+   out when there are none.
+
+Every name and site keeps its `isolate()`. Gone: «שלום X,», «הסעה ל…:», the vehicle line
+(«רכב: …»), «נוסעים (n):», «בלי נוסעים.» and «יעדים:». A driver alone gets the day, his name
+and the sites line.
+
+**The words.** The message has NEW keys: `mGreeting`, `mDriverName`, `mRider`, `mRiderOnly`
+and `mSites`.
+- Removed, because nothing reads them any more: `mHello`, `mHeading`, `mVehicle` and
+  `mPassengers`.
+- Kept word for word: `mPassenger`, `mPassengerOnly`, `mAlone` and `mDestinations`. The summary
+  of the day (and the rides' report for the last two) borrows them.
+- **«סיכום הסעות ליום» is byte for byte what v202 composes.** `tests/transport.test.mjs` checks
+  this against v202's own transport files out of Git (d768b30), for the same plans, with and
+  without a man who lost his site.
+
+**What a phone shows for a driver already marked «נפתח בוואטסאפ» on the old words.** The mark is
+believed only while `transportMessageSig(number, text)` still matches. A mark made on a v202
+message no longer matches the v203 message for the same car, so `transportMarkState` answers
+'none'. After the update:
+- the car's card offers «פתיחה בוואטסאפ» again instead of saying «נפתח בוואטסאפ»;
+- the journey's last station counts that driver as not opened, and no longer names him among
+  the workers as already opened.
+
+The mark itself stays on the disk as it was, and nothing is written for it. A driver opened
+again gets a new mark. This is the rule since v174 for any change to a message, and v203 does
+not change it.
+
+**The words are the owner's shape and are pinned.** Pinned line for line in tests/transport.test.mjs
+in four cases, on the owner's own date and names:
+- passengers with sites;
+- a passenger with no site;
+- a driver alone;
+- everyone on one site.
+
+The pins that moved with it, on purpose, are the old message in tests/transport.test.mjs,
+tests/transport.browser.mjs (the link's address) and tests/journey.browser.mjs (station 5's
+link). The news item is proposed and pinned in tests/whatsnew.test.mjs: «הודעה קצרה יותר
+לנהג» – «ההודעה לנהג קצרה יותר: היום, הנהג, כל עובד והאתר שלו, והאתרים.», and its «הראה לי»
+opens הסעות like the other הסעות items. Not tried on a real phone.
 
 ## v202 — the workbook made easier to read: «סיכום» first, widths, ₪, filters, the header on every page (candidate, not served)
 

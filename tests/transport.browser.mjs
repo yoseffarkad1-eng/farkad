@@ -1290,8 +1290,9 @@ async function evening(width, height, scheme) {
     same('dropped on the driver\'s seat, he is the driver - nobody is asked whether he may',
         [await drawn(page, 'tv_01'), await kept(page), await page.locator(seated('w_01')).getAttribute('aria-label')],
         ['w_01 - w_02 - -', 'tv_01:w_01 w_02@3', `נהג: ${named('אחמד')} · הרצליה`]);
-    const message = [`שלום ${named('אחמד')},`, 'הסעה ליום שלישי 10/11/2026:', `רכב: ${car('טויוטה קורולה 2013')}`, 'נוסעים (1):',
-        `- ${named('מוחמד')} – ${named('חיפה')}`, `יעדים: ${named('הרצליה')}, ${named('חיפה')}`].join('\n');
+    // MOVED IN v203: the owner's shape of the driver's message (tests/transport.test.mjs pins it).
+    const message = ['ערב טוב, היום - יום שלישי 10/11', named('אחמד'),
+        `${named('מוחמד')} – ${named('חיפה')}`, `${named('הרצליה')}, ${named('חיפה')}`].join('\n');
     const link = page.locator('a[data-wa="tv_01"]');
     same('and the door to WhatsApp appears: a real link with the whole address on it, opened in its own tab',
         [await link.getAttribute('href'), await link.getAttribute('target'), await link.getAttribute('rel'), await text(page, 'a[data-wa="tv_01"]')],
@@ -1575,7 +1576,7 @@ async function evening(width, height, scheme) {
     same('one more man in that car is a different message: the mark is no longer believed',
         [await page.locator('[data-car="tv_01"]').getAttribute('data-mark'), await page.locator('[data-car="tv_01"] .transport-mark').count()], ['none', 0]);
     check('and the link carries the new message', decodeURIComponent((await page.locator('a[data-wa="tv_01"]').getAttribute('href')).split('text=')[1])
-        .includes(`- ${named('ראמי')} – ${named('פרדסיה')}`));
+        .includes(`\n${named('ראמי')} – ${named('פרדסיה')}\n`));   // MOVED IN v203: no «- » before a man
 
     // ------------------------------------------------------------ a vehicle that stays home
     suite(`${where}: a vehicle that does not go out today`);

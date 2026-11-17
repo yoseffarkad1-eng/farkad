@@ -159,22 +159,29 @@ const TRANSPORT_TEXT = Object.freeze({
     opened: 'נפתח בוואטסאפ',
     noPhone: 'אין מספר טלפון תקין',
 
-    // --- the message a driver receives
-    //   שלום סאמר,
-    //   הסעה ליום שלישי 10/11/2026:
-    //   רכב: טויוטה קורולה 2016
-    //   נוסעים (2):
-    //   - ראמי – חדרה
-    //   - דוד – חיפה
-    //   יעדים: חיפה, חדרה
-    // No pickup line and no «עדכון מספר N» line any more: areas and versions are gone
-    // (v174). No emoji: the proposal had none, and the owner may ask for the seder's.
-    mHello: name => `שלום ${name},`,
-    mHeading: (day, date) => `הסעה ל${day} ${date}:`,
-    mVehicle: v => `רכב: ${v}`,
-    mPassengers: n => `נוסעים (${n}):`,
-    mPassenger: (name, site) => `- ${name} – ${site}`,
+    // --- the message a driver receives (v203: the owner's own shape, 2026-11-17)
+    //   ערב טוב, היום - יום רביעי 18/11
+    //   סאמר
+    //   ראמי – חדרה
+    //   ג'מיל – חיפה
+    //   חסן – חדרה
+    //   חדרה, חיפה
+    // The day and its date; the driver (seat 1) alone on his line; one line per passenger
+    // in the order of the seats, his site after him or his name alone when the record has
+    // none for him today; the trip's sites last, left out when there are none. No greeting
+    // by name, no vehicle line, no count and no «בלי נוסעים.»: a driver alone is the day,
+    // his name and his sites. No emoji: the owner's message had none.
+    mGreeting: (day, date) => `ערב טוב, היום - ${day} ${date}`,
+    mDriverName: name => name,
+    mRider: (name, site) => `${name} – ${site}`,
     // a passenger with no site in today's record: named, and no site invented for him
+    mRiderOnly: name => name,
+    mSites: sites => sites,
+    // Until v203 the driver's message was «שלום X,», «הסעה ל…:», «רכב: …», «נוסעים (n):»,
+    // «- name – site» and «יעדים: …». The three lines below are no longer the driver's:
+    // the summary of the day borrows them (and the rides' report `mAlone` and
+    // `mDestinations`), so they stay word for word for those.
+    mPassenger: (name, site) => `- ${name} – ${site}`,
     mPassengerOnly: name => `- ${name}`,
     mAlone: 'בלי נוסעים.',
     mDestinations: sites => `יעדים: ${sites}`,
@@ -191,8 +198,9 @@ const TRANSPORT_TEXT = Object.freeze({
     summaryFile: date => `farkad-הסעות-${date}.png`,
 
     // --- the summary itself. It borrows `driver`, `driverNone`, `mPassenger`,
-    // `mPassengerOnly`, `mAlone` and `nobody` from above, so a man reads the same in it
-    // as in the message his driver gets.
+    // `mPassengerOnly`, `mAlone` and `nobody` from above. Until v203 that made a man read
+    // the same in it as in his driver's message; the driver's message is the owner's
+    // shorter one now, and the summary is word for word what it was.
     //   סיכום הסעות ליום שלישי 10/11/2026:
     //
     //   רכב: טויוטה קורולה 2016 – 3 מתוך 5
@@ -290,7 +298,8 @@ const TRANSPORT_TEXT = Object.freeze({
     // A DAY WITH NO STORED PLAN IS SAID TO HAVE NONE. It is never counted as a day a
     // vehicle stayed home: this phone not having a plan is a fact about the phone.
     // As in the summary, a vehicle's name never starts a line. `driver`'s neighbours
-    // `mAlone` and `mDestinations` are borrowed from the driver's message.
+    // `mAlone` and `mDestinations` are borrowed from above (until v203 they were also the
+    // driver's message's).
     rCount: n => (n === 1 ? 'יום אחד' : `${n} ימים`),
     rIn: n => (n === 1 ? 'ביום אחד' : `ב-${n} ימים`),
     rHeading: (range, from, to) => `דוח הסעות – ${range}, ${from} עד ${to}:`,
@@ -906,21 +915,16 @@ function transportDriverMessage(date, vehicleId) {
     if (!vehicle || !seats || !seats[1]) return '';
     const parsed = parseLocalDate(date);
     const passengers = seats.slice(2).filter(Boolean);
-    const lines = [T.mHello(isolate(transportWorkerName(ctx, seats[1]))),
-        T.mHeading(hebrewDayName(parsed), formatFullDate(parsed)),
-        T.mVehicle(transportRli(vehicle.name))];
-    if (passengers.length === 0) lines.push(T.mAlone);
-    else {
-        lines.push(T.mPassengers(passengers.length));
-        passengers.forEach(id => {
-            const name = isolate(transportWorkerName(ctx, id));
-            const site = transportSiteName(ctx, ctx.attendance[id]);
-            lines.push(site ? T.mPassenger(name, isolate(site)) : T.mPassengerOnly(name));
-        });
-    }
+    const lines = [T.mGreeting(hebrewDayName(parsed), formatShortDate(parsed)),
+        T.mDriverName(isolate(transportWorkerName(ctx, seats[1])))];
+    passengers.forEach(id => {
+        const name = isolate(transportWorkerName(ctx, id));
+        const site = transportSiteName(ctx, ctx.attendance[id]);
+        lines.push(site ? T.mRider(name, isolate(site)) : T.mRiderOnly(name));
+    });
     const sites = TransportEngine.tripSites(ctx, { driver: seats[1], passengers })
         .map(id => isolate(transportSiteName(ctx, id)));
-    if (sites.length) lines.push(T.mDestinations(sites.join(', ')));
+    if (sites.length) lines.push(T.mSites(sites.join(', ')));
     return lines.join('\n');
 }
 
