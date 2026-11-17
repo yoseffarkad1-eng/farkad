@@ -356,19 +356,22 @@ await block('R3 the line: its words, its button, its ✕, and when it is not put
     const d = three();
     refresh(d);
     given('the line is up', lineShown(d));
-    const parts = banner(d).children;
-    same('a sentence, a button and a ✕, in that order', parts.map(node => [node.tagName, node.id]),
-        [['SPAN', 'closeReminderLine'], ['BUTTON', 'closeReminderOpen'], ['BUTTON', 'closeReminderDismiss']]);
+    const line = banner(d).children;
+    same('a sentence, then its two buttons as one group', line.map(node => [node.tagName, node.id || node.className]),
+        [['SPAN', 'closeReminderLine'], ['DIV', 'close-reminder-acts']]);
+    const parts = [line[0]].concat(line[1].children);
+    same('a button and a ✕, in that order', parts.slice(1).map(node => [node.tagName, node.id]),
+        [['BUTTON', 'closeReminderOpen'], ['BUTTON', 'closeReminderDismiss']]);
     same('the button\'s words', parts[1].textContent, 'לסגירת שבוע');
     same('the ✕ and its name', [parts[2].textContent, parts[2].getAttribute('aria-label')], ['✕', 'הסתר עד מחר']);
     const disk = diskBut(d);
     press(parts[1]);
     same('the button opens «סגירת שבוע» - its own opener, once', d.global('__opened'), 1);
     same('and writes nothing', diskBut(d), disk);
-    const shown = banner(d).children;
+    const shown = d.doc.getElementById('closeReminderOpen');
     refresh(d);
     check('the same count drawn again does not build the line again (nothing under a finger is replaced)',
-        banner(d).children[1] === shown[1]);
+        banner(d).children[1].children[0] === shown);
 
     // No crew: a first install says nothing.
     const empty = phone();

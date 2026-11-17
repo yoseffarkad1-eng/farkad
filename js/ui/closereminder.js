@@ -300,12 +300,16 @@ function closeReminderShow(count) {
     const words = el('span', null, T.line(count));
     words.id = 'closeReminderLine';
     banner.appendChild(words);
+    // The two buttons are one group: where the line has to wrap they go under the sentence
+    // TOGETHER, never the ✕ alone on a row of its own (css/design.css).
+    const acts = el('div', 'close-reminder-acts');
     const open = button(T.open, 'btn-secondary', () => closeReminderOpen());
     open.id = 'closeReminderOpen';
-    banner.appendChild(open);
+    acts.appendChild(open);
     const away = button('✕', 'btn-icon', () => closeReminderDismiss(), T.dismiss);
     away.id = 'closeReminderDismiss';
-    banner.appendChild(away);
+    acts.appendChild(away);
+    banner.appendChild(acts);
     banner.style.display = '';
     closeReminderShown = count;
     if (typeof scheduleBarMeasure === 'function') scheduleBarMeasure();
