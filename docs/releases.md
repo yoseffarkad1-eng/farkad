@@ -1,10 +1,8 @@
 ## v202 — the workbook made easier to read: «סיכום» first, widths, ₪, filters, the header on every page (candidate, not served)
 
-**NOT SERVED.** A candidate on v201 (main, cd2cce1); the three build stamps still say v201 and
-the release commit moves them. Its «מה חדש» item is at the top of WHATSNEW_BUILDS (proposed;
-the guard in tests/whatsnew.test.mjs says SKIP until the stamps move). Until they do,
-tests/build.test.mjs and tests/gate.integrity.test.mjs each fail exactly one check, «nothing in
-the shell has changed since» - expected, and not to be "fixed" by anything but the release.
+**NOT SERVED YET.** A candidate on v201 (main, cd2cce1). The release commit moves the three
+build stamps to v202; its «מה חדש» item is at the top of WHATSNEW_BUILDS (proposed). The owner
+saw the pictures and the file itself and said to publish (2026-11-17).
 
 **Why.** The owner, 2026-11-16, about the file «📊 יצוא» writes: it "could be developed more,
 more organised and polished - I don't know how, show me your creativity". The file opened with
