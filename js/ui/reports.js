@@ -5224,6 +5224,298 @@ function downloadRefusedNotice(refused, handed) {
     };
 }
 
+// ---------------------------------------------------------------- the workbook's look (v202)
+//
+// The owner asked for the file to be "more organised and polished" (2026-11-16). What the
+// shipped library - SheetJS CE 0.18.5, vendor/ - actually writes into the bytes was read
+// back out of a generated file before any of this was built on it, and only that is used:
+//
+//   column widths (<cols>), a number format per cell (numFmt, applied by the cell's style
+//   index), a filter on a table's header row (<autoFilter>), the header row repeated on
+//   every printed page (_xlnm.Print_Titles), a link to another sheet (<hyperlink
+//   location>), and a sheet of its own.
+//
+// What it does NOT write, so nothing here pretends to: bold, colour, fills, borders, wrapped
+// text, a frozen header row (the sheetView it writes carries rightToLeft and nothing else),
+// the page's orientation.
+//
+// THE RULE OF ALL OF IT: not one stored value moves. Every cell of every sheet that was in
+// the file before keeps its value and its type - a format changes how a number is SHOWN, and
+// a SUM, a sort and the bar above the grid still read the number the app wrote. The rows
+// reportSheets() returns are not touched; everything here works on the worksheet objects
+// after aoa_to_sheet. tests/xlsxlook.test.mjs reads every sheet of the file back and holds it
+// cell for cell against the same export written by v201's reports.js out of Git.
+//
+// And the look never costs the file: a fault in it is logged and the workbook goes as v201
+// wrote it (see exportReports).
+
+// Money: whole shekels with a thousands separator and the sign after the number, which is
+// how a shekel amount is written in Hebrew; the agorot only on a cell that has them, so a
+// whole wage never reads 1,300.00 and 1,237.50 is never shown as 1,238. The minus is the
+// number's own, laid out inside the number - a cell is not a Hebrew sentence (compare
+// js/ui/dom.js, where it is).
+const XLSX_MONEY = '#,##0 "₪";-#,##0 "₪"';
+const XLSX_MONEY_AGORA = '#,##0.00 "₪";-#,##0.00 "₪"';
+// A count on a date-by-site grid: a zero is shown as a dash, so the eye finds the days a site
+// was worked. The cell still holds 0 - a SUM over it, and the bar above the grid, say 0. The
+// `_)` is a space the width of a bracket after the figure: LibreOffice lays a date (Latin
+// text) against the left edge of its cell and the count beside it against its right, and
+// without it «1» and «2026-11-08» read as one run.
+const XLSX_COUNT = '0_);-0_);"–"_)';
+
+// The overview's words. PROPOSED, not read by the owner; pinned in tests/xlsxlook.test.mjs.
+const SUMMARY_SHEET = 'סיכום';
+const SUMMARY_TEXT = Object.freeze({
+    title: 'סיכום הדוח',
+    range: 'תקופה',
+    made: 'הופק',
+    chosen: 'בקובץ רק העובדים שנבחרו.',
+    source: 'כל מספר כאן נספר או חובר מהגיליון ששמו בכותרת שמעליו, והכותרת מקשרת אליו.',
+    men: 'עובדים',
+    unpriced: 'עובדים בלי שכר יומי, שהשכר שלהם אינו בסכום',
+    detail: 'כל יום עבודה של כל עובד',
+    site: 'אתר',
+    siteDays: 'ימי עובד־אתר',
+    rimaCount: 'עובדי רימא'
+});
+
+// A column's letters, A..Z, AA.. - the library's own helper is not used, so a stand-in
+// library without it (tests/smoke.mjs, tests/vehicles.test.mjs) does not throw here.
+function xlsxColumn(index) {
+    let n = index + 1;
+    let out = '';
+    while (n > 0) {
+        const rest = (n - 1) % 26;
+        out = String.fromCharCode(65 + rest) + out;
+        n = Math.floor((n - 1) / 26);
+    }
+    return out;
+}
+
+const xlsxAddress = (row, col) => xlsxColumn(col) + (row + 1);
+
+// The format a money cell is shown in: agorot only where the value has them.
+const xlsxMoneyFormat = value => (Number.isInteger(agora(value)) ? XLSX_MONEY : XLSX_MONEY_AGORA);
+
+// How many characters a cell is wide when it is shown - the number as its format draws it.
+function xlsxShownLength(value, format) {
+    if (typeof value === 'number') {
+        if (format === XLSX_MONEY || format === XLSX_MONEY_AGORA) {
+            const whole = Math.floor(Math.abs(value));
+            const digits = String(whole).length;
+            return digits + Math.floor((digits - 1) / 3) + (format === XLSX_MONEY_AGORA ? 3 : 0)
+                + 2 + (value < 0 ? 1 : 0);
+        }
+        return String(value).length;
+    }
+    return [...String(value === null || value === undefined ? '' : value)].length;
+}
+
+// ONE SHEET DRESSED. `rows` are the rows the sheet was made from, read and never written;
+// `look` says which cells are money, which are grid counts, which rows the filter covers and
+// which cells link to another sheet. Only properties the library reads are set: z on a cell
+// that exists, '!cols', '!autofilter', and l on a cell that exists.
+function dressSheet(ws, rows, look) {
+    const formatOf = (r, c, value) => {
+        if (typeof value !== 'number') return null;
+        if (look.money && look.money(r, c)) return xlsxMoneyFormat(value);
+        if (look.count && look.count(r, c) && Number.isInteger(value)) return XLSX_COUNT;
+        return null;
+    };
+    const widths = [];
+    rows.forEach((row, r) => {
+        // A row of one cell is a heading or a note: in the file it runs on over the empty
+        // cells beside it, so it does not widen its column.
+        const lone = row.length === 1;
+        row.forEach((value, c) => {
+            const format = formatOf(r, c, value);
+            const cell = ws[xlsxAddress(r, c)];
+            if (format && cell && typeof cell === 'object') cell.z = format;
+            if (lone) return;
+            widths[c] = Math.max(widths[c] || 0, xlsxShownLength(value, format));
+        });
+    });
+    const cap = look.cap || 100;
+    ws['!cols'] = widths.map(width => ({ wch: Math.min(cap, Math.max(6, (width || 0) + 2)) }));
+    if (look.filterTo !== undefined && look.filterTo !== null && look.filterTo >= 1 && rows[0]) {
+        ws['!autofilter'] = { ref: `A1:${xlsxAddress(look.filterTo, rows[0].length - 1)}` };
+    }
+    (look.links || []).forEach(link => {
+        const cell = ws[xlsxAddress(link.row, link.col)];
+        if (cell && typeof cell === 'object') cell.l = { Target: `#'${link.sheet}'!A1` };
+    });
+    return ws;
+}
+
+// The last row of a date-by-site grid that is a date - the filter covers the header and the
+// days, and stops above the total line, so a sort never moves the total into the days.
+function gridLastDateRow(rows) {
+    let last = 0;
+    rows.forEach((row, r) => { if (r > 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(row[0]))) last = r; });
+    return last;
+}
+
+// The look of each sheet the file already had, by its key in reportSheets().
+function sheetLook(key, rows) {
+    const head = rows[0] || [];
+    if (key === 'payroll') {
+        const money = new Set(['שכר רכב', 'שכר יומי', 'נצבר', 'לתשלום']
+            .map(name => head.indexOf(name)).filter(at => at >= 0));
+        // The deduction's heading changes with the gate (deductionColumnName), and it is
+        // always the column after נצבר.
+        if (head.indexOf('נצבר') >= 0) money.add(head.indexOf('נצבר') + 1);
+        return { money: (r, c) => r > 0 && money.has(c), filterTo: rows.length - 1 };
+    }
+    if (key === 'detail') {
+        const at = head.indexOf('לתשלום ליום');
+        return { money: (r, c) => r > 0 && c === at, filterTo: rows.length - 1 };
+    }
+    // חיוב, בלי עובדי רימא, רימא, עובדי יוסף גבס: dates down, sites across, counts.
+    return { count: (r, c) => r > 0 && c > 0, filterTo: gridLastDateRow(rows) };
+}
+
+// «סיכום» (v202): the file's first sheet, the overview a bookkeeper reads before the
+// tables. EVERY FIGURE ON IT IS A CELL OF ANOTHER SHEET OF THIS FILE, OR A SUM OF A COLUMN OF
+// ONE: nothing is priced, counted or rounded here that the sheets have not already said
+// (the sums are put back to the agora, which is what each of their parts already is). The
+// pay sheet is grouped by the cell that already says how each man is paid.
+//
+// NOT in the client's file: that file is the billing grid and nothing else, and an
+// overview of it would be the same numbers twice. And «עובדי יוסף גבס» is its own block,
+// LAST, with its own note - never added to a total and never a column of another block -
+// so with the list removed, the overview is the same rows with that block cut off its end.
+//
+// Returns the rows, which cells are money, and which cells link to which sheet.
+function workbookSummary(sheets, options = {}) {
+    const rows = [];
+    const money = new Set();
+    const links = [];
+    const add = row => { rows.push(row); return rows.length - 1; };
+    const heading = sheet => { links.push({ row: add([sheet]), col: 0, sheet }); };
+    const range = `${formatFullDate(parseLocalDate(REPORT_RANGE.from))} עד ${formatFullDate(parseLocalDate(REPORT_RANGE.to))}`;
+
+    // Said as one sentence each, beginning in Hebrew: a cell that begins with a date is laid
+    // out left to right, and «06/11/2026 עד 19/11/2026» came out of LibreOffice with its two
+    // dates side by side and the «עד» after them.
+    add([SUMMARY_TEXT.title]);
+    add([`${SUMMARY_TEXT.range}: ${range}`]);
+    add([`${SUMMARY_TEXT.made}: ${options.made || formatFullDate(parseLocalDate(todayStr()))}`]);
+    if (options.chosen) add([SUMMARY_TEXT.chosen]);
+    add([SUMMARY_TEXT.source]);
+
+    const sum = (list, at) => agora(list.reduce((total, row) =>
+        total + (typeof row[at] === 'number' ? row[at] : 0), 0));
+
+    if (sheets.payroll) {
+        const head = sheets.payroll[0];
+        const earnedAt = head.indexOf('נצבר');
+        const takenAt = earnedAt + 1;
+        const netAt = head.indexOf('לתשלום');
+        const cycleAt = head.indexOf('מחזור תשלום');
+        const noteAt = head.indexOf('הערה');
+        const daysAt = head.indexOf('נוכחות');
+        // A man with a row of figures - not the row the pay sheet adds, with no figure, for a
+        // man whose open account is in another period (v189).
+        const men = sheets.payroll.slice(1).filter(row => typeof row[daysAt] === 'number');
+        const line = (label, list) => {
+            const at = add([label, list.length, sum(list, earnedAt), sum(list, takenAt), sum(list, netAt)]);
+            [2, 3, 4].forEach(col => money.add(`${at}:${col}`));
+        };
+        add([]);
+        heading('שכר');
+        add([head[cycleAt], SUMMARY_TEXT.men, head[earnedAt], head[takenAt], head[netAt]]);
+        Object.keys(PAY_CYCLE_LABELS).forEach(key => {
+            const label = PAY_CYCLE_LABELS[key];
+            const group = men.filter(row => row[cycleAt] === label
+                || String(row[cycleAt]).indexOf(`${label} · `) === 0);
+            if (group.length > 0) line(label, group);
+        });
+        line('סה״כ', men);
+        const unpriced = men.filter(row => row[earnedAt] === ''
+            || String(row[noteAt]).indexOf(NO_DAILY_RATE_NOTE) !== -1).length;
+        if (unpriced > 0) add([`${SUMMARY_TEXT.unpriced}: ${unpriced}`]);
+    }
+    if (sheets.detail) {
+        add([]);
+        heading('פירוט');
+        add([SUMMARY_TEXT.detail]);
+    }
+
+    // A date-by-site grid read by its total line: a site per column, and the grand total.
+    const bySite = (grid, total, label, countLabel) => {
+        const head = grid[0];
+        const foot = grid.find((row, r) => r > 0 && row[0] === total);
+        add([SUMMARY_TEXT.site, countLabel]);
+        for (let c = 1; c < head.length - 1; c += 1) add([head[c], foot[c]]);
+        add([label, foot[head.length - 1]]);
+    };
+    if (sheets.invoice) {
+        add([]);
+        heading('חיוב');
+        bySite(sheets.invoice, 'סה״כ', 'סה״כ', SUMMARY_TEXT.siteDays);
+        if (sheets.withoutRima) {
+            const foot = sheets.withoutRima[sheets.withoutRima.length - 1];
+            links.push({ row: add([NO_RIMA_TITLE, foot[foot.length - 1]]), col: 0, sheet: NO_RIMA_TITLE });
+        }
+    }
+    if (sheets.rima) {
+        add([]);
+        heading(RIMA_SHEET);
+        bySite(sheets.rima, RIMA_TOTAL, RIMA_TOTAL, SUMMARY_TEXT.rimaCount);
+        add([RIMA_SHEET_NOTE]);
+    }
+    // LAST, and on its own: the list is in no arithmetic (v183).
+    if (sheets.yosefGeves) {
+        add([]);
+        heading(YOSEF_GEVES_SHEET);
+        bySite(sheets.yosefGeves, YOSEF_GEVES_TOTAL, YOSEF_GEVES_TOTAL, YOSEF_GEVES_TITLE);
+        add([YOSEF_GEVES_NOTE]);
+    }
+    return { rows, money, links };
+}
+
+// The whole workbook, sheet by sheet in the file's order. Separate from exportReports so a
+// test can hold it up without a download: `xlsx` is the library, `sheets` reportSheets(), and
+// `client` whether this is one client's file. With `plain` the file is written exactly as
+// v201 wrote it - which is what a fault in the look falls back to.
+function buildReportWorkbook(xlsx, sheets, client, options = {}) {
+    const wb = xlsx.utils.book_new();
+    // See exportReports: the direction, said once for every sheet.
+    wb.Workbook = { Views: [{ RTL: true }] };
+    const plain = options.plain === true;
+    const titles = [];
+    const append = (rows, name, look) => {
+        const ws = xlsx.utils.aoa_to_sheet(rows);
+        if (!plain && look) {
+            dressSheet(ws, rows, look);
+            if (look.printTitles) titles.push(name);
+        }
+        xlsx.utils.book_append_sheet(wb, ws, name);
+    };
+    if (!plain && !client) {
+        const summary = workbookSummary(sheets, options);
+        append(summary.rows, SUMMARY_SHEET, {
+            money: (r, c) => summary.money.has(`${r}:${c}`),
+            links: summary.links,
+            cap: 40
+        });
+    }
+    const named = [['payroll', 'שכר'], ['invoice', 'חיוב'], ['withoutRima', NO_RIMA_TITLE],
+        ['detail', 'פירוט'], ['rima', RIMA_SHEET], ['yosefGeves', YOSEF_GEVES_SHEET]];
+    named.forEach(([key, name]) => {
+        if (!sheets[key]) return;
+        append(sheets[key], name, Object.assign(sheetLook(key, sheets[key]), { printTitles: true }));
+    });
+    // The header row on every printed page of a table: a list of days runs to pages, and a
+    // page of numbers with no heading over them is a page somebody has to count across.
+    if (titles.length > 0) {
+        wb.Workbook.Names = titles.map(name => ({
+            Name: '_xlnm.Print_Titles', Sheet: wb.SheetNames.indexOf(name), Ref: `'${name}'!$1:$1`
+        }));
+    }
+    return wb;
+}
+
 async function exportReports() {
     const stamp = `${REPORT_RANGE.from}_${REPORT_RANGE.to}`;
     const client = scopedExportPlace();
@@ -5289,40 +5581,32 @@ async function exportReports() {
     }
 
     try {
-        const wb = XLSX.utils.book_new();
-
         // The file has to open the way it reads. Every sheet here is Hebrew - עובד is
         // the first column and לתשלום the last - and a workbook that says nothing about
         // its direction opens left to right on any Excel that is not itself Hebrew: the
         // first column lands on the far left and the bookkeeper reads the table
         // backwards. This is the one flag that decides it; SheetJS writes it into the
         // sheet as rightToLeft="1", which was checked against a real generated file
-        // rather than taken from the documentation.
+        // rather than taken from the documentation. buildReportWorkbook says it, once.
         //
         // The screen and the printed page have never had this problem - the page is
         // dir="rtl" and the PDF comes out of it - so this is the only place the
         // direction had to be said out loud.
-        wb.Workbook = { Views: [{ RTL: true }] };
-
-        if (sheets.payroll) {
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.payroll), 'שכר');
-        }
+        //
         // Only where it was built - see the CSV branch above: a selected-worker export has no
         // client invoice, and the workbook for one ended in «היצוא נכשל».
-        if (sheets.invoice) {
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.invoice), 'חיוב');
-        }
-        if (sheets.withoutRima) {
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.withoutRima), NO_RIMA_TITLE);
-        }
-        if (sheets.detail) {
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.detail), 'פירוט');
-        }
-        if (sheets.rima) {
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.rima), RIMA_SHEET);
-        }
-        if (sheets.yosefGeves) {
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheets.yosefGeves), YOSEF_GEVES_SHEET);
+        //
+        // THE LOOK (v202) NEVER COSTS THE FILE. Widths, formats, filters and «סיכום» are
+        // built on top of the same sheets; if any of it fails, the workbook is written the
+        // way v201 wrote it, every value the same, and the fault goes to the console.
+        let wb;
+        try {
+            wb = buildReportWorkbook(XLSX, sheets, client, {
+                chosen: REPORT_SECTION === 'workers' && REPORT_WORKERS !== null
+            });
+        } catch (lookError) {
+            console.error('Report workbook look failed; writing it plain:', lookError);
+            wb = buildReportWorkbook(XLSX, sheets, client, { plain: true });
         }
         // NAMED LATIN-FIRST, like the backup (farkad-<date>.json) and the picture
         // (farkad-דוח-…png). The names were דוחות_<from>_<to>.xlsx and שכר_/חיוב_/פירוט_

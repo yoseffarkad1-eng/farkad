@@ -7136,8 +7136,9 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   check('which says the file opens right to left',
     Boolean(book.views && book.views[0] && book.views[0].RTL === true),
     JSON.stringify(book.views && book.views[0]));
+  // v202 MOVED: «סיכום» first, the three reports after it.
   check('the sheets are the three reports, named in Hebrew',
-    book.sheets.join(',') === 'שכר,חיוב,פירוט', book.sheets.join(','));
+    book.sheets.join(',') === 'סיכום,שכר,חיוב,פירוט', book.sheets.join(','));
 
   // The direction is only worth setting if the columns are in the order it assumes.
   check('the payroll still starts at the worker', book.firstPayrollHeading === 'עובד',

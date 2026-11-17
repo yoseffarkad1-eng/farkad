@@ -353,8 +353,9 @@ async function openInstalled() {
         bytes[0] === 0x50 && bytes[1] === 0x4b, bytes.subarray(0, 2).toString('latin1'));
 
     const book = workbookOf(bytes);
+    // v202 MOVED: «סיכום» first (tests/xlsxlook.test.mjs), the three after it as they were.
     same('with the three sheets the app appends, named in Hebrew',
-        book.names, ['שכר', 'חיוב', 'פירוט']);
+        book.names, ['סיכום', 'שכר', 'חיוב', 'פירוט']);
 
     // The direction, in the file, on every sheet - asked again here because this workbook
     // was built by a library loaded a different way, and "it works offline" is worth

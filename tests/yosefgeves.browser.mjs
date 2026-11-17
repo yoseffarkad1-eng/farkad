@@ -629,8 +629,9 @@ const stored = (page, date, placeId) => page.evaluate(([day, id]) => yosefGevesC
         return { names: back.SheetNames, own: rows('עובדי יוסף גבס'), bill: rows('חיוב'), rima: rows('רימא') };
     });
     await page.keyboard.press('Escape');
+    // v202 MOVED: «סיכום» first; the list's own still last.
     same('its sheets: the five there were, then the list\'s own, last', book && book.names,
-        ['שכר', 'חיוב', 'בלי עובדי רימא', 'פירוט', 'רימא', TITLE]);
+        ['סיכום', 'שכר', 'חיוב', 'בלי עובדי רימא', 'פירוט', 'רימא', TITLE]);
     same('the list\'s sheet: full dates, real numbers, the total line, an empty row, the note', book && book.own, [
         ['תאריך', 'Site B', 'Site E', 'Site J', 'סה״כ'],
         ['2026-10-12', 2, 0, 0, 2], ['2026-10-13', 0, 6, 0, 6], ['2026-10-15', 0, 0, 4, 4],
