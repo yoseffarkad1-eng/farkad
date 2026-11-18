@@ -156,8 +156,15 @@ const queuedBefore = await page.evaluate(() => JSON.stringify(FarkadSync.pending
 {
     suite('the way in is one entry inside the WhatsApp dialog, not a new button on the day');
 
+    // v204: the dock is «שליחה לוואטסאפ» and «בניית סידור»; «מהיום הקודם» stays in its markup
+    // but is drawn only at the journey's first station (on every other day it is a row of
+    // «עוד ⋯»). The guarantee is the same - the seder is no button of its own on the day -
+    // so the count is of the buttons a person can SEE, and each is named.
     same('the day\'s dock still has its two buttons and no more',
-        await page.locator('.day-actions button').count(), 2);
+        await page.locator('.day-actions button:visible').count(), 2);
+    same('and they are WhatsApp and «בניית סידור», neither of them the seder',
+        await page.locator('.day-actions button:visible').evaluateAll(bs => bs.map(b => b.textContent.trim())),
+        ['💬 שליחה לוואטסאפ', 'בניית סידור']);
     same('and nothing on the day screen itself offers it',
         await page.locator('#dayView').getByText(ENTRY).count(), 0);
     await page.locator('.day-actions .btn-success').click();
