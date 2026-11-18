@@ -178,13 +178,10 @@ const recordBytes = page => page.evaluate(() => {
 const diskBut = (page, ...skip) => page.evaluate(keys => JSON.stringify(Object.keys(localStorage).sort()
     .filter(key => !keys.includes(key) && key !== 'farkad:openBuilds').map(key => [key, localStorage.getItem(key)])), skip);
 
+// MOVED ON PURPOSE (v204): the way in is the dock's «בניית סידור», where «מהיום הקודם» stood -
+// the owner's choice, 2026-11-18. Until v203 it was a row of the WhatsApp dialog, two taps deep.
 async function start(page) {
-    await page.locator(WA_BUTTON).tap();
-    // MOVED ON PURPOSE (v194): a person's pace. The dialog's rows come up over the dock's button,
-    // and a tap in that place less than 300 ms after the one that opened it is that tap again
-    // (the page's rule, js/ui/sheet.js) - a driver's next tap came 30 ms later.
-    await page.waitForTimeout(350);
-    await page.locator('#journeyEntry').tap();
+    await page.locator('#journeyDockBtn').tap();
     await page.waitForTimeout(150);
 }
 // Brought onto the glass the way a person brings it - the list scrolled until the thing is
@@ -362,72 +359,66 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     same('the app booted on the evening the clock says', await page.evaluate(() => [todayStr(), State.date]), [TODAY, TODAY]);
     const dockBefore = await page.evaluate(() => {
         const dock = document.querySelector('.day-actions');
-        return { kids: [...dock.children].map(node => node.tagName + ':' + (node.id || node.className)),
+        return { kids: [...dock.children].filter(node => getComputedStyle(node).display !== 'none')
+                .map(node => node.id || (node.classList.contains('btn-success') ? 'whatsapp' : node.className)),
             height: Math.round(dock.getBoundingClientRect().height),
             journey: document.querySelectorAll('.app [id^="journey"], #transportPanel [id^="journey"]').length,
             panel: getComputedStyle(document.getElementById('journeyPanel')).display };
     });
-    same('before a journey the day\'s dock holds its own two buttons and nothing else', dockBefore.kids.length, 2);
+    // MOVED ON PURPOSE (v204, the owner's choice of 2026-11-18): the dock's second button is
+    // «בניית סידור», where «מהיום הקודם» stood - which stays in the document for the first
+    // station only and is a row of «עוד ⋯» on every other day.
+    same('before a journey the day\'s dock shows two buttons and nothing else: «שליחה לוואטסאפ», then «בניית סידור»',
+        dockBefore.kids, ['whatsapp', 'journeyDockBtn']);
     // MOVED, second pass: «nothing of the journey is on the day screen» (0) -> exactly one
-    // thing, the button at the foot of the list.
-    same('and the one thing of the journey on the day screen is the button at the list\'s foot',
+    // thing, the button at the foot of the list. MOVED AGAIN (v204): that one thing is the
+    // dock's button.
+    same('and the one thing of the journey on the day screen is the dock\'s button',
         [await page.evaluate(() => [...document.querySelectorAll('.app [id^="journey"]')].map(node => node.id)), dockBefore.panel],
-        [['journeyDayEntry'], 'none']);
-    const foot = await page.evaluate(() => {
-        const entry = document.getElementById('journeyDayEntry');
-        const row = entry.parentNode;
-        const box = entry.getBoundingClientRect();
-        const list = document.getElementById('dayView').getBoundingClientRect();
-        const above = [...document.querySelectorAll('#dayView .tray, #dayView .site-grid')].map(node => node.getBoundingClientRect().bottom);
-        const names = [...document.querySelectorAll('#dayView .wrow, #dayView .chip-main')].map(node => node.getBoundingClientRect().bottom);
-        const style = getComputedStyle(entry);
-        const under = row.nextElementSibling;
-        return { text: entry.textContent, resume: entry.dataset.resume, w: box.width, h: box.height, list: list.width,
-            next: row.nextElementSibling && row.nextElementSibling.querySelector('#dayCheckEntry') ? 'dayCheckEntry' : null,
-            // v188: that row holds «חיפוש עובד» first and «בדיקת היום» beside it, one line, whole
-            // under the journey's row and touching nothing of it.
-            // MOVED (the owner, 2026-11-11): «הכל חופש» left the header and ends that row, on a
-            // line of its own 24px under the two (tests/holiday.browser.mjs). Round two: what ends
-            // it there now is «עוד ⋯» (dayMoreEntry), the day's menu, «הכל חופש» behind it.
-            footIds: under ? [...under.querySelectorAll('button')].map(node => node.id) : [],
-            footClear: under ? [...under.querySelectorAll('button')].every(node => { const b = node.getBoundingClientRect(); return b.top >= box.bottom - 0.5 && b.height >= 47.5 && b.width >= 44; }) : false,
-            footOneLine: under ? new Set([...under.querySelectorAll('#findEntry, #dayCheckEntry')].map(node => Math.round(node.getBoundingClientRect().top))).size === 1 : false,
-            holidayUnder: under && under.querySelector('#dayMoreEntry') ? under.querySelector('#dayMoreEntry').getBoundingClientRect().top
-                >= Math.max(...[...under.querySelectorAll('#findEntry, #dayCheckEntry')].map(node => node.getBoundingClientRect().bottom)) + 23.5 : false,
-            footTall: under ? Math.round(under.getBoundingClientRect().height) : 0,
-            last: row.nextElementSibling === document.getElementById('dayView').lastElementChild,
-            under: Math.max(...above, ...names) <= box.top + 0.5, font: parseFloat(style.fontSize),
-            inDayView: document.getElementById('dayView').contains(entry),
-            header: document.querySelector('#dayView .day-header').contains(entry), dock: document.querySelector('.day-actions').contains(entry) };
+        [['journeyDockBtn'], 'none']);
+    const entry = await page.evaluate(() => {
+        const node = document.getElementById('journeyDockBtn');
+        const box = node.getBoundingClientRect();
+        const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        const wa = document.querySelector('.day-actions .btn-success').getBoundingClientRect();
+        const style = getComputedStyle(node);
+        const under = document.getElementById('dayView').lastElementChild;
+        return { text: node.textContent, title: node.title, resume: node.dataset.resume,
+            w: box.width, h: box.height, font: parseFloat(style.fontSize),
+            waFont: parseFloat(getComputedStyle(document.querySelector('.day-actions .btn-success')).fontSize),
+            whole: node.scrollWidth <= node.clientWidth + 1,
+            onTop: Boolean(top) && (top === node || node.contains(top)),
+            // right to left: «שליחה לוואטסאפ» at the start corner, then this one; one line
+            afterWa: wa.left >= box.right - 1 && Math.abs(wa.top - box.top) <= 1 && Math.abs(wa.height - box.height) <= 1,
+            dock: node.parentNode === document.querySelector('.day-actions'),
+            footRow: document.querySelector('#dayView .journey-day-row') === null,
+            footIds: under ? [...under.querySelectorAll('button')].map(one => one.id) : [] };
     });
-    same('it names the day it will open on', [bare(foot.text), foot.resume], [DAY_ENTRY, '0']);
-    check('it is at the FOOT of the list: under every site, tray and name, straight above «בדיקת היום», which is still last',
-        foot.inDayView && foot.under && foot.next === 'dayCheckEntry' && foot.last, JSON.stringify(foot));
-    check('not on the header and not on the dock', !foot.header && !foot.dock);
-    same('the row under it is the day\'s own foot: «חיפוש עובד» then «בדיקת היום», in one line, whole and clear of it - and «עוד ⋯» on a line of its own under them',
-        [foot.footIds, foot.footClear, foot.footOneLine, foot.holidayUnder], [['findEntry', 'dayCheckEntry', 'dayMoreEntry'], true, true, true]);
-    check('and that row is one button tall but for «עוד ⋯»\'s own line - the journey\'s row and that line are the only heights the foot gained',
-        foot.footTall <= 56 + 24 + 48, String(foot.footTall));
-    check('the width of the list, 48px or more, in 16px words or larger', foot.w >= foot.list - 1 && foot.h >= 47.5 && foot.font >= 16,
-        JSON.stringify({ w: foot.w, list: foot.list, h: foot.h, font: foot.font }));
+    same('worded with the journey\'s own name, and titled with the day it will open on', [bare(entry.text), bare(entry.title), entry.resume], [ENTRY, DAY_ENTRY, '0']);
+    check('IN the dock, beside «שליחה לוואטסאפ» and as tall as it, in one line', entry.dock && entry.afterWa, JSON.stringify(entry));
+    // The dock's words are the dock's size - 14px on a phone, as «שליחה לוואטסאפ» beside it
+    // (css/app.css), the app's floor for a letter since v200.
+    check('44px or more both ways, in the dock\'s own size of words (as «שליחה לוואטסאפ», 14px or more), its words whole, and under nothing',
+        entry.h >= 43.5 && entry.w >= 44 && entry.font >= 14 && entry.font === entry.waFont && entry.whole && entry.onTop, JSON.stringify(entry));
+    same('the foot of the list has no row of the journey\'s any more: it ends with «חיפוש עובד», «בדיקת היום» and «עוד ⋯»',
+        [entry.footRow, entry.footIds], [true, ['findEntry', 'dayCheckEntry', 'dayMoreEntry']]);
     await page.locator(WA_BUTTON).tap();
-    // MOVED ON PURPOSE (v194): a person's pace. The dialog's rows come up over the dock's button,
-    // and a tap in that place less than 300 ms after the one that opened it is that tap again
-    // (the page's rule, js/ui/sheet.js) - a driver's next tap came 30 ms later.
+    // A person's pace (v194): the dialog's rows come up over the dock's button.
     await page.waitForTimeout(350);
     const entries = await page.evaluate(() => [...document.querySelectorAll('#shareModal .modal-actions > *')]
-        .map(node => node.id).filter(id => ['sederEntry', 'transportEntry', 'journeyEntry'].includes(id)));
-    same('one entry, in the WhatsApp dialog, after the seder\'s and הסעות\'s', entries, ['sederEntry', 'transportEntry', 'journeyEntry']);
-    same('worded', await text(page, '#journeyEntry'), ENTRY);
-    const entryBox = await page.locator('#journeyEntry').boundingBox();
-    check('44px, the whole row', entryBox.height >= 43.5 && entryBox.width > width / 2, JSON.stringify(entryBox));
+        .map(node => node.id).filter(id => /Entry$/.test(id)));
+    // MOVED ON PURPOSE (v204): the owner asked for the journey "not inside the WhatsApp button".
+    same('the WhatsApp dialog no longer offers the journey: the seder\'s row and הסעות\'s only',
+        [entries, await page.locator('#journeyEntry').count()], [['sederEntry', 'transportEntry'], 0]);
+    await page.locator('#shareModal button[onclick="closeShareModal()"]').tap();
+    await page.waitForTimeout(150);
     const record0 = await recordBytes(page);
 
     // ------------------------------------------------------------ station 1
     suite(`${where}: station 1 - the day screen itself, on tomorrow`);
-    await page.locator('#journeyEntry').tap();
+    await page.locator('#journeyDockBtn').tap();
     await page.waitForTimeout(200);
-    same('the dialog stepped aside and the journey is at its first station', [await visible(page, '#shareModal'), await station(page)], [false, 1]);
+    same('one tap on the dock\'s button and the journey is at its first station', [await visible(page, '#shareModal'), await station(page)], [false, 1]);
     same('for TOMORROW - and the day screen is on that date', await page.evaluate(() => [journeyDate(), State.date]), [DAY, DAY]);
     same('which its own header says', await text(page, '#dayView .day-date'), '11/11/2026');
     same('kept: the date, the station, and that it is on the screen',
@@ -462,8 +453,10 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     check('the row is INSIDE the day\'s own dock - no bar of its own', dock.row && dock.position === 'fixed');
     // MOVED, second pass: «the dock's own two buttons are still there» -> the WhatsApp
     // button is put away at this station (sending is the fifth) and the copy button stays.
-    same('of the dock\'s own two buttons «שליחה לוואטסאפ» is put away and «מהיום הקודם» is there, whole, 44px and under nothing',
-        dock.own.map(one => one.h >= 44 && one.w >= 44 && one.top), [false, true]);
+    // MOVED (v204): the dock's own buttons are three in the document - «שליחה לוואטסאפ», «בניית
+    // סידור» and «מהיום הקודם» - and here the first two are put away and the copy button is there.
+    same('of the dock\'s own buttons «שליחה לוואטסאפ» and «בניית סידור» are put away and «מהיום הקודם» is there, whole, 44px and under nothing',
+        dock.own.map(one => one.h >= 44 && one.w >= 44 && one.top), [false, false, true]);
     const lines = await page.evaluate(() => {
         const tops = sel => { const box = document.querySelector(sel).getBoundingClientRect(); return [Math.round(box.top), Math.round(box.left), Math.round(box.right)]; };
         const leave = tops('#journeyDock .journey-quiet');
@@ -846,11 +839,11 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
             await page.evaluate(() => document.body.classList.contains('journey-on') || document.body.classList.contains('journey-day'))],
         [0, false, 0, null, false]);
     same('and the day screen is back on TODAY', [await page.evaluate(() => State.date), await text(page, '#dayView .day-date')], [TODAY, '10/11/2026']);
-    same('the day\'s dock is its own two buttons again, at the height it had',
-        await page.evaluate(() => { const dock = document.querySelector('.day-actions'); return [dock.children.length, Math.round(dock.getBoundingClientRect().height)]; }),
+    same('the day\'s dock shows its own two buttons again, at the height it had',
+        await page.evaluate(() => { const dock = document.querySelector('.day-actions'); return [[...dock.children].filter(node => getComputedStyle(node).display !== 'none').length, Math.round(dock.getBoundingClientRect().height)]; }),
         [2, dockBefore.height]);
-    same('«שליחה לוואטסאפ» is back with it, and the button at the foot offers a new journey',
-        [await visible(page, WA_BUTTON), bare(await page.locator('#journeyDayEntry').textContent())], [true, DAY_ENTRY]);
+    same('«שליחה לוואטסאפ» is back with it, and «בניית סידור» beside it offers a new journey',
+        [await visible(page, WA_BUTTON), await visible(page, '#journeyDockBtn'), bare(await page.locator('#journeyDockBtn').getAttribute('title'))], [true, true, DAY_ENTRY]);
     same('what he built is all still there: the day, the seats and the one mark',
         await page.evaluate(([day, key]) => [Object.keys(JSON.parse(localStorage.getItem('scheduleData:v2')).days[day].actual).length,
             Object.keys(JSON.parse(localStorage.getItem(key)).trips).length, Object.keys(JSON.parse(localStorage.getItem(key)).marks).length], [DAY, RIDES]),
@@ -860,32 +853,34 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
     await context.close();
 }
 
-// ================================================================== the button at the foot of the day
+// ================================================================== the button in the dock
 
+// MOVED ON PURPOSE (v204): from v188 to v203 this was «the button at the foot of the day»; the
+// owner chose to have it in the dock, where «מהיום הקודם» stood (2026-11-18). What it promised
+// there it promises here: one tap is the journey, a journey left in the middle is continued,
+// three hours on a new one is offered - now in its title, the dock's words being fixed.
 for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'light']]) {
     const { page, context, errors, asked } = await open(width, height, scheme);
-    suite(`${width}x${height} ${scheme}: the journey from the foot of the day's list`);
+    suite(`${width}x${height} ${scheme}: the journey from the dock's «בניית סידור»`);
     const record = await recordBytes(page);
     const disk = await diskBut(page);
     const header = await page.evaluate(() => { const box = document.querySelector('#dayView .day-header').getBoundingClientRect(); return [Math.round(box.top), Math.round(box.height)]; });
-    await tapOnDay(page, page.locator('#journeyDayEntry'));
+    await page.locator('#journeyDockBtn').tap();
     await page.waitForTimeout(200);
     same('one tap on it is the journey at its first station, for the day it named', [await station(page), await page.evaluate(() => [journeyDate(), State.date])], [1, [DAY, DAY]]);
     same('started from here it wrote its own key and nothing else', [await recordBytes(page), await diskBut(page, KEY)], [record, disk]);
-    same('with the journey\'s row in the dock the button at the foot is not drawn - one way onward, not two',
-        [await page.locator('#journeyDayEntry').count(), await visible(page, DOCK_ROW), await page.locator('#dayCheckEntry').count()], [0, true, 1]);
+    same('with the journey\'s row in the dock the button is put away - one way onward, not two',
+        [await visible(page, '#journeyDockBtn'), await visible(page, DOCK_ROW), await page.locator('#dayCheckEntry').count()], [false, true, 1]);
     await walkTo(page, 4);
     await page.locator('#journeyLeave').tap();
     await page.waitForTimeout(200);
     given('he left at the last look', await station(page) === 0 && (await keptOf(page)).station === 4);
-    same('left in the middle, the same button says where he is',
-        [bare(await page.locator('#journeyDayEntry').textContent()), await page.locator('#journeyDayEntry').getAttribute('data-resume')],
-        ['המשך בניית הסידור · שלב 4 מתוך 5', '1']);
-    if (width === 440 && SHOTS) {
-        await page.locator('#journeyDayEntry').evaluate(node => node.scrollIntoView({ block: 'center' }));
-        await shot(page, 'day-foot-continue');
-    }
-    await tapOnDay(page, page.locator('#journeyDayEntry'));
+    same('left in the middle, the same button says where he is - in its title, its words the same',
+        [bare(await page.locator('#journeyDockBtn').textContent()), bare(await page.locator('#journeyDockBtn').getAttribute('title')),
+            await page.locator('#journeyDockBtn').getAttribute('data-resume')],
+        [ENTRY, 'המשך בניית הסידור · שלב 4 מתוך 5', '1']);
+    if (width === 440 && SHOTS) await shot(page, 'dock-continue');
+    await page.locator('#journeyDockBtn').tap();
     await page.waitForTimeout(200);
     same('and a tap continues it there', [await station(page), await text(page, '#journeyStation')], [4, STATIONS[3]]);
     await page.locator('#journeyLeave').tap();
@@ -893,32 +888,34 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'light']])
     await page.clock.fastForward('03:10:00');
     await page.evaluate(() => render());
     await page.waitForTimeout(150);
-    same('three hours on it offers a new journey again', bare(await page.locator('#journeyDayEntry').textContent()), DAY_ENTRY);
-    // The by-worker view of the day has the same foot.
+    same('three hours on it offers a new journey again', bare(await page.locator('#journeyDockBtn').getAttribute('title')), DAY_ENTRY);
+    // The by-worker view of the day has the same foot - and the same dock.
     await page.evaluate(() => { State.date = todayStr(); setDayMode('workers'); });
     await page.waitForTimeout(200);
-    // v188: the row under the journey's holds «חיפוש עובד» and then «בדיקת היום» (js/ui/day.js).
-    // MOVED (the owner, 2026-11-11): and ends with «הכל חופש», which left the header. Round
-    // two: with «עוד ⋯», the day's menu, in that place - «הכל חופש» is behind it.
-    same('the by-worker view ends in the same two rows, in the same order: the journey\'s, then find, the check and «עוד ⋯»',
-        await page.evaluate(() => [...document.getElementById('dayView').children].slice(-2).map(row => [...row.querySelectorAll('button')].map(node => node.id))),
-        [['journeyDayEntry'], ['findEntry', 'dayCheckEntry', 'dayMoreEntry']]);
+    same('the by-worker view ends in the same row: find, the check and «עוד ⋯», and no row of the journey\'s',
+        await page.evaluate(() => [[...document.getElementById('dayView').lastElementChild.querySelectorAll('button')].map(node => node.id),
+            document.querySelector('#dayView .journey-day-row') === null]),
+        [['findEntry', 'dayCheckEntry', 'dayMoreEntry'], true]);
+    same('and «בניית סידור» is in its dock', await visible(page, '#journeyDockBtn'), true);
     await page.evaluate(() => { setDayMode('sites'); window.scrollTo(0, 0); });
     await page.waitForTimeout(250);
     same('the day\'s header is where it was, the size it was', await page.evaluate(() => { const box = document.querySelector('#dayView .day-header').getBoundingClientRect(); return [Math.round(box.top), Math.round(box.height)]; }), header);
-    // At doubled text the words wrap inside the button; nothing runs off the side.
+    // At doubled text the dock keeps to the screen, as its WhatsApp button does: its words
+    // whole, or - on a day the bars measured too tight (body.day-tight, css/app.css) - the
+    // dock's own one line and an ellipsis, its whole name still its text.
     given('the cascade was doubled', await doubleEveryFontSize(page) > 100);
     await page.evaluate(() => render());
     await page.waitForTimeout(300);
     const big = await page.evaluate(() => {
-        const entry = document.getElementById('journeyDayEntry');
+        const entry = document.getElementById('journeyDockBtn');
         const box = entry.getBoundingClientRect();
-        return { inside: box.left >= -0.5 && box.right <= window.innerWidth + 0.5, tall: box.height >= 47.5,
-            whole: entry.scrollWidth <= entry.clientWidth + 1 && entry.scrollHeight <= entry.clientHeight + 1,
+        return { inside: box.left >= -0.5 && box.right <= window.innerWidth + 0.5, tall: box.height >= 43.5,
+            whole: entry.scrollWidth <= entry.clientWidth + 1 || document.body.classList.contains('day-tight'),
+            named: entry.textContent === 'בניית סידור',
             page: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1 };
     });
-    same('at 200% the button holds all its words, inside the screen, and the page does not scroll sideways',
-        big, { inside: true, tall: true, whole: true, page: true });
+    same('at 200% the button is inside the screen, 44px tall, its words whole or the dock\'s own ellipsis, and the page does not scroll sideways',
+        big, { inside: true, tall: true, whole: true, named: true, page: true });
     same('nothing went wrong on the page, and WhatsApp was never opened', [errors, asked.length], [[], 0]);
     await context.close();
 }
@@ -927,13 +924,14 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'light']])
 
 // THE GUARANTEE THIS BUTTON MUST NOT COST (tests/mobile.test.mjs): with the list scrolled
 // to its end the last man is on the glass and a tap reaches him. On a phone turned
-// sideways, and on a 320x568 one, there is not room under him for a second button - so
-// there the button is not drawn, and the row in the WhatsApp dialog is the way in.
+// sideways, and on a 320x568 one, there was not room under him for a second button, so from
+// v188 to v203 the foot's button was not drawn there. MOVED (v204): the button is the dock's
+// now - it costs the list nothing, and it is on these phones too.
 for (const [width, height] of [[568, 320], [844, 390], [320, 568]]) {
     const { page, context, errors } = await open(width, height, 'dark');
-    suite(`${width}x${height}: no room at the foot - the button is not drawn, and the last man is still reachable`);
-    same('the button is not on the glass, and «בדיקת היום» is',
-        [await visible(page, '#journeyDayEntry'), await visible(page, '#dayCheckEntry')], [false, true]);
+    suite(`${width}x${height}: a short screen - «בניית סידור» is in the dock, and the last man is still reachable`);
+    same('the dock\'s button is on the glass, and so is «בדיקת היום»; the foot has no row of the journey\'s',
+        [await visible(page, '#journeyDockBtn'), await visible(page, '#dayCheckEntry'), await page.locator('#dayView .journey-day-row').count()], [true, true, 0]);
     // Asked the way tests/mobile.test.mjs asks it: the by-worker list, scrolled to its end.
     await page.evaluate(() => setDayMode('workers'));
     await page.waitForTimeout(250);
@@ -951,8 +949,55 @@ for (const [width, height] of [[568, 320], [844, 390], [320, 568]]) {
     await page.evaluate(() => { setDayMode('sites'); window.scrollTo(0, 0); });
     await page.waitForTimeout(250);
     await start(page);
-    same('the row in the WhatsApp dialog still starts the journey', [await station(page), await page.evaluate(() => journeyDate())], [1, DAY]);
+    same('the dock\'s button starts the journey here too', [await station(page), await page.evaluate(() => journeyDate())], [1, DAY]);
     same('nothing went wrong on the page', errors, []);
+    await context.close();
+}
+
+// ================================================================== the dock on every phone (v204)
+
+// The dock holds exactly two buttons, «שליחה לוואטסאפ» and «בניית סידור», at 320, 375 and 440,
+// in both schemes and with «תצוגה גדולה» on: each a thumb's worth (44px both ways, 52px tall with
+// the large display), its words whole and the dock's size, under nothing, side by side.
+const dockOf = page => page.evaluate(() => {
+    const dock = document.querySelector('.day-actions');
+    const shown = [...dock.children].filter(node => getComputedStyle(node).display !== 'none');
+    return { ids: shown.map(node => node.id || (node.classList.contains('btn-success') ? 'whatsapp' : node.className)),
+        boxes: shown.map(node => {
+            const box = node.getBoundingClientRect();
+            const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+            return { w: Math.round(box.width), h: Math.round(box.height), top: Math.round(box.top),
+                font: parseFloat(getComputedStyle(node).fontSize), whole: node.scrollWidth <= node.clientWidth + 1,
+                hit: Boolean(top) && (top === node || node.contains(top)) };
+        }),
+        page: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1 };
+});
+for (const [width, height] of [[320, 568], [375, 667], [440, 956]]) for (const scheme of ['light', 'dark']) for (const large of [false, true]) {
+    const { page, context, errors } = await open(width, height, scheme);
+    if (large) {
+        await page.evaluate(() => { localStorage.setItem('farkadDisplay:large', '1'); });
+        await page.reload();
+        await page.waitForFunction(() => typeof State === 'object' && typeof render === 'function');
+        await page.waitForTimeout(250);
+    }
+    const tag = `${width}x${height} ${scheme}${large ? ', «תצוגה גדולה» on' : ''}`;
+    suite(`${tag}: the day's dock is «שליחה לוואטסאפ» and «בניית סידור»`);
+    given(`${tag}: the large display is ${large ? 'on' : 'off'}`,
+        await page.evaluate(() => document.documentElement.classList.contains('display-large')) === large);
+    const dock = await dockOf(page);
+    same(`${tag}: exactly the two buttons, in that order`, dock.ids, ['whatsapp', 'journeyDockBtn']);
+    const floor = large ? 52 : 44;
+    check(`${tag}: each ${floor}px tall and 44px wide or more, its words whole, under nothing`,
+        dock.boxes.every(box => box.h >= floor - 0.5 && box.w >= 44 && box.whole && box.hit), JSON.stringify(dock.boxes));
+    // Side by side: each one's middle within the other's height (with the large display the
+    // WhatsApp phrase may take two lines and stand taller, its neighbour centred beside it).
+    const middle = box => box.top + box.h / 2;
+    check(`${tag}: side by side, in the same size of words - ${large ? '20px' : '14px'} or more`,
+        middle(dock.boxes[1]) > dock.boxes[0].top && middle(dock.boxes[1]) < dock.boxes[0].top + dock.boxes[0].h
+            && middle(dock.boxes[0]) > dock.boxes[1].top - dock.boxes[0].h / 2 && middle(dock.boxes[0]) < dock.boxes[1].top + dock.boxes[1].h + dock.boxes[0].h / 2
+            && dock.boxes[0].font === dock.boxes[1].font && dock.boxes[1].font >= (large ? 20 : 14), JSON.stringify(dock.boxes));
+    check(`${tag}: and the page does not scroll sideways`, dock.page);
+    same(`${tag}: nothing went wrong on the page`, errors, []);
     await context.close();
 }
 
@@ -1119,10 +1164,12 @@ for (const [width, height] of [[375, 667], [440, 956]]) {
     // and a tap in that place less than 300 ms after the one that opened it is that tap again
     // (the page's rule, js/ui/sheet.js) - a driver's next tap came 30 ms later.
     await page.waitForTimeout(350);
-    same('the dialog has the seder\'s row and the journey\'s, and none for הסעות',
-        await page.evaluate(() => [...document.querySelectorAll('#shareModal .modal-actions > *')].map(node => node.id).filter(id => /Entry$/.test(id))), ['sederEntry', 'journeyEntry']);
-    await page.locator('#journeyEntry').tap();
+    // MOVED (v204): the journey's row left that dialog for the dock.
+    same('the dialog has the seder\'s row and none for הסעות or the journey',
+        await page.evaluate(() => [...document.querySelectorAll('#shareModal .modal-actions > *')].map(node => node.id).filter(id => /Entry$/.test(id))), ['sederEntry']);
+    await page.locator('#shareModal button[onclick="closeShareModal()"]').tap();
     await page.waitForTimeout(150);
+    await start(page);
     same('the strip marks the third station as skipped from the start', await strip(page, '#journeyDock'), ['now', 'todo', 'skipped', 'todo', 'todo']);
     same('and says so to a screen reader', await page.locator('#journeyDock .journey-pip[data-station="3"]').getAttribute('aria-label'), 'הסעות: מדולג');
     await floors(page, 'off: station 1');

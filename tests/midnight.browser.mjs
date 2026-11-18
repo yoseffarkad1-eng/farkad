@@ -814,9 +814,16 @@ const surfaceCases = [
         open: async page => { await page.locator('#dayView .bulk-toggle').first().tap(); await page.waitForTimeout(100); },
         act: page => page.locator('#bulkRow .bulk-chip', { hasText: 'אתר דרום' }).tap(),
         expect: [['w_01', 'p_02'], ['w_02', 'p_02'], ['w_03', 'p_02'], ['w_04', 'p_02']] },
-    { what: 'the copy button', seed: [['2026-11-09', 'w_01', 'p_02']],
-        open: async () => {},
-        act: async page => { await page.locator('#copyDayBtn').tap(); await page.waitForTimeout(100); await page.locator('#askOk').tap(); },
+    // v204: «מהיום הקודם» is a row of «עוד ⋯» (the dock gave its place to «בניית סידור»). The
+    // menu is opened before midnight and its row pressed after it: the copy goes into the day
+    // the menu named, as the dock's button copied into the day it was drawn for.
+    { what: 'the copy row of «עוד ⋯»', seed: [['2026-11-09', 'w_01', 'p_02']],
+        open: async page => {
+            await page.locator('#dayView .day-more-action').first().tap();
+            await page.waitForFunction(() => { const row = document.getElementById('dayMoreCopy'); return Boolean(row) && !row.disabled; });
+            await page.waitForTimeout(750);
+        },
+        act: async page => { await page.locator('#dayMoreCopy').tap(); await page.waitForTimeout(100); await page.locator('#askOk').tap(); },
         expect: [['w_01', 'p_02']] },
     { what: 'a site\'s רימא box', seed: [], count: ['rima', 'rimaCount'] },
     { what: 'a site\'s יוסף גבס box', seed: [], count: ['yosefgeves', 'yosefGevesCount'] }

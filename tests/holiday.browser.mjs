@@ -113,6 +113,14 @@ const MORE = 'עוד ⋯';
 const MORE_LABEL = 'אפשרויות עבור יום רביעי 11/11/2026';
 const MENU_TITLE = 'יום רביעי 11/11/2026';
 const CLOSE = 'סגור';
+// MOVED ON PURPOSE (v204): the menu's rows are «הכל חופש», «מהיום הקודם» - the dock gave its
+// place to «בניית סידור» (the owner's choice, 2026-11-18) - and «סגור». The copy row's words
+// name the day it copies from, or are its plain name when there is none (copyButtonWords,
+// js/ui/sheet.js), and it is pressable exactly when the dock's button would be; held as the
+// menu opens is still «הכל חופש» alone.
+const MENU_ROWS = answers => Array.isArray(answers) && answers.length === 3 && answers[0] === ENTRY
+    && typeof answers[1] === 'string' && answers[1].startsWith('↧ ') && answers[2] === CLOSE;
+const HELD_FIRST = disabled => Array.isArray(disabled) && disabled.length === 3 && disabled[0] === true && disabled[2] === false;
 
 const NAMES = ['אחמד', 'מוחמד עבד אל רחמן', 'יוסי', 'ח\'אלד', 'סאלח', 'נאסר', 'עודי', 'זיאד', 'מאהר', 'רגא',
     'עלי', 'כרם', 'סמיר', 'ג\'מאל', 'פאדי', 'האני', 'וליד', 'בשאר', 'תאמר', 'ראמי', 'שאדי', 'מוסא', 'עיסא', 'יונס',
@@ -636,6 +644,16 @@ try {
                     pad.style.height = `${Math.max(0, want - (document.documentElement.scrollHeight - document.documentElement.clientHeight))}px`;
                     list.after(pad);
                     await new Promise(done => setTimeout(done, 120));
+                    // MOVED ON PURPOSE (v204): the block assumed the day already ran past the glass,
+                    // so that every pixel of it was a pixel of scroll. Without the journey's row at
+                    // the foot (it is the dock's now) the two men's day at twice the text size is
+                    // 54px SHORTER than the glass, and a block of 94 ended the day at 40, outside
+                    // the band - so it is made up once more by what is still missing.
+                    const short = want - (document.documentElement.scrollHeight - document.documentElement.clientHeight);
+                    if (short > 0) {
+                        pad.style.height = `${parseFloat(pad.style.height) + short}px`;
+                        await new Promise(done => setTimeout(done, 120));
+                    }
                     return { end: document.documentElement.scrollHeight - document.documentElement.clientHeight,
                         full: !document.body.classList.contains('day-compact') };
                 }, midBand);
@@ -727,7 +745,11 @@ try {
         given(`${tag}: the large display is ${large ? 'on' : 'off'}`,
             await page.evaluate(() => document.documentElement.classList.contains('display-large')) === large);
         const cdp = await context.newCDPSession(page);
-        for (const [crew, sites, mode] of [[3, 3, 'sites'], [3, 3, 'workers'], [8, 1, 'sites']]) {
+        // MOVED ON PURPOSE (v204): three men by worker was a day long enough to compact the header
+        // only because the journey's row stood at its foot; that row is the dock's button now, and
+        // at 375x667 the day ended 53px down - under the 72 it takes. Four men by worker is the
+        // same kind of day, a row longer.
+        for (const [crew, sites, mode] of [[3, 3, 'sites'], [4, 3, 'workers'], [8, 1, 'sites']]) {
             const day = `${crew} men on ${sites} sites ${mode === 'sites' ? 'by site' : 'by worker'}`;
             await dayOfLength(page, crew, sites, mode);
             const end = await fingerToEnd(page, cdp, width, height);
@@ -853,17 +875,17 @@ try {
                     const first = await page.evaluate(() => window.__menu);
                     opened += 1;
                     const label = `${one.crew} on ${one.sites} ${one.mode === 'sites' ? 'by site' : 'by worker'}, at its ${where}`;
-                    const fine = menu.open === 'flex' && menu.title === MENU_TITLE && JSON.stringify(menu.answers) === JSON.stringify([ENTRY, CLOSE])
+                    const fine = menu.open === 'flex' && menu.title === MENU_TITLE && MENU_ROWS(menu.answers)
                         && menu.aria === ENTRY_LABEL && menu.nearest && menu.nearest.gap >= 48 && menu.finger >= 48 && menu.whole && menu.hit
                         && !menu.cut && menu.h >= (large ? 52 : 44) && menu.w >= 44 && menu.font >= (large ? 20 : 16)
-                        && first && JSON.stringify(first.disabled) === '[true,false]' && first.focus === CLOSE;
+                        && first && HELD_FIRST(first.disabled) && first.focus === CLOSE;
                     if (!fine) near.push({ label, menu, first });
                     await page.evaluate(() => askClose(null));
                     await page.waitForTimeout(40);
                 }
                 before.push([disk, await page.evaluate(() => localStorage.getItem('scheduleData:v2'))]);
             }
-            check(`${tag}: the menu, opened by a real tap on «עוד ⋯» ${opened} times - the day its title, «הכל חופש» (v116's accessible name) then «סגור»; «הכל חופש» 48px and more from every target a finger can reach and from the finger, whole on the glass, reached at its centre, its words whole; held as it opens, the focus on «סגור»`,
+            check(`${tag}: the menu, opened by a real tap on «עוד ⋯» ${opened} times - the day its title, «הכל חופש» (v116's accessible name), «מהיום הקודם» and «סגור»; «הכל חופש» 48px and more from every target a finger can reach and from the finger, whole on the glass, reached at its centre, its words whole; held as it opens, the focus on «סגור»`,
                 opened >= menuDays.length && near.length === 0, JSON.stringify(near.slice(0, 2)));
             check(`${tag}: and shut, nothing was written`, before.every(([was, now]) => was === now));
             await context.close();
@@ -886,14 +908,29 @@ try {
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(server.url);
         await page.waitForFunction(() => typeof openDayMore === 'function' && typeof State === 'object');
+        // MOVED ON PURPOSE (v204): with the journey's row gone from the foot (it is the dock's
+        // button now) the verifier's day of 3 men ends 62px higher and its «עוד ⋯» stood 41px
+        // clear of the dock - and more men waiting do not lengthen it, the tray lays them side by
+        // side. So the day is given, above its foot, a block of the height a longer list would add,
+        // the one that brings «עוד ⋯» back across the dock's edge as the verifier's day had it.
         await dayOfLength(page, 3, 2, 'sites');
+        await page.evaluate(async () => {
+            const foot = document.getElementById('dayMoreEntry').closest('.day-foot-more') || document.getElementById('dayMoreEntry').parentNode;
+            const entry = document.getElementById('dayMoreEntry').getBoundingClientRect();
+            const dock = document.querySelector('.day-actions').getBoundingClientRect();
+            const pad = document.createElement('div');
+            pad.className = 'band-pad';
+            pad.style.height = `${Math.max(0, Math.round(dock.top - entry.top - entry.height / 2))}px`;
+            foot.before(pad);
+            await new Promise(done => setTimeout(done, 150));
+        });
         const before = await disk(page);
         const at = await page.evaluate(() => {
             const box = document.getElementById('dayMoreEntry').getBoundingClientRect();
             const dock = document.querySelector('.day-actions').getBoundingClientRect();
             return { y: Math.round(scrollY), top: box.top, bottom: box.bottom, x: box.left + box.width / 2, dock: dock.top };
         });
-        given('440x956, 2 sites, 3 men by site, at the top: «עוד ⋯» stands across the dock\'s edge',
+        given('440x956, 2 sites, 3 men by site and the block, at the top: «עוד ⋯» stands across the dock\'s edge',
             at.y === 0 && at.top < at.dock - 6 && at.bottom > at.dock, JSON.stringify(at));
         const finger = { x: at.x, y: (at.top + at.dock) / 2 };
         await watchMenu(page);
@@ -905,7 +942,7 @@ try {
         const first = await page.evaluate(() => window.__menu);
         const marked = await page.evaluate(() => State.schedule.workers.filter(worker => isAbsent(State.schedule, State.date, worker.id, 'actual')).length);
         check('a double tap on what shows of it above the dock opens the menu - held, on «סגור» - and no question, and marks nobody',
-            menu.open === 'flex' && menu.title === MENU_TITLE && Boolean(first) && JSON.stringify(first.disabled) === '[true,false]'
+            menu.open === 'flex' && menu.title === MENU_TITLE && Boolean(first) && HELD_FIRST(first.disabled)
             && first.focus === CLOSE && marked === 0, JSON.stringify({ menu, first, marked }));
         check('its «הכל חופש» is 48px and more from that finger', menu.finger >= 48, `${menu.finger}px`);
         await menuHoldOver(page);
@@ -1011,8 +1048,8 @@ try {
             at.card && at.under >= 16 && !at.header && at.atEnd && at.last && at.h >= 48 && at.font >= 16, JSON.stringify(at));
         const finger = await openMenuByTap(page);
         const menu = await page.evaluate(MENU_SURVEY, [finger.x, finger.y]);
-        check('a tap there opens the same menu - the day, «הכל חופש» then «סגור», «הכל חופש» 48px and more from the finger and from «סגור»',
-            menu.title === MENU_TITLE && JSON.stringify(menu.answers) === JSON.stringify([ENTRY, CLOSE]) && menu.finger >= 48
+        check('a tap there opens the same menu - the day, «הכל חופש», «מהיום הקודם» and «סגור», «הכל חופש» 48px and more from the finger and from «סגור»',
+            menu.title === MENU_TITLE && MENU_ROWS(menu.answers) && menu.finger >= 48
             && Boolean(menu.nearest) && menu.nearest.gap >= 48, JSON.stringify(menu));
         await menuHoldOver(page);
         await watchQuestion(page);

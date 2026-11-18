@@ -334,13 +334,29 @@ async function seedRoster(page) {
   });
   await page.waitForTimeout(200);
 
+  // v204: «מהיום הקודם» is a row of the day's «עוד ⋯» (the dock gave its place to «בניית
+  // סידור», the owner's choice), and the dock's own copy button is drawn only at the journey's
+  // first station. Opened the way a finger does, and the row pressed once the menu's hold
+  // (DOUBLE_TAP_GUARD_MS) is over; the label read from the menu AND from the dock's button,
+  // which say the same thing from one function (copyButtonWords).
+  const openCopyRow = async () => {
+    await page.locator('#dayMoreEntry').click();
+    await page.waitForTimeout(800);
+    return page.locator('#dayMoreCopy');
+  };
   // The button names the day it will copy from rather than saying "the previous day"
   // and leaving the person to work out which one that was.
-  check('the copy button names the day it will copy from',
-    (await page.textContent('#copyDayBtn')).includes('11/08'),
-    await page.textContent('#copyDayBtn'));
+  let copyRow = await openCopyRow();
+  check('the copy row names the day it will copy from',
+    (await copyRow.textContent()).includes('11/08'),
+    await copyRow.textContent());
+  check('and says it as the dock\'s copy button does',
+    (await copyRow.textContent()) === (await page.textContent('#copyDayBtn')),
+    [await copyRow.textContent(), await page.textContent('#copyDayBtn')].join(' | '));
+  check('the dock\'s copy button is put away off the journey',
+    !(await page.locator('#copyDayBtn').isVisible()));
 
-  await page.locator('#copyDayBtn').click();
+  await copyRow.click();
   await page.waitForTimeout(400);
 
   check('copying carries the rate across',
@@ -360,11 +376,12 @@ async function seedRoster(page) {
   // day anything was actually recorded on.
   await page.evaluate(() => { State.date = '2026-08-18'; render(); });
   await page.waitForTimeout(300);
+  copyRow = await openCopyRow();
   check('an empty run in between is stepped over, not reported as nothing to copy',
-    (await page.textContent('#copyDayBtn')).includes('12/08'),
-    await page.textContent('#copyDayBtn'));
+    (await copyRow.textContent()).includes('12/08'),
+    await copyRow.textContent());
 
-  await page.locator('#copyDayBtn').click();
+  await copyRow.click();
   await page.waitForTimeout(400);
   check('and it copies that day, days later',
     (await page.evaluate(() =>
@@ -381,6 +398,10 @@ async function seedRoster(page) {
   await page.waitForTimeout(300);
   check('with nothing behind it the button is dimmed rather than misleading',
     await page.locator('#copyDayBtn').isDisabled());
+  copyRow = await openCopyRow();
+  check('and so is the row of «עוד ⋯», with the same reason',
+    (await copyRow.isDisabled()) && (await copyRow.getAttribute('title')) === 'אין יום קודם עם רישום',
+    await copyRow.getAttribute('title'));
   await page.context().close();
 }
 
@@ -5647,7 +5668,10 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
       const tabs = document.querySelector('.tabs');
       const style = getComputedStyle(bar);
       const box = bar.getBoundingClientRect();
+      // MOVED ON PURPOSE (v204): the buttons the dock SHOWS - «שליחה לוואטסאפ» and «בניית סידור»;
+      // «מהיום הקודם» stays in its markup for the journey's first station only, put away here.
       const buttons = [...bar.querySelectorAll('button')]
+        .filter(node => getComputedStyle(node).display !== 'none')
         .map(node => Math.round(node.getBoundingClientRect().height));
       return {
         pad: Math.round(parseFloat(style.paddingBottom)),
@@ -9329,6 +9353,17 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
     held.disabled === true, JSON.stringify(held));
   check('and it says which state it is in, in the app\'s own word for it',
     typeof held.title === 'string' && held.title.includes('הרישום מושבת'), held.title);
+
+  // v204: the same, said by the row of «עוד ⋯» that stands for it off the journey.
+  const row = await page.evaluate(() => {
+    openDayMore(null, State.date);
+    const copy = document.getElementById('dayMoreCopy');
+    const said = copy ? { disabled: copy.disabled, title: copy.title } : null;
+    if (typeof askClose === 'function') askClose(null);
+    return said;
+  });
+  check('the row of «עוד ⋯» is disabled under the hold too, in the same word',
+    row !== null && row.disabled === true && row.title.includes('הרישום מושבת'), JSON.stringify(row));
 
   await page.context().close();
 }

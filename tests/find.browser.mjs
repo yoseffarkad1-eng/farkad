@@ -86,7 +86,9 @@ try {
     same('the day has one button for it, worded',
         [await page.locator('#findEntry').count(), await page.locator('#findEntry').innerText(),
             await page.locator('#findEntry').getAttribute('aria-haspopup')], [1, 'חיפוש עובד', 'dialog']);
-    same('the dock still has its two buttons and no more', await page.locator('.day-actions button').count(), 2);
+    // MOVED ON PURPOSE (v204): the dock's markup holds «מהיום הקודם» for the journey's first station
+    // only (put away on every other day); the buttons it SHOWS are counted - «שליחה לוואטסאפ» and «בניית סידור».
+    same('the dock still has its two buttons and no more', await page.locator('.day-actions button:visible').count(), 2);
     same('the header has no new control: the same ones, with and without the finder\'s file',
         await page.evaluate(() => [...document.querySelectorAll('#dayView .day-header button')]
             .filter(node => node.checkVisibility()).map(node => node.className)

@@ -392,7 +392,8 @@ function phone(crew) {
         // (dayMoreEntry) in that place, and «הכל חופש» is behind it, on no screen; the row is
         // built and drawn exactly as on the second move.
         // (v194: the two moves brought together - the row ends with «עוד ⋯» AND is handed through trayClock.)
-        /const check = \(\) => \{\s+const journey = typeof journeyDayEntry === 'function' \? journeyDayEntry\(\) : null;\s+if \(journey\) root\.appendChild\(trayClock\(journey\)\);\s+const foot = typeof dayCheckEntry === 'function' \? dayCheckEntry\(\) : el\('div', 'daycheck-row'\);\s+if \(typeof findEntry === 'function'\) foot\.insertBefore\(findEntry\(\), foot\.firstChild\);\s+foot\.appendChild\(dayMoreEntry\(\)\);\s+foot\.classList\.add\('day-foot-more'\);\s+root\.appendChild\(trayClock\(foot\)\);\s+\};/
+        // (v204: the journey's row above it is gone - «בניית סידור» is the dock's; the row itself is as it was.)
+        /const check = \(\) => \{\s+const foot = typeof dayCheckEntry === 'function' \? dayCheckEntry\(\) : el\('div', 'daycheck-row'\);\s+if \(typeof findEntry === 'function'\) foot\.insertBefore\(findEntry\(\), foot\.firstChild\);\s+foot\.appendChild\(dayMoreEntry\(\)\);\s+foot\.classList\.add\('day-foot-more'\);\s+root\.appendChild\(trayClock\(foot\)\);\s+\};/
             .test(source('js/ui/day.js')));
     same('and nothing else in the app opens it', ['index.html', 'js/app.js', 'js/ui/day.js', 'js/ui/sheet.js', 'js/ui/roster.js',
         'js/ui/reports.js', 'js/ui/share.js', 'js/ui/week.js', 'js/ui/settings.js', 'js/ui/workercard.js']

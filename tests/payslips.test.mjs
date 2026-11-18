@@ -1409,9 +1409,12 @@ const press = (node, type) => {
     // reports' block begins; the no-fixed-height half still reads to the end of the file.
     const theirs = after.indexOf('/* ---- the reports say the account') === -1
         ? after : after.slice(0, after.indexOf('/* ---- the reports say the account'));
-    check('and those two have no fixed height either, and one media query between them',
+    // MOVED ON PURPOSE (v204): the one media query between them was the journey's foot button
+    // put away under 580px of height; the button is the dock's now (the owner's choice,
+    // 2026-11-18), and the query went with it - none is left between the two.
+    check('and those two have no fixed height either, and no media query between them',
         !/[^-]height: \d/.test(after.replace(/min-height/g, 'min-h').replace(/max-height/g, 'max-h').replace(/line-height/g, 'line-h'))
-        && (theirs.match(/@media/g) || []).length === 1 && after.indexOf('@media (max-height: 580px) { .journey-day-row { display: none; } }') !== -1);
+        && (theirs.match(/@media/g) || []).length === 0 && after.indexOf('.journey-day-row') === -1);
 }
 
 await settle(1);

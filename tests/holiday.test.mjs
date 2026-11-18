@@ -250,8 +250,16 @@ suite('the question: which day, how many, every man by name');
 // ================================================================== the menu
 // «עוד ⋯» (openDayMore): the only way to the question since round two. On a device the menu is
 // askChoice, stood in for here so its options can be read and its answers given.
+// v204: and the copy button's two functions (js/ui/sheet.js, not loaded on these devices) stood
+// in for too, so the menu's row of «מהיום הקודם» can be read and pressed: what it was asked about
+// and what it was told to copy are kept on the device.
+const COPY_WORDS = Object.freeze({ text: '↧ מיום שני 09/11', disabled: false, title: 'העתק את מה שנרשם ב09/11/2026. רק מי שעדיין לא נרשם יושלם.' });
 function menus(device) {
     const opened = [];
+    device.copyAsked = [];
+    device.copied = [];
+    device.ctx.copyButtonWords = (date, layer) => { device.copyAsked.push([date, layer]); return { ...COPY_WORDS }; };
+    device.ctx.copyPreviousDay = at => { device.copied.push(at); };
     device.ctx.askChoice = options => new Promise(resolve => { opened.push({ options, resolve }); });
     device.closed = 0;
     device.ctx.askClose = result => { device.closed += 1; const last = opened[opened.length - 1]; if (last) last.resolve(result); };
@@ -267,16 +275,44 @@ suite('«עוד ⋯»: the menu names the day, holds, and goes straight on to th
     same('one menu', opened.length, 1);
     const options = opened[0].options;
     same('titled with the day it is about', options.title, MENU_TITLE);
-    same('its answers: «הכל חופש», with v116\'s accessible name, then «סגור»',
-        options.choices.map(choice => (typeof choice === 'string' ? choice : [choice.label, choice.aria])), [[ENTRY, ENTRY_LABEL], CLOSE]);
+    // MOVED ON PURPOSE (v204): «מהיום הקודם» is a row of this menu, between the two - the dock
+    // gave its place to «בניית סידור» (the owner's choice, 2026-11-18). Its words, whether it can
+    // be pressed and its title are the dock button's own (copyButtonWords), for the menu's day.
+    same('its answers: «הכל חופש», with v116\'s accessible name, then «מהיום הקודם» in the dock button\'s own words, then «סגור»',
+        options.choices.map(choice => (typeof choice === 'string' ? choice
+            : [choice.label, choice.aria || null, choice.title || null, Boolean(choice.disabled), choice.id || null])),
+        [[ENTRY, ENTRY_LABEL, null, false, null], [COPY_WORDS.text, null, COPY_WORDS.title, false, 'dayMoreCopy'], CLOSE]);
+    same('and those words were asked for the day the menu names, on its layer', device.copyAsked, [[device.call('todayStr'), 'actual']]);
     same('a finger\'s width apart and held for the day\'s double-tap guard; with no page, no finger is made up',
         [options.apart, options.hold, options.from], [true, 700, null]);
     same('nothing asked yet', seen.length, 0);
     opened[0].resolve(CLOSE);
     same('«סגור»: it answers false', await shut, false);
+    same('and copied nothing', device.copied, []);
     const control = seed(phone('d_menu_control'));
     same('and nothing was asked or written', [seen.length, records(device)], [0, records(control)]);
     check('and no ↶ is offered', !armed(device));
+
+    // v204: the row of «מהיום הקודם», chosen: the menu shut, and ONE copy into the day the menu
+    // named, by the copy button's own writer (copyPreviousDay) - nothing written here.
+    const copying = seed(phone('d_menu_copy'));
+    const copyMenus = menus(copying);
+    const copyControl = seed(phone('d_menu_copy_control'));
+    const named = copying.call('todayStr');
+    const answered = copying.call('openDayMore', null, named);
+    copyMenus[0].resolve(COPY_WORDS.text);
+    same('«מהיום הקודם»: it answers \'copied\'', await answered, 'copied');
+    same('and asked the copy button\'s writer, once, for the day the menu named and its layer', copying.copied, [{ date: named, layer: 'actual' }]);
+    same('the menu itself wrote nothing - the writer is the copy button\'s', records(copying), records(copyControl));
+    // Drawn but not pressable (no day behind it, or the hold): its label is never an answer.
+    const held = seed(phone('d_menu_copy_held'));
+    const heldMenus = menus(held);
+    held.ctx.copyButtonWords = () => ({ text: '↧ מהיום הקודם', disabled: true, title: 'אין יום קודם עם רישום' });
+    const heldAnswer = held.call('openDayMore');
+    same('a copy row that cannot be pressed is drawn disabled, with its reason', [heldMenus[0].options.choices[1].disabled, heldMenus[0].options.choices[1].title],
+        [true, 'אין יום קודם עם רישום']);
+    heldMenus[0].resolve('↧ מהיום הקודם');
+    same('and even its label as an answer copies nothing', [await heldAnswer, held.copied], [false, []]);
 
     const tapped = seed(phone('d_menu_tap'));
     const tapMenus = menus(tapped);
