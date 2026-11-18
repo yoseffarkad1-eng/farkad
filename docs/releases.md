@@ -1,3 +1,63 @@
+## v204 — «בניית סידור» in the dock, where «מהיום הקודם» stood; «מהיום הקודם» in «עוד ⋯» (candidate, not served)
+
+**NOT SERVED YET.** A candidate on the v203 candidate (049b5b3). The release commit moves the
+three build stamps to v204, and its «מה חדש» entry is at the top of WHATSNEW_BUILDS (proposed).
+The owner chose option 1 on 2026-11-18: «בניית סידור» in place of «מהיום הקודם». Before that he
+had asked for the journey to be "مش داخل كبسه الواتس اب" - not inside the WhatsApp button - and
+he had already said to publish what he approves.
+
+Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`,
+`firestore.rules` or `functions`. No key, field path or writer is added, and no Hebrew string
+but the news item and the moved «איפה» of two older items.
+
+**What he sees.**
+- **The dock** is «💬 שליחה לוואטסאפ», then «בניית סידור». The new button sits where
+  «מהיום הקודם» was, under the dock's own button rules, so the dock is the height it was. A tap
+  is journeyStart: a journey he left is continued, and anything else starts a new one for the
+  next working day.
+- **Its words** are the journey's own name. The day-naming label of v188's foot button («בניית
+  סידור ליום רביעי 11/11/2026», or «המשך בניית הסידור · שלב N מתוך 5») does not fit half a dock at
+  320px with «תצוגה גדולה», so it is the button's TITLE, written on every draw.
+- **«מהיום הקודם»** is a row of the day's «עוד ⋯», between «הכל חופש» and «סגור», on every day.
+  Its words, whether it can be pressed and why not come from the dock button's own function
+  (copyButtonWords): the day it copies from, «אין יום קודם עם רישום», «הרישום מושבת».
+  Pressed, it is copyPreviousDay into the day the menu named, the same writer as before. It
+  fills only men with nothing recorded and gives the same ↶. The menu's hold
+  (DOUBLE_TAP_GUARD_MS) covers it.
+- **At the journey's first station** the dock is exactly what it was: «מהיום הקודם» between
+  «יציאה» and the way onward, and «שליחה לוואטסאפ» and «בניית סידור» put away.
+- **ONE way in.** The journey's row in the WhatsApp dialog (v184) and its button at the foot of
+  the list (v188) are gone, with their CSS and the 580px rule that hid the foot button. The
+  foot ends with «חיפוש עובד», «בדיקת היום» and «עוד ⋯» as before. Every phone now has the button,
+  sideways and 320x568 included, since it costs the list nothing.
+- **Under a hold** the new button is not dimmed: the journey writes nothing of its own.
+- **The menu with three rows, sideways.** On a phone turned sideways, the column of three rows,
+  a finger apart, is taller than the glass. askChoiceAway now counts an arrangement only where
+  «הכל חופש» is whole on the glass (js/ui/ask.js). Before this, at 568x320, the column turned
+  round put it under the bottom edge.
+
+**«מה חדש».** One item, and its «הראה לי» lands on the dock's button without pressing it. The
+v184 and v188 items told of the two places that are gone, so their «איפה» now names the dock.
+v188's sentence says «בתחתית מסך היום» where it said «בתחתית רשימת היום».
+
+**Tests moved, each deliberately and said where it is moved:**
+- journey.browser: the way in, the dock at station 1 (three buttons in the document, one
+  shown), the dock button's own section, and the short screens.
+- whatsnew.*: the item, the ways, and the two old items.
+- holiday.*: the menu's three rows; the band and compact-header days, which were long enough
+  only with the journey's row under them.
+- doubletap: «סגור» over the dock's second button now proves no journey is started.
+- midnight: the copy row opened before midnight writes the day it named.
+- smoke: the copy through «עוד ⋯» and the held row.
+- find, payslips: the code and the stylesheet they read.
+- find, daycheck, mobile, smoke: the dock's SHOWN buttons are counted.
+- New checks:
+  - journey.browser: the dock on 320/375/440 in both schemes and with «תצוגה גדולה».
+  - usual.test: the copy row's disk is byte for byte the dock button's on a twin phone.
+  - holiday.test: the copy row asked for its own day, and a disabled one copying nothing.
+
+**Not tried on a real phone.**
+
 ## v203 — «תזכורת לסגירת חשבונות», «דוח הסעות» and a shorter message to each driver: three things the owner asked for on 2026-11-17, in one build (candidate, not served)
 
 **NOT SERVED YET.** A candidate on v202 (main, d768b30). The release commit moves the three
