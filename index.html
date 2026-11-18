@@ -106,7 +106,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v202">
+<meta name="farkad-build" content="v203">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -164,6 +164,11 @@
     <div class="banner banner-warn" id="offlineBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-warn" id="migrationBanner" role="status" aria-live="polite" style="display:none"></div>
     <div class="banner banner-info" id="installBanner" role="status" aria-live="polite" style="display:none"></div>
+    <!-- «תזכורת לסגירת חשבונות» (js/ui/closereminder.js): one quiet line while men whose last
+         finished period is open could be closed in «סגירת שבוע» - read after the first paint,
+         never put up while somebody is typing, put away until tomorrow by its ✕, and off for
+         good on a phone that turned it off in ⋯. Above «מה חדש»: it is about money. -->
+    <div class="banner banner-info" id="closeReminderBanner" role="status" aria-live="polite" style="display:none"></div>
     <!-- «מה חדש» (js/ui/whatsnew.js): one quiet line after an update that has something to
          tell, never on a first install and never put up while somebody is typing. Last of
          the banners: it is the least urgent thing this area ever says. -->
@@ -546,24 +551,49 @@
     </div>
 </div>
 
-<!-- THE REPORT OF A PERIOD'S RIDES: over a week or a month, each vehicle - on how many days
-     it went out, who drove it, how many seats were filled - and each driver, from the plans
-     kept on THIS phone and from nothing else; a day this phone has no plan for is counted
-     and said, never shown as a vehicle that stayed home. Opened only by its one button on
-     the panel above. The summary's dialog over again, with four buttons that choose the
-     range; the same tier, the same three ways out. It writes nothing anywhere, and every
-     word on it is set by js/ui/transport.js from that file's one block. -->
+<!-- THE RIDES' REPORT (v203, the owner's own shape of v182's report of a period): on top,
+     «מי היה ברכב?» - one vehicle on one date, its driver, its men and where it went, for a
+     fine that arrives months later; then over a week, a month or two chosen dates the two
+     lists - each vehicle with its days and the sites it went to, and each driver day by day
+     with his vehicle, his sites and the men he took - from the plans kept on THIS phone
+     and the day record, and from nothing else; a day this phone has no plan for is counted
+     and said, never shown as a vehicle that stayed home. Opened by its button on the panel
+     above and by its row in «דוחות» ← «הפקת דוח» on a phone where הסעות is on. The text is
+     folded under its own button and leaves by the same three ways as the summary's. It
+     writes nothing anywhere, and every word on it is set by js/ui/transport.js from that
+     file's one block. -->
 <div class="modal" id="transportReportModal">
     <div class="modal-content">
         <h3 id="transportReportTitle" tabindex="-1"></h3>
+        <section class="transport-lookup" id="transportLookup" aria-labelledby="transportLookupTitle">
+            <h4 id="transportLookupTitle"></h4>
+            <p class="transport-lookup-lead" id="transportLookupLead"></p>
+            <div class="transport-lookup-fields">
+                <label class="transport-field"><span id="transportLookupVehicleLabel"></span>
+                    <select id="transportLookupVehicle" onchange="transportLookupShow()"></select></label>
+                <label class="transport-field"><span id="transportLookupDateLabel"></span>
+                    <input type="date" dir="ltr" id="transportLookupDate" onchange="transportLookupShow()"/></label>
+            </div>
+            <div class="transport-lookup-result" id="transportLookupResult" role="status" aria-live="polite"></div>
+        </section>
         <div class="transport-report-ranges" id="transportReportRanges" role="group">
             <button type="button" class="btn-secondary" data-range="thisWeek" aria-pressed="false" onclick="transportReportPick('thisWeek')"></button>
             <button type="button" class="btn-secondary" data-range="lastWeek" aria-pressed="false" onclick="transportReportPick('lastWeek')"></button>
             <button type="button" class="btn-secondary" data-range="thisMonth" aria-pressed="false" onclick="transportReportPick('thisMonth')"></button>
             <button type="button" class="btn-secondary" data-range="lastMonth" aria-pressed="false" onclick="transportReportPick('lastMonth')"></button>
+            <button type="button" class="btn-secondary" data-range="custom" aria-pressed="false" onclick="transportReportPick('custom')"></button>
         </div>
-        <label class="field-label" for="transportReportText" id="transportReportLabel"></label>
-        <textarea id="transportReportText" rows="12" readonly></textarea>
+        <div class="transport-report-custom" id="transportReportCustom" hidden>
+            <label class="transport-field"><span id="transportReportFromLabel"></span>
+                <input type="date" dir="ltr" id="transportReportFrom" onchange="transportReportCustomTyped()"/></label>
+            <label class="transport-field"><span id="transportReportToLabel"></span>
+                <input type="date" dir="ltr" id="transportReportTo" onchange="transportReportCustomTyped()"/></label>
+        </div>
+        <div class="transport-report-body" id="transportReportBody"></div>
+        <div class="transport-report-fold">
+            <button type="button" class="btn-secondary" id="transportReportFold" aria-expanded="false" aria-controls="transportReportText" onclick="transportReportToggleText()"></button>
+            <textarea id="transportReportText" rows="12" readonly hidden></textarea>
+        </div>
         <div class="modal-actions">
             <button type="button" class="btn-success" id="transportReportSend" onclick="transportReportSend()"></button>
             <button type="button" class="btn-secondary" id="transportReportCopy" onclick="transportReportCopy()"></button>
@@ -1182,6 +1212,11 @@
 <!-- «מה חדש»: after offline.js (midEdit) and settings.js (the sheet it sends to); it calls
      the screens it shows only when «הראה לי» is pressed. -->
 <script src="js/ui/whatsnew.js"></script>
+<!-- «תזכורת לסגירת חשבונות»: after weeklyclose.js (the list it counts and the dialog its
+     button opens), owes.js (the key a reading is kept under), offline.js (midEdit) and
+     display.js (whose row in ⋯ it stands before). Reads nothing at load; app.js asks it at
+     boot and after every draw, through typeof. -->
+<script src="js/ui/closereminder.js"></script>
 <!-- The usual site: after day.js (the tray that calls it, the double-tap guard) and
      sheet.js (sheetPickPlace, the one write it borrows); called at render and at a tap. -->
 <script src="js/ui/usual.js"></script>

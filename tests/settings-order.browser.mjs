@@ -24,7 +24,15 @@
 // inventory gains its one button and its four runs of words, and "ten cards" says eleven.
 // Nothing that was on the sheet moved or changed a word.
 //
-// So this file pins the ORDER (three sections, eleven cards, by their own titles), the
+// v203 (candidate): a TWELFTH card, «תזכורת לסגירת חשבונות», in «כללי» straight before
+// «תזכורות בטלפון» (so «תצוגה גדולה» still follows the reminders) - the per-phone switch of the in-app line that says how many men's
+// accounts are still open (js/ui/closereminder.js; the owner, 2026-11-17). On by default. A
+// moved expectation, on purpose and listed: ORDER, POSTURE, FOLD and the "every reason
+// standing" posture gain the row (shut, and shut with every reason standing: it has none), the
+// inventory gains its one button and its five runs of words, and "eleven cards" says twelve.
+// Nothing that was on the sheet moved or changed a word.
+//
+// So this file pins the ORDER (three sections, twelve cards, by their own titles), the
 // POSTURE (what is open when the sheet opens, and that it is the same every time), the
 // rule that a redraw neither opens nor shuts anything, every reason a row opens by
 // itself, and an INVENTORY: every control and every sentence that was on the v171 sheet,
@@ -50,15 +58,15 @@ const errors = [];
 
 // THE ORDER, as the owner asked for it on 2026-11-09 and as index.html now has it.
 const ORDER = [
-    {id: 'settingsDaily', section: 'כללי', cards: ['ענן וסנכרון', 'תזכורות בטלפון', 'תצוגה גדולה', 'הסעות']},
+    {id: 'settingsDaily', section: 'כללי', cards: ['ענן וסנכרון', 'תזכורת לסגירת חשבונות', 'תזכורות בטלפון', 'תצוגה גדולה', 'הסעות']},
     {id: 'settingsBackups', section: 'גיבוי ושחזור', cards: ['גיבוי', 'ייבוא ושחזור', 'שחזור חירום', 'איפוס מקדמות']},
     {id: 'settingsHelp', section: 'מכשיר ועזרה', cards: ['עדכון וגרסה', 'מצב המכשיר', 'מידע טכני']}
 ];
 // 'card' is the one that is not a row and cannot be shut.
-const POSTURE = {'ענן וסנכרון': 'card', 'תזכורות בטלפון': false, 'תצוגה גדולה': false, 'הסעות': false,
+const POSTURE = {'ענן וסנכרון': 'card', 'תזכורת לסגירת חשבונות': false, 'תזכורות בטלפון': false, 'תצוגה גדולה': false, 'הסעות': false,
     'גיבוי': true, 'ייבוא ושחזור': false, 'שחזור חירום': false, 'איפוס מקדמות': false,
     'עדכון וגרסה': false, 'מצב המכשיר': false, 'מידע טכני': false};
-const FOLD = {'תזכורות בטלפון': 'settingsFoldReminders', 'תצוגה גדולה': 'displayLargeCard', 'הסעות': 'transportSwitchCard',
+const FOLD = {'תזכורות בטלפון': 'settingsFoldReminders', 'תזכורת לסגירת חשבונות': 'closeReminderCard', 'תצוגה גדולה': 'displayLargeCard', 'הסעות': 'transportSwitchCard',
     'גיבוי': 'settingsFoldBackup', 'ייבוא ושחזור': 'settingsFoldRestore',
     'שחזור חירום': 'settingsFoldRescue', 'איפוס מקדמות': 'settingsFoldAdvanceReset', 'עדכון וגרסה': 'settingsFoldUpdate',
     'מצב המכשיר': 'settingsFoldDevice', 'מידע טכני': 'diagnosticGroup'};
@@ -83,6 +91,8 @@ const CONTROLS = [
     'button |  | 💾 שמור קובץ גיבוי | exportBackup()',
     "button |  | 📂 טען קובץ גיבוי | document.getElementById('importInput').click()",
     'button |  | 🔄 בדוק עדכון | checkForUpdate()',
+    // v203, MOVED ON PURPOSE: «תזכורת לסגירת חשבונות» (js/ui/closereminder.js), its row's one button.
+    'button | closeReminderSwitch | כיבוי התזכורת במכשיר הזה | ',
     'button | diagnosticCopy | העתק | ',
     'button | diagnosticToggle | הסתר מידע טכני | ',
     'button | displayLargeSwitch | הפעלת תצוגה גדולה במכשיר הזה | ',
@@ -137,6 +147,7 @@ const SENTENCES = [
     'כבוי', 'כבוי',
     'כדי לראות התראה במסך הנעילה, אפשר התראות לפרקד בהגדרות הטלפון. מצב שקט, מיקוד וחיבור לרשת עשויים להשפיע על ההצגה.',
     'כיבוי ההתראות במכשיר הזה',
+    'כיבוי התזכורת במכשיר הזה',
     'כל יום',
     'כלי עזר לטיפול בתקלה',
     'כללי', 'כללי',
@@ -146,8 +157,10 @@ const SENTENCES = [
     'לשחזור חירום בלבד.',
     'מגדיל את האותיות, המספרים והכפתורים בכל המסכים. פועל במכשיר הזה בלבד.',
     'מה חדש',
+    'מופעלת במכשיר הזה',
     'מידע טכני',
     'מידע על ההתראות',
+    'מיום חמישי, כשהשבוע נגמר, ועד שהחשבונות נסגרים, מופיעה למעלה שורה עם מספר העובדים שהחשבון שלהם עוד לא נסגר. ✕ מסתיר אותה עד מחר. פועל במכשיר הזה בלבד.',
     'מכשיר ועזרה', 'מכשיר ועזרה',
     'מצב החיבור של המכשיר הזה',
     'מצב המכשיר',
@@ -162,6 +175,7 @@ const SENTENCES = [
     'פתח ב־Chrome או Samsung Internet, לחץ על הפעלה ואשר התראות במכשיר.',
     'פתיחת גיבוי או חזרה למצב קודם',
     'ראשון עד חמישי', 'ראשון עד שישי',
+    'שורה כשיש חשבונות שלא נסגרו',
     'שורות טכניות לצילום או להעתקה, כשמשהו נראה לא במקום על המסך. אין בהן שמות של עובדים או אתרים, אין סכומים ואין סיסמאות.',
     'שחזור חירום',
     'שחזור מחליף את הנתונים הקיימים. המצב הנוכחי נשמר כגיבוי מקומי לפני כן.',
@@ -173,6 +187,7 @@ const SENTENCES = [
     'שמירת עותק של הנתונים בקובץ',
     'תזכורות בטלפון',
     'תזכורת הבוקר תגיע למחרת כל ערב שנבחר.',
+    'תזכורת לסגירת חשבונות',
     'תצוגה גדולה',
     '↩️', 'ⓘ', '☁️', '✕', '💾', '💾', '📂', '🔄'
 ];
@@ -243,7 +258,7 @@ try {
     const record = await page.evaluate(() => JSON.stringify(State.schedule));
     await openSheet(page);
 
-    suite('three sections, eleven cards, in the order that was asked for');
+    suite('three sections, twelve cards, in the order that was asked for');
     same('the sections and their cards, by their own titles', await layout(page), ORDER);
     same('the jump buttons name the same three sections, in the same order',
         await page.locator('.settings-nav button').allTextContents(), ORDER.map(part => part.section));
@@ -637,8 +652,8 @@ try {
         });
         await openSheet(everything);
         await everything.waitForFunction(() => document.getElementById('settingsFoldReminders').open);
-        same('every reason standing: הסעות, תצוגה גדולה, איפוס מקדמות and מידע טכני are still shut, everything else is open',
-            await posture(everything), {'ענן וסנכרון': 'card', 'תזכורות בטלפון': true, 'תצוגה גדולה': false, 'הסעות': false,
+        same('every reason standing: תזכורת לסגירת חשבונות, הסעות, תצוגה גדולה, איפוס מקדמות and מידע טכני are still shut, everything else is open',
+            await posture(everything), {'ענן וסנכרון': 'card', 'תזכורת לסגירת חשבונות': false, 'תזכורות בטלפון': true, 'תצוגה גדולה': false, 'הסעות': false,
                 'גיבוי': true, 'ייבוא ושחזור': true, 'שחזור חירום': true, 'איפוס מקדמות': false,
                 'עדכון וגרסה': true, 'מצב המכשיר': true, 'מידע טכני': false});
         await everything.context().close();
@@ -683,8 +698,9 @@ try {
                             .filter(node => getComputedStyle(node).display !== 'flex').length
                     };
                 });
+                // v203, MOVED ON PURPOSE: eleven rows - «תזכורת לסגירת חשבונות» is the new one.
                 check(`${tag}, ${state}: every row is at least 56px tall and wider than a finger`,
-                    measured.rows.length === 10 && measured.rows.every(([, w, h]) => h >= 56 && w >= 44),
+                    measured.rows.length === 11 && measured.rows.every(([, w, h]) => h >= 56 && w >= 44),
                     JSON.stringify(measured.rows));
                 same(`${tag}, ${state}: nothing a finger lands on is under 44px either way`, measured.small, []);
                 same(`${tag}, ${state}: no field under 16px`, measured.fine, []);

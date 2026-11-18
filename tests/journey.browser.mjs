@@ -733,9 +733,10 @@ for (const [width, height, scheme] of [[440, 956, 'dark'], [375, 667, 'dark'], [
         await page.evaluate(() => [...document.querySelectorAll('#journeySendDrivers .journey-send-row')]
             .map(row => [row.dataset.vehicle, row.querySelector('strong').textContent, row.querySelector('.journey-send-sub').textContent].join(' | '))),
         ['tv_01 | אחמד | טויוטה קורולה 2013', 'tv_02 | סמיר | טויוטה קורולה 2016', 'tv_03 | דוד | BYD סיל U 2025']);
-    const message = [`שלום ${named('אחמד')},`, 'הסעה ליום רביעי 11/11/2026:', `רכב: ${car('טויוטה קורולה 2013')}`, 'נוסעים (2):',
-        `- ${named('מוחמד')} – ${named('חיפה')}`, `- ${named('יוסי')} – ${named('פרדסיה')}`,
-        `יעדים: ${named('הרצליה')}, ${named('חיפה')}, ${named('פרדסיה')}`].join('\n');
+    // MOVED IN v203: the owner's shape of the driver's message (tests/transport.test.mjs pins it).
+    const message = ['ערב טוב, היום - יום רביעי 11/11', named('אחמד'),
+        `${named('מוחמד')} – ${named('חיפה')}`, `${named('יוסי')} – ${named('פרדסיה')}`,
+        `${named('הרצליה')}, ${named('חיפה')}, ${named('פרדסיה')}`].join('\n');
     const door = page.locator('#journeySendDrivers a[data-wa="tv_01"]');
     same('his door is a real link to HIS chat with HIS message, before the finger lands',
         [await door.getAttribute('href'), await door.getAttribute('target'), bare(await door.textContent())],
@@ -1226,7 +1227,7 @@ for (const [width, height] of [[375, 667], [440, 956]]) {
         [await page.locator('#journeySendDrivers [data-vehicle="tv_02"]').getAttribute('data-mark'),
             await page.locator('#journeySendDrivers [data-vehicle="tv_02"] .transport-badge').count()], ['none', 0]);
     const hrefAfter = await page.locator('#journeySendDrivers a[data-wa="tv_02"]').getAttribute('href');
-    check('and the door carries the new site', hrefAfter !== hrefBefore && decodeURIComponent(hrefAfter).includes(`- ${named('עלי')} – ${named('נתניה')}`), decodeURIComponent(hrefAfter));
+    check('and the door carries the new site', hrefAfter !== hrefBefore && decodeURIComponent(hrefAfter).includes(`\n${named('עלי')} – ${named('נתניה')}\n`), decodeURIComponent(hrefAfter));   // MOVED IN v203: no «- »
     same('nothing went wrong on the page', errors, []);
     await shot(page, 'changed-after-seating-station-5');
     await context.close();

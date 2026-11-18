@@ -128,6 +128,11 @@ async function phone(size, slow = 1, big = 14) {
     await page.evaluate(() => {
         State.date = todayStr(); showView('day'); setDayMode('sites'); render(); hideUndo();
         document.querySelectorAll('#accountBanner > .btn-icon, #whatsNewLine .btn-icon').forEach(node => { if (node.offsetParent) node.click(); });
+        // v203: «תזכורת לסגירת חשבונות» is put away with them, by its own ✕'s function (it may
+        // still be reading when this runs). The season leaves every past period open, so its line
+        // stands above the day, and the rows this suite aims at (the seventh, the ninth) were
+        // pushed under the dock: the tap landed on the dock and took nobody off (the v203 gate).
+        if (typeof closeReminderDismiss === 'function') closeReminderDismiss();
         window.scrollTo(0, 0);
         // Every press on the presses' own clock, and every click on a ✕ with what it did: the
         // men on sites before it and after every listener of it, and when the page was done.

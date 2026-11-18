@@ -1,3 +1,318 @@
+## v203 — «תזכורת לסגירת חשבונות», «דוח הסעות» and a shorter message to each driver: three things the owner asked for on 2026-11-17, in one build (candidate, not served)
+
+**NOT SERVED YET.** A candidate on v202 (main, d768b30). The release commit moves the three
+build stamps to v203. Its «מה חדש» entry is at the top of WHATSNEW_BUILDS (proposed), and it
+carries four items: one for the reminder, two for the rides' report and one for the driver's
+message. The first two parts were written on v201 as two separate candidates, then rebased
+here as one release. The third was written here.
+- The owner saw the reminder's pictures and said it is fine (2026-11-17: "التذكير تمام").
+- He saw the rides report's pictures and said four months of history is enough for him (same
+  day: "٤ شهور بكفيني").
+- He chose the driver's message's exact shape himself (same day; part 3).
+- He had already said to publish what he approves.
+
+Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`,
+`firestore.rules` or `functions`.
+
+**THE ROLLOUT RULE.** Every phone (three) goes to v203, and no window of v202 or older stays open
+beside a v203 one on the same phone. The reason is the rides report. A v202-or-older window that
+opens the הסעות screen prunes the phone's plans back to 35 days, and so deletes the history this
+build keeps for 400 days. The phone that answers traffic fines takes v203 first. The reminder
+crosses no build: its two keys are per phone and read by nobody else.
+
+### 1. «דוח הסעות» as the owner asked: «מי היה ברכב?», the vehicles and the drivers on one page, and plans kept up to 400 days (candidate, not served)
+
+**Why.** The owner, 2026-11-17 (in Arabic): "I want a report for the vehicles: where each
+vehicle went. And a second report: who was driving the vehicle - just names. On the same page,
+two lists: one, the number of days of the vehicles; the second, who was driving, where exactly
+he went, and whom he took with him." Asked what for, all four: a TRAFFIC FINE arrives for a
+vehicle on a date, weeks or months later, and he must know who drove it and who was in it; the
+vehicles' expenses; billing the client for where the vehicles went; and knowing what happened.
+"Where it went" is ALL the sites of the men in the car that day, not only the driver's. And a
+range of MORE than a month - which the store's 35 days could not give.
+
+**What changed in the app: `js/ui/transport.js`, `index.html` (the one dialog), `css/design.css`,
+`css/large.css`, one row in `js/ui/reports.js`, `js/ui/whatsnew.js`. Nothing in `js/model`,
+`js/sync`, `js/state.js`, `js/store.js`, `js/recovery.js`, `js/ui/transport-share.js` or
+`firestore.rules`;** no record field path, no writer of the record; one new transport key
+(`farkadTransport:trimmed`, below).
+
+1. **One page** - v182's «דוח הסעות לתקופה», rebuilt; its button stays under the last car of the
+   הסעות screen, and «דוחות» ← «הפקת דוח» has one more row, «דוח הסעות», drawn ONLY on a phone
+   where הסעות is turned on (`transportReportEntry`; the reports file asks for it the way it asks
+   for «סיכום חודש»). From top to bottom:
+   - **«מי היה ברכב?»** - a vehicle (every vehicle of the list, the ones taken off it too, said
+     «(הוצא מהרשימה)») and a date (today on opening): «רכב: … – יום … dd/mm/yyyy», «נהג: …»,
+     «נוסעים: …» in the order of their seats, «יעדים: …». A date this phone has no plan for, a
+     day the plan keeps that vehicle home, a vehicle nobody sat in, a vehicle turned off from
+     that day, bytes that will not read, a date older than the store keeps and a day removed to
+     make room - each is said in its own sentence and none of them as "it did not go out".
+   - **the ranges**: «השבוע», «שבוע קודם», «החודש», «חודש שעבר» as before, and «תאריכים אחרים»
+     (the pay report's own words, with «מתאריך» / «עד תאריך»): any two dates, up to 92 days -
+     longer is cut to its last 92 and said.
+   - **what is said about the days**: v182's sentences, and one more - the dates on which the
+     record has men working and this phone holds no plan («ימים שעבדו בהם ואין להם שיבוץ
+     במכשיר הזה: 06/11, 11/11»), the days a plan was made somewhere else or never.
+   - **«רכבים – כמה ימים יצא כל רכב ולאן»**: each vehicle that went out, its days, and each
+     site it went to with its days (most first), «- עובד בלי אתר ברישום – N» for the days a
+     man in it had no site, «בלי נהג – N»; then once, the vehicles of the list that carried
+     nobody.
+   - **«נהגים – מי נהג, לאן ועם מי»**: each driver (seat 1), «נהג: … – N ימים», then day by
+     day «- יום ראשון 08/11: ⁧רכב⁩ – sites» and under it «נוסעים: …» (or «בלי נוסעים.»).
+   Names, days and sites only: no shekel, no rate, nothing of pay (pinned).
+2. **WHERE A VEHICLE WENT IS DERIVED, NEVER STORED, NEVER GUESSED.** A plan keeps who sat where
+   and no destination. The report reads, for the date, EVERY site of every man in the car from
+   the day record as it is now - his day's entries, none if he is marked absent, from the whole
+   list of places (a site archived since is still where the car went) - and the vehicle's sites
+   are their union in the list's order. A man in a seat with no site that day is named with
+   «(בלי אתר ברישום)», a driver with none gets «(הנהג בלי אתר ברישום)» after the sites his men
+   went to, and a car none of whose men had a site goes to «בלי אתר ברישום». A correction of the
+   record made later moves the report with it, which is the point: the record is the truth.
+3. **A vehicle taken off the list** («הוצאה מהרשימה», `active: false`) is counted on the days
+   BEFORE TODAY that its stored plans seat men in it - until v203 it vanished from every report
+   the moment it was retired, and a fine for a sold car could not be answered. From today on it
+   is not one of the day's vehicles, as on the screen; it is never listed as idle. KNOWN EDGE: a
+   plan written for a future day before the vehicle was retired, and never touched after, still
+   seats men in it on that day's bytes; once that day is past, the report counts it.
+4. **The page is the text.** The lists are drawn from the very sections the text is joined from
+   (`transportReportSections`), line for line (pinned in the browser). The text is folded under
+   «הדוח כטקסט» (as «סיכום חודש» folds its own) and leaves by the summary's three doors -
+   `shareTextOut`, `copyTextOut` (which opens the fold first: the copy's last resort is a long
+   press on the field) and `sharePrintout('transport')`. THE PICTURE RUNS TO COLUMNS: a week of
+   the drivers' list is a few hundred lines, and one column of it is taller than
+   js/ui/printout.js draws at full size (4096px) - it came out shrunk past reading. With the
+   report taller than 2,400px the blocks are laid out in columns, the first on the right, each
+   block whole, the title across the top; the summary of a day never sets it and is drawn as
+   before. Every word drawn is a word of the page, in its order (pinned).
+5. **It is a reading.** It writes no key, marks nothing, prunes nothing; the whole disk byte for
+   byte after every range, the lookup and every door (Node and Chromium). It follows the record
+   and the plans while open - from the הסעות screen as before, and from «דוחות» with that screen
+   shut (`renderTransportIfOpen` refreshes it).
+
+**RETENTION - THE PLANS ARE KEPT UP TO 400 DAYS, AND THE RECORD STILL WINS THE DISK.** Until
+v203 every day older than 35 was removed when the screen opened. Measured (tests/transport.test.mjs,
+charged as `Store.used()` charges, two bytes a UTF-16 unit, key and value):
+
+| a day's plan | bytes | days in 512 KiB |
+|---|---|---|
+| all seven vehicles full (39 men), a «נפתח» mark on every driver | 4,070 | 128 |
+| 20 men, no marks | 1,826 | 287 |
+
+A year of full days would be ~1.4 MB - over a quarter of the 5 MiB `Store` plans against (iOS
+Safari's figure), beside a record that is ~0.5 MiB for a season before its restore points. A
+ride plan is an OPTIONAL write and never spends a restore point, but neither is it ever spent
+BY the reclaim ladder, which knows only restore points (js/ui/backup.js) - so what the history
+holds is room the record cannot take back by itself. Hence two limits, both in the record's
+favour, applied where pruning always was (`transportPrune`, when the screen opens):
+
+- **400 days** (`TRANSPORT_HISTORY_DAYS`): older day keys, and their `:unreadable` copies, go.
+- **512 KiB** (`TRANSPORT_HISTORY_BYTES`, a tenth of the budget): the days older than the 35-day
+  working window, together; over it, the oldest go first.
+- **60% of the budget** (`TRANSPORT_ROOM_SHARE`): while the origin holds more than 3 MiB, or
+  `Store.full` is up, the days older than the window go, oldest first, until it does not - all
+  of them if need be.
+- A day removed by the cap or the room is remembered by its date alone, in
+  `farkadTransport:trimmed` (the newest such date; optional, verified), so the report says
+  «מתוכם N ימים עד dd/mm/yyyy: שיבוצים ישנים נמחקו מהמכשיר הזה כדי לפנות מקום לרישום העבודה.»
+  and «מי היה ברכב?» says the same, instead of "no plan".
+- The 35-day WORKING WINDOW is unchanged (`TRANSPORT_KEEP_DAYS`): js/ui/transport-share.js
+  shares, owes, listens to and puts aside only those days, exactly as in v186-v203. A day older
+  than the window is never sent, never compared with the cloud and never adopted from it.
+
+**NOT DONE, and to be decided by the owner:**
+- **The cloud keeps every shared day for ever** (firestore.rules allow no delete), but this build
+  never reads a day older than the working window back from it. A phone that did not hold a day
+  - planned on another phone and never heard, or removed here for room - cannot answer for it,
+  though the cloud could. Reading one day back for «מי היה ברכב?» is one read and a change to
+  the adapter (`js/sync/firebase-adapter.js`), which this candidate does not touch.
+- No compaction: a past day is kept exactly as written (its «נפתח» marks included, ~20% of a
+  full day). Rewriting old days is a write on every opening, and was not worth the risk.
+- The limits are checked when the הסעות screen opens; between openings the record can grow past
+  60% while up to 512 KiB of history sits there - bounded, and said.
+- **What was pruned before v203 is gone.** A phone's history begins 35 days before it took v203.
+- **ROLLOUT:** a v202-or-older window that opens the הסעות screen on a phone prunes at 35 days
+  and deletes that phone's history. So: no older window beside a v203 one on a phone whose
+  history matters, and the phone that answers fines takes v203 first. Nothing else crosses
+  builds: the shared documents and their 35-day window are v186's, unchanged.
+
+**The words, all PROPOSED** (pinned in tests/transport.test.mjs, the news in
+tests/whatsnew.test.mjs): «תאריכים אחרים», «מתאריך», «עד תאריך» (the pay report's own), «הדוח
+כטקסט», «אפשר לבחור עד 92 ימים, ולכן מוצגים 92 הימים האחרונים של הטווח.», «מי היה ברכב?», «למשל
+לדוח תנועה: בוחרים רכב ותאריך.», «רכב», «תאריך», «… (הוצא מהרשימה)», «רכב: … – יום … …», «אין
+במכשיר הזה שיבוץ ליום הזה.», «השיבוץ של היום הזה שמור במכשיר ולא נקרא.», «בשיבוץ השמור במכשיר
+הזה … סומן «לא זמין היום».», «בשיבוץ השמור במכשיר הזה אף עובד לא שובץ ב… ביום הזה.», «ברשימת
+הרכבים … כבוי החל מ-….», «שיבוצים ישנים מ-400 ימים אינם נשמרים במכשיר הזה.», «שיבוצים עד …
+נמחקו מהמכשיר הזה כדי לפנות מקום לרישום העבודה.», «מתוכם N ימים עד …: שיבוצים ישנים נמחקו
+מהמכשיר הזה כדי לפנות מקום לרישום העבודה.», «ימים שעבדו בהם ואין להם שיבוץ במכשיר הזה: …»,
+«רכבים – כמה ימים יצא כל רכב ולאן», «- … – N ימים», «- עובד בלי אתר ברישום – N», «נהגים – מי
+נהג, לאן ועם מי», «- יום … dd/mm: … – …», «נוסעים: …», «בלי אתר ברישום», «… (בלי אתר ברישום)»,
+«… (הנהג בלי אתר ברישום)»; the row «דוח הסעות» is `reportTitle`. Gone with v182's shape:
+«תצוגה מקדימה של הדוח», «מושבים תפוסים: …», «נהגים בתקופה:» and its per-driver line. «מה חדש»:
+«דוח הסעות: רכבים ונהגים» and «שיבוצי הסעות נשמרים עד שנה», «הראה לי» opening the הסעות screen
+(or, where it is off, the row in ⋯ that turns it on) - navigation only.
+
+**Tests.** tests/transport.test.mjs: the week, the month and last month line for line against a
+hand count (a man on two sites, a man with no site, a driver with none, a car none of whose men
+had a site, a vehicle kept home, a day with no plan named when men worked, an unreadable day,
+a driver since deleted); «מי היה ברכב?» in every state; an archived site; a retired vehicle
+before and on today; a vehicle turned off; «תאריכים אחרים» in either order and cut at 92; the
+horizon a year on; the 400 days, the cap and the room with the bytes measured, the newest kept,
+the window untouched, the date remembered and said, no restore point spent; the sections = the
+text; nothing written; every word. tests/transport.share.test.mjs: the report and the lookup on
+the phone that HEARD a day say what they say on the phone that planned it. tests/transport.browser.mjs:
+both ways in, the page = the text line for line, the lists = a hand count off the disk and the
+record, the five ranges, the lookup, the fold, WhatsApp / wa.me / copy / picture through
+recorders, columns, a record changed under it with the screen shut, 200% text, 44px and 16px on
+320, 375 and 440 in both schemes, Escape and the focus; tests/screens.mjs already lists the
+dialog, so tests/largetext.browser.mjs measures it with the mode on and off.
+
+**Not tried on a real phone; the owner has not read the words.**
+
+### 2. «תזכורת לסגירת חשבונות»: a quiet line from Thursday while men's accounts are still open (candidate, not served)
+
+**Why.** The owner, 2026-11-17: "a reminder - on Thursday, 'there are 4 men whose account is
+still not closed', so I don't forget to close accounts". It is a line inside the app, not a
+notification. The phone's own «תזכורות בטלפון» is a server's push. Teaching that server to count
+open accounts would be a change to `functions`, and that needs the owner's approval; this build
+does not make it.
+
+**What changed in the app: `js/ui/closereminder.js` (new), one banner in `index.html`, two
+lines in `js/app.js` (render() and bootOnce() ask it, through typeof), `sw.js`'s shell, the
+line's sizes in `css/design.css` and again in `css/large.css`, and the item in
+`js/ui/whatsnew.js`. Nothing in `js/model`, `js/sync`, `js/state.js`, `js/store.js`,
+`js/recovery.js` or `firestore.rules`;** no field path, no entry kind, no writer, no stamp.
+
+1. **ONE quiet line** in the banner area, above «מה חדש»'s: «יש 4 עובדים שהחשבון שלהם עוד לא
+   נסגר» (one man: «יש עובד אחד שהחשבון שלו עוד לא נסגר»), a button «לסגירת שבוע» that opens
+   the existing «סגירת שבוע» dialog (`openWeeklyClose`, the opener «דוחות» and «מקדמות» use) over
+   whatever screen is showing, and a ✕ («הסתר עד מחר»).
+2. **THE COUNT IS THE DIALOG'S OWN.** `weeklyCloseRead(schedule, today, now)` - the men it
+   would OFFER (`held` null): his last finished period open and a day of work in it. A man the
+   dialog shows as «לא ייסגר» (his period ends today and today is not recorded, an earlier
+   period with work left open, any reason the per-man box refuses) is not counted. Its gate is
+   the dialog's: with `financialWritingEnabled` false (the carry shut, the writer shut, a record
+   nobody approved) the list is empty and there is no line.
+3. **WHICH DAYS** - no calendar rule of its own; the dialog's target already is one. On
+   THURSDAY a weekly man's week (and every other week a fortnightly man's fortnight) ends, and
+   he counts from the moment today is recorded for him - so the line comes up on Thursday once
+   the day is written, not at dawn. FRIDAY TO WEDNESDAY his last finished period ended on a
+   Thursday before today: open, it is a forgotten close and the line says so every day until it
+   is closed; closed, there is nothing to say. A fortnightly man in the week his fortnight does
+   not end is counted only if the fortnight before is still open.
+4. **WHEN IT IS NOT PUT UP:** the switch in ⋯ off; ✕ pressed today; no crew (a first install
+   says nothing); a count of 0; a reading that throws (nothing shown, nothing thrown); and never
+   under somebody's hands - while a field is typed in or a dialog is open (`midEdit`) it waits,
+   as «מה חדש» waits, and comes when that ends. It does NOT ask whether the phone is «מסונכרן
+   בין המכשירים»: the line only reminds, and the dialog refuses an unsynced phone in its own
+   sentence (D4) - a reminder that went quiet whenever the signal did would be quiet on site.
+5. **THE ROW IN ⋯ ← «כללי»**, «תזכורת לסגירת חשבונות», straight before «תזכורות בטלפון» (so
+   «תצוגה גדולה» still follows the reminders and «הסעות» is still last): a shut row like every other (v172; `settingsFoldReasons` names no reason for it),
+   its lead, its state and one switch. ON by default.
+6. **TWO PER-PHONE KEYS, through Store, optional:** `farkadCloseReminder:off` (exactly '1' is off;
+   absent, damaged or anything else is on) and `farkadCloseReminder:dismissed` (the local date
+   of the ✕; anything not today is not dismissed). Never the record, the outbox, the fence, the
+   cloud, a backup, a restore point or the rescue file.
+7. **WHAT IT COSTS.** `weeklyCloseRead` walks every man's history (649 ms in Node for fourteen
+   men on half a year of days). It is never read before the first paint or inside a draw: at
+   boot after the frame that paints the page, and after a draw only once the draws have stopped
+   for 1.5 s. A reading is kept under the record itself (`owesKey`: the write tick, today, both
+   gates, the record as text), so an unmoved record reads nothing. ON THE DAY SCREEN a write
+   does not make it read again, except on a day that ends somebody's period - the one day a
+   write to today moves the count; elsewhere (where accounts are closed) every settled draw of a
+   moved record reads again; a start, a return to the app, a new calendar day, a change of
+   screen and the switch turned on read again. THE PRICE, said: a PAST day typed on the day
+   screen between Friday and Wednesday can leave the count behind until one of those happens.
+   Off, or put away today, nothing is read at all.
+
+**Its Hebrew:** the line's sentence is the owner's own; every other word is PROPOSED and pinned
+in `tests/closereminder.test.mjs` (R8) and `tests/whatsnew.test.mjs`: «לסגירת שבוע», «הסתר עד
+מחר», «תזכורת לסגירת חשבונות», «שורה כשיש חשבונות שלא נסגרו», the lead («מיום חמישי, כשהשבוע
+נגמר, ועד שהחשבונות נסגרים, מופיעה למעלה שורה עם מספר העובדים שהחשבון שלהם עוד לא נסגר. ✕
+מסתיר אותה עד מחר. פועל במכשיר הזה בלבד.»), «מופעלת במכשיר הזה», «כבויה במכשיר הזה», «הפעלת
+התזכורת במכשיר הזה», «כיבוי התזכורת במכשיר הזה», and the «מה חדש» item.
+
+**Tests.** `tests/closereminder.test.mjs` (new, in `npm test`): R1 the count equal to
+weeklyCloseRead's offered men on seeded records (both cycles, a man held, men closed one by one
+down to none, a man with no day of work, both gates, an unapproved record); R2 a week walked day
+by day (nothing Friday-Wednesday with last week closed, nothing on Thursday before today is
+written, one man after, every day after until closed, the fortnight's own Thursday); R3 the
+line's parts and words, its button calling the dialog's opener and writing nothing, no crew,
+typing or a dialog (waits, then comes), a reading that throws; R4 the ✕ (today, a reload, the
+next day, a damaged note, a disk that refuses it); R5 the row's place and words and the switch;
+R6 the two keys and no other byte - record, outbox, fence, cloud, backup, rescue file; R7 the
+cost; R8 the words and what the file may not do. `tests/closereminder.browser.mjs` (new, in
+`test:all`): the line coming up by itself after a start, its button opening «סגירת שבוע» at its
+title with exactly the men counted, a dialog and a typed field holding it, the ✕ through a
+reload and the next morning, the row in ⋯ and its switch, and the floors at 320x568, 375x667
+and 440x956 in both schemes with and without «תצוגה גדולה» (16/18px, 4.5:1/7:1, 44/52px, nothing
+past its button, no sideways scroll). MOVED ON PURPOSE: `tests/settings-order.browser.mjs` (a
+twelfth card, its button and five runs of words), `tests/whatsnew.*` (the item and the way
+`closeReminder`, which shows the row and switches nothing), `tests/screens.mjs` (the line, so
+the large display's walk measures it). NOT a real phone. Pictures (375x812, scale 2, light and
+dark, synthetic names): the line on the day, «סגירת שבוע» after its button, the row in ⋯.
+
+### 3. The driver's message as the owner shaped it
+
+**Why.** The owner, 2026-11-17, gave the exact shape of what a driver is sent from הסעות. For a
+plan on Wednesday 18/11/2026:
+
+    ערב טוב, היום - יום רביעי 18/11
+    סאמר
+    ראמי – חדרה
+    ג'מיל – חיפה
+    חסן – חדרה
+    חדרה, חיפה
+
+**What changed:** `transportDriverMessage` in `js/ui/transport.js`, its words in TRANSPORT_TEXT,
+and one «מה חדש» item. The lines are:
+1. `ערב טוב, היום - <the plan's day> <d/m>`. The day comes from `hebrewDayName`. The date comes
+   from `formatShortDate`, the app's own short date, which pads both parts to two digits: 18/11,
+   and 08/11 for the 8th.
+2. The driver (seat 1), alone on his line.
+3. One line per passenger, in the order of the seats: `name – site`. A passenger with no site
+   in today's record gets his name alone.
+4. The trip's sites (`TransportEngine.tripSites`, as before), joined by ", ". This line is left
+   out when there are none.
+
+Every name and site keeps its `isolate()`. Gone: «שלום X,», «הסעה ל…:», the vehicle line
+(«רכב: …»), «נוסעים (n):», «בלי נוסעים.» and «יעדים:». A driver alone gets the day, his name
+and the sites line.
+
+**The words.** The message has NEW keys: `mGreeting`, `mDriverName`, `mRider`, `mRiderOnly`
+and `mSites`.
+- Removed, because nothing reads them any more: `mHello`, `mHeading`, `mVehicle` and
+  `mPassengers`.
+- Kept word for word: `mPassenger`, `mPassengerOnly`, `mAlone` and `mDestinations`. The summary
+  of the day (and the rides' report for the last two) borrows them.
+- **«סיכום הסעות ליום» is byte for byte what v202 composes.** `tests/transport.test.mjs` checks
+  this against v202's own transport files out of Git (d768b30), for the same plans, with and
+  without a man who lost his site.
+
+**What a phone shows for a driver already marked «נפתח בוואטסאפ» on the old words.** The mark is
+believed only while `transportMessageSig(number, text)` still matches. A mark made on a v202
+message no longer matches the v203 message for the same car, so `transportMarkState` answers
+'none'. After the update:
+- the car's card offers «פתיחה בוואטסאפ» again instead of saying «נפתח בוואטסאפ»;
+- the journey's last station counts that driver as not opened, and no longer names him among
+  the workers as already opened.
+
+The mark itself stays on the disk as it was, and nothing is written for it. A driver opened
+again gets a new mark. This is the rule since v174 for any change to a message, and v203 does
+not change it.
+
+**The words are the owner's shape and are pinned.** Pinned line for line in tests/transport.test.mjs
+in four cases, on the owner's own date and names:
+- passengers with sites;
+- a passenger with no site;
+- a driver alone;
+- everyone on one site.
+
+The pins that moved with it, on purpose, are the old message in tests/transport.test.mjs,
+tests/transport.browser.mjs (the link's address) and tests/journey.browser.mjs (station 5's
+link). The news item is proposed and pinned in tests/whatsnew.test.mjs: «הודעה קצרה יותר
+לנהג» – «ההודעה לנהג קצרה יותר: היום, הנהג, כל עובד והאתר שלו, והאתרים.», and its «הראה לי»
+opens הסעות like the other הסעות items. Not tried on a real phone.
+
 ## v202 — the workbook made easier to read: «סיכום» first, widths, ₪, filters, the header on every page (candidate, not served)
 
 **NOT SERVED YET.** A candidate on v201 (main, cd2cce1). The release commit moves the three

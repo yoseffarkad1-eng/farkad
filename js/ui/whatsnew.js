@@ -73,6 +73,20 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    { build: 'v203', items: [
+        { title: 'תזכורת לסגירת חשבונות',
+            text: 'מיום חמישי מופיעה למעלה שורה עם מספר העובדים שהחשבון שלהם עוד לא נסגר, וכפתור לסגירת שבוע.',
+            where: 'הגדרות ← כללי ← תזכורת לסגירת חשבונות', go: 'closeReminder' },
+        { title: 'דוח הסעות: רכבים ונהגים',
+            text: 'עמוד אחד עם שתי רשימות – כמה ימים יצא כל רכב ולאן, ומי נהג, לאן ועם מי – ולמעלה בוחרים רכב ותאריך ורואים מי היה בו.',
+            where: 'מסך ההסעות ← דוח הסעות לתקופה, וגם דוחות ← הפקת דוח', go: 'rides' },
+        { title: 'שיבוצי הסעות נשמרים עד שנה',
+            text: 'שיבוץ של יום נשמר במכשיר עד 400 ימים כל עוד יש מקום, כדי שאפשר יהיה לבדוק דוח תנועה שמגיע מאוחר.',
+            where: 'מסך ההסעות ← דוח הסעות לתקופה ← מי היה ברכב?', go: 'rides' },
+        { title: 'הודעה קצרה יותר לנהג',
+            text: 'ההודעה לנהג קצרה יותר: היום, הנהג, כל עובד והאתר שלו, והאתרים.',
+            where: 'מסך ההסעות ← פתיחה בוואטסאפ ליד כל רכב', go: 'rides' }
+    ] },
     { build: 'v202', items: [
         { title: 'קובץ ה-Excel מסודר יותר',
             text: 'בקובץ יש עכשיו גיליון «סיכום» ראשון, עמודות ברוחב הנכון, סכומים עם ₪ ומסננים בשורת הכותרת, והמספרים עצמם לא השתנו.',
@@ -568,7 +582,11 @@ const WHATSNEW_GO = Object.freeze({
     // v198: «איפוס מקדמות» - its row in ⋯ ← «גיבוי ושחזור», opened and shown, and its button
     // NOT pressed. The tool writes money for every man (js/ui/advancereset.js); it is opened
     // only by a person's own tap on that button, never by being told about it.
-    advanceReset: () => whatsNewSettings('settingsFoldAdvanceReset', 'settingsBackups')
+    advanceReset: () => whatsNewSettings('settingsFoldAdvanceReset', 'settingsBackups'),
+    // v203: «תזכורת לסגירת חשבונות» - its row in ⋯ ← «כללי», opened and shown, the switch NOT
+    // pressed (js/ui/closereminder.js): it is on by default, and whether this phone keeps it
+    // on is the person's own tap.
+    closeReminder: () => whatsNewSettings('closeReminderCard', 'settingsDaily')
 });
 
 // The card steps aside first (which is also "seen"), and the settings sheet with it when
