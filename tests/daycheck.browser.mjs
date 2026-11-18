@@ -209,7 +209,9 @@ const recordBefore = await page.evaluate(() => JSON.stringify(State.schedule));
     if (found !== 1) await stop(context);
     same('and no second element says it anywhere on the page',
         await page.locator('button', { hasText: ENTRY }).count(), 1);
-    same('the dock still has its two buttons and no more', await page.locator('.day-actions button').count(), 2);
+    // MOVED ON PURPOSE (v204): the dock's markup holds «מהיום הקודם» for the journey's first station
+    // only (put away on every other day); the buttons it SHOWS are counted - «שליחה לוואטסאפ» and «בניית סידור».
+    same('the dock still has its two buttons and no more', await page.locator('.day-actions button:visible').count(), 2);
     // MOVED (the owner, 2026-11-11): «הכל חופש» («רשום חופש לעובדים בלי רישום ביום הנבחר»)
     // is no longer on the header - it ends the row this button stands in, at the foot of the
     // day (tests/holiday.browser.mjs). Every other control of the header is as it was.

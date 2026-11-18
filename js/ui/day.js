@@ -511,15 +511,14 @@ function buildDay(root) {
     // that was enough to leave the last man of the crew under the pinned header with the
     // page scrolled as far as it goes (tests/mobile.test.mjs).
     //
-    // «בניית סידור» (js/ui/journey.js) has its button at the same foot, in a row of its own
-    // ABOVE that one - it is the evening's main tool and carries a whole date - and gives
-    // none while its own row is in the dock. That row IS 62px, so the stylesheet does not
-    // show it on a screen too short to afford it (css/design.css, the journey's second pass).
+    // «בניית סידור» (js/ui/journey.js) had its button at the same foot, in a row of its own
+    // above that one, from v188 to v203; since v204 it is in the dock, where «מהיום הקודם»
+    // stood (the owner's choice, 2026-11-18), and the foot has no row of its own for it.
     //
-    // BOTH ROWS COME UP UNDER THE FINGER THAT PLACED THE LAST MAN WAITING (the second review of the
-    // hotfix): the trays fold away above them, and the second tap of a double tap on his usual
-    // chip landed on «בניית סידור» and started the journey - the day screen moved to tomorrow and
-    // the journey's place was written. Round two gave the rows the trays' whole clock, and a
+    // THE ROW COMES UP UNDER THE FINGER THAT PLACED THE LAST MAN WAITING (the second review of the
+    // hotfix): the trays fold away above it, and the second tap of a double tap on his usual
+    // chip landed on the journey's button there and started the journey - the day screen moved to
+    // tomorrow and the journey's place was written. Round two gave the rows the trays' whole clock, and a
     // deliberate «בדיקת היום» or «חיפוש עובד» 350-650 ms after placing the last man - the reading
     // people go to next - did nothing and said nothing (the third review). What comes down on them
     // there is the same finger again: a press inside the control of the tray's last write, less
@@ -540,8 +539,6 @@ function buildDay(root) {
     // man his place, wherever the row's own wrap puts it, beside the two or under them
     // (css/design.css). Like the two, it writes nothing.
     const check = () => {
-        const journey = typeof journeyDayEntry === 'function' ? journeyDayEntry() : null;
-        if (journey) root.appendChild(trayClock(journey));
         const foot = typeof dayCheckEntry === 'function' ? dayCheckEntry() : el('div', 'daycheck-row');
         if (typeof findEntry === 'function') foot.insertBefore(findEntry(), foot.firstChild);
         foot.appendChild(dayMoreEntry());
@@ -1914,26 +1911,45 @@ function holidayTapPoint(event, id) {
 // the screen when it was opened, and the dialog stays open into the question (askChoice's
 // `next`), so the day cannot follow the calendar between the two. Answers true when a holiday
 // was recorded through it, false when it was shut or the question was answered no.
+//
+// v204: «מהיום הקודם» IS A ROW OF THIS MENU, between «הכל חופש» and «סגור», on every day - the
+// dock gave its place to «בניית סידור» (the owner's choice, 2026-11-18). Its words, whether it
+// can be pressed and why not are the dock button's own (copyButtonWords, js/ui/sheet.js), and
+// pressing it is copyPreviousDay into the day the menu named - the same writer, the same
+// rule that fills only men with nothing recorded, the same ↶. «הכל חופש» stays the first row:
+// it is the one the menu keeps away from the finger that opened it (askChoiceAway).
+// Answers 'copied' when the copy row was chosen (its own dialog then says what it did).
 function openDayMore(event, drawnFor) {
     const date = isRealDate(drawnFor) ? drawnFor : State.date;
+    const layer = State.layer;
     const day = parseLocalDate(date);
+    const copy = typeof copyButtonWords === 'function' ? copyButtonWords(date, layer) : null;
     let asked = null;
+    const choices = [
+        { label: HOLIDAY_TEXT.entry, aria: HOLIDAY_TEXT.entryLabel, next: point => {
+            // The question is about the day the menu named, and the holiday is written there
+            // (markAllHoliday's `drawnFor`), whatever the calendar did meanwhile.
+            asked = markAllHoliday(null, point, date);
+        } }
+    ];
+    if (copy) choices.push({ label: copy.text, title: copy.title, disabled: copy.disabled, id: 'dayMoreCopy' });
+    choices.push(HOLIDAY_TEXT.close);
     const chosen = askChoice({
         title: HOLIDAY_TEXT.menuTitle(hebrewDayName(day), formatFullDate(day)),
-        choices: [
-            { label: HOLIDAY_TEXT.entry, aria: HOLIDAY_TEXT.entryLabel, next: point => {
-                // The question is about the day the menu named, and the holiday is written there
-                // (markAllHoliday's `drawnFor`), whatever the calendar did meanwhile.
-                asked = markAllHoliday(null, point, date);
-            } },
-            HOLIDAY_TEXT.close
-        ],
+        choices,
         apart: true,
         hold: DOUBLE_TAP_GUARD_MS,
         from: holidayTapPoint(event, 'dayMoreEntry')
     });
-    // Shut - «סגור», Escape, beside it - or displaced by the question it went on to.
-    return chosen.then(() => (asked ? asked : false));
+    // Shut - «סגור», Escape, beside it - or displaced by the question it went on to; or the
+    // copy row, which copies once the menu is shut, into the day it named.
+    return chosen.then(label => {
+        if (copy && !copy.disabled && label === copy.text) {
+            copyPreviousDay({ date, layer });
+            return 'copied';
+        }
+        return asked ? asked : false;
+    });
 }
 
 // Holiday fills only missing records. The date and the men are captured before the

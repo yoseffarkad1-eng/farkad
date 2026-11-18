@@ -4240,6 +4240,10 @@ body.writes-blocked .day-actions button { opacity: .5; }
    reach the crew from somewhere. */
 body.writes-blocked .day-actions #copyDayBtn { pointer-events: none; }
 body.writes-blocked .day-actions .btn-success { opacity: 1; }
+/* Nor «בניית סידור» (v204, where the copy button stood): the journey writes nothing of its
+   own, every write at its first station is the day screen's and is refused there, and its
+   last look and its sending are what a held phone can still do. */
+body.writes-blocked .day-actions #journeyDockBtn { opacity: 1; }
 /* 14px, not the 12 it was born at: this is the app telling somebody that nothing they
    type tonight is being recorded, and it is read at the end of a working day. The floor
    the mobile suite holds every other sentence to applies to the most serious one too. */

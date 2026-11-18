@@ -58,7 +58,7 @@ const SINCE = 'מה שנוסף מאז העדכון האחרון שראית, מה
 const ALL = 'כל מה שנוסף לאחרונה, מהחדש לישן.';
 const SHOW = 'הראה לי';
 // The builds that have news, newest first (tests/whatsnew.test.mjs pins the block).
-const NEWS = [203, 202, 201, 200, 199, 198, 197, 196, 195, 194, 192, 191, 190, 189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
+const NEWS = [204, 203, 202, 201, 200, 199, 198, 197, 196, 195, 194, 192, 191, 190, 189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
 
 // SYNTHETIC. Fourteen invented men on three invented sites.
 const NAMES = ['אחמד', 'מוחמד', 'יוסי', 'סמיר', 'עלי', 'Ali Hassan', 'ראמי', 'דוד', 'עבד אל-רחמן', 'מחמוד', 'חאלד', 'נביל', 'זיאד', 'כרים'];
@@ -424,7 +424,7 @@ for (const rides of [false, true]) {
     if (rides) await page.evaluate(() => transportSetEnabled(true));
     given(`הסעות is ${rides ? 'on' : 'off'}`, await page.evaluate(() => transportEnabled()) === rides);
     const ways = await page.evaluate(() => Object.keys(WHATSNEW_GO).sort());
-    same('the ways there are', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'day', 'dayCheck', 'dayFoot', 'display', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
+    same('the ways there are', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'version', 'week']);
     const reset = () => page.evaluate(() => {
         [...document.querySelectorAll('.modal')].filter(node => node.style.display === 'flex').forEach(node => {
             const close = MODAL_CLOSERS[node.id];
@@ -448,9 +448,11 @@ for (const rides of [false, true]) {
     // Where each way lands. `folds` is asked only where the way goes to the sheet.
     const lands = {
         day: s => s.view === 'day' && s.modals.length === 0 && !s.settings && !s.transport,
-        dayFoot: s => s.view === 'day' && s.modals.length === 0 && s.focus === 'journeyDayEntry' && s.journey === 0,
+        // v204: «בניית סידור» in the dock - where the v184 and v188 items (once 'share' and
+        // 'dayFoot': the WhatsApp dialog's row and the foot's button) land too - given the
+        // keyboard and NOT pressed.
+        journeyDock: s => s.view === 'day' && s.modals.length === 0 && s.focus === 'journeyDockBtn' && s.journey === 0,
         dayCheck: s => s.view === 'day' && s.modals.join() === 'dayCheckModal',
-        share: s => s.view === 'day' && s.modals.join() === 'shareModal',
         roster: s => s.view === 'roster' && s.modals.length === 0 && !s.settings,
         // The menu open with the row on the glass - and the row NOT pressed: no dialog.
         reportsMenu: s => s.view === 'reports' && s.menu && s.menuRows.includes('monthSummaryOpen') && s.modals.length === 0,
@@ -496,9 +498,9 @@ for (const rides of [false, true]) {
         const s = await state();
         check(`${way}: it lands on the screen it names, with the card out of the way`, lands[way](s) && !s.modals.includes('whatsNewModal'), JSON.stringify(s));
         same(`${way}: and the whole disk is byte for byte what it was`, await diskBut(page), disk);
-        if (way === 'dayFoot') {
-            const onGlass = await page.evaluate(() => { const box = document.getElementById('journeyDayEntry').getBoundingClientRect(); return box.top >= 0 && box.bottom <= window.innerHeight; });
-            check('dayFoot: the button is brought onto the glass - and not pressed: no journey was started',
+        if (way === 'journeyDock') {
+            const onGlass = await page.evaluate(() => { const box = document.getElementById('journeyDockBtn').getBoundingClientRect(); return box.top >= 0 && box.bottom <= window.innerHeight; });
+            check('journeyDock: the button is on the glass - and not pressed: no journey was started',
                 onGlass && await page.evaluate(() => localStorage.getItem('farkadSederJourney')) === null);
         }
         if (way === 'rides' && !rides) {

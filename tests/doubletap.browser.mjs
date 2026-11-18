@@ -721,8 +721,12 @@ suite('the walking sheet\'s last man: the tile places him, the sheet shuts, and 
         unguarded.length > 0, unguarded.join(' / '));
 }
 
-// (b) The sheet's «סגור» over «מהיום הקודם»: the day's dock is under the sheet's foot. Yesterday
-// has a record and today has men waiting, so the dock's button copies a day.
+// (b) The sheet's «סגור» over the dock's second button: the day's dock is under the sheet's
+// foot. Until v203 that button was «מהיום הקודם», and the harm a second tap did was a copied day;
+// since v204 it is «בניית סידור» (the owner's choice, 2026-11-18), and the harm is a journey
+// started - the day screen moved to tomorrow and the journey's place written. Yesterday still
+// has a record and today men waiting, as before, so neither the record nor the day moves for any
+// other reason.
 async function overCopy(size) {
     const { context, page } = await phone(size, 2);
     await page.evaluate(() => {
@@ -731,17 +735,19 @@ async function overCopy(size) {
     });
     await page.evaluate(() => { openAssignSheet('w_10', { stay: true }); });
     await page.waitForTimeout(GUARD + 150);
-    // A point inside both «סגור» and the dock's copy button, when the two overlap.
+    // A point inside both «סגור» and the dock's second button, when the two overlap.
     const point = await page.evaluate(() => {
         const close = document.querySelector('#assignSheetFoot .sheet-close').getBoundingClientRect();
-        const copy = document.getElementById('copyDayBtn').getBoundingClientRect();
+        const copy = document.getElementById('journeyDockBtn').getBoundingClientRect();
         const left = Math.max(close.left, copy.left) + 4, right = Math.min(close.right, copy.right) - 4;
         const top = Math.max(close.top, copy.top) + 4, bottom = Math.min(close.bottom, copy.bottom) - 4;
         return left < right && top < bottom ? { x: (left + right) / 2, y: (top + bottom) / 2 } : null;
     });
     return { context, page, point };
 }
-suite('the sheet\'s «סגור» over «מהיום הקודם»: the sheet shuts, and no day is copied');
+const journeyStarted = page => page.evaluate(() => (typeof journeyStation === 'function' ? journeyStation() : 0) > 0
+    || document.body.classList.contains('journey-on'));
+suite('the sheet\'s «סגור» over «בניית סידור»: the sheet shuts, no journey is started and no day is copied');
 {
     const unguarded = [], skipped = [];
     let runs = 0, clean = 0;
@@ -752,7 +758,7 @@ suite('the sheet\'s «סגור» over «מהיום הקודם»: the sheet shuts
         const hit = await doubleTap(page, point, 150, forget ? () => run(page, FORGET) : null);
         const seen = await lastGap(page);
         if (!(seen < WALK_BOUNCE) && attempt < 2) { await context.close(); continue; }
-        const nothing = (await written(page)) === before;
+        const nothing = (await written(page)) === before && !(await journeyStarted(page));
         if (forget) { if (!nothing) unguarded.push(`${size.join('x')} (${hit})`); }
         else {
             runs++;
@@ -762,10 +768,10 @@ suite('the sheet\'s «סגור» over «מהיום הקודם»: the sheet shuts
         await context.close();
         break;
     }
-    if (skipped.length) console.log(`  («סגור» does not stand over the copy button at ${[...new Set(skipped)].join(', ')})`);
-    given('«סגור» stands over the copy button on at least two phones', runs >= 2, String(runs));
-    same('in every one of them the sheet is shut and the day, the disk and the queue are what they were', clean, runs);
-    check('and with the rule\'s memory emptied between the two taps, the second tap copied the previous day in at least one of them',
+    if (skipped.length) console.log(`  («סגור» does not stand over «בניית סידור» at ${[...new Set(skipped)].join(', ')})`);
+    given('«סגור» stands over «בניית סידור» on at least two phones', runs >= 2, String(runs));
+    same('in every one of them the sheet is shut, no journey is started, and the day, the disk and the queue are what they were', clean, runs);
+    check('and with the rule\'s memory emptied between the two taps, the second tap started the journey in at least one of them',
         unguarded.length > 0, unguarded.join(' / '));
 }
 
@@ -917,16 +923,20 @@ for (let attempt = 0; attempt < 3; attempt++) {
     break;
 }
 for (const pace of [350, 450]) for (let attempt = 0; attempt < 3; attempt++) {
-    // The same place, a deliberate moment later: «סגור» over the copy button, then the copy.
+    // The same place, a deliberate moment later: «סגור» over the dock's second button, then that
+    // button. MOVED ON PURPOSE (v204): the button is «בניית סידור» (the owner's choice,
+    // 2026-11-18), so the deliberate tap starts the journey - for tomorrow, at its first station -
+    // where until v203 it copied the previous day; and it writes nothing to the record.
     const { context, page, point } = await overCopy([375, 667]);
-    given('«סגור» stands over the copy button at 375x667', Boolean(point));
+    given('«סגור» stands over «בניית סידור» at 375x667', Boolean(point));
     const before = await written(page);
     await doubleTap(page, point, pace);
     const seen = await lastGap(page);
     if (!(seen >= WALK_BOUNCE) && attempt < 2) { await context.close(); continue; }
     check(`${pace} ms: the page saw the two presses at least the bounce apart`, seen >= WALK_BOUNCE, String(seen));
-    check(`«סגור», and ${pace} ms later the button that was under it: the previous day is copied`, (await written(page)) !== before);
-    same(`${pace} ms: three men, each from yesterday`, [await sites(page, 'w_01'), await sites(page, 'w_02'), await sites(page, 'w_03')], [['p_02'], ['p_02'], ['p_02']]);
+    check(`«סגור», and ${pace} ms later the button that was under it: the journey is started`, await journeyStarted(page));
+    same(`${pace} ms: at its first station, and the record is what it was`,
+        [await page.evaluate(() => journeyStation()), (await written(page)) === before], [1, true]);
     await context.close();
     break;
 }

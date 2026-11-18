@@ -509,6 +509,28 @@ await block('a chip tap and a pick in his sheet leave the same bytes on the disk
     check('none of them a key of this feature', !chipMoved.some(key => /usual/i.test(key)), chipMoved.join(', '));
 });
 
+// v204: «מהיום הקודם» left the dock for a row of the day's «עוד ⋯» (the owner chose «בניית סידור»
+// in its place, 2026-11-18). The row is the same writer: what it leaves on the disk is, byte for
+// byte, what the dock's button left - copyPreviousDay(), its onclick, on a twin phone.
+await block('«מהיום הקודם» from «עוד ⋯» leaves the bytes the dock\'s copy button left', async () => {
+    const dock = seeded('d_copy');
+    const menu = seeded('d_copy');
+    given('the two phones start as the same bytes', disk(dock) === disk(menu), differing(dock, menu).join(', '));
+    const before = dock.dump();
+    dock.run('copyPreviousDay()');
+    let offered = null;
+    menu.ctx.askChoice = options => { offered = options.choices; return Promise.resolve(options.choices[1].label); };
+    const answer = await menu.run('openDayMore(null, State.date)');
+    same('the menu\'s second row is the copy, in the dock button\'s words, pressable', offered && [offered[1].label, offered[1].disabled, offered[1].id],
+        [menu.run('copyButtonWords(State.date, State.layer).text'), false, 'dayMoreCopy']);
+    same('pressed, it answers that it copied', answer, 'copied');
+    same('no key differs between the two phones', differing(dock, menu).join(', '), '');
+    check('the whole disk is byte for byte the same', disk(dock) === disk(menu));
+    const moved = Object.keys(dock.dump()).filter(key => dock.dump()[key] !== before[key]).sort();
+    given('and the copy did move the disk', moved.length > 0, moved.join(', '));
+    same('and both said the same thing', menu.told.map(String), dock.told.map(String));
+});
+
 await block('a man whose last days were double with hours is given a REGULAR day, as the sheet gives', async () => {
     const sheet = seeded('d_reg');
     const chip = seeded('d_reg');

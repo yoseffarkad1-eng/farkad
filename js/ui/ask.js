@@ -110,6 +110,12 @@ function askPointOf(event, button) {
 // that leaves it furthest. A phone turned sideways is why there are four: there «עוד ⋯» rests
 // level with where the menu's column comes down (measured at 568x320 and 667x375, 20-28px
 // from either place in the column), and only beside the other answer is it far from it.
+//
+// v204: AND WHOLE ON THE GLASS. With three answers (the day's «עוד ⋯» has «מהיום הקודם» between
+// «הכל חופש» and «סגור») the column a finger apart is taller than a phone turned sideways: at
+// 568x320 the column turned round put the first answer under the bottom of the glass, far from
+// the finger and unreadable. An arrangement counts only where the first answer is whole inside
+// the window; failing every one, the furthest of those that are, and only then the furthest.
 function askChoiceAway(parts, point) {
     const box = parts.choices;
     const first = box && box.querySelector('button');
@@ -117,6 +123,12 @@ function askChoiceAway(parts, point) {
     const away = () => {
         const at = first.getBoundingClientRect();
         return Math.hypot(Math.max(at.left - point.x, 0, point.x - at.right), Math.max(at.top - point.y, 0, point.y - at.bottom));
+    };
+    const whole = () => {
+        const at = first.getBoundingClientRect();
+        const w = typeof innerWidth === 'number' ? innerWidth : Infinity;
+        const h = typeof innerHeight === 'number' ? innerHeight : Infinity;
+        return at.top >= -0.5 && at.left >= -0.5 && at.bottom <= h + 0.5 && at.right <= w + 0.5;
     };
     const arrange = classes => {
         box.classList.remove('ask-flip', 'ask-across');
@@ -126,8 +138,9 @@ function askChoiceAway(parts, point) {
     for (const classes of [[], ['ask-flip'], ['ask-across'], ['ask-across', 'ask-flip']]) {
         arrange(classes);
         const distance = away();
-        if (distance >= ASK_KEEP_AWAY) return;
-        if (!best || distance > best.distance) best = { classes, distance };
+        const seen = whole();
+        if (distance >= ASK_KEEP_AWAY && seen) return;
+        if (!best || (seen && !best.seen) || (seen === best.seen && distance > best.distance)) best = { classes, distance, seen };
     }
     arrange(best.classes);
 }
@@ -349,8 +362,10 @@ function askChoice(options) {
     parts.cancel.style.display = 'none';
 
     parts.choices.style.display = '';
-    // A choice is its label, or { label, aria, next } - an accessible name of its own, and a
-    // question it goes straight on to (see the held choice above).
+    // A choice is its label, or { label, aria, next, disabled, title } - an accessible name of
+    // its own, a question it goes straight on to (see the held choice above), and - v204, the
+    // copy row of the day's «עוד ⋯» - a choice drawn but not pressable, with the reason as
+    // its title, exactly as the button it stands for says it (renderCopyButton).
     (settings.choices || []).forEach((choice, index) => {
         const label = choice && typeof choice === 'object' ? choice.label : choice;
         const btn = document.createElement('button');
@@ -358,6 +373,9 @@ function askChoice(options) {
         if (index > 0) btn.className = 'btn-secondary';
         btn.textContent = label;
         if (choice && typeof choice === 'object' && choice.aria) btn.setAttribute('aria-label', choice.aria);
+        if (choice && typeof choice === 'object' && choice.title) btn.title = choice.title;
+        if (choice && typeof choice === 'object' && choice.id) btn.id = choice.id;
+        if (choice && typeof choice === 'object' && choice.disabled) btn.disabled = true;
         btn.onclick = event => {
             // Inside a menu's hold nothing answers it (askHold).
             if (askHeld()) return;

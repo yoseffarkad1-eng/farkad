@@ -87,6 +87,11 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    { build: 'v204', items: [
+        { title: 'בניית סידור במקום מהיום הקודם',
+            text: 'בניית סידור נמצא עכשיו למטה ליד שליחה לוואטסאפ, ומהיום הקודם עבר ל«עוד ⋯» בתחתית הרשימה ולשלב הראשון של הסידור.',
+            where: 'היום ← למטה, ליד שליחה לוואטסאפ', go: 'journeyDock' }
+    ] },
     { build: 'v203', items: [
         { title: 'תזכורת לסגירת חשבונות',
             text: 'מיום חמישי מופיעה למעלה שורה עם מספר העובדים שהחשבון שלהם עוד לא נסגר, וכפתור לסגירת שבוע.',
@@ -190,8 +195,8 @@ const EXPECTED = [
     ] },
     { build: 'v188', items: [
         { title: 'בניית סידור ישר ממסך היום',
-            text: 'בתחתית רשימת היום יש כפתור שפותח את בניית הסידור ליום הבא, או ממשיך מהשלב שבו עצרת.',
-            where: 'היום ← בתחתית הרשימה', go: 'dayFoot' },
+            text: 'בתחתית מסך היום יש כפתור שפותח את בניית הסידור ליום הבא, או ממשיך מהשלב שבו עצרת.',
+            where: 'היום ← למטה, ליד שליחה לוואטסאפ', go: 'journeyDock' },
         { title: 'תלוש לכל עובד',
             text: 'כל עובד מקבל בוואטסאפ את החשבון שלו לתקופה שלו: הימים, מה נצבר, המקדמות וכמה נותר לתשלום.',
             where: 'דוחות ← לפי עובד ← הפקת דוח ← תלוש לכל עובד', go: 'payslipsMenu' },
@@ -218,7 +223,7 @@ const EXPECTED = [
     { build: 'v184', items: [
         { title: 'בניית סידור',
             text: 'הסידור של מחר במסלול אחד של חמישה שלבים: שיבוץ לאתרים, בדיקה, הסעות, מבט אחרון ושליחה.',
-            where: 'שליחה לוואטסאפ ← בניית סידור', go: 'share' },
+            where: 'היום ← למטה, ליד שליחה לוואטסאפ', go: 'journeyDock' },
         { title: 'כרטיס עובד',
             text: 'עובד אחד במסך אחד, לקריאה בלבד: איפה עבד בשבועיים האחרונים, השכר בתקופה הפתוחה והמקדמות שלו.',
             where: 'צוות ← כרטיס עובד, ליד שם העובד', go: 'roster' },
@@ -463,7 +468,7 @@ await block('the news itself: every build, every item, every word', async () => 
 
     const items = builds.flatMap(entry => entry.items.map(item => ({ build: entry.build, ...item })));
     const ways = Object.keys(device.global('WHATSNEW_GO')).sort();
-    same('the ways «הראה לי» can go', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'day', 'dayCheck', 'dayFoot', 'display', 'find', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'share', 'version', 'week']);
+    same('the ways «הראה לי» can go', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'version', 'week']);
     check('every item is a title, a sentence and a place, and nothing else',
         items.every(item => Object.keys(item).every(key => ['build', 'title', 'text', 'where', 'go'].includes(key))
             && [item.title, item.text, item.where].every(value => typeof value === 'string' && value.trim() === value && value.length > 0)));

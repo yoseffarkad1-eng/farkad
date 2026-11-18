@@ -106,7 +106,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v203">
+<meta name="farkad-build" content="v204">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -279,10 +279,17 @@
 
     <div class="day-actions">
         <!-- WhatsApp first: in RTL that is the start corner, under the thumb, and it is
-             the button pressed every evening. The copy button's label is written by
-             renderCopyButton, which names the day it will copy from - the last one with
-             anything on it, not whatever was yesterday. -->
+             the button pressed every evening. Beside it, since v204, «בניית סידור» - the
+             owner's choice (2026-11-18): the evening's own tool where «מהיום הקודם» stood,
+             and its ONE way in (journeyStart, js/ui/journey.js; its title says the day it
+             opens on, renderJourneyIfOpen). The copy button stays in the dock for the
+             journey's first station only, where css/design.css seats it between «יציאה»
+             and the way onward; on every other day it is a row of «עוד ⋯» at the foot of
+             the list (openDayMore, js/ui/day.js). Its label is written by renderCopyButton,
+             which names the day it will copy from - the last one with anything on it, not
+             whatever was yesterday. -->
         <button type="button" class="btn-success" onclick="showDayMessage()" title="הודעה לוואטסאפ עם הסידור של היום">💬 שליחה לוואטסאפ</button>
+        <button type="button" class="btn-secondary journey-dock-entry" id="journeyDockBtn" onclick="journeyStart()">בניית סידור</button>
         <button type="button" class="btn-secondary" id="copyDayBtn" onclick="copyPreviousDay()">↧ מהיום הקודם</button>
     </div>
 

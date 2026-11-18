@@ -3786,7 +3786,9 @@ for (const [width, height, what] of [[320, 667, 'portrait'], [667, 320, 'landsca
         };
         return {
             tabs: [...document.querySelectorAll('.tabs .tab')].map(nameOf),
-            dock: [...document.querySelectorAll('.day-actions button')].map(nameOf),
+            // v204: the buttons the dock SHOWS - «מהיום הקודם» stays in its markup for the journey's first
+            // station only, put away here; the two are «שליחה לוואטסאפ» and «בניית סידור».
+            dock: [...document.querySelectorAll('.day-actions button')].filter(node => getComputedStyle(node).display !== 'none').map(nameOf),
             nav: [...document.querySelectorAll('.day-nav .btn-nav')].map(nameOf),
             steps: [...document.querySelectorAll('.day-steps .step-btn')].map(nameOf),
             modes: [...document.querySelectorAll('.day-header .mode-toggle button')].map(nameOf),
@@ -3804,7 +3806,7 @@ for (const [width, height, what] of [[320, 667, 'portrait'], [667, 320, 'landsca
     check(`${label}: every tab still answers to its own word`,
         named.tabs.every(name => name.length > 1)
         && named.tabs.some(name => name.includes('היום')), JSON.stringify(named.tabs));
-    check(`${label}: the dock's two buttons still say what they send and what they copy`,
+    check(`${label}: the dock's two buttons still say what they send and that they build the seder`,
         named.dock.length === 2 && named.dock.every(name => name.length > 3),
         JSON.stringify(named.dock));
     check(`${label}: קודם and הבא are still named in full`,

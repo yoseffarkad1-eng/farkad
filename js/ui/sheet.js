@@ -1050,9 +1050,11 @@ function lastRecordedDayBefore(schedule, date, layer) {
 // the difference between thirty taps and five.
 //
 // Into the day the button was drawn for (copyButtonDay, below) - the day its words count
-// back from - rather than State.date at the tap.
-function copyPreviousDay() {
-    const at = copyButtonDay || { date: State.date, layer: State.layer };
+// back from - rather than State.date at the tap. `drawnFor` is the same from the row of
+// «עוד ⋯» (openDayMore, js/ui/day.js, v204): the day that menu named when it was opened.
+function copyPreviousDay(drawnFor) {
+    const at = drawnFor && isRealDate(drawnFor.date) && drawnFor.layer ? drawnFor
+        : (copyButtonDay || { date: State.date, layer: State.layer });
     const from = lastRecordedDayBefore(State.schedule, at.date, at.layer);
     if (!from) {
         askTell('אין יום קודם עם רישום להעתיק ממנו.');
@@ -1079,7 +1081,16 @@ function renderCopyButton() {
     const btn = document.getElementById('copyDayBtn');
     if (!btn) return;
     copyButtonDay = { date: State.date, layer: State.layer };
+    const words = copyButtonWords(State.date, State.layer);
+    btn.textContent = words.text;
+    btn.disabled = words.disabled;
+    btn.title = words.title;
+}
 
+// What the copy button says, and whether it can be pressed, for a day - the dock's button
+// at the journey's first station and the row of «עוד ⋯» (v204) say the same thing, from
+// here, so neither speaks of a day the other does not.
+function copyButtonWords(date, layer) {
     // THE HOLD IS SAID BY THE BUTTON, not only worn by the stylesheet.
     //
     // css/app.css gives this button `pointer-events: none` and opacity .5 while
@@ -1098,27 +1109,20 @@ function renderCopyButton() {
     // The word is the app's own - js/ui/day.js's progress line already says «הרישום מושבת»
     // in exactly this state - so no new string enters the product.
     if (typeof farkadWritesBlocked === 'function' && farkadWritesBlocked()) {
-        btn.textContent = '↧ מהיום הקודם';
-        btn.disabled = true;
-        btn.title = 'הרישום מושבת';
-        return;
+        return { text: '↧ מהיום הקודם', disabled: true, title: 'הרישום מושבת' };
     }
 
     const from = State.schedule.workers.length === 0
         ? null
-        : lastRecordedDayBefore(State.schedule, State.date, State.layer);
+        : lastRecordedDayBefore(State.schedule, date, layer);
 
     if (!from) {
-        btn.textContent = '↧ מהיום הקודם';
-        btn.disabled = true;
-        btn.title = 'אין יום קודם עם רישום';
-        return;
+        return { text: '↧ מהיום הקודם', disabled: true, title: 'אין יום קודם עם רישום' };
     }
 
     const parsed = parseLocalDate(from);
-    btn.disabled = false;
     // 'מיום רביעי', not 'מרביעי' - the toast for the same action says it correctly and
     // the button should not speak worse Hebrew than its own confirmation.
-    btn.textContent = `↧ ${'מ' + hebrewDayName(parsed)} ${formatShortDate(parsed)}`;
-    btn.title = `העתק את מה שנרשם ב${formatFullDate(parsed)}. רק מי שעדיין לא נרשם יושלם.`;
+    return { text: `↧ ${'מ' + hebrewDayName(parsed)} ${formatShortDate(parsed)}`, disabled: false,
+        title: `העתק את מה שנרשם ב${formatFullDate(parsed)}. רק מי שעדיין לא נרשם יושלם.` };
 }

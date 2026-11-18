@@ -48,21 +48,20 @@
 // why): station 3's bar counts him, the strip marks that station as having something left,
 // and the last look names him in the words the vehicle's own card uses.
 //
-// TWO WAYS IN, and they are the same door (journeyStart). The row in the WhatsApp dialog
-// (#shareModal), under the seder's and הסעות's rows, is v184's. Since the second pass there
-// is also ONE button at the FOOT of the day's list, above «בדיקת היום» (journeyDayEntry,
-// asked for by js/ui/day.js): the owner asked for this as his main evening tool and it was
-// two taps deep in a dialog about something else. The foot, and not the header or the dock:
-// those two are measured to the pixel (tests/mobile.test.mjs, tests/design.browser.mjs -
-// eleven whole names at 440x956), and the foot is under the last name. It says the day it
-// will open on, and while a journey he left is still his (JOURNEY_RESUME_MS) it says where
-// he is in it instead. With the journey's own row in the dock it is not drawn at all, and
-// on a screen under 580px tall the stylesheet does not show it (css/design.css: there the
-// last man of the list must stay reachable at the list's end, and one more row costs him).
+// ONE WAY IN (journeyStart): «בניית סידור» in the day's DOCK, beside «שליחה לוואטסאפ», where
+// «מהיום הקודם» stood (v204 - the owner chose it on 2026-11-18, having asked for the journey
+// "not inside the WhatsApp button"). v184 put the way in as a row of the WhatsApp dialog and
+// v188 added a button at the foot of the day's list; both are gone, so there is one door and
+// it is where the thumb already is every evening. Its words are the journey's own name,
+// short enough for half a dock at 320px with the large display on; the day it will open
+// on - or, while a journey he left is still his (JOURNEY_RESUME_MS), where he is in it - is
+// its title (journeyDayEntryWords, written on every draw by renderJourneyIfOpen). With the
+// journey's own row in the dock it is put away (css/design.css), and so is it on paper.
 //
 // THE SECOND PASS, the rest of it (each measured in tests/journey.browser.mjs):
 //   - at station 1 the dock's «שליחה לוואטסאפ» is put away (css/design.css) - sending is
-//     station 5 - and «מהיום הקודם» stays: copying the last day is how a seder is begun;
+//     station 5 - and «מהיום הקודם» stays: copying the last day is how a seder is begun
+//     (since v204 the one place on the dock it is drawn; on other days it is in «עוד ⋯»);
 //   - a driver whose message was opened is named again in the workers' group at station 5
 //     with that same mark, so nobody messages him twice without meaning to - he is not
 //     taken off the seder's list, that choice is the owner's;
@@ -84,7 +83,7 @@
 // «סיכום הסעות ליום» are TRANSPORT_TEXT's; «👷 לכל עובד בנפרד», the count of workers and
 // «נפתחו N מתוך M» are SEDER_TEXT's. A name in a template is already isolated by the caller.
 const JOURNEY_TEXT = Object.freeze({
-    // --- the way in: a row in the WhatsApp dialog; and the frame's own title
+    // --- the way in: the dock's button (v204); and the frame's own title
     entry: 'בניית סידור',
     title: 'בניית סידור',
     // «שיבוץ» is the app's own word for putting a man somewhere («שיבוץ לרכבים», «אין
@@ -101,9 +100,9 @@ const JOURNEY_TEXT = Object.freeze({
     leave: 'יציאה',
     finish: 'סיום',
     notKept: 'המקום בבניית הסידור לא נשמר במכשיר. אם האפליקציה תיסגר, מתחילים מהשלב הראשון.',
-    // --- the button at the foot of the day's list: the day a new journey opens on -
-    // «בניית סידור ליום רביעי 11/11/2026» (never «מחר»: on a Friday evening it is Sunday) -
-    // or, with a journey he left still his, where he is in it.
+    // --- the dock button's title (v204; the words of v188's button at the foot of the list):
+    // the day a new journey opens on - «בניית סידור ליום רביעי 11/11/2026» (never «מחר»: on a
+    // Friday evening it is Sunday) - or, with a journey he left still his, where he is in it.
     dayEntry: (day, date) => `בניית סידור ל${day} ${date}`,
     dayResume: n => `המשך בניית הסידור · שלב ${n} מתוך 5`,
 
@@ -367,9 +366,6 @@ function journeyRidesOn() {
 // From the entry. The journey he is in the middle of is continued where he left it;
 // otherwise a new one, for tomorrow, at the first station.
 function journeyStart() {
-    // The dialog the entry lives in steps aside: one layer at a time.
-    const share = typeof document !== 'undefined' && document.getElementById ? document.getElementById('shareModal') : null;
-    if (share && typeof closeShareModal === 'function') closeShareModal();
     const now = Date.now();
     const kept = journeyStored(now);
     journeyMemory = kept || { version: 1, date: journeyDefaultDate(todayStr()), station: 1, at: now, open: true };
@@ -577,6 +573,7 @@ function renderJourneyIfOpen() {
         && (typeof currentView === 'undefined' || currentView === 'day');
     document.body.classList.toggle('journey-on', Boolean(live));
     document.body.classList.toggle('journey-day', onDay);
+    journeyDockEntryTitle();
     if (!live) {
         journeyDrawDock(null);
         journeyDrawPanel(null);
@@ -1073,27 +1070,11 @@ function journeyKeydown(event) {
 
 // ================================================================== the way in
 
-// The row in the WhatsApp dialog, after the seder's and הסעות's. Built here rather than
-// written into index.html because its label is one of the words above. «הסעות» puts its
-// own row straight after the seder's whenever it is switched on, so this one is always
-// the last of the three, whichever order they were built in.
-function journeyInstallEntry() {
-    if (typeof document === 'undefined' || !document.querySelector) return;
-    const actions = document.querySelector('#shareModal .modal-actions');
-    if (!actions || document.getElementById('journeyEntry')) return;
-    const entry = button(JOURNEY_TEXT.entry, 'btn-secondary journey-entry', () => journeyStart());
-    entry.id = 'journeyEntry';
-    const after = document.getElementById('transportEntry') || document.getElementById('sederEntry')
-        || actions.querySelector('.btn-success');
-    actions.insertBefore(entry, after ? after.nextSibling : actions.firstChild);
-}
-
-// THE BUTTON AT THE FOOT OF THE DAY'S LIST (js/ui/day.js asks for it on every draw of the
-// day, through typeof). A new node each time, like everything the day draws. Not drawn
-// while the journey is on the screen: its own row is then in the dock, a thumb below.
-// Pressing it is journeyStart - the same door as the row in the WhatsApp dialog - so a
-// journey he left is continued and anything else starts a new one; if the three hours ran
-// out between the draw and the tap, the tap starts a new one and the label was a minute old.
+// THE DOCK'S BUTTON (index.html, #journeyDockBtn, v204). Its words are fixed; its title is
+// the day a new journey opens on or where he is in the one he left, so it is written on every
+// draw (renderJourneyIfOpen). Pressing it is journeyStart - a journey he left is continued
+// and anything else starts a new one; if the three hours ran out between the draw and the
+// tap, the tap starts a new one and the title was a minute old.
 function journeyDayEntryWords(now, today) {
     const T = JOURNEY_TEXT;
     const kept = journeyStored(now);
@@ -1102,14 +1083,16 @@ function journeyDayEntryWords(now, today) {
     return T.dayEntry(hebrewDayName(parsed), formatFullDate(parsed));
 }
 
-function journeyDayEntry() {
-    if (journeyLive) return null;
-    const row = el('div', 'journey-day-row');
-    const entry = button(journeyDayEntryWords(Date.now(), todayStr()), 'btn-secondary journey-day-entry', () => journeyStart());
-    entry.id = 'journeyDayEntry';
-    entry.dataset.resume = journeyStored(Date.now()) ? '1' : '0';
-    row.appendChild(entry);
-    return row;
+function journeyDockEntryTitle() {
+    const entry = document.getElementById('journeyDockBtn');
+    if (!entry) return;
+    try {
+        const now = Date.now();
+        entry.title = journeyDayEntryWords(now, todayStr());
+        entry.dataset.resume = journeyStored(now) ? '1' : '0';
+    } catch (error) {
+        entry.removeAttribute('title');
+    }
 }
 
 // Away and back - a call, WhatsApp - is the journey being touched: the three hours are
@@ -1125,9 +1108,8 @@ function journeyWatch() {
     });
 }
 
-// At load: the entry and the two listeners. Never allowed to throw into the boot.
+// At load: the two listeners. Never allowed to throw into the boot.
 try {
-    journeyInstallEntry();
     journeyWatch();
 } catch (error) {
     if (typeof console !== 'undefined' && console.warn) console.warn('journey: not installed', error);

@@ -837,7 +837,6 @@
 :root.display-large .find-who .badge { font-size: 20px; }
 :root.display-large .find-door { font-size: 20px; font-weight: 600; }
 :root.display-large .find-group { font-size: 21px; }
-:root.display-large .journey-day-entry { font-size: 21px; font-weight: 700; }
 :root.display-large body.journey-day .day-actions > #copyDayBtn { font-size: 20px !important; }
 :root.display-large #whatsNewBanner { font-size: 20px; font-weight: 600; }
 :root.display-large #whatsNewBanner button { font-size: 20px; }
