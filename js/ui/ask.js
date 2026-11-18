@@ -349,8 +349,10 @@ function askChoice(options) {
     parts.cancel.style.display = 'none';
 
     parts.choices.style.display = '';
-    // A choice is its label, or { label, aria, next } - an accessible name of its own, and a
-    // question it goes straight on to (see the held choice above).
+    // A choice is its label, or { label, aria, next, disabled, title } - an accessible name of
+    // its own, a question it goes straight on to (see the held choice above), and - v204, the
+    // copy row of the day's «עוד ⋯» - a choice drawn but not pressable, with the reason as
+    // its title, exactly as the button it stands for says it (renderCopyButton).
     (settings.choices || []).forEach((choice, index) => {
         const label = choice && typeof choice === 'object' ? choice.label : choice;
         const btn = document.createElement('button');
@@ -358,6 +360,9 @@ function askChoice(options) {
         if (index > 0) btn.className = 'btn-secondary';
         btn.textContent = label;
         if (choice && typeof choice === 'object' && choice.aria) btn.setAttribute('aria-label', choice.aria);
+        if (choice && typeof choice === 'object' && choice.title) btn.title = choice.title;
+        if (choice && typeof choice === 'object' && choice.id) btn.id = choice.id;
+        if (choice && typeof choice === 'object' && choice.disabled) btn.disabled = true;
         btn.onclick = event => {
             // Inside a menu's hold nothing answers it (askHold).
             if (askHeld()) return;

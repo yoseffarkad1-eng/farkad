@@ -978,12 +978,11 @@ body.journey-day .day-actions { flex-wrap: wrap; }
 .journey-foot .journey-next { flex: 2 1 0; }
 .journey-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-/* The way in, a whole row of the WhatsApp dialog like the two above it. And the two
-   dialogs the last station opens: the panel is on the settings sheet's tier (60) and an
-   ordinary .modal on 50, which would open them BEHIND the station that asked - the fault
-   the rides' summary has its own line for. Raised only while a journey is on the screen;
-   both sit later in the document than the panel, so on one tier they are in front. */
-#shareModal .modal-actions .journey-entry { grid-column: 1 / -1; }
+/* The two dialogs the last station opens: the panel is on the settings sheet's tier (60)
+   and an ordinary .modal on 50, which would open them BEHIND the station that asked - the
+   fault the rides' summary has its own line for. Raised only while a journey is on the
+   screen; both sit later in the document than the panel, so on one tier they are in front.
+   (Until v204 the way in was a whole row of the WhatsApp dialog; it is the dock's now.) */
 body.journey-on #shareModal,
 body.journey-on #sederModal { z-index: 60; }
 /* כרטיס עובד (js/ui/workercard.js): one man on one screen, and nothing on it to edit.
@@ -1211,9 +1210,14 @@ body.journey-on #sederModal { z-index: 60; }
 .find-group { margin: 14px 0 0; color: var(--ink-2); font-size: 17px; }
 
 /* ---- בניית סידור, the second pass (js/ui/journey.js) -------------------------------------
-   THE WAY IN ON THE DAY SCREEN is one tonal button the width of the list at the list's
-   FOOT, above «בדיקת היום» - under the last name, so the header, the dock and the eleven
-   names above it are where they were. Its words wrap; it has no fixed height.
+   THE WAY IN ON THE DAY SCREEN is the dock's second button since v204 (the owner's choice,
+   2026-11-18), where «מהיום הקודם» stood: the dock's own button rules size it (css/app.css,
+   .day-actions button - the same share of the row, the same 44px and up, one line), so the
+   dock is exactly as tall as it was and the eleven names above it are where they were.
+   «מהיום הקודם» stays IN the document and in the dock, put away on every day but the
+   journey's first station, where it is seated as below; on the others it is a row of the
+   day's «עוד ⋯» (js/ui/day.js). From v188 to v203 the way in was a button at the list's
+   foot, not drawn under 580px of height; with it gone, that rule is gone too.
 
    AT STATION 1 THE DOCK IS TWO LINES, where it was three. «שליחה לוואטסאפ» is put away
    (sending is the fifth station) and «מהיום הקודם» - how a seder is begun - takes the place
@@ -1222,16 +1226,9 @@ body.journey-on #sederModal { z-index: 60; }
    the dock's copy button are items of ONE wrapping flex line, and `order` seats the copy
    button between the two. The dock's height is still whatever these words need, and
    js/ui/bars.js still measures it as it stands. */
-.journey-day-row { display: flex; margin: 14px 0 0; }
-.journey-day-entry { flex: 1 1 auto; min-width: 0; min-height: 48px; padding: 10px 14px; font-size: 17px; font-weight: 700; white-space: normal; overflow-wrap: anywhere; }
-/* NOT ON A SHORT SCREEN. On a phone turned sideways (320-390px tall), and on a 320x568 one,
-   what is left between the day's header and the bars is one or two rows: a second button
-   under the last man puts HIM under the header when the list is scrolled to its end, and
-   "the last man in the crew is still reachable there" is a measured guarantee
-   (tests/mobile.test.mjs) that outranks a shortcut. There the journey keeps its row in the
-   WhatsApp dialog and nothing else changes. The three phones this is for are 647px tall
-   and more. */
-@media (max-height: 580px) { .journey-day-row { display: none; } }
+.day-actions > #copyDayBtn { display: none !important; }
+body.journey-day .day-actions > #copyDayBtn { display: inline-block !important; }
+body.journey-day .day-actions > #journeyDockBtn { display: none !important; }
 body.journey-day .day-actions { align-items: stretch; }
 body.journey-day .day-actions > .btn-success { display: none !important; }
 body.journey-day .journey-dock,

@@ -73,6 +73,11 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    { build: 'v204', items: [
+        { title: 'בניית סידור במקום מהיום הקודם',
+            text: 'בניית סידור נמצא עכשיו למטה ליד שליחה לוואטסאפ, ומהיום הקודם עבר ל«עוד ⋯» בתחתית הרשימה ולשלב הראשון של הסידור.',
+            where: 'היום ← למטה, ליד שליחה לוואטסאפ', go: 'journeyDock' }
+    ] },
     { build: 'v203', items: [
         { title: 'תזכורת לסגירת חשבונות',
             text: 'מיום חמישי מופיעה למעלה שורה עם מספר העובדים שהחשבון שלהם עוד לא נסגר, וכפתור לסגירת שבוע.',
@@ -177,8 +182,8 @@ const WHATSNEW_BUILDS = Object.freeze([
     ] },
     { build: 'v188', items: [
         { title: 'בניית סידור ישר ממסך היום',
-            text: 'בתחתית רשימת היום יש כפתור שפותח את בניית הסידור ליום הבא, או ממשיך מהשלב שבו עצרת.',
-            where: 'היום ← בתחתית הרשימה', go: 'dayFoot' },
+            text: 'בתחתית מסך היום יש כפתור שפותח את בניית הסידור ליום הבא, או ממשיך מהשלב שבו עצרת.',
+            where: 'היום ← למטה, ליד שליחה לוואטסאפ', go: 'journeyDock' },
         { title: 'תלוש לכל עובד',
             text: 'כל עובד מקבל בוואטסאפ את החשבון שלו לתקופה שלו: הימים, מה נצבר, המקדמות וכמה נותר לתשלום.',
             where: 'דוחות ← לפי עובד ← הפקת דוח ← תלוש לכל עובד', go: 'payslipsMenu' },
@@ -205,7 +210,7 @@ const WHATSNEW_BUILDS = Object.freeze([
     { build: 'v184', items: [
         { title: 'בניית סידור',
             text: 'הסידור של מחר במסלול אחד של חמישה שלבים: שיבוץ לאתרים, בדיקה, הסעות, מבט אחרון ושליחה.',
-            where: 'שליחה לוואטסאפ ← בניית סידור', go: 'share' },
+            where: 'היום ← למטה, ליד שליחה לוואטסאפ', go: 'journeyDock' },
         { title: 'כרטיס עובד',
             text: 'עובד אחד במסך אחד, לקריאה בלבד: איפה עבד בשבועיים האחרונים, השכר בתקופה הפתוחה והמקדמות שלו.',
             where: 'צוות ← כרטיס עובד, ליד שם העובד', go: 'roster' },
@@ -529,22 +534,18 @@ function whatsNewReportsMenu(workers) {
 
 const WHATSNEW_GO = Object.freeze({
     day: () => whatsNewDay(),
-    // The foot of the day's list: brought onto the glass and given the keyboard. Not
-    // pressed - starting a journey is his tap, not this one.
-    dayFoot: () => {
+    // «בניית סידור» in the day's dock (v204): the day screen, and the button given the
+    // keyboard. Not pressed - starting a journey is his tap, not this one. Since v204 the v184
+    // and v188 items land here too: the row of the WhatsApp dialog and the button at the foot
+    // of the list they told of are this button now, and their «איפה» says so.
+    journeyDock: () => {
         whatsNewDay();
-        // On a short screen the journey's button is not drawn there (css/design.css says
-        // why) and the foot is «בדיקת היום»: he is still brought to the foot.
-        const entry = ['journeyDayEntry', 'dayCheckEntry'].map(id => document.getElementById(id))
-            .find(node => node && node.offsetParent !== null);
-        if (!entry) return false;
-        entry.scrollIntoView({ block: 'center', behavior: 'instant' });
+        const entry = document.getElementById('journeyDockBtn');
+        if (!entry || entry.offsetParent === null) return false;
         entry.focus({ preventScroll: true });
         return true;
     },
     dayCheck: () => { whatsNewDay(); return typeof openDayCheck === 'function' ? openDayCheck() : false; },
-    // The WhatsApp dialog, where the rows of the seder, of הסעות and of the journey are.
-    share: () => { whatsNewDay(); if (typeof showDayMessage === 'function') showDayMessage(); return true; },
     roster: () => { showView('roster'); return true; },
     // The reports screen with its «הפקת דוח» menu OPEN, the rows it holds on the glass. The
     // row itself is not pressed: «סיכום חודש» and «תלוש לכל עובד» each open a reading of
