@@ -68,6 +68,24 @@ let ADVANCE_ORDER_DRAFT = null;
 // before, and tests/reports.speed.test.mjs holds every cell of the sheet, the paper's
 // tables, the workbook, the statements and the cards byte for byte against the pay sheet
 // of v195 (out of Git) under both readings of the gates.
+//
+// AND THE LEDGER AND EACH MAN'S WALK, ONCE (v206). What was left after v196 was the walk:
+// every reader that asks for a man's account - his row's carry, his notes, his card, the
+// closing box, the board, his statement, «סגירת שבוע» - walks every period of his since his
+// first advance, and every step of every walk folds the WHOLE ledger again (advanceWalk ->
+// overpaidAdvances -> advanceOutstanding -> foldLedger + advanceHistory, js/model). Measured
+// on a season nobody closed (40 men, 300 days): 40 seconds for one draw of «דוחות» in Node,
+// 44 in one task in Chromium slowed four times, two minutes for the payslips. So inside the
+// reading the seven readers of that walk - ledgerEntries, foldLedger, advanceHistory,
+// overpaidAdvances, advanceOutstanding, advanceWalk, advancePositionInto - answer THIS record
+// once per question (reportShareLedger, below), for every way in that opens the reading:
+// the two pages, a man's days, his closing, his statement, the workbook, the card, the
+// payslips, the month, «סגירת שבוע»'s list and «איפוס מקדמות»'s. Same rules as the three
+// above: another record goes to the real function every time, an append that can reach
+// this record forgets every answer, and the readers are put back in the same finally.
+//
+// tests/speed.test.mjs holds every way in byte for byte against v204's files (out of Git)
+// and counts what is asked.
 let REPORT_ONCE = null;
 let REPORT_GATE_KEPT = null;
 
@@ -108,41 +126,216 @@ function reportReading() {
     return REPORT_ONCE !== null && REPORT_ONCE.schedule === State.schedule;
 }
 
+// ---------------------------------------------------- the ledger and the walks, once (v206)
+//
+// THE SEVEN READERS OF A MAN'S WALK, answered once per question inside a reading. Each is
+// a model function read and never changed (js/model/ledger.js, js/model/schema.js); what
+// is asked of it here is exactly what its own callers ask, and anything else - another
+// schedule, another number of arguments, an id that is neither a string nor a number - goes
+// to the real function, untouched.
+const REPORT_SHARED_READERS = ['ledgerEntries', 'foldLedger', 'advanceHistory', 'overpaidAdvances',
+    'advanceOutstanding', 'advanceWalk', 'advancePositionInto'];
+
+// WHAT THOSE ANSWERS DEPEND ON BESIDES THE RECORD: the readers themselves, the one appender,
+// v196's three, and every name js/model feature-detects (`typeof X === 'function'`) - because
+// the model's answer depends on which of them is loaded. advanceOutstanding reads the old
+// field when foldLedger or advanceHistory is absent; advanceWalk counts no overpayment with
+// no overpaidAdvances; frozenPeriodFor freezes nothing with no closedPeriods. An answer
+// worked out with every reader loaded is another answer from one worked out with one taken
+// away, so inside one reading an answer is shared only while each of these is as present as
+// it was when the reading opened. tests/speed.test.mjs fails the day the model
+// feature-detects a name that is not on this list.
+const REPORT_SHARED_DEPENDS = REPORT_SHARED_READERS.concat(['appendLedgerEntry', 'carryReportingEnabled',
+    'payrollReport', 'closedPeriods', 'workerDaysReport', 'rimaCount', 'poisonedContainers',
+    'planAdvanceCarry', 'overpaymentStaysCredit', 'ledgerContainerProblem', 'isPeriodFor']);
+
+// The readers as they are on the page right now, by name, in REPORT_SHARED_DEPENDS's order.
+function reportSharedFound() {
+    const page = typeof globalThis === 'object' && globalThis ? globalThis : {};
+    return REPORT_SHARED_DEPENDS.map(name => page[name]);
+}
+
+// An append that cannot reach this record: its first argument is an object other than the
+// record, with a ledger object of its own and a map of entries of its own - the copy
+// «סגירת שבוע» closes a man's empty periods on first (weeklyCloseWithoutEmpties). The
+// appender writes only into its first argument's own map (js/model/ledger.js), so such an
+// append moves nothing this reading answers for. Anything else - the record itself, a copy
+// sharing the record's ledger object or its map, something that is not an object - can.
+function reportSharedApart(asked, schedule) {
+    const object = value => value !== null && typeof value === 'object';
+    const ledger = object(schedule) ? schedule.ledger : undefined;
+    const map = object(ledger) ? ledger.advances : undefined;
+    return asked !== schedule && object(asked) && object(asked.ledger) && asked.ledger !== ledger
+        && object(asked.ledger.advances) && asked.ledger.advances !== map;
+}
+
+// ONE READING'S SHARE OF THE LEDGER, for the record it opened on.
+//
+// The answers are kept per STATE of the record, the rule weeklyCloseOnce keeps (js/ui/
+// weeklyclose.js): the schedule object, its ledger map, its map of advances, and a count of
+// the appends that could reach it. An append that can - or one that throws - forgets every
+// answer; an append to a copy of its own (see reportSharedApart) forgets nothing. What is handed out is what the real function would
+// hand out, as a copy wherever a caller could change it: the lists sliced, the flat answers
+// copied, the fold shared as v196 shares a pay sheet - nothing writes into a fold
+// (currentAdvances, the one function that does, has no caller; pinned).
+function reportShareLedger(schedule, found) {
+    const page = typeof globalThis === 'object' && globalThis ? globalThis : {};
+    const real = {};
+    REPORT_SHARED_READERS.concat(['appendLedgerEntry']).forEach(name => {
+        real[name] = typeof page[name] === 'function' ? page[name] : null;
+    });
+    // Which of the readers were there when the reading opened. A scope opened inside it may
+    // put one in that was absent (weeklyCloseOnce installs its own whether or not the real
+    // reader is loaded); while that is so the model's answer is another one, and every
+    // question goes to the real function, remembered nowhere.
+    const present = found.map(fn => typeof fn === 'function');
+    const asPresent = () => {
+        for (let n = 0; n < present.length; n += 1) {
+            if ((typeof page[REPORT_SHARED_DEPENDS[n]] === 'function') !== present[n]) return false;
+        }
+        return true;
+    };
+    const liveMap = () => (schedule && schedule.ledger && schedule.ledger.advances) || null;
+    const liveLegacy = () => (schedule && schedule.advances) || null;
+    let moved = 0;
+    let memo = null;
+    const fresh = () => ({ held: liveMap(), legacy: liveLegacy(), moved, entries: null, fold: null, history: null,
+        overpaid: new Map(), outstanding: new Map(), walks: new Map(), positions: new Map() });
+    const now = () => {
+        if (!memo || memo.held !== liveMap() || memo.legacy !== liveLegacy() || memo.moved !== moved) memo = fresh();
+        return memo;
+    };
+    // A key for one argument: its type and its value, -0 apart from 0. Only for the two
+    // kinds of id the model's callers pass; anything else is not answered from memory.
+    const idKey = value => ((typeof value === 'string' || typeof value === 'number')
+        ? `${typeof value}:${Object.is(value, -0) ? '-0' : String(value)}` : null);
+    const entriesOf = slot => {
+        if (!slot.entries) slot.entries = real.ledgerEntries(schedule);
+        return slot.entries;
+    };
+    const wrap = {};
+    if (real.appendLedgerEntry) wrap.appendLedgerEntry = function (asked) {
+        const apart = reportSharedApart(asked, schedule);
+        if (!apart) moved += 1;
+        let landed = false;
+        try {
+            const out = real.appendLedgerEntry.apply(this, arguments);
+            landed = true;
+            return out;
+        } finally {
+            // Checked again after the call: still a copy of its own, and it did not throw.
+            if (apart && !(landed && reportSharedApart(asked, schedule))) moved += 1;
+        }
+    };
+    if (real.ledgerEntries) wrap.ledgerEntries = function (asked) {
+        if (asked !== schedule || arguments.length !== 1 || !asPresent()) return real.ledgerEntries.apply(this, arguments);
+        return entriesOf(now()).slice();
+    };
+    if (real.foldLedger) wrap.foldLedger = function (asked) {
+        if (asked !== schedule || arguments.length !== 1 || !asPresent()) return real.foldLedger.apply(this, arguments);
+        const slot = now();
+        if (!slot.fold) slot.fold = real.foldLedger(schedule);
+        return slot.fold;
+    };
+    // advanceHistory is ledgerEntries filtered to one advance, in the same order: the whole
+    // ledger grouped once, in that order. It needs ledgerEntries to group from - with that
+    // absent it is not wrapped, and asks for itself exactly as it would.
+    if (real.advanceHistory && real.ledgerEntries) wrap.advanceHistory = function (asked, advanceId) {
+        const one = asked === schedule && arguments.length === 2 ? idKey(advanceId) : null;
+        if (asked !== schedule || one === null || !asPresent()) return real.advanceHistory.apply(this, arguments);
+        const slot = now();
+        if (!slot.history) {
+            const history = new Map();
+            entriesOf(slot).forEach(entry => {
+                const of = String(entry.advanceId);
+                if (!history.has(of)) history.set(of, []);
+                history.get(of).push(entry);
+            });
+            slot.history = history;
+        }
+        return (slot.history.get(String(advanceId)) || []).slice();
+    };
+    if (real.overpaidAdvances) wrap.overpaidAdvances = function (asked, workerId) {
+        const one = asked === schedule && arguments.length === 2 ? idKey(workerId) : null;
+        if (asked !== schedule || one === null || !asPresent()) return real.overpaidAdvances.apply(this, arguments);
+        const slot = now();
+        if (!slot.overpaid.has(one)) slot.overpaid.set(one, real.overpaidAdvances(schedule, workerId));
+        const answer = slot.overpaid.get(one);
+        return Array.isArray(answer) ? answer.map(state => Object.assign({}, state)) : answer;
+    };
+    if (real.advanceOutstanding) wrap.advanceOutstanding = function (asked, advanceId) {
+        const one = asked === schedule && arguments.length === 2 ? idKey(advanceId) : null;
+        if (asked !== schedule || one === null || !asPresent()) return real.advanceOutstanding.apply(this, arguments);
+        const slot = now();
+        if (!slot.outstanding.has(one)) slot.outstanding.set(one, real.advanceOutstanding(schedule, advanceId));
+        return Object.assign({}, slot.outstanding.get(one));
+    };
+    if (real.advanceWalk) wrap.advanceWalk = function (asked, workerId, from, to, carriedIn) {
+        const one = asked === schedule && arguments.length === 5 && typeof from === 'string' && typeof to === 'string'
+            && typeof carriedIn === 'number' ? idKey(workerId) : null;
+        if (asked !== schedule || one === null || !asPresent()) return real.advanceWalk.apply(this, arguments);
+        const slot = now();
+        const walk = `${one}|${from}|${to}|${idKey(carriedIn)}`;
+        if (!slot.walks.has(walk)) slot.walks.set(walk, real.advanceWalk(schedule, workerId, from, to, carriedIn));
+        return Object.assign({}, slot.walks.get(walk));
+    };
+    if (real.advancePositionInto) wrap.advancePositionInto = function (asked, workerId, fromDate) {
+        const one = asked === schedule && arguments.length === 3 && typeof fromDate === 'string' ? idKey(workerId) : null;
+        if (asked !== schedule || one === null || !asPresent()) return real.advancePositionInto.apply(this, arguments);
+        const slot = now();
+        const at = `${one}|${fromDate}`;
+        if (!slot.positions.has(at)) slot.positions.set(at, real.advancePositionInto(schedule, workerId, fromDate));
+        return slot.positions.get(at);
+    };
+    return {
+        install() { Object.keys(wrap).forEach(name => { page[name] = wrap[name]; }); },
+        uninstall() { Object.keys(wrap).forEach(name => { page[name] = real[name]; }); }
+    };
+}
+
 function reportReadOnce(read, self, args) {
     if (reportReading()) return read.apply(self, args || []);
     const schedule = State.schedule;
     const outer = REPORT_ONCE;
+    // The readers this reading's answers depend on, taken before anything is swapped - by the
+    // OUTERMOST reading: a reading of another record opened inside one is handed the outer
+    // reading's wrappers, which give another record to the real functions untouched.
+    const found = outer && Array.isArray(outer.found) ? outer.found : reportSharedFound();
     const real = { gate: carryReportingEnabled, sheet: payrollReport, closed: closedPeriods };
     const model = typeof real.gate === 'function' && typeof real.sheet === 'function'
         && typeof real.closed === 'function';
     let gate;
+    let shared = null;
     const sheets = new Map();
     const folds = new Map();
-    REPORT_ONCE = { schedule };
-    if (model) {
-        carryReportingEnabled = asked => {
-            if (asked !== schedule) return real.gate(asked);
-            if (gate === undefined) gate = reportGateAnswer(asked, real.gate);
-            return gate;
-        };
-        payrollReport = function (asked, from, to) {
-            if (asked !== schedule || arguments.length !== 3 || typeof from !== 'string' || typeof to !== 'string') {
-                return real.sheet.apply(this, arguments);
-            }
-            const key = `${from}..${to}`;
-            if (!sheets.has(key)) sheets.set(key, real.sheet(asked, from, to));
-            return sheets.get(key);
-        };
-        closedPeriods = function (asked, workerId) {
-            if (asked !== schedule || arguments.length !== 2) return real.closed.apply(this, arguments);
-            const key = String(workerId);
-            if (!folds.has(key)) folds.set(key, real.closed(asked, workerId));
-            return folds.get(key);
-        };
-    }
+    REPORT_ONCE = { schedule, found };
     try {
+        if (model) {
+            carryReportingEnabled = asked => {
+                if (asked !== schedule) return real.gate(asked);
+                if (gate === undefined) gate = reportGateAnswer(asked, real.gate);
+                return gate;
+            };
+            payrollReport = function (asked, from, to) {
+                if (asked !== schedule || arguments.length !== 3 || typeof from !== 'string' || typeof to !== 'string') {
+                    return real.sheet.apply(this, arguments);
+                }
+                const key = `${from}..${to}`;
+                if (!sheets.has(key)) sheets.set(key, real.sheet(asked, from, to));
+                return sheets.get(key);
+            };
+            closedPeriods = function (asked, workerId) {
+                if (asked !== schedule || arguments.length !== 2) return real.closed.apply(this, arguments);
+                const key = String(workerId);
+                if (!folds.has(key)) folds.set(key, real.closed(asked, workerId));
+                return folds.get(key);
+            };
+            shared = reportShareLedger(schedule, found);
+            shared.install();
+        }
         return read.apply(self, args || []);
     } finally {
+        if (shared) shared.uninstall();
         if (model) {
             carryReportingEnabled = real.gate;
             payrollReport = real.sheet;
