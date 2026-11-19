@@ -763,6 +763,14 @@ function yearSummarySheets(facts) {
     const R = MONTH_SUMMARY_REUSED;
     const Y = YEAR_SUMMARY_REUSED;
     const known = value => (value === null || value === undefined ? '—' : value);
+    // A SENTENCE IN A CELL IS SET RIGHT TO LEFT BY ITS OWN MARKS, one U+200F at each end. Excel
+    // takes a cell's direction from its first Hebrew letter and shows the marks as nothing; a
+    // spreadsheet that lays every cell out left to right - LibreOffice 24.2 does, printed and
+    // looked at on this very file - otherwise carries a sentence's closing stop to its right
+    // edge, sends «⚠️ 1» from the head of the sentence it opens to its tail, and puts «לא פעיל»
+    // before the name it follows. Only the cells that are sentences, or a name set into words,
+    // carry them: a name, a number, a heading and a month stand bare, as in the reports' file.
+    const said = text => `\u200F${text}\u200F`;
     const sheets = [];
 
     // «סיכום»: the frame, when it was made, the figures, the sentences, and the list apart.
@@ -771,7 +779,7 @@ function yearSummarySheets(facts) {
         const money = new Set();
         const add = row => { rows.push(row); return rows.length - 1; };
         add([T.title(facts.year)]);
-        yearSummaryFrameLines(facts).forEach(text => add([text]));
+        yearSummaryFrameLines(facts).forEach(text => add([said(text)]));
         add([`${SUMMARY_TEXT.made}: ${formatFullDate(parseLocalDate(todayStr()))}`]);
         add([]);
         // «נצבר»'s sentences in the rows right under it: the accountant reads this file without the
@@ -779,13 +787,13 @@ function yearSummarySheets(facts) {
         yearSummaryTiles(facts).forEach(tile => {
             const at = add([tile.label, known(tile.value)]);
             if (tile.money && typeof tile.value === 'number') money.add(`${at}:1`);
-            if (tile.id === 'gross') yearSummaryNotes(facts).forEach(note => add([note.text]));
+            if (tile.id === 'gross') yearSummaryNotes(facts).forEach(note => add([said(note.text)]));
         });
         const apart = yearSummaryApart(facts);
         if (apart) {
             add([]);
             add([apart.label, apart.value]);
-            add([apart.note]);
+            add([said(apart.note)]);
         }
         sheets.push({ key: 'summary', name: SUMMARY_SHEET, rows,
             look: { money: (r, c) => money.has(`${r}:${c}`), cap: 40 }, table: false });
@@ -804,11 +812,12 @@ function yearSummarySheets(facts) {
 
     // «עובדים»: every man in the roster's order; a man switched off says so beside his name -
     // the name isolated, as in every sentence a name is set into, so that a name in Latin
-    // letters or ending in a digit keeps its place before the words in a right-to-left cell.
+    // letters or ending in a digit keeps its place before the words, and the cell set right to
+    // left by its marks (`said`, above).
     {
         const rows = [[Y.worker, R.attendance, Y.payUnits, R.doubles, R.extraHours, R.gross, T.handedOver]];
         facts.men.forEach(man => {
-            rows.push([man.active ? man.name : `${isolate(man.name)} · ${Y.inactive}`, man.attendanceDays, man.payUnits,
+            rows.push([man.active ? man.name : said(`${isolate(man.name)} · ${Y.inactive}`), man.attendanceDays, man.payUnits,
                 man.doubleDays, man.extraHours, known(man.gross), man.handedOver]);
         });
         const last = rows.length - 1;
@@ -816,7 +825,7 @@ function yearSummarySheets(facts) {
         // the year cannot price, in the sheet's own sentence.
         const unknown = facts.men.filter(man => man.gross === null).map(man => man.name);
         if (unknown.length > 0) {
-            rows.push([MONTH_SUMMARY_TEXT.unpriced(unknown.length, unknown.map(name => isolate(name)).join(', '))]);
+            rows.push([said(MONTH_SUMMARY_TEXT.unpriced(unknown.length, unknown.map(name => isolate(name)).join(', ')))]);
         }
         sheets.push({ key: 'workers', name: T.menSheet, rows, table: true,
             look: { money: (r, c) => r > 0 && r <= last && (c === 5 || c === 6), filterTo: last } });
@@ -832,7 +841,7 @@ function yearSummarySheets(facts) {
             rows.push([site.name, site.billed].concat(withRima ? [site.own, site.rima] : [], [yearSummarySpan(site)]));
         });
         const last = rows.length - 1;
-        if (withRima) { rows.push([]); rows.push([M.rimaNote]); }
+        if (withRima) { rows.push([]); rows.push([said(M.rimaNote)]); }
         sheets.push({ key: 'sites', name: T.sitesSheet, rows, table: true, look: { filterTo: last } });
     }
 
@@ -843,7 +852,7 @@ function yearSummarySheets(facts) {
         const last = rows.length - 1;
         rows.push([YOSEF_GEVES_TOTAL, facts.line.yosef ? facts.line.yosef.total : 0]);
         rows.push([]);
-        rows.push([YOSEF_GEVES_NOTE]);
+        rows.push([said(YOSEF_GEVES_NOTE)]);
         sheets.push({ key: 'yosef-geves', name: YOSEF_GEVES_SHEET, rows, table: true, look: { filterTo: last } });
     }
     return sheets;

@@ -914,6 +914,10 @@ function bookOf(bytes) {
     return { names, sheets, views };
 }
 
+// A sentence in a cell, as the workbook sets it: right to left by a U+200F at each end (a name,
+// a number, a heading and a month carry none - the cell-for-cell comparisons below hold both).
+const said = text => `\u200F${text}\u200F`;
+
 // The sheet's own sentence for a wage it cannot price, as the year writes it.
 const unpricedSentence = names => `⚠️ ${names.length} עובדים בלי שכר יומי, ולכן הסכום חסר אותם: `
     + `${names.map(name => `\u2068${name}\u2069`).join(', ')}. הוסף להם שכר במסך "עובדים ואתרים".`;
@@ -924,40 +928,40 @@ function expectedBook(facts, today) {
     const L = facts.line;
     const money = value => (value === null ? '—' : value);
     const summary = [[`סיכום שנת ${facts.year}`],
-        ['נצבר לפי הרישום: כל יום עבודה בשנה, לפי השכר שנרשם ליום הזה. זה לא מה ששולם בפועל.'],
-        ['תקופת תשלום שעוברת את 1 בינואר מתחלקת כאן לפי הימים: כל יום נספר בשנה שבה עבדו בו.']]
-        .concat(facts.inProgress ? [['השנה עוד לא נגמרה. המספרים הם של מה שנרשם עד עכשיו.']] : [])
+        [said('נצבר לפי הרישום: כל יום עבודה בשנה, לפי השכר שנרשם ליום הזה. זה לא מה ששולם בפועל.')],
+        [said('תקופת תשלום שעוברת את 1 בינואר מתחלקת כאן לפי הימים: כל יום נספר בשנה שבה עבדו בו.')]]
+        .concat(facts.inProgress ? [[said('השנה עוד לא נגמרה. המספרים הם של מה שנרשם עד עכשיו.')]] : [])
         .concat([[`הופק: ${today.slice(8, 10)}/${today.slice(5, 7)}/${today.slice(0, 4)}`], [],
             ['ימי עבודה', L.workingDays], ['ימי נוכחות', L.attendance], ['עובדים שעבדו', L.men], ['סה״כ ימי עובד־אתר', L.siteDays]])
         .concat(L.ownSiteDays !== null ? [['בלי עובדי רימא', L.ownSiteDays]] : [])
         .concat([['סה״כ עובדי רימא', L.rima ? L.rima.total : 0], ['נצבר', money(L.gross)]])
         // Right under «נצבר»: the men it leaves out, why the year is smaller, the hours left out.
-        .concat(L.unpriced.length ? [[unpricedSentence(L.unpriced)]] : [])
-        .concat(facts.notSummed ? [['עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.']] : [])
-        .concat(L.hoursUnpriced ? [['* שעות נוספות בלי שכר שעה - לא נכללו בסכום.']] : [])
+        .concat(L.unpriced.length ? [[said(unpricedSentence(L.unpriced))]] : [])
+        .concat(facts.notSummed ? [[said('עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.')]] : [])
+        .concat(L.hoursUnpriced ? [[said('* שעות נוספות בלי שכר שעה - לא נכללו בסכום.')]] : [])
         .concat([['מקדמות שניתנו', L.advances]])
         .concat(L.repaid ? [['הוחזר במזומן', L.repaid]] : [])
         .concat(L.reversed ? [['תיקון-היפוך', L.reversed]] : [])
-        .concat(L.yosef ? [[], ['סה״כ עובדי יוסף גבס', L.yosef.total], ['עובדי יוסף גבס בלבד. אינם נכללים בשכר ואינם נכללים בחיוב.']] : []);
+        .concat(L.yosef ? [[], ['סה״כ עובדי יוסף גבס', L.yosef.total], [said('עובדי יוסף גבס בלבד. אינם נכללים בשכר ואינם נכללים בחיוב.')]] : []);
     const NAMES = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
     const withRima = L.rima !== null;
     const months = [['חודש', withRima ? 'בלי עובדי רימא' : 'ימי עובד־אתר', 'עובדים שעבדו', 'נצבר', 'מקדמות שניתנו']]
         .concat(facts.months.map((m, i) => (m.empty ? [NAMES[i], '—', '—', '—', '—']
             : [NAMES[i], m.ownSiteDays !== null ? m.ownSiteDays : m.siteDays, m.men, money(m.gross), m.advances])));
     const men = [['עובד', 'ימי נוכחות', 'ימי שכר', 'כפולים', 'שעות נוספות', 'נצבר', 'מקדמות שניתנו']]
-        .concat(facts.men.map(m => [m.active ? m.name : `\u2068${m.name}\u2069 · לא פעיל`, m.attendanceDays, m.payUnits, m.doubleDays,
+        .concat(facts.men.map(m => [m.active ? m.name : said(`\u2068${m.name}\u2069 · לא פעיל`), m.attendanceDays, m.payUnits, m.doubleDays,
             m.extraHours, money(m.gross), m.handedOver]))
         // No «—» without its reason: one row after the last man names every man whose cell it is.
-        .concat(facts.men.some(m => m.gross === null) ? [[unpricedSentence(facts.men.filter(m => m.gross === null).map(m => m.name))]] : []);
+        .concat(facts.men.some(m => m.gross === null) ? [[said(unpricedSentence(facts.men.filter(m => m.gross === null).map(m => m.name)))]] : []);
     const span = s => (s.first === s.last ? NAMES[Number(s.first.slice(5)) - 1]
         : `${NAMES[Number(s.first.slice(5)) - 1]}–${NAMES[Number(s.last.slice(5)) - 1]}`);
     const sites = [['אתר', 'סה״כ ימי עובד־אתר'].concat(withRima ? ['בלי עובדי רימא', 'רישום לרימא'] : [], ['חודשים'])]
         .concat(facts.sites.map(s => [s.name, s.billed].concat(withRima ? [s.own, s.rima] : [], [span(s)])))
-        .concat(withRima ? [[], ['עובדי רימא בלבד. אינם נכללים בשכר. בחיוב כל אחד מהם נספר כיום עובד־אתר אחד.']] : []);
+        .concat(withRima ? [[], [said('עובדי רימא בלבד. אינם נכללים בשכר. בחיוב כל אחד מהם נספר כיום עובד־אתר אחד.')]] : []);
     const book = { 'סיכום': summary, 'חודשים': months, 'עובדים': men, 'אתרים': sites };
     if (facts.yosef.length > 0) {
         book['עובדי יוסף גבס'] = [['אתר', 'עובדי יוסף גבס']].concat(facts.yosef.map(p => [p.name, p.total]),
-            [['סה״כ עובדי יוסף גבס', L.yosef.total], [], ['עובדי יוסף גבס בלבד. אינם נכללים בשכר ואינם נכללים בחיוב.']]);
+            [['סה״כ עובדי יוסף גבס', L.yosef.total], [], [said('עובדי יוסף גבס בלבד. אינם נכללים בשכר ואינם נכללים בחיוב.')]]);
     }
     return book;
 }
@@ -997,7 +1001,17 @@ function withLibrary(device) {
         Object.keys(want).forEach(sheet => same(`${name}: «${sheet}», cell for cell`, book.sheets[sheet].rows, want[sheet]));
         same(`${name}: every sheet opens right to left`, Object.values(book.views).map(v => v.join()), book.names.map(() => '1'));
         same(`${name}: the frame on the first sheet, before any figure`, book.sheets['סיכום'].rows[1][0],
-            'נצבר לפי הרישום: כל יום עבודה בשנה, לפי השכר שנרשם ליום הזה. זה לא מה ששולם בפועל.');
+            said('נצבר לפי הרישום: כל יום עבודה בשנה, לפי השכר שנרשם ליום הזה. זה לא מה ששולם בפועל.'));
+        // THE MARKS: every sentence of the file is set right to left by a U+200F at each end and
+        // holds none inside; a cell without them never opens with ⚠️ or * nor closes on a stop -
+        // so a sentence added later without its marks fails here.
+        const cells = Object.values(book.sheets).flatMap(sheet => sheet.rows.flat()).filter(cell => typeof cell === 'string');
+        const marked = cells.filter(cell => cell.indexOf('\u200F') !== -1);
+        check(`${name}: each sentence is set right to left by its marks, and nothing else carries one`,
+            marked.length >= 3 && marked.every(cell => cell[0] === '\u200F' && cell[cell.length - 1] === '\u200F'
+                && cell.slice(1, -1).indexOf('\u200F') === -1)
+            && cells.filter(cell => cell.indexOf('\u200F') === -1).every(cell => !/^(⚠️|\*)/.test(cell) && !/\.$/.test(cell)),
+            JSON.stringify(cells.filter(cell => cell.indexOf('\u200F') === -1 && (/^(⚠️|\*)/.test(cell) || /\.$/.test(cell)))));
         // Money in the workbook's own money format; a count is a count.
         const men = book.sheets['עובדים'];
         const moneyLooks = men.rows.slice(1).flatMap((row, r) => [5, 6].filter(c => typeof row[c] === 'number')
@@ -1027,11 +1041,11 @@ function withLibrary(device) {
     const grossAt = summaryRows.findIndex(row => row[0] === 'נצבר');
     same('«סיכום»: right under «נצבר», his sentence and then the year\'s reason', [summaryRows[grossAt],
         plain(summaryRows[grossAt + 1][0]), summaryRows[grossAt + 2][0], summaryRows[grossAt + 3][0]],
-    [['נצבר', 1950], '⚠️ 1 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: בית. הוסף להם שכר במסך "עובדים ואתרים".',
-        'עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.', 'מקדמות שניתנו']);
+    [['נצבר', 1950], said('⚠️ 1 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: בית. הוסף להם שכר במסך "עובדים ואתרים".'),
+        said('עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.'), 'מקדמות שניתנו']);
     const menRows = marchBook.sheets['עובדים'].rows;
     same('«עובדים»: his «נצבר» «—», and after the last man the one row that names him', [menRows[2][5], menRows.length,
-        plain(menRows[4][0])], ['—', 5, '⚠️ 1 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: בית. הוסף להם שכר במסך "עובדים ואתרים".']);
+        plain(menRows[4][0])], ['—', 5, said('⚠️ 1 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: בית. הוסף להם שכר במסך "עובדים ואתרים".')]);
 
     // «שמירה חוזרת» writes it again; anything else (a tap beside it, Escape, «הבנתי») writes nothing more.
     const again = withLibrary(handPhone(OPEN));
