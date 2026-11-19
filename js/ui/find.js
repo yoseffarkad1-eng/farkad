@@ -4,7 +4,7 @@
 // screen, somebody rings, and what is wanted is one man - his card, his day, his advances.
 // Until now that was: leave the day, open the crew, type in its search, find his row,
 // press. This is one dialog over the day: type any part of his name (or of his number),
-// and each man found carries the three doors beside his name.
+// and each man found carries the four doors beside his name.
 //
 // IT IS A FINDER AND NOTHING ELSE. It reads the roster, and every button on it goes to a
 // screen that already exists, by that screen's own function:
@@ -13,6 +13,8 @@
 //   the day's sheet   openAssignSheet       js/ui/sheet.js   - for the date ON SCREEN,
 //                                           named on the button, never a date it chose
 //   «מקדמות»          showWorkerAdvances    js/ui/reports.js
+//   «איפה עבד»        openHistory           js/ui/history.js - asked through typeof; LAST,
+//                                           so «מקדמות» keeps its place under the thumb
 //
 // It writes nothing: no commit, no preference, not even what was typed - the field is
 // emptied when the dialog closes. tests/find.test.mjs holds the whole disk byte for byte.
@@ -184,6 +186,10 @@ function findRowNode(worker, sheetLabel) {
     // and his advances here; putting him back to work is the crew screen's switch.
     if (worker.active !== false) door('sheet', sheetLabel);
     door('advances', FIND_REUSED.advances);
+    // «מי עבד איפה» (js/ui/history.js), on this build: where he worked, on any day of the
+    // record - for a man turned off too, the commonest dispute being about a man who left.
+    // Last, so every door before it stands where it stood.
+    if (typeof HISTORY_TEXT === 'object' && typeof openHistory === 'function') door('history', HISTORY_TEXT.door);
     row.appendChild(doors);
     return row;
 }
@@ -282,13 +288,18 @@ function renderFindIfOpen() {
     }
 }
 
-// The three doors. Each closes the finder and hands the man to the screen that owns what
+// The four doors. Each closes the finder and hands the man to the screen that owns what
 // was asked for; none of them changes anything itself.
 function findGo(what, workerId) {
     const worker = State.worker(workerId);
     closeFind();
     // He left the record between the list being drawn and the tap: nothing opens.
     if (!worker) return;
+    // «מי עבד איפה» on him; it enters at its own heading.
+    if (what === 'history') {
+        if (typeof openHistory === 'function') openHistory(worker.id);
+        return;
+    }
     if (what === 'advances') {
         showWorkerAdvances(worker.id);
         return;

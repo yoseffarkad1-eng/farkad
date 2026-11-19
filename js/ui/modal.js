@@ -24,6 +24,8 @@ const MODAL_CLOSERS = {
     workerCardModal: () => closeWorkerCard(),
     // The finder (js/ui/find.js): closing it empties what was typed.
     findModal: () => closeFind(),
+    // «מי עבד איפה» (js/ui/history.js): closing it forgets the question and what was drawn.
+    historyModal: () => closeHistory(),
     shareModal: () => closeShareModal(),
     // Closing it on purpose is what stops a reload bringing it back (js/ui/seder.js).
     sederModal: () => closeSederList(),

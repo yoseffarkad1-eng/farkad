@@ -162,6 +162,8 @@ function render() {
     if (typeof renderMonthSummaryIfOpen === 'function') renderMonthSummaryIfOpen();
     // And for a site's card (js/ui/sitecard.js): every count on it is read off this record.
     if (typeof renderSiteCardIfOpen === 'function') renderSiteCardIfOpen();
+    // And for «מי עבד איפה» (js/ui/history.js): its counts and its days are read off this record.
+    if (typeof renderHistoryIfOpen === 'function') renderHistoryIfOpen();
     // And for «תלוש לכל עובד» (js/ui/payslips.js): every row is a man's pay and a link that
     // carries his statement, and both must say what the record says now.
     if (typeof renderPayslipsIfOpen === 'function') renderPayslipsIfOpen();

@@ -1209,6 +1209,68 @@ body.journey-on #sederModal { z-index: 60; }
 .find-door { min-width: 0; min-height: 48px; padding: 8px 6px !important; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
 .find-group { margin: 14px 0 0; color: var(--ink-2); font-size: 17px; }
 
+/* ---- «מי עבד איפה» (js/ui/history.js) ----------------------------------------------------
+   One dialog over the day, from the finder's door: three choices, the counts, the text in a
+   fold, and the days. Built for the finder's reader: nothing under 16px, every control and
+   every row 48px tall, no fixed height and no text in a fixed box - a row wraps and grows,
+   so doubled text and «תצוגה גדולה» make it taller and cut nothing.
+   IT HANGS FROM THE TOP, like the finder: a choice that empties the list or fills it does not
+   move the choices under the finger. The head never scrolls; everything under it does.
+   EACH LABEL ABOVE ITS FIELD, at every width and with no query: a name in a closed select has
+   the whole width (measured: «עבד אל-רחמן אבו חוסיין · לא פעיל» fits at 320 without the mode),
+   and the choice is written again as words under the three, where it is never cut.
+   THE TILES are the worker card's pairs, as many to a line as fit - two at 320, three from
+   375 - by the grid alone. A DAY is a tonal row, as the site card's men are: its date, the man,
+   and his day - each site in its own colour with its name (the day screen's tag, raised from
+   13px and freed of its fixed 28px), the kind as a word and a double heavier, and the day
+   screen's «2 אתרים» raised from 11px, as the finder raises its badge.
+   It stands inside the slice tests/payslips.test.mjs reads, and keeps that slice's limits: no
+   media query, no fixed height, every size between 16px and 30px - a figure here is 24px. */
+#historyModal { align-items: flex-start; }
+#historyModal .history-content { display: flex; flex-direction: column; max-width: 680px; padding: 16px; overflow: hidden; }
+.history-head { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 10px; }
+.history-head h3 { min-width: 0; margin: 0; line-height: 1.3; overflow-wrap: anywhere; }
+.history-head button { flex: 0 0 auto; min-width: 64px; min-height: 48px; font-size: 16px; }
+.history-scroll { flex: 1 1 auto; min-height: 0; margin-top: 4px; overflow-y: auto; overscroll-behavior: contain; }
+.history-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-top: 8px; color: var(--ink); font-size: 16px; font-weight: 600; }
+.history-field select,
+.history-field input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 48px; margin: 0; font-family: inherit; font-size: 16px; font-weight: 500; }
+.history-now { display: block; margin-top: 10px; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.history-totals { margin-top: 12px; }
+.history-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+.history-tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.history-tile-label { color: var(--ink-2); font-size: 16px; overflow-wrap: anywhere; }
+.history-tile-value { font-size: 24px; font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.history-note { margin: 8px 0 0; color: var(--ink-2); font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
+.history-site-head { margin: 0 0 4px; font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+.history-pair { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; min-width: 0; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.history-pair-label { min-width: 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.history-pair-value { font-size: 22px; font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.history-pair-note { flex: 1 1 100%; margin: 2px 0 0; }
+.history-pair-apart { margin-top: 12px; border-top: 2px solid var(--line); }
+.history-men-head { margin: 14px 0 2px; font-size: 18px; font-weight: 800; }
+.history-man { margin: 0; padding: 6px 0; font-size: 16px; overflow-wrap: anywhere; }
+.history-fold { margin-top: 12px; }
+.history-fold > button { width: 100%; min-height: 48px; font-size: 16px; }
+.history-fold-body { display: grid; gap: 8px; margin-top: 8px; }
+#historyModal .history-fold-body textarea { margin: 0; font-size: 16px; }
+.history-fold-body button { min-height: 48px; font-size: 16px; }
+.history-fold-body .share-status:empty { display: none; }
+.history-list { margin-top: 12px; }
+.history-month { margin: 16px 0 6px; font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+#historyList .history-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; width: 100%; min-height: 48px; margin: 0 0 6px; padding: 8px 12px; font-size: 16px; text-align: start; white-space: normal; }
+.history-when { flex: 0 0 auto; font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.history-name { flex: 1 1 auto; min-width: 0; font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+.history-day { display: flex; flex: 1 1 12em; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.history-day .tag { height: auto; min-height: 30px; max-width: 100%; font-size: 16px; white-space: normal; overflow-wrap: anywhere; }
+.history-kind { font-size: 16px; font-weight: 600; }
+.history-kind-double { font-weight: 800; }
+.history-hours { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.history-day .badge { font-size: 16px; }
+.history-foot { margin-top: 4px; }
+.history-count { color: var(--ink); }
+#historyList .history-more { width: 100%; min-height: 48px; margin-top: 8px; font-size: 16px; }
+
 /* ---- בניית סידור, the second pass (js/ui/journey.js) -------------------------------------
    THE WAY IN ON THE DAY SCREEN is the dock's second button since v204 (the owner's choice,
    2026-11-18), where «מהיום הקודם» stood: the dock's own button rules size it (css/app.css,
