@@ -495,11 +495,29 @@ const landing = (rowSelector, key, id) => page.evaluate(([rowSelector, key, id])
 }
 
 // Two taps: the chip, then `target` (a point, or a function of the page giving one) `gap` ms
-// after the chip's press, on the presses' own clock. Made again when the page saw a gap too
-// far from the one asked for. Returns what was under the second finger and the gap seen.
+// after the chip's press, ON THE PRESSES' OWN CLOCK - the gap the page saw between the two
+// pointerdowns is what counts, and a pair it saw outside [gap - 60, gap + 40] (or, inside the
+// hold, at GUARD - 5 or later) is VOID: whatever it did is undone and it is made again, so a
+// machine that delayed the second finger past the hold is never taken for the app letting it
+// through. The driver's own latency is about 20 ms, so the second tap is aimed 25 ms early.
+// Each attempt carries its own baseline: `before` is the disk as that attempt began.
+const activeFlags = () => page.evaluate(() => JSON.stringify(State.schedule.workers.map(w => [w.id, w.active])));
+async function undoAttempt(flags) {
+    await page.evaluate(flags => {
+        if (document.getElementById('askModal').style.display === 'flex') askCancel();
+        [...document.querySelectorAll('.modal')].forEach(m => { if (m.style.display === 'flex' && MODAL_CLOSERS[m.id]) MODAL_CLOSERS[m.id](); });
+        const was = new Map(JSON.parse(flags));
+        let moved = false;
+        State.schedule.workers.forEach(w => { if (was.has(w.id) && was.get(w.id) !== w.active) { w.active = was.get(w.id); moved = true; } });
+        if (moved) { State.commitRoster(); render(); }
+    }, flags);
+    await pause(page, 760);
+}
 async function twoTaps(chipLocator, target, gap) {
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
         await openFresh();
+        const flags = await activeFlags();
+        const before = await disk(page);
         await page.evaluate(() => { window.__downs.length = 0; });
         await chipLocator.scrollIntoViewIfNeeded();
         await pause(page, 60);
@@ -509,17 +527,17 @@ async function twoTaps(chipLocator, target, gap) {
         await page.touchscreen.tap(at.x, at.y);
         const point = typeof target === 'function' ? await target(at) : (target || at);
         if (!point) return { missing: true };
-        const wait = started + gap - Date.now();
+        const wait = started + gap - 25 - Date.now();
         if (wait > 0) await page.waitForTimeout(wait);
         const under = await page.evaluate(({ x, y }) => { const node = document.elementFromPoint(x, y);
             const hit = node && node.closest('button'); return hit ? `${hit.className}|${hit.textContent.trim().slice(0, 20)}` : (node ? node.id || node.className : null); }, point);
         await page.touchscreen.tap(point.x, point.y);
         await pause(page, 250);
         const seen = await page.evaluate(() => { const d = window.__downs; return d.length > 1 ? Math.round(d[d.length - 1] - d[d.length - 2]) : null; });
-        if (seen !== null && Math.abs(seen - gap) <= 120 && (gap < GUARD ? seen < GUARD - 10 : seen > GUARD + 10)) return { under, seen };
-        await page.evaluate(() => { if (document.getElementById('askModal').style.display === 'flex') askCancel(); });
-        await page.evaluate(() => { [...document.querySelectorAll('.modal')].forEach(m => { if (m.style.display === 'flex' && MODAL_CLOSERS[m.id]) MODAL_CLOSERS[m.id](); }); });
-        await pause(page, 150);
+        const inside = gap < GUARD ? seen !== null && seen >= gap - 60 && seen <= Math.min(gap + 40, GUARD - 5)
+            : seen !== null && seen >= GUARD + 20 && seen <= gap + 100;
+        if (inside) return { under, seen, before, attempts: attempt + 1 };
+        await undoAttempt(flags);
     }
     return { failed: true };
 }
@@ -561,14 +579,15 @@ const saveOnGlass = () => page.evaluate(() => {
     suite('13. a double tap on a door is one tap: the second press is the page\'s to spend');
     for (const [kind, id] of [['idle', 'w_08'], ['noRate', 'w_02']]) {
         const done = await twoTaps(chip(kind, id), null, 120);
-        check(`${kind}: the two presses were a double tap`, !done.failed && done.seen < 300, JSON.stringify(done));
-        same(`${kind}: no byte moved and no switch turned`, [await disk(page), await switches()], [diskBefore, switchesBefore]);
+        check(`${kind}: the two presses were a double tap`, !done.failed && done.seen < 300, JSON.stringify({ seen: done.seen, under: done.under }));
+        same(`${kind}: no byte moved and no switch turned`, [await disk(page), await switches()], [done.before, switchesBefore]);
         if (kind === 'noRate') same('and the form is still open', await page.evaluate(() => document.getElementById('workerFormModal').style.display), 'flex');
         await settle();
     }
 
     suite('13. THE SLOW SECOND TAP: 350, 500 and 650 ms after a door\'s chip, nothing turns, the form stays open, no byte moves');
     const trials = [];
+    const seenGaps = [];
     for (const gap of [350, 500, 650]) {
         trials.push(['row', 'the chip\'s own point', gap, () => twoTaps(chip('idle', 'w_08'), null, gap)]);
         trials.push(['row', 'his own «פעיל»', gap, () => twoTaps(chip('idle', 'w_08'), async () => { await pause(page, 60); return switchOnGlass('his', 'w_08'); }, gap)]);
@@ -582,20 +601,22 @@ const saveOnGlass = () => page.evaluate(() => {
         const done = await make();
         const name = `${door} door, ${gap} ms, on ${where}`;
         if (done.missing) { check(`${name}: there was such a point on the glass`, false); await settle(); continue; }
-        check(`${name}: the page saw the second press inside the hold`, !done.failed, JSON.stringify(done));
+        check(`${name}: the page saw the second press inside the hold`, !done.failed, JSON.stringify({ seen: done.seen, attempts: done.attempts }));
+        seenGaps.push(`${door}/${gap}:${done.seen}`);
         if (where.includes('«פעיל»')) check(`${name}: what was under the finger was a switch`, /worker-active-toggle/.test(done.under || ''), String(done.under));
         if (where.includes('«שמור»')) check(`${name}: what was under the finger was «שמור»`, /שמור/.test(done.under || ''), String(done.under));
-        same(`${name}: no switch turned and no byte moved`, [await switches(), await disk(page)], [switchesBefore, diskBefore]);
+        same(`${name}: no switch turned and no byte moved`, [await switches(), await disk(page)], [switchesBefore, done.before]);
         if (door === 'form') same(`${name}: the form is still open`, await page.evaluate(() => document.getElementById('workerFormModal').style.display), 'flex');
         await settle();
     }
+    console.log(`  (the gaps the page saw: ${seenGaps.join(' ')})`);
     same('after all of it, the record in memory', await record(page), recordBefore);
 }
 
 {
     suite('13. the hold is a window, not a lock: 800 ms after the chip a switch turns, and a keyboard\'s Enter inside it too');
     const late = await twoTaps(chip('idle', 'w_08'), async () => { await pause(page, 60); return switchOnGlass('his', 'w_08'); }, GUARD + 100);
-    check('the page saw the second press after the hold', !late.failed && !late.missing && late.seen > GUARD, JSON.stringify(late));
+    check('the page saw the second press after the hold', !late.failed && !late.missing && late.seen > GUARD, JSON.stringify({ seen: late.seen, under: late.under }));
     same('his switch turned: he is switched off', await page.evaluate(() => State.worker('w_08').active), false);
     await settle();
     await page.evaluate(() => { State.worker('w_08').active = true; State.commitRoster(); render(); });
