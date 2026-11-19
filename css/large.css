@@ -1234,11 +1234,6 @@
 :root.display-large a.seder-go,
 :root.display-large .journey-send-row a { min-height: 52px !important; min-width: 52px !important; }
 
-/* «סיכום שנה»'s PAIRS, label over value: two to a line at 104px leaves a 22px figure of
-   money no room on the 320px phone, so here a pair takes a line of its own until there is
-   room for two at 144px. */
-:root.display-large .ysum-pairs { grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)) !important; }
-
 /* ---- הסעות ---------------------------------------------------------------------------
    The picture holds as it is: a seat is a share of the car's width, so two larger names
    still sit side by side, the driver still on the LEFT, and a row of three seats still
