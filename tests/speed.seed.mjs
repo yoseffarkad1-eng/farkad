@@ -59,6 +59,12 @@ export const CHANGED = ['js/ui/reports.js', 'js/ui/owes.js', 'js/ui/advancereset
 export const SCREENS = ['js/ui/sitecolor.js', 'js/ui/reports.js', 'js/ui/workercard.js', 'js/ui/seder.js', 'js/ui/payslips.js',
     'js/ui/monthsummary.js', 'js/ui/owes.js', 'js/ui/daycheck.js', 'js/ui/weeklyclose.js', 'js/ui/closereminder.js',
     'js/ui/advancereset.js', 'js/ui/undo.js'];
+// THE FILES OF TRACKS MERGED AFTER THIS ONE that draw on a page compared here with v204, loaded
+// on BOTH sides from this tree (6ab193d has none of them, and its own owes.js never calls
+// them). EMPTY on this branch. The integrator puts 'js/ui/payday.js' here when wave 1 is
+// merged: its row on «מקדמות» is then taken out of the comparison by LATER_ROWS below, and
+// counted.
+export const LATER_SCREENS = [];
 
 export const TODAY = '2026-11-19';
 // The seven readers of a man's walk S1 answers once (js/ui/reports.js), and v196's three.
@@ -140,6 +146,7 @@ export function openDevice(storage, options = {}) {
     }
     const files = options.files || filesOf('now');
     SCREENS.forEach(file => device.run(files[file]));
+    LATER_SCREENS.forEach(file => device.run(source(file)));
     device.run('var currentView = "reports";');
     device.ctx.showView = view => device.run(`currentView = ${JSON.stringify(view)}`);
     device.ctx.askTell = () => Promise.resolve();
@@ -336,7 +343,37 @@ export function mediumDisk(options = {}) {
 //
 // Each is code a phone runs and the TEXT it answers: a page's nodes as tests/
 // reports.speed.test.mjs snaps them, or a reading's answer as JSON. `man` is filled in.
-export const SNAP = `function speedSnap(node) {
+// NODES A LATER TRACK ADDS to a page compared with v204 (the contract, «Conflicts with wave 1»).
+// Payday puts «סגירת שבוע»'s button INTO a row of its own beside its entry (owes-actions), where
+// v204 draws the button straight in the board: so such a row is REPLACED by its children that
+// v204 also draws - the «סגירת שבוע» button stays, in place - and its own children that v204
+// does not draw (payday-entry) are taken out and COUNTED (SPEED_LATER), with the boards drawn.
+// On this branch there are none; tests/speed.test.mjs holds that, and one per board once a
+// LATER_SCREENS file draws one.
+export const SNAP = `var SPEED_LATER = { rows: 0, kids: 0, boards: 0 };
+const SPEED_LATER_ROWS = ['owes-actions'];
+const SPEED_LATER_KIDS = ['payday-entry'];
+function speedHas(node, names) {
+    const own = String(node.className || '').split(/\\s+/);
+    return names.some(name => own.indexOf(name) !== -1);
+}
+function speedKids(node) {
+    const out = [];
+    node.children.forEach(child => {
+        if (speedHas(child, SPEED_LATER_ROWS)) {
+            SPEED_LATER.rows += 1;
+            child.children.forEach(inner => {
+                if (speedHas(inner, SPEED_LATER_KIDS)) { SPEED_LATER.kids += 1; return; }
+                out.push(speedSnap(inner));
+            });
+            return;
+        }
+        out.push(speedSnap(child));
+    });
+    return out;
+}
+function speedSnap(node) {
+    if (speedHas(node, ['owes'])) SPEED_LATER.boards += 1;
     const out = { tag: node.tagName, cls: node.className || '' };
     const attrs = Object.keys(node.attributes || {}).sort();
     if (attrs.length) out.attrs = attrs.map(key => [key, node.attributes[key]]);
@@ -348,10 +385,10 @@ export const SNAP = `function speedSnap(node) {
     const style = Object.keys(node.style || {}).sort();
     if (style.length) out.style = style.map(key => [key, node.style[key]]);
     if (node.children.length === 0) out.text = node.textContent;
-    else out.kids = node.children.map(speedSnap);
+    else out.kids = speedKids(node);
     return out;
 }
-function speedDrawn(id) { return JSON.stringify(document.getElementById(id).children.map(speedSnap)); }
+function speedDrawn(id) { return JSON.stringify(speedKids(document.getElementById(id))); }
 function speedRange(name) {
     const set = {
         'the default account': () => { REPORT_PRESET = 'fortnight'; REPORT_RANGE.from = null; REPORT_RANGE.to = null; const r = defaultPayrollRange(); REPORT_RANGE.from = r.from; REPORT_RANGE.to = r.to; },
@@ -571,6 +608,8 @@ export function compareAll(label, oldDevice, nowDevice, ways, tally) {
     tally.writes += nowDevice.run('SPEED_WRITES');
     if (JSON.stringify(nowDevice.dump()) !== nowDisk) tally.diskMoved.push(label);
     tally.kept += nowDevice.run('REPORT_SHARED_KEPT === null ? 0 : 1');
+    const later = JSON.parse(nowDevice.run(`JSON.stringify(Object.assign({ drawing: typeof paydayEntryButton === 'function' }, SPEED_LATER))`));
+    if (tally.later) tally.later.push([label, later]);
     const flat = JSON.parse(nowDevice.run('JSON.stringify(SPEED_FLAT)'));
     tally.flat.sheets += flat.sheets;
     tally.flat.rows += flat.rows;

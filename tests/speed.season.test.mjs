@@ -100,6 +100,13 @@ const SEASON = {};
     given('season-closed: closed in order', SEASON.closed.facts.closes > 100, j(SEASON.closed.facts));
     given('season-skipped: closed in order, with its men who missed a week', SEASON.skipped.facts.closes > 100
         && SEASON.skipped.facts.skippers.length >= 4, j(SEASON.skipped.facts));
+    // The shape the clocks below are taken on, said: a record of the size the contract measured.
+    check(`season-open: ${SEASON.open.facts.advances} advances, ${SEASON.open.facts.ledger} ledger entries, ${SEASON.open.facts.kib} KiB, nothing closed`,
+        SEASON.open.facts.kib > 800 && SEASON.open.facts.ledger > SEASON.open.facts.advances);
+    check(`season-closed: ${SEASON.closed.facts.closes} closes, ${SEASON.closed.facts.ledger} ledger entries, ${SEASON.closed.facts.kib} KiB`,
+        SEASON.closed.facts.kib > 800 && SEASON.closed.facts.ledger > SEASON.closed.facts.closes);
+    check(`season-skipped: ${SEASON.skipped.facts.skippers.length} weekly men who missed the week before their last finished one`,
+        SEASON.skipped.facts.skippers.every(id => Number(id.slice(2)) <= 16));
 }
 const MEN = Array.from({ length: 40 }, (unused, at) => `w_${String(at + 1).padStart(2, '0')}`);
 const WEEKLY = ['w_01', 'w_02'];
@@ -112,8 +119,6 @@ const offered = JSON.parse(skippedPhone.way(`const read = weeklyCloseRead(State.
     return JSON.stringify(read.men.filter(man => !man.held).map(man => ({ id: man.id, empties: man.empties.length })));`));
 const withEmpties = offered.filter(man => man.empties > 0).map(man => man.id);
 const without = offered.filter(man => man.empties === 0).map(man => man.id);
-given('season-skipped: at least four men offered with an empty week closed first on a copy', withEmpties.length >= 4, j(offered));
-given('and at least four offered without', without.length >= 4, j(offered));
 
 // Every way in of `ways` on both builds: v204 once (timed), this build cold and then again.
 function againstV204(label, record, ways, options = {}) {
@@ -188,6 +193,8 @@ function againstV204(label, record, ways, options = {}) {
 // ---------------------------------------------------------------- 2, 4, 9. season-skipped
 {
     suite('2, 4, 9. season-skipped: the men whose empty week is closed first on a copy');
+    given('season-skipped: at least four men offered with an empty week closed first on a copy', withEmpties.length >= 4, j(offered));
+    given('and at least four offered without', without.length >= 4, j(offered));
     const ways = [
         ['«סגירת שבוע»\'s list', `speedReset(); ${BOOK_WAYS.filter(([name]) => /סגירת שבוע/.test(name))[0][1]}`],
         ['the reminder\'s count', `speedReset(); ${BOOK_WAYS.filter(([name]) => /reminder/.test(name))[0][1]}`],
