@@ -6,11 +6,48 @@ tracks of the 2026-11-19 program; the integrator ships them together as v206.
 
 The week tab shows one week of the crew; a man's card shows one man's month; «סיכום חודש» counts a
 month. Nothing shows THE CREW'S MONTH: who worked where on every day of it. That board is the
-attendance sheet a client, an accountant or a man who disputes his days asks for at month end - and,
-filtered to one site, it is the client's appendix to the invoice: his men, Rima's count and the
-billed worker-site days, day by day, the same numbers «לפי אתר» bills. This track draws it as a
-third mode of the week tab, prints it on one A4 landscape page and shares it as a picture. It counts
-people; it prices nothing and writes nothing.
+owner's and the accountant's attendance sheet - the one he reads at month end, and the one he
+settles a man's dispute about his days with. Filtered to one site it is who worked at that site,
+day by day, with the site's counts at its foot - the same numbers «לפי אתר» counts. This track
+draws it as a third mode of the week tab, prints it on A4 landscape and shares it as a picture. It
+counts people; it prices nothing and writes nothing. It is NOT presented as paper for a client:
+the app's client paper deliberately names no man (css/app.css:4768-4772, body.client-scoped), this
+board names every man, and whether a client is shown the crew's names is the owner's to decide -
+nobody has asked him (an open question in the report, default: the board is the owner's).
+
+## Revision 2 - after the critic (2026-11-19). A builder who started from revision 1 reconciles THIS
+
+Each point was checked against the code at the base; the text below is already changed in place.
+1. **«בלי עובדי רימא» is SCREEN ONLY on this board, too.** The owner ruled that figure screen and
+   workbook only, because the paper and the picture are what gets handed on (js/ui/reports.js:2444,
+   css/app.css:2483, js/ui/printout.js:374; pinned by tests/rima.browser.mjs:911/919; CLAUDE.md
+   v167). So the filtered board's 'own' foot row is hidden by the board's `@media print` rule and
+   left out of `readMonthPrintout()`; paper and picture keep «רישום לרימא» and «סה״כ ימי עובד־אתר».
+   A PDF check and a picture-spec check hold it.
+2. **No "client's appendix" framing** anywhere (goal, words, «מה חדש», report): see above.
+3. **One map of site names per draw**: `placeLabelsIn(State.schedule)` with NO range, the map
+   `renderWeekCell` uses (js/ui/week.js:346), built ONCE per board draw; `renderWeekCell` is NOT
+   called per cell (it builds that map again for every filled cell - about 1,000 whole-record scans
+   on a season's month).
+4. **Criterion 2 no longer contradicts criterion 6**: a cell is compared with `renderWeekCell`'s on
+   everything except `data-initial` where the board's two-letter rule applies; criterion 6 pins
+   those values.
+5. **The payrollReport identity (criterion 3) has a named exception**: a closure recorded with no
+   `periodTo` that starts on the month's first day is matched by a month range (schema.js:2319-2321),
+   so payrollReport answers its frozen counts there; the board follows the live record, and a
+   fixture holds the difference.
+6. **The redraw keeps the reader's place**: `render()` rebuilds `#weekView` on every commit and
+   adopted snapshot (week.js:48-52, app.js:126), so the grid's `scrollLeft` and the page's `scrollY`
+   are kept across a redraw (tested with an adopted snapshot).
+7. **The paper's page count is stated honestly**: one A4 landscape page holds a small crew; a crew
+   of 40 runs to more than one page, the dates' header repeated on each - measured and printed, not
+   promised as one page.
+8. **openMonthBoard is called one task after a caller's dialog shut** (js/ui/modal.js:145-161 would
+   otherwise give the focus back to that dialog's opener after the board focused its title).
+9. An automatic update's reload (v205) under the board returns to the week GRID: the month and the
+   filter are memory only and v205's updateReturnKeep keeps only the view. Stated in the report; the
+   integrator decides whether updateReturnKeep (which keeps the screen, the day and the chosen
+   deductions - not this board's month or filter) should carry the board's mode.
 
 ## Goal
 
@@ -19,9 +56,11 @@ month: one row per man (archived men who worked in it marked «לא פעיל»),
 (a Saturday only when something was recorded on it), each cell in the colour of the site with its
 first letter, his month's attendance at the row's end and the men per day at the foot - and «רישום
 לרימא» and «עובדי יוסף גבס» apart, each in no total. He steps months, narrows the board to one
-site (then the foot is his own men, Rima and the billed count, cell for cell what «לפי אתר» bills),
-taps a cell to open that day or a name to open the man's card, prints the board on one A4
-landscape page, or shares it as a picture on WhatsApp.
+site (then the foot is, on the screen, his own men, Rima and the worker-site days, cell for cell
+what «לפי אתר» counts; on paper and in the picture Rima and the worker-site days only, because «בלי
+עובדי רימא» is screen and workbook only, by the owner's ruling), taps a cell to open that day or a
+name to open the man's card, prints the board on A4 landscape (one page for a small crew; a larger
+one continues on the next page with the dates repeated), or shares it as a picture on WhatsApp.
 
 ## Out of scope
 
@@ -45,13 +84,13 @@ Store key. Its state is memory: `MONTH_BOARD_KEY` ('YYYY-MM') and `MONTH_BOARD_P
 | what | read from (file:line at the base) |
 |---|---|
 | the month's dates | `monthSummaryRange(key)` (js/ui/monthsummary.js:113) - the same calendar month «סיכום חודש» and «החודש» read |
-| a Saturday column | unfiltered: `anyRecordOnRestDay(date)` (js/ui/day.js:1343 - any record in any layer, Rima and יוסף גבס counts included); filtered: an entry of a man at that site, or `rimaCount`/`yosefGevesCount` at that site, that Saturday (js/model/schema.js:3028/3298) |
+| a Saturday column | unfiltered: `anyRecordOnRestDay(date)` (js/ui/day.js:1343 - any record in any layer, Rima and יוסף גבס counts included; the rule the day's arrows use, and since revision 2 the status screen's pulse uses it too, so the two screens agree about Saturdays); filtered: an entry of a man at that site, or `rimaCount`/`yosefGevesCount` at that site, that Saturday (js/model/schema.js:3028/3298) |
 | the rows | `weekWorkers(dates)`'s rule over the month's dates (js/ui/week.js:290-299: every active man, plus an archived man with an entry or an absence in the month), in roster order; filtered: the men with an entry at that site in the month |
-| a cell | `isAbsent` / `entriesFor(State.schedule, date, id, State.layer)` (schema.js:2852/2847) - the record as the week's `renderWeekCell` reads it (week.js:320-410): `entryRate` / `entryExtraHours` for ● and +, `placeLabelsIn` / `placeLabelFrom` (schema.js:1785/1799) for the name, `siteInitial` (js/ui/sitecolor.js:72) for the letter; filtered: only that site's line |
-| a man's total «נוכחות» | the dates with an entry and no absence (the count `payrollReport(schedule, from, to)` returns as `attendanceDays`, js/model/money.js:210 - pinned equal, not used to draw); filtered: the dates with an entry at that site |
+| a cell | `isAbsent` / `entriesFor(State.schedule, date, id, State.layer)` (schema.js:2852/2847) - the record as the week's `renderWeekCell` reads it (week.js:320-410): `entryRate` / `entryExtraHours` for ● and +, `placeLabelFrom(labels, placeId)` (schema.js:1799) for the name, `siteInitial` (js/ui/sitecolor.js:72) for the letter (or the board's two letters, below); filtered: only that site's line. `labels` = `placeLabelsIn(State.schedule)` with NO range - the very map `renderWeekCell` builds (week.js:346), so «אתר שאינו ברשימה N» has the week's number - built ONCE per draw of the board and handed to every cell, the legend, the filter's options and the title. `renderWeekCell` itself is NOT called per cell: it rebuilds that whole-record map for every filled cell. |
+| a man's total «נוכחות» | the dates with an entry and no absence (the count `payrollReport(schedule, from, to)` returns as `attendanceDays`, js/model/money.js:210 - pinned equal, not used to draw, with ONE exception: a man with a closure recorded with no `periodTo` whose period starts on the month's first day, which `frozenPeriodFor` matches to any range starting that day (schema.js:2319-2321), so payrollReport answers its frozen counts for the whole month there - the board shows the live record); filtered: the dates with an entry at that site |
 | the foot, unfiltered | «סה"כ עובדים» per date: the week's tfoot rule (`renderWeekTotals`, week.js:302-318); then `RIMA_TITLE` with `rimaReport(schedule, from, to).dayTotal(date)` (schema.js:3077) and `YOSEF_GEVES_TITLE` with `yosefGevesReport(schedule, from, to).dayTotal(date)` (schema.js:3338), each a row of its own, each only when its month total > 0, each with its note, each in no total |
-| the foot, filtered | `NO_RIMA_TITLE` «בלי עובדי רימא» = `invoiceWithoutRima(schedule, from, to, placeId).countAt(placeId, date)` (money.js:531); `RIMA_TITLE` = `rimaReport(schedule, from, to, placeId).countAt(placeId, date)`; `NO_RIMA_TOTAL` «סה״כ ימי עובד־אתר» = `invoiceByDate(schedule, from, to).countAt(placeId, date)` (money.js:563) - the invoice's own count, equal to the first two added, cell by cell (pinned); then `YOSEF_GEVES_TITLE` = `yosefGevesReport(schedule, from, to, placeId).countAt(placeId, date)` with `YOSEF_GEVES_NOTE`, in no total |
-| the filter's sites | the sites with a billed day in the month: `invoiceByDate(schedule, from, to).places` (money.js:563), in its order |
+| the foot, filtered | `NO_RIMA_TITLE` «בלי עובדי רימא» = `invoiceWithoutRima(schedule, from, to, placeId).countAt(placeId, date)` (money.js:531) - **SCREEN ONLY** (kind `'own'`: hidden by the board's `@media print` rule, left out of `readMonthPrintout()`, exactly as `.report-norima` is kept off the reports' paper and picture, css/app.css:2483, printout.js:374 - the owner's ruling for this figure); `RIMA_TITLE` = `rimaReport(schedule, from, to, placeId).countAt(placeId, date)`; `NO_RIMA_TOTAL` «סה״כ ימי עובד־אתר» = `invoiceByDate(schedule, from, to).countAt(placeId, date)` (money.js:563) - the invoice's own count, equal to the first two added, cell by cell (pinned); then `YOSEF_GEVES_TITLE` = `yosefGevesReport(schedule, from, to, placeId).countAt(placeId, date)` with `YOSEF_GEVES_NOTE`, in no total. On paper and in the picture: Rima, the worker-site days and יוסף גבס - never the 'own' row |
+| the filter's sites | the sites with a billed day in the month: the ids of `invoiceByDate(schedule, from, to).places` (money.js:563), in its order - each NAMED from the board's one `labels` map, never from the invoice's own names (which are numbered over the month's range, so an unlisted site could carry another number there) |
 | the legend | the sites drawn on the board, each with `paintSite` (sitecolor.js:46), its letter and its name; when two of them share a letter, BOTH show their first two letters on this board, its paper and its picture (a board-local rule; `siteInitial` is untouched) |
 
 ## Permissions and privacy
@@ -96,7 +135,11 @@ the person presses: paper and the picture. The picture is drawn off the board's 
   is a button → `openWorkerCard(id)` (js/ui/workercard.js:851). None of them writes.
 - `openMonthBoard(key, placeId)` (for track `status` and for «מה חדש»): `showView('week')`, then
   sets the key (null = this month) and the filter, `setWeekPhoneMode('month')`, focuses the board's
-  title; answers `true`.
+  title; answers `true`. The board is not a `.modal`: a caller that has just shut a dialog calls this
+  ONE TASK LATER (`setTimeout(go, 0)`, whatsNewGo's rule, js/ui/whatsnew.js:594-606), or js/ui/modal.js
+  gives the focus back to that dialog's opener at the microtask checkpoint and the title loses it
+  (modal.js:145-161). The function says so in its comment; it does not defer by itself (a direct
+  call from the corner's door must focus at once).
 - `js/ui/monthboard.js`: `<script>` directly after `js/ui/find.js` (index.html:1197) - after
   week.js, sitecolor.js, workercard.js and monthsummary.js, whose functions it calls only when
   drawn - with a comment that it runs nothing at load. `'./js/ui/monthboard.js'` in sw.js SHELL
@@ -106,15 +149,24 @@ the person presses: paper and the picture. The picture is drawn off the board's 
   (the 'transport' precedent, transport.js:2573/2606). The reader reads the BOARD'S DOM - the
   title, the dates, each row's name, each cell's `data-place` / `data-initial` / mark, the totals,
   the foot rows and the legend - and the planner draws it on `PRINTOUT_PAPER` (printout.js:52-60)
-  right to left, within `PRINTOUT_MAX_SIDE` (4,096 px, printout.js:38). Two lines in printout.js and
-  nothing else there.
+  right to left, within `PRINTOUT_MAX_SIDE` (4,096 px, printout.js:38). The reader leaves out the
+  'own' foot row («בלי עובדי רימא») BY ITS KIND (`data-kind="own"` on its row), as
+  `readReportPrintout` leaves `.report-norima` out by name (printout.js:372-375): the picture goes
+  where paper goes. Two lines in printout.js and nothing else there.
 - **Paper**: `body.week-print-layout` already gives the week tab its A4 landscape page
   (app.css:4929-4934). New `@media print` rules in css/app.css, directly after the week's
   (app.css:4956), for the board only: its header controls and the door hidden; `h1.month-print-title`
   shown (`MONTH_BOARD_TEXT.title(...)`, hidden on screen); the table full width, `table-layout:
   fixed`, the name column 16%, sticky positions undone, `print-color-adjust: exact` on the cells,
   the site letter written in each cell (the screen draws it by design.css, which paper does not
-  read), the legend printed. The grid mode's paper is untouched (tests/week-print.browser.mjs).
+  read), the legend printed, and the 'own' foot row hidden
+  (`.month-board tr[data-kind="own"] { display: none !important; }`, the same `!important` as
+  `.report-norima`'s rule, app.css:2483). PAGES, said and not promised: one A4 landscape page holds
+  the header, the foot and a small crew; a larger crew continues on further pages with the dates'
+  header row repeated (`thead { display: table-header-group }`), no row split across a page
+  (`tr { break-inside: avoid }`), the foot rows and the legend after the last man. The PDF test
+  counts the pages at 12, 25 and 40 men and the report prints the three numbers. The grid mode's
+  paper is untouched (tests/week-print.browser.mjs).
 
 ## The screen, section by section
 
@@ -142,6 +194,12 @@ suite. Names through `isolate()` inside sentences.
   sticky (`position: sticky; inset-inline-start: 0`, the week's own rule, app.css:2809-2816); the grid
   scrolls sideways inside its own box only, and opens scrolled so that today's column is in view
   when the board is on this month.
+- THE PLACE IS KEPT ACROSS A REDRAW. `render()` rebuilds `#weekView` on every commit and every
+  adopted snapshot (week.js:48-52, app.js:126). A redraw of the SAME month and filter keeps the
+  grid box's `scrollLeft` and the page's `scrollY` as they were (read before the board is cleared,
+  put back after it is drawn); only a new month, a new filter or the door's tap opens at today's
+  column. The keyboard's focus on a date button, a cell or a name is put back on the same date/man
+  when it is still drawn.
 
 ## Floors and looks
 
@@ -187,11 +245,19 @@ absences, an archived man who worked, an archived site, Rima on two sites, יו�
 Saturday with work, a Saturday with only a Rima count, two sites sharing a first letter):
 1. The rows: active men plus archived men with a record in the month, in roster order; filtered,
    the men with an entry at that site.
-2. Every cell, unfiltered, carries the same classes, site lines, letters, marks and words as
-   `renderWeekCell(worker, date)` for the same man and date (one look, not two); filtered, only
-   that site's line.
-3. Every man's total equals `payrollReport(schedule, from, to)`'s `attendanceDays` and the number
-   of his filled cells; filtered, his dates at that site.
+2. Every cell, unfiltered, carries the same classes, site lines, marks, words and `aria-label` as
+   `renderWeekCell(worker, date)` for the same man and date (one look, not two) - compared on
+   everything EXCEPT `data-initial` on a line whose site shares its first letter with another site
+   of the month (there the board's two-letter rule applies, criterion 6) and except `tabindex` (the
+   board's cells are `-1`); filtered, only that site's line. The suite calls `renderWeekCell` for
+   the comparison; the board never does (a spy: 0 calls from a draw), and `placeLabelsIn` is called
+   once per draw (a spy).
+3. Every man's total equals the number of his filled cells and `payrollReport(schedule, from,
+   to)`'s `attendanceDays` - except a man with a closure recorded with no `periodTo` whose period
+   starts on the month's first day (a FIXTURE: a Friday-first month, a weekly man closed by an old
+   closure carrying no `periodTo`, then a day of that week corrected - payrollReport answers the
+   closure's frozen counts for the month, the board the live record, and they differ by exactly the
+   correction); filtered, his dates at that site.
 4. The foot, unfiltered: «סה"כ עובדים» equals the week's tfoot rule on every date, and on the
    month's busiest date `monthSummaryRead(key).busiest.men` (the busiest date itself agreeing with
    `monthSummaryRead(key).busiest.date`); the Rima and יוסף גבס rows equal their reports' `dayTotal` and appear in
@@ -206,7 +272,9 @@ Saturday with work, a Saturday with only a Rima count, two sites sharing a first
 8. Every PROPOSED word pinned; every BORROWED word found in its owner; the Hebrew/Arabic scan green.
 9. The facts' cost row.
 10. `readMonthPrintout()`'s spec (names, cells, totals, foot rows, legend, title) equals the facts
-    it was drawn from.
+    it was drawn from, LESS the 'own' foot row: on a filtered board with Rima the spec holds
+    «רישום לרימא» and «סה״כ ימי עובד־אתר» and no row titled «בלי עובדי רימא» (and no second
+    worker-site-day total line), unfiltered it holds no 'own' row at all.
 
 Browser (tests/monthboard.browser.mjs):
 11. The door at 320x568, 375x667, 440x956 × dark/light × mode off/on: ≥ 44 × 44 (52), its words
@@ -214,17 +282,26 @@ Browser (tests/monthboard.browser.mjs):
 12. A tap opens the board on the month, today's column on the glass, the name column pinned while
     the grid scrolls inside itself, no sideways page scroll; the arrows, «החודש», the filter and
     «חזרה לטבלת השבוע» do what they say; leaving the tab and coming back shows the grid
-    (tests/week.browser.mjs:35/88 unchanged).
+    (tests/week.browser.mjs:35/88 unchanged). The board scrolled sideways and the page scrolled
+    down, then a commit and an ADOPTED SNAPSHOT (the harness's fake cloud) redraw it: `scrollLeft`
+    and `scrollY` within 1 px of where they were, the same month and filter; a new month opens at
+    today's column (this month) or the first date (another month). With the status screen present
+    (the merged tree, or a stub caller that shuts a dialog then calls `openMonthBoard` a task
+    later), the focus ends on the board's title.
 13. A cell and a date header open that day (`currentView === 'day'`, `State.date` that date); a
     name opens his card at its title.
 14. The week grid with the door: its node count is the base's plus one, and every other node is
     the same (`monthBoardDoor` set to `undefined` for the base reading on the same page).
 15. The week's picture: `readWeekPrintout()`'s spec is the same JSON with the door as without it.
-16. Paper: a real PDF (tests/pdf.mjs) of the board - A4 landscape, every name, the title with and
-    without a site, a Saturday column only where recorded; and the grid mode's PDF still what
-    tests/week-print.browser.mjs holds (that suite green, untouched).
+16. Paper: a real PDF (tests/pdf.mjs) of the board - A4 landscape, every name exactly once, the
+    title with and without a site, a Saturday column only where recorded; on a filtered board with
+    Rima the text «רישום לרימא» and «סה״כ ימי עובד־אתר» present and «בלי עובדי רימא» ABSENT; the
+    page count at 12, 25 and 40 men printed, the dates' header row on every page and no row split;
+    and the grid mode's PDF still what tests/week-print.browser.mjs holds (that suite green,
+    untouched).
 17. The picture: `printoutImage('month')` within 4,096 px, every name and every site letter at the
-    place its layout claims (sampled from the PNG as tests/week-print.browser.mjs samples the week).
+    place its layout claims (sampled from the PNG as tests/week-print.browser.mjs samples the week);
+    filtered with Rima, the plan holds no «בלי עובדי רימא» row.
 18. Floors at every phone, scheme and mode and at doubled text (the ruler, `measureInPage`;
     every target - cells, date buttons, names, the select - ≥ 44 / 52).
 19. The draw and picture budget rows.
@@ -273,11 +350,14 @@ Existing suites touched, deliberately and only as said:
 Provided (globals of `js/ui/monthboard.js`):
 - `openMonthBoard(key, placeId)` → `boolean` - `key` 'YYYY-MM' or null for this month, `placeId`
   a site id or null for every site; shows the week tab in month mode and focuses the board's title.
-  The caller closes its own dialog first.
+  The caller closes its own dialog first and then calls this ONE TASK LATER (`setTimeout(go, 0)`):
+  the board is not a `.modal`, and js/ui/modal.js gives the focus back to the shut dialog's opener
+  at the microtask checkpoint after the block that shut it (modal.js:145-161).
 - `monthBoardDoor()` → the corner button (asked by week.js through `typeof`); the node `#monthBoardDoor`.
 - `monthBoardFacts(key, placeId)` → `{ key, from, to, place: {id, name}|null, dates: [{date, saturday}],
   rows: [{ workerId, name, active, cells: [{ date, absent, lines: [{placeId, initial, double, extra}] }], total }],
-  foot: [{ kind: 'men'|'own'|'rima'|'billed'|'yosef', label, byDate: {date: n}, total|null }],
+  foot: [{ kind: 'men'|'own'|'rima'|'billed'|'yosef', label, byDate: {date: n}, total|null, paper: boolean }],
+  (`paper` false for 'own' only: the screen shows it, the paper and the picture never),
   legend: [{ placeId, name, letters }], empty }`.
 - `readMonthPrintout()` / `planMonthPrintout(spec, probe, family)` - for `printoutImage('month')`.
 - `MONTH_BOARD_TEXT` (with `.door`).
@@ -292,5 +372,11 @@ suite's exit code and counts, one by one on the final commit from a clean tree; 
 text and the CLAUDE.md file-list line for the integrator; screenshots (synthetic names, 440x956
 dark, 320x568 with the mode, the PDF's first page and the picture, JPEG/PNG) in
 `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-monthboard/`;
-what was not verified (not tried on a real phone; real paper not printed); open questions with a
-default.
+what was not verified (not tried on a real phone; real paper not printed); the page counts at 12,
+25 and 40 men; that an automatic update's reload (v205) under the board lands on the week grid,
+its month and filter lost; open questions with a default - at least: (1) is the filtered board
+something the owner hands a client, given that it names his men (default: no - it is his and the
+accountant's; the app's client paper names nobody); (2) does he want «בלי עובדי רימא» on THIS
+board's paper (default: no - his ruling for that figure is screen and workbook only); (3) should
+updateReturnKeep carry the board's month and filter across an update (default: the integrator's
+call, not this branch's).
