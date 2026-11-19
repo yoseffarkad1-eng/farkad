@@ -333,6 +333,13 @@ const switchesBefore = await switches();
         typeof window.__pwned]), [0, 'undefined']);
     same('it has no field to type in: there is nothing to save in it', await page.evaluate(() =>
         document.querySelectorAll('#crewCheckModal input, #crewCheckModal select, #crewCheckModal textarea').length), 0);
+    // Nothing leaves the phone from it: no text door, no picture, no print (contract.md, Out of scope).
+    same('its only buttons are its names and «סגור»: no door that sends, copies, shares or prints', await page.evaluate(() =>
+        [...document.querySelectorAll('#crewCheckModal button')].filter(node => !node.classList.contains('daycheck-go'))
+            .map(node => node.id)), ['crewCheckClose']);
+    await page.emulateMedia({ media: 'print' });
+    same('and on paper it is not there', await page.evaluate(() => getComputedStyle(document.getElementById('crewCheckModal')).display), 'none');
+    await page.emulateMedia({ media: 'screen' });
     if (SHOTS) await page.screenshot({ path: join(SHOTS, 'dialog-440-dark.jpg'), type: 'jpeg', quality: 80 });
 
     suite('11. Tab stays inside; Escape, «סגור» and the backdrop shut it, the keyboard back on the button');
