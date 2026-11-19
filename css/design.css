@@ -1235,6 +1235,10 @@ body.journey-on #sederModal { z-index: 60; }
 .history-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-top: 8px; color: var(--ink); font-size: 16px; font-weight: 600; }
 .history-field select,
 .history-field input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 48px; margin: 0; font-family: inherit; font-size: 16px; font-weight: 500; }
+/* app.css holds every date field on a phone to 44px with a heavier selector
+   (input[type="date"]:not([aria-hidden="true"])), which beat the line above: as heavy, and
+   later, the two dates are as tall as the three selects over them. */
+.history-field input[type="date"] { min-height: 48px; }
 .history-now { display: block; margin-top: 10px; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
 .history-totals { margin-top: 12px; }
 .history-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
@@ -1253,6 +1257,9 @@ body.journey-on #sederModal { z-index: 60; }
 .history-fold { margin-top: 12px; }
 .history-fold > button { width: 100%; min-height: 48px; font-size: 16px; }
 .history-fold-body { display: grid; gap: 8px; margin-top: 8px; }
+/* The fold is shut by its attribute, and a display of its own would have shown it anyway:
+   the text, «שלח» and «העתק» on the glass and in the Tab order with the fold «shut». */
+.history-fold-body[hidden] { display: none; }
 #historyModal .history-fold-body textarea { margin: 0; font-size: 16px; }
 .history-fold-body button { min-height: 48px; font-size: 16px; }
 .history-fold-body .share-status:empty { display: none; }
