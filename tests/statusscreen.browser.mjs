@@ -127,9 +127,17 @@ const stripWith = (page, line) => page.evaluate(line => {
     door.style.display = 'none';
     out.unwrapped = bar();
     out.basePill = chip.hidden ? null : box(chip);
-    // The strip as v204 drew it puts the chip on a line of its own when the chip and «הגדרות» do
-    // not fit side by side: the chip's line is then above «הגדרות»'s.
-    out.alone = !chip.hidden && box(chip).b <= box(settingsBtn).t + 0.5;
+    // The strip as v204 drew it puts the chip on a line of its own when nothing else of the strip
+    // fits beside it (a long count, a narrow phone, the mode on): no other item in its line. Then
+    // the room the strip has for the door is from the top of the strip (or the glass) to the
+    // top of the line under it.
+    const strip = document.querySelector('.topbar');
+    const others = [...strip.children].filter(node => node !== chip && node !== door
+        && getComputedStyle(node).display !== 'none' && getComputedStyle(node).position !== 'fixed').map(box).filter(b => b.h > 0);
+    const c = box(chip);
+    out.alone = !chip.hidden && !others.some(b => b.t < c.b - 0.5 && b.b > c.t + 0.5);
+    const below = others.filter(b => b.t >= c.b - 0.5).map(b => b.t);
+    out.room = below.length ? Math.round(Math.min(...below) - Math.max(0, box(strip).t)) : null;
     door.insertBefore(chip, door.firstChild);
     door.style.display = '';
     out.again = bar();
@@ -153,10 +161,10 @@ function stripChecks(label, m, word, large, bound) {
     // «הגדרות»; where the strip puts the chip on a line of its own, all the room the strip has
     // above «הגדרות»'s line - the strip is not made taller for it (the price is said in
     // features/status/handoff.md).
-    if (m.alone) {
-        console.log(`        ${label}, «${which}»: the chip on a line of its own - the door reaches ${m.reach}px down the pill (the strip has ${Math.round(m.settings.t)}px above «הגדרות»)`);
-        check(`${label}, «${which}»: on a line of its own, the door reaches from the top of the glass to «הגדרות»`,
-            m.reach >= Math.floor(m.settings.t) - 1, `${m.reach}px of ${Math.round(m.settings.t)}`);
+    if (m.alone && m.room !== null) {
+        console.log(`        ${label}, «${which}»: the chip on a line of its own - the door reaches ${m.reach}px down the pill, all the ${m.room}px the strip has above the line under it`);
+        check(`${label}, «${which}»: on a line of its own, the door reaches from the top of the strip to the line under it`,
+            m.reach >= m.room - 1, `${m.reach}px of ${m.room}`);
     } else {
         check(`${label}, «${which}»: the door's reach down the pill, ${large ? 52 : 44}px`, m.reach >= floor, `${m.reach}px`);
     }
