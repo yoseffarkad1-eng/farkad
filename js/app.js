@@ -173,6 +173,9 @@ function render() {
     // And for the finder (js/ui/find.js): a man added or turned off on another phone is
     // found, or not, as the record has him now.
     if (typeof renderFindIfOpen === 'function') renderFindIfOpen();
+    // And for «תמונת מצב» (js/ui/status.js): today, the next day, the pulse and the sites are
+    // read off this record and drawn again; the money, which costs, is read once the draws stop.
+    if (typeof renderStatusIfOpen === 'function') renderStatusIfOpen();
     // «תזכורת לסגירת חשבונות» (js/ui/closereminder.js): nothing is read here - its line is
     // taken down at once if it is no longer wanted, and otherwise read once the draws stop.
     if (typeof closeReminderAfterRender === 'function') closeReminderAfterRender();
@@ -250,6 +253,8 @@ function renderSyncChip() {
     chip.textContent = label;
     chip.className = 'sync-chip' + (state ? ' ' + state : '');
     chip.hidden = label === '';
+    // The chip is the door of «תמונת מצב» (v206): the door is named by what the chip says.
+    if (typeof statusDoorSync === 'function') statusDoorSync(chip, label);
 }
 
 function watchSyncNotice() {
