@@ -802,11 +802,13 @@ function yearSummarySheets(facts) {
             look: { money: (r, c) => r > 0 && (c === 3 || c === 4), filterTo: rows.length - 1 } });
     }
 
-    // «עובדים»: every man in the roster's order; a man switched off says so beside his name.
+    // «עובדים»: every man in the roster's order; a man switched off says so beside his name -
+    // the name isolated, as in every sentence a name is set into, so that a name in Latin
+    // letters or ending in a digit keeps its place before the words in a right-to-left cell.
     {
         const rows = [[Y.worker, R.attendance, Y.payUnits, R.doubles, R.extraHours, R.gross, T.handedOver]];
         facts.men.forEach(man => {
-            rows.push([man.active ? man.name : `${man.name} · ${Y.inactive}`, man.attendanceDays, man.payUnits,
+            rows.push([man.active ? man.name : `${isolate(man.name)} · ${Y.inactive}`, man.attendanceDays, man.payUnits,
                 man.doubleDays, man.extraHours, known(man.gross), man.handedOver]);
         });
         const last = rows.length - 1;

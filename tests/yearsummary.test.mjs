@@ -85,7 +85,7 @@ const OPEN = { carryAdvances: true, ledgerWrites: true };
 
 const agora = value => Math.round(Number(value) * 100) / 100;
 // The marks the app pins direction with, taken off so a line can be read and compared.
-const plain = text => String(text).replace(/[‎⁦-⁩]/g, '');
+const plain = text => String(text).replace(/[\u200e\u2066-\u2069]/g, '');
 const addDays = (date, days) => {
     const [y, m, d] = date.split('-').map(Number);
     const at = new Date(y, m - 1, d + days, 12);
@@ -657,7 +657,7 @@ check('fortnights across 1 January, closed and corrected', seen.crossing === 4, 
     check('the reason stands straight under the figures, before יוסף גבס apart',
         body.querySelectorAll('.ysum-figures')[0].children.map(n => n.className).join(' | ')
         === 'msum-head | msum-tiles | hint hint-warn msum-warn | msum-note ysum-notsummed | ysum-apart');
-    check('his name travels isolated', body.querySelectorAll('.msum-warn')[0].textContent.indexOf('⁨בית⁩') !== -1);
+    check('his name travels isolated', body.querySelectorAll('.msum-warn')[0].textContent.indexOf('\u2068בית\u2069') !== -1);
     same('יוסף גבס apart, with its note, in no tile with the others', [body.querySelectorAll('.ysum-apart .msum-tile')
         .map(t => t.getAttribute('data-figure')), body.querySelectorAll('.ysum-apart .msum-note').map(n => n.textContent)],
         [['yosef'], ['עובדי יוסף גבס בלבד. אינם נכללים בשכר ואינם נכללים בחיוב.']]);
@@ -945,7 +945,7 @@ function expectedBook(facts, today) {
         .concat(facts.months.map((m, i) => (m.empty ? [NAMES[i], '—', '—', '—', '—']
             : [NAMES[i], m.ownSiteDays !== null ? m.ownSiteDays : m.siteDays, m.men, money(m.gross), m.advances])));
     const men = [['עובד', 'ימי נוכחות', 'ימי שכר', 'כפולים', 'שעות נוספות', 'נצבר', 'מקדמות שניתנו']]
-        .concat(facts.men.map(m => [m.active ? m.name : `${m.name} · לא פעיל`, m.attendanceDays, m.payUnits, m.doubleDays,
+        .concat(facts.men.map(m => [m.active ? m.name : `\u2068${m.name}\u2069 · לא פעיל`, m.attendanceDays, m.payUnits, m.doubleDays,
             m.extraHours, money(m.gross), m.handedOver]))
         // No «—» without its reason: one row after the last man names every man whose cell it is.
         .concat(facts.men.some(m => m.gross === null) ? [[unpricedSentence(facts.men.filter(m => m.gross === null).map(m => m.name))]] : []);
@@ -1012,7 +1012,7 @@ function withLibrary(device) {
         }
         same(`${name}: handed to the browser, in the export's own words - never «נשמר»`, [device.chosen.length,
             device.chosen[0].title, device.chosen[0].message, device.chosen[0].choices], [1, 'קובץ ה-Excel נמסר לשמירה',
-            `⁦farkad-year_${year}.xlsx⁩ נמסר לדפדפן — פתח את "קבצים" וודא שהוא מופיע. `
+            `\u2066farkad-year_${year}.xlsx\u2069 נמסר לדפדפן — פתח את "קבצים" וודא שהוא מופיע. `
             + 'ב-Excel הטבלה נפתחת מימין לשמאל; תצוגה מקדימה ("קבצים", וואטסאפ, Numbers) עשויה להציג אותה משמאל לימין, עם אותם מספרים.',
             ['הבנתי', 'שמירה חוזרת']]);
     }

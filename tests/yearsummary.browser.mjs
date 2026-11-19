@@ -44,7 +44,7 @@ const SHOTS = process.env.YEARSUMMARY_SHOTS || '';
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 
 const TODAY = '2026-11-19';
-const plain = text => String(text).replace(/[‎⁦-⁩]/g, '');
+const plain = text => String(text).replace(/[\u200e\u2066-\u2069]/g, '');
 const brief = (rows, say) => rows.slice(0, 5).map(say).join(' | ') + (rows.length > 5 ? ` … +${rows.length - 5}` : '');
 
 // A year of synthetic work: five men (one paid weekly, one with a single day in March that has
