@@ -750,8 +750,25 @@ const doubleText = page => page.evaluate(() => {
         const { context, page, errors: seen } = await openApp(browser, server.url, { width, height, scheme: 'light' });
         keep(seen);
         await doubleText(page);
-        await openRead(page);
         const label = `${width}x${height}, text doubled`;
+        // The door's own words (a phone with no chip) at twice the size: taller than the pill,
+        // so the door's line is as tall as they are - never words standing out of the strip
+        // above it or over «הגדרות» beside or under it.
+        const strip = await stripWith(page, CHIPS[CHIPS.length - 1][1]);
+        const words = await page.evaluate(() => {
+            const box = node => { const r = node.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
+            const range = document.createRange();
+            range.selectNodeContents(document.querySelector('#statusDoor .status-door-words'));
+            const text = range.getBoundingClientRect();
+            return { text: { l: text.left, r: text.right, t: text.top, b: text.bottom }, bar: box(document.querySelector('.topbar')),
+                settings: box(document.getElementById('settingsBtn')) };
+        });
+        await stripBack(page);
+        const apart = (a, b) => a.r <= b.l + 0.5 || b.r <= a.l + 0.5 || a.b <= b.t + 0.5 || b.b <= a.t + 0.5;
+        check(`${label}: the door's own words inside the strip, top to bottom, and clear of «הגדרות»`,
+            strip.wordsShown !== false && words.text.t >= words.bar.t - 0.5 && words.text.b <= words.bar.b + 0.5 && apart(words.text, words.settings),
+            JSON.stringify(words));
+        await openRead(page);
         const m = await page.evaluate(measureInPage, ['#statusModal']);
         const hero = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.status-hero-n')).fontSize));
         given(`${label}: the text is doubled`, hero >= 96, String(hero));
