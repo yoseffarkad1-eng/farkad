@@ -707,7 +707,15 @@ function crewCheckChipNode(finding, chip, live) {
 // keyboard's click is never held; a press that comes down later is what it always was. A box
 // of the form to type in is not held: a touch there only moves the caret. Memory only, never
 // kept.
+//
+// AND THE SAME PLACE, WHATEVER IS THERE NOW. A slow double tap's second touch comes down where
+// the chip was, and after a row or a site door that place can be on neither surface - the tab
+// bar at the foot of the glass, the top bar - where it changed the screen under the man he
+// was taken to. So for the same window a press inside the chip's own rectangle, as it stood at
+// its press (BOUNCE_REACH around it, the page's own measure of a finger's jitter, js/ui/sheet.js),
+// is held wherever it lands. A door opened from the keyboard has no such place.
 let crewCheckHoldUntil = 0;
+let crewCheckHoldAt = null;
 let crewCheckMarked = null;
 const CREW_CHECK_HELD_ON_ROSTER = 'button, input, select, summary';
 const CREW_CHECK_HELD_ON_FORM = 'button, summary, select';
@@ -717,7 +725,12 @@ function crewCheckArmHold() {
         || typeof sheetClock !== 'function' || typeof DOUBLE_TAP_GUARD_MS !== 'number') return false;
     const press = typeof openPress === 'function' ? openPress() : null;
     crewCheckHoldUntil = (press ? press.stamp : sheetClock()) + DOUBLE_TAP_GUARD_MS;
+    crewCheckHoldAt = press && press.area ? press.area : null;
     const held = pressed => Boolean(pressed) && pressed.stamp < crewCheckHoldUntil;
+    const reach = typeof BOUNCE_REACH === 'number' ? BOUNCE_REACH : 0;
+    const here = pressed => held(pressed) && crewCheckHoldAt !== null
+        && pressed.x >= crewCheckHoldAt.left - reach && pressed.x <= crewCheckHoldAt.right + reach
+        && pressed.y >= crewCheckHoldAt.top - reach && pressed.y <= crewCheckHoldAt.bottom + reach;
     // The crew screen: «פעיל» and an archived row's «כבוי» restore (.worker-active-toggle),
     // «בדיקת הצוות» itself, the cards' buttons, «עוד ⋯», the adding buttons, the crew search,
     // the fold of the men switched off. The form: «שמור», «ביטול», the buttons under them, its
@@ -725,6 +738,9 @@ function crewCheckArmHold() {
     // list); nothing else guards either surface.
     guardFingersOn(document.getElementById('rosterView'), CREW_CHECK_HELD_ON_ROSTER, held);
     guardFingersOn(document.getElementById('workerFormModal'), CREW_CHECK_HELD_ON_FORM, held);
+    // The chip's own place, on the whole page: every element is "covered", and the predicate
+    // asks the place as well as the time.
+    guardFingersOn(document.body, '*', here);
     return true;
 }
 

@@ -573,6 +573,7 @@ async function undoAttempt(flags) {
         let moved = false;
         State.schedule.workers.forEach(w => { if (was.has(w.id) && was.get(w.id) !== w.active) { w.active = was.get(w.id); moved = true; } });
         if (moved) { State.commitRoster(); render(); }
+        if (currentView !== 'roster') showView('roster');
     }, flags);
     await pause(page, 760);
 }
@@ -593,7 +594,9 @@ async function twoTaps(chipLocator, target, gap) {
         const wait = started + gap - Date.now();
         if (wait > 0) await page.waitForTimeout(wait);
         const under = await page.evaluate(({ x, y }) => { const node = document.elementFromPoint(x, y);
-            const hit = node && node.closest('button'); return hit ? `${hit.className}|${hit.textContent.trim().slice(0, 20)}` : (node ? node.id || node.className : null); }, point);
+            const bar = node && node.closest ? (node.closest('.tabs') ? 'tab bar: ' : node.closest('.topbar') ? 'top bar: ' : '') : '';
+            const hit = node && node.closest('button');
+            return bar + (hit ? `${hit.className}|${hit.textContent.trim().slice(0, 20)}` : (node ? node.id || node.className || node.tagName : null)); }, point);
         await page.touchscreen.tap(point.x, point.y);
         await pause(page, 250);
         const seen = await page.evaluate(() => { const d = window.__downs; return d.length > 1 ? Math.round(d[d.length - 1] - d[d.length - 2]) : null; });
@@ -605,11 +608,13 @@ async function twoTaps(chipLocator, target, gap) {
     }
     return { failed: true };
 }
-// Back to the crew screen with nothing open, between two trials.
+// Back to the crew screen with nothing open, between two trials - the screen itself too, so that
+// a trial that let a touch change it fails by its own check and not by the next trial's timeout.
 async function settle() {
     await page.evaluate(() => {
         if (document.getElementById('askModal').style.display === 'flex') askCancel();
         [...document.querySelectorAll('.modal')].forEach(m => { if (m.style.display === 'flex' && MODAL_CLOSERS[m.id]) MODAL_CLOSERS[m.id](); });
+        if (currentView !== 'roster') showView('roster');
         window.scrollTo(0, 0);
     });
     await pause(page, 760);
@@ -667,6 +672,7 @@ const openModals = () => page.evaluate(() => [...document.querySelectorAll('.mod
     suite('13. THE SLOW SECOND TAP: 350, 500 and 650 ms after a door\'s chip, nothing turns, the form stays open, no byte moves');
     const trials = [];
     const seenGaps = [];
+    const underChip = [];
     for (const gap of [350, 500, 650]) {
         trials.push(['row', 'the chip\'s own point', gap, () => twoTaps(chip('idle', 'w_08'), null, gap)]);
         trials.push(['row', 'his own «פעיל»', gap, () => twoTaps(chip('idle', 'w_08'), async () => { await pause(page, 60); return switchOnGlass('his', 'w_08'); }, gap)]);
@@ -702,10 +708,15 @@ const openModals = () => page.evaluate(() => [...document.querySelectorAll('.mod
         if (where.includes('«ביטול»')) check(`${name}: what was under the finger was «ביטול»`, /ביטול/.test(done.under || ''), String(done.under));
         same(`${name}: no switch turned and no byte moved`, [await switches(), await disk(page)], [switchesBefore, done.before]);
         same(`${name}: nothing opened but what the door opened`, await openModals(), door === 'form' ? ['workerFormModal'] : []);
+        // FIX ROUND 1: the touch at the chip's own place can be on neither surface the hold
+        // covers (the tab bar, the top bar) - it must not change the screen either.
+        same(`${name}: the screen is still the crew screen`, await page.evaluate(() => currentView), 'roster');
+        if (where === 'the chip\'s own point') underChip.push(`${door}/${gap}: ${done.under}`);
         if (where.includes('«עוד פרטים»')) check(`${name}: the fold is still open, the number in it`, await page.evaluate(() => document.getElementById('workerFormMore').open));
         await settle();
     }
     console.log(`  (the gaps the page saw: ${seenGaps.join(' ')})`);
+    console.log(`  (under the finger at the chip's own point: ${underChip.join(' | ')})`);
     same('after all of it, the record in memory', await record(page), recordBefore);
 }
 
