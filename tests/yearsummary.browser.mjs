@@ -294,7 +294,7 @@ try {
         [plain(await page.locator('#yearSummaryBody .ysum-figures .msum-warn').first().innerText()),
             await page.locator('#yearSummaryBody .ysum-notsummed').innerText(), facts.notSummed],
         ['⚠️ 1 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: דוגמה דלת. הוסף להם שכר במסך "עובדים ואתרים".',
-            'עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.', true]);
+            'עובד שיש לו אפילו יום עבודה אחד בלי שכר יומי לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.', true]);
     same('the men in the roster\'s order, the one switched off said so', await page.locator('#yearSummaryBody .ysum-man')
         .evaluateAll(nodes => nodes.map(node => [node.querySelector('.ysum-man-name').textContent,
             (node.querySelector('.ysum-inactive') || { textContent: '' }).textContent])),
@@ -372,6 +372,12 @@ try {
     same('forward to 2026, where there is no next year: its focus goes to the other arrow, not to nowhere',
         [await page.locator('#yearSummaryYear').innerText(), await page.locator('#yearSummaryNext').isVisible(), await active(page),
             await page.locator('#yearSummaryBody .ysum-month').count()], ['2026', false, 'yearSummaryPrev', 12]);
+    // Where he is when he leaves by March's row: the row in the middle of the glass.
+    const marchTop = await page.evaluate(() => {
+        document.querySelector('#yearSummaryBody .ysum-month[data-ysum-month="2026-03"]').scrollIntoView({ block: 'center' });
+        return document.querySelector('#yearSummaryModal .modal-content').scrollTop;
+    });
+    given('March\'s row is below the first screen, so there is a place to come back to', marchTop > 200, String(marchTop));
     await page.locator('#yearSummaryBody .ysum-month[data-ysum-month="2026-03"]').click();
     await page.waitForTimeout(80);
     same('March\'s row: the year shuts and «סיכום חודש» opens on March, at its heading', [await isOpen(page, 'yearSummaryModal'),
@@ -379,6 +385,19 @@ try {
         await page.locator('#monthSummaryYear').innerText()], [false, true, 'מרץ 2026', 'monthSummaryTitle', 'סיכום שנת 2026']);
     const march = await page.evaluate(() => monthSummaryFacts('2026-03'));
     same('and what it says of March is what the year\'s row said', march.money.gross, facts.months[2].gross);
+    // THE WAY BACK (fix round 1): the month's own door puts him where he left the year - the same
+    // place in it, on the same month's row - and not at the top of twelve months again.
+    await page.locator('#monthSummaryYear').click();
+    await readYear(page);
+    await page.waitForTimeout(60);
+    same('the month\'s door brings him back to where he left the year, on the row he left by', [
+        Math.abs(await page.evaluate(() => document.querySelector('#yearSummaryModal .modal-content').scrollTop) - marchTop) <= 1,
+        await active(page)], [true, '2026-03']);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(80);
+    await openYear(page);
+    same('opened another way, the year is at its top again', [await page.evaluate(() =>
+        document.querySelector('#yearSummaryModal .modal-content').scrollTop), await active(page)], [0, 'yearSummaryTitle']);
     await page.keyboard.press('Escape');
     await page.waitForTimeout(80);
 
@@ -458,6 +477,31 @@ try {
     await page.keyboard.press('Escape');
     await page.evaluate(() => { XLSX = window.__xlsx; loadXlsx = window.__loadXlsx; downloadCsv = window.__downloadCsv; });
     await page.waitForTimeout(60);
+    // A FIRST EXPORT PRESSED TWICE (fix round 1): the library 600 ms on its way, and a second
+    // press 150 ms after the first - a finger on the button, and the button's own function - is
+    // nothing: ONE file, the button shut and the frame's line saying so meanwhile.
+    await page.evaluate(() => {
+        window.__written = [];
+        window.__realLoad = loadXlsx;
+        loadXlsx = () => new Promise(done => setTimeout(() => done(window.__realLoad()), 600));
+    });
+    const exportAt = await page.locator('#yearSummaryExport').boundingBox();
+    await page.locator('#yearSummaryExport').click();
+    await page.waitForTimeout(150);
+    const during = await page.evaluate(() => ({ shut: document.getElementById('yearSummaryExport').disabled,
+        line: document.getElementById('yearSummaryStatus').textContent }));
+    await page.mouse.click(exportAt.x + exportAt.width / 2, exportAt.y + exportAt.height / 2);
+    await page.evaluate(() => { yearSummaryExport(); });
+    await page.waitForFunction(() => document.getElementById('askModal').style.display === 'flex', null, { timeout: 10000 });
+    await page.waitForTimeout(400);
+    same('pressed twice while the library is on its way: «מכין את הקובץ…» and the button shut meanwhile, and ONE file',
+        [during, await page.evaluate(() => window.__written.map(one => one.name))],
+        [{ shut: true, line: 'מכין את הקובץ…' }, ['farkad-year_2026.xlsx']]);
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => { loadXlsx = window.__realLoad; });
+    await page.waitForTimeout(80);
+    same('and once it is handed over, the button is the year\'s again and the line is gone', await page.evaluate(() =>
+        [document.getElementById('yearSummaryExport').disabled, document.getElementById('yearSummaryStatus').textContent]), [false, '']);
     await page.locator('#yearSummaryClose').click();
     await page.waitForTimeout(80);
 
@@ -483,9 +527,36 @@ try {
         monthSummaryReadRange = function () { window.__reads.range += 1; if (drawing) window.__reads.inRender += 1; return range.apply(this, arguments); };
         render = function () { drawing = true; try { return draw.apply(this, arguments); } finally { drawing = false; } };
     });
+    // A record that did not move first: render() twice draws nothing new - no mark, no line, the
+    // figures where they are (fix round 1: no check of the glass held this).
+    await page.evaluate(() => { render(); render(); });
+    same('render() over a record that did not move: the figures stay, unmarked, and nothing is read', await page.evaluate(() => ({
+        tiles: document.querySelectorAll('#yearSummaryBody .msum-tile').length > 0,
+        stale: document.getElementById('yearSummaryBody').classList.contains('ysum-stale'),
+        reading: document.querySelectorAll('#yearSummaryBody .ysum-reading').length,
+        status: document.getElementById('yearSummaryStatus').textContent, reads: Object.assign({}, window.__reads) })),
+    { tiles: true, stale: false, reading: 0, status: '', reads: { read: 0, range: 0, inRender: 0 } });
+    // THE READER'S PLACE, sampled every 40 ms from the first commit until the year is read again:
+    // the figures used to be taken off at once, the dialog shrank to one screen, and he was put
+    // at its top for a second and a half (fix round 1).
+    await page.evaluate(sel => {
+        window.__place = [];
+        const c = document.querySelector(sel);
+        const tick = () => {
+            window.__place.push({ top: Math.round(c.scrollTop),
+                tiles: document.querySelectorAll('#yearSummaryBody .msum-tile').length,
+                stale: document.getElementById('yearSummaryBody').classList.contains('ysum-stale') });
+            if (window.__place.length < 200) window.__placeTimer = setTimeout(tick, 40);
+        };
+        tick();
+    }, content);
     // Three commits 500 ms apart, each a Saturday nobody worked.
     const placeholder = () => page.evaluate(() => ({ tiles: document.querySelectorAll('#yearSummaryBody .msum-tile').length,
-        reading: (document.querySelector('#yearSummaryBody .ysum-reading') || { textContent: '' }).textContent,
+        stale: document.getElementById('yearSummaryBody').classList.contains('ysum-stale'),
+        busy: document.getElementById('yearSummaryBody').getAttribute('aria-busy'),
+        status: document.getElementById('yearSummaryStatus').textContent,
+        exportShut: document.getElementById('yearSummaryExport').disabled,
+        reading: document.querySelectorAll('#yearSummaryBody .ysum-reading').length,
         reads: Object.assign({}, window.__reads) }));
     const seen = [];
     for (const [at, date] of [[0, '2026-11-14'], [1, '2026-11-07'], [2, '2026-10-31']]) {
@@ -494,18 +565,25 @@ try {
         seen.push(await placeholder());
     }
     const afterLast = Date.now();
-    same('each commit\'s render() read nothing, and the figures went at the first', seen.map(one => [one.tiles, one.reading, one.reads]),
-        seen.map(() => [0, 'מחשב את השנה…', { read: 0, range: 0, inRender: 0 }]));
+    same('each commit\'s render() read nothing, and from the first the figures stayed where they were, marked as being read again',
+        seen.map(one => [one.tiles > 0, one.stale, one.busy, one.status, one.exportShut, one.reading, one.reads]),
+        seen.map(() => [true, true, 'true', 'מחשב את השנה…', true, 0, { read: 0, range: 0, inRender: 0 }]));
     await page.waitForTimeout(1000);
     const midway = await placeholder();
-    same('a second after the last commit: still nothing read', [midway.tiles, midway.reads.read], [0, 0]);
-    await page.waitForFunction(() => document.querySelector('#yearSummaryBody .msum-tile') !== null, null, { timeout: 10000 });
+    same('a second after the last commit: still nothing read, still marked', [midway.tiles > 0, midway.stale, midway.reads.read], [true, true, 0]);
+    await page.waitForFunction(() => document.querySelector('#yearSummaryBody .msum-tile') !== null
+        && !document.getElementById('yearSummaryBody').classList.contains('ysum-stale'), null, { timeout: 10000 });
     const after = await page.evaluate(() => Object.assign({}, window.__reads));
     const waited = Date.now() - afterLast;
     same('then ONE reading, none of it inside render()', [after.read, after.inRender], [1, 0]);
     check('and it came only once the draws had stopped for 1.5 s', waited >= 1400, `${waited} ms after the last commit`);
-    same('the three days are on it, and the reader is where he was', [Number(await attendance()),
-        await page.evaluate(sel => document.querySelector(sel).scrollTop, content)], [was + 3, 600]);
+    same('the three days are on it, the reader is where he was, and the year is current again', [Number(await attendance()),
+        await page.evaluate(sel => document.querySelector(sel).scrollTop, content), await placeholder().then(one =>
+            [one.stale, one.busy, one.status, one.exportShut])], [was + 3, 600, [false, 'false', '', false]]);
+    const place = await page.evaluate(() => { clearTimeout(window.__placeTimer); return window.__place; });
+    check('and at no moment of the wait was he anywhere but where he was, nor the figures off the glass',
+        place.length > 40 && place.every(one => one.top === 600 && one.tiles > 0),
+        JSON.stringify(place.filter(one => one.top !== 600 || one.tiles === 0).slice(0, 4)));
 
     // A snapshot adopted from another phone: the same rule.
     await page.evaluate(() => { window.__reads = { read: 0, range: 0, inRender: 0 }; });
@@ -517,9 +595,10 @@ try {
         FarkadSync.receive(raw);
     });
     const adopted = await placeholder();
-    same('a snapshot adopted under it: the figures go at once, nothing read inside the draw', [adopted.tiles, adopted.reads],
-        [0, { read: 0, range: 0, inRender: 0 }]);
-    await page.waitForFunction(() => document.querySelector('#yearSummaryBody .msum-tile') !== null, null, { timeout: 10000 });
+    same('a snapshot adopted under it: the figures stay, marked at once, nothing read inside the draw', [adopted.tiles > 0, adopted.stale,
+        adopted.status, adopted.reads], [true, true, 'מחשב את השנה…', { read: 0, range: 0, inRender: 0 }]);
+    await page.waitForFunction(() => document.querySelector('#yearSummaryBody .msum-tile') !== null
+        && !document.getElementById('yearSummaryBody').classList.contains('ysum-stale'), null, { timeout: 10000 });
     same('then ONE reading with the other phone\'s day on it, the place kept', [await page.evaluate(() => window.__reads.read),
         await page.evaluate(() => window.__reads.inRender), Number(await attendance()),
         await page.evaluate(sel => document.querySelector(sel).scrollTop, content)], [1, 0, was + 4, 600]);
@@ -538,8 +617,50 @@ try {
                 const doorBox = await glass.locator('#monthSummaryYear').boundingBox();
                 const floor = large ? 51.5 : 47.5;
                 check(`${tag}: the door ${large ? 52 : 48}px both ways`, doorBox.width >= floor && doorBox.height >= floor, JSON.stringify(doorBox));
+                // ON THE MONTH'S FIRST SCREEN (fix round 1): it stood after the whole month, 2 to 5.5
+                // screens down, and nobody told the year was in «סיכום חודש» found it.
+                same(`${tag}: the door is on «סיכום חודש»'s first screen, as it opens`, await glass.evaluate(() => {
+                    const content = document.querySelector('#monthSummaryModal .modal-content');
+                    const c = content.getBoundingClientRect();
+                    const r = document.getElementById('monthSummaryYear').getBoundingClientRect();
+                    return { scrollTop: content.scrollTop, on: r.top >= Math.max(c.top, 0) - 1 && r.bottom <= Math.min(c.bottom, innerHeight) + 1 };
+                }), { scrollTop: 0, on: true });
                 await glass.locator('#monthSummaryYear').click();
                 await readYear(glass);
+                // THE FOOT UNDER THE THUMB (fix round 1): the export and «סגור» were the last row of the
+                // longest dialog of the app, 9 to 16 screens down, with a 12px strip of backdrop the
+                // only other way out.
+                const footAt = async () => glass.evaluate(() => {
+                    const c = document.querySelector('#yearSummaryModal .modal-content').getBoundingClientRect();
+                    return ['yearSummaryExport', 'yearSummaryClose'].map(id => {
+                        const r = document.getElementById(id).getBoundingClientRect();
+                        return r.height > 0 && r.top >= Math.max(c.top, 0) - 1 && r.bottom <= Math.min(c.bottom, innerHeight) + 1;
+                    });
+                });
+                const footTop = await footAt();
+                const screens = await glass.evaluate(() => {
+                    const content = document.querySelector('#yearSummaryModal .modal-content');
+                    content.scrollTop = Math.round(content.scrollHeight / 2);
+                    return Math.round(content.scrollHeight / content.clientHeight * 10) / 10;
+                });
+                await glass.waitForTimeout(40);
+                const footMiddle = await footAt();
+                await glass.evaluate(() => { const content = document.querySelector('#yearSummaryModal .modal-content'); content.scrollTop = content.scrollHeight; });
+                await glass.waitForTimeout(40);
+                const footEnd = await footAt();
+                await glass.evaluate(() => { document.querySelector('#yearSummaryModal .modal-content').scrollTop = 0; });
+                await glass.waitForTimeout(40);
+                same(`${tag}: «יצוא השנה» and «סגור» on the glass at the first screen, the middle and the last (${screens} screens)`,
+                    [footTop, footMiddle, footEnd], [[true, true], [true, true], [true, true]]);
+                const names = await glass.evaluate(() => [...document.querySelectorAll('#yearSummaryBody .ysum-man')].map(row => {
+                    const name = getComputedStyle(row.querySelector('.ysum-man-name'));
+                    const values = [...row.querySelectorAll('.ysum-pair-value')].map(node => getComputedStyle(node));
+                    return { name: row.querySelector('.ysum-man-name').textContent.slice(0, 12), weight: Number(name.fontWeight),
+                        size: parseFloat(name.fontSize), values: Math.max(...values.map(v => Number(v.fontWeight))),
+                        valueSize: Math.max(...values.map(v => parseFloat(v.fontSize))) };
+                }));
+                check(`${tag}: a man's name is the heaviest thing on his row, and as large as his largest figure`, names.length === 5
+                    && names.every(one => one.weight > one.values && one.size >= one.valueSize), JSON.stringify(names[0]));
                 const read = await glass.evaluate(measureInPage, ['#yearSummaryModal']);
                 const live = read.texts.filter(t => !t.off);
                 const small = live.filter(t => t.size < (large ? 18 : 16));
@@ -623,6 +744,71 @@ try {
             await shot(glass, '10-year-375-dark-doubled-text');
         }
         await glass.context().close();
+    }
+
+    // ------------------------------------------------------------ a figure is never broken inside its digits
+    // THE SEASON AT DOUBLED TEXT (fix round 1): forty men over the year - a seven-figure «נצבר» -
+    // with every size of the dialog doubled, on three phones, with and without «תצוגה גדולה». A run
+    // of digits may go onto a line of its own, never be cut in two, where it fits a line of its
+    // own - «4788515 ₪» was drawn «4788» over «515». One that is wider than the whole line its box
+    // gives it (a seven-figure «נצבר» at 60px on the 320px phone) can only be broken or leave the
+    // glass, and is broken: such runs are named in the detail and counted, never passed as fitting.
+    for (const [width, height] of [[320, 568], [375, 667], [440, 956]]) {
+        for (const large of [false, true]) {
+            const tag = `${width}x${height}, a season at doubled text${large ? ', «תצוגה גדולה»' : ''}`;
+            suite(`the figures whole - ${tag}`);
+            const glass = await phone(width, height, 'dark', { season: true, large });
+            await glass.evaluate(() => openYearSummary(2026));
+            await readYear(glass);
+            await glass.evaluate(() => {
+                const sizes = [...document.querySelectorAll('#yearSummaryModal *')].map(node => [node, parseFloat(getComputedStyle(node).fontSize)]);
+                sizes.forEach(([node, size]) => node.style.setProperty('font-size', `${size * 2}px`, 'important'));
+            });
+            await glass.waitForTimeout(80);
+            const runs = await glass.evaluate(() => {
+                const out = { measured: 0, broken: [], tooWide: [] };
+                document.querySelectorAll('#yearSummaryBody .msum-value, #yearSummaryBody .ysum-pair-value, #yearSummaryBody .ysum-bar-count, #yearSummaryBody .msum-count')
+                    .forEach(node => {
+                        const text = node.firstChild;
+                        if (!text || text.nodeType !== 3) return;
+                        const digits = /\d{2,}/g;
+                        for (let m = digits.exec(text.nodeValue); m; m = digits.exec(text.nodeValue)) {
+                            const range = document.createRange();
+                            range.setStart(text, m.index);
+                            range.setEnd(text, m.index + m[0].length);
+                            const lines = new Set([...range.getClientRects()].filter(r => r.width > 0.5).map(r => Math.round(r.top)));
+                            out.measured += 1;
+                            if (lines.size <= 1) continue;
+                            // Its own width unbroken, in its own type, against the line its box gives it.
+                            const probe = document.createElement('span');
+                            probe.textContent = m[0];
+                            probe.style.cssText = 'position: absolute; visibility: hidden; white-space: nowrap;';
+                            node.appendChild(probe);
+                            const natural = probe.getBoundingClientRect().width;
+                            probe.remove();
+                            const cs = getComputedStyle(node);
+                            const room = node.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+                            const one = { figure: node.textContent, lines: lines.size, natural: Math.round(natural), room: Math.round(room) };
+                            (natural <= room + 1 ? out.broken : out.tooWide).push(one);
+                        }
+                    });
+                return out;
+            });
+            given(`${tag}: the season's figures were measured`, runs.measured > 100, String(runs.measured));
+            check(`${tag}: no figure is broken inside its digits where it fits a line of its own`
+                + (runs.tooWide.length ? ` (wider than any line here, and so broken: ${runs.tooWide.map(one => `${one.figure} ${one.natural}/${one.room}px`).join(', ')})` : ''),
+            runs.broken.length === 0, JSON.stringify(runs.broken.slice(0, 4)));
+            const box = await glass.evaluate(() => {
+                const content = document.querySelector('#yearSummaryModal .modal-content');
+                return { page: document.documentElement.scrollWidth <= innerWidth + 1, sideways: content.scrollWidth <= content.clientWidth + 1 };
+            });
+            check(`${tag}: and nothing scrolls sideways for it`, box.page && box.sideways, JSON.stringify(box));
+            if (width === 440 && !large) {
+                await glass.evaluate(() => { document.querySelector('#yearSummaryModal .modal-content').scrollTop = 0; });
+                await shot(glass, '11-year-440-season-doubled-text');
+            }
+            await glass.context().close();
+        }
     }
 
     // ------------------------------------------------------------ 18. the budget
