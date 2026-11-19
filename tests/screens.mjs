@@ -456,6 +456,33 @@ export const SCREENS = [
     { name: 'the close reminder line', scope: ['#closeReminderBanner'],
         open: async page => { await home(page); await run(page, () => closeReminderShow(4)); await pause(page); },
         close: page => run(page, () => closeReminderHide()) },
+    // v206: «תמונת מצב» (js/ui/status.js) - the whole screen, opened by its own opener and read
+    // (the money after a frame); and its door on a phone with no chip to show, where the door
+    // says its own words in the strip. The live sync line is held still while that is measured.
+    { name: 'status - the whole screen', scope: ['#statusModal'],
+        open: async page => {
+            await home(page);
+            await run(page, () => { openStatus(); });
+            await page.waitForFunction(() => statusIsOpen() && !document.querySelector('#statusModal .status-pending'));
+            await pause(page, 300);
+        },
+        close: page => run(page, () => closeStatus()) },
+    { name: 'status - the door with no chip', scope: ['.topbar'],
+        open: async page => {
+            await home(page);
+            await run(page, () => {
+                window.__statusNotice = updateSyncNotice;
+                updateSyncNotice = function () {};
+                document.getElementById('storageNotice').textContent = 'הנתונים נשמרים במכשיר הזה בלבד.';
+                renderSyncChip();
+            });
+            await pause(page);
+        },
+        close: page => run(page, () => {
+            if (window.__statusNotice) { updateSyncNotice = window.__statusNotice; window.__statusNotice = null; }
+            updateSyncNotice();
+            renderSyncChip();
+        }) },
     { name: 'what is new', scope: ['#whatsNewModal'],
         open: async page => { await home(page); await run(page, () => { openWhatsNew('all'); }); await pause(page, 300); },
         close: page => run(page, () => closeWhatsNew()) },
