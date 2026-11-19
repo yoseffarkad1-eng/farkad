@@ -716,27 +716,43 @@ function historyRowNode(row, facts) {
     return node;
 }
 
-// The rows from `start` up to `end`, each month's heading before its first, into `list`.
-function historyRowsInto(list, facts, start, end) {
+// What each node of the list was drawn from - the key it is found by and the words it says -
+// so that a redraw passes over what did not move. A WeakMap: nothing is written on the node.
+const HISTORY_NODES = new WeakMap();
+
+// The list as the sequence it is drawn in - each month's heading before its first day, the
+// days, the foot - every item with its key, the words it is drawn from, and how to build it.
+// A day's words are the row and the man's name and whether names are shown: its colour is
+// its site's id (js/ui/sitecolor.js) and moves with nothing else.
+function historyListItems(facts, shown) {
     const heading = {};
     facts.months.forEach(month => { heading[month.key] = month; });
-    let month = start > 0 ? facts.rows[start - 1].date.slice(0, 7) : null;
-    for (let at = start; at < end; at += 1) {
+    const everyone = facts.workerId === null;
+    const items = [];
+    let month = null;
+    for (let at = 0; at < shown; at += 1) {
         const row = facts.rows[at];
         const key = row.date.slice(0, 7);
         if (key !== month) {
-            const head = el('h4', 'history-month', historyMonthHeading(heading[key]));
-            head.dataset.month = key;
-            list.appendChild(head);
+            const words = historyMonthHeading(heading[key]);
+            const monthKey = key;
+            items.push({ key: `month:${key}`, words, build: () => {
+                const head = el('h4', 'history-month', words);
+                head.dataset.month = monthKey;
+                return head;
+            } });
             month = key;
         }
-        list.appendChild(historyRowNode(row, facts));
+        items.push({ key: `row:${row.date}:${row.workerId}`, words: JSON.stringify([row, facts.names[row.workerId], everyone]),
+            build: () => historyRowNode(row, facts) });
     }
+    items.push({ key: 'foot', words: JSON.stringify([facts.rows.length, shown]), build: () => historyFootNode(facts, shown) });
+    return items;
 }
 
 // Under the rows: what a tap does, and - with more rows than drawn - how many of how many and
 // the way to the next chunk, or, at the screen's cap, the sentence that says to narrow it.
-function historyFootInto(list, facts, shown) {
+function historyFootNode(facts, shown) {
     const T = HISTORY_TEXT;
     const total = facts.rows.length;
     const foot = el('div', 'history-foot');
@@ -752,7 +768,7 @@ function historyFootInto(list, facts, shown) {
             foot.appendChild(more);
         }
     }
-    list.appendChild(foot);
+    return foot;
 }
 
 // The focused row or button of the list, by its key; and the one drawn again under it.
@@ -770,25 +786,46 @@ function historyFocusKey(list, key) {
     return true;
 }
 
+// THE LIST, built again only where it moved. A commit or a snapshot from another phone under
+// six hundred drawn days changes a day or two: what no longer stands, or no longer says what
+// it said, is taken out; every other node stays the node it was - in its place, the focus
+// still on it - and only the new and the changed are built and put in where they go. The
+// answer is the list a fresh draw would make, node for node (tests/history.test.mjs).
 function historyDrawList(facts) {
     const list = historyParts().list;
     if (!list) return;
     const held = historyFocusedKey(list);
-    clear(list);
     if (facts.rows.length === 0) {
+        clear(list);
         list.appendChild(emptyHint(HISTORY_TEXT.empty));
         return;
     }
-    const shown = historyShownNow(facts);
-    historyRowsInto(list, facts, 0, shown);
-    historyFootInto(list, facts, shown);
-    historyFocusKey(list, held);
+    const items = historyListItems(facts, historyShownNow(facts));
+    const wanted = new Map(items.map(item => [item.key, item.words]));
+    const kept = new Map();
+    [...list.children].forEach(node => {
+        const drawn = HISTORY_NODES.get(node);
+        if (drawn && wanted.get(drawn.key) === drawn.words && !kept.has(drawn.key)) kept.set(drawn.key, node);
+        else list.removeChild(node);
+    });
+    items.forEach((item, at) => {
+        let node = kept.get(item.key);
+        if (!node) {
+            node = item.build();
+            HISTORY_NODES.set(node, { key: item.key, words: item.words });
+        }
+        const here = list.children[at] || null;
+        if (here === node) return;
+        if (node.parentNode === list) list.removeChild(node);
+        list.insertBefore(node, here);
+    });
+    if (held && !historyFocusedKey(list)) historyFocusKey(list, held);
 }
 
 // THE ONE DRAW: the facts read once, and the screen touched only where they moved.
-function historyDraw() {
+function historyDraw(read) {
     if (!HISTORY) return;
-    const facts = historyFacts();
+    const facts = read || historyFacts();
     HISTORY_FACTS = facts;
     const signature = historySignature(facts, historyShownNow(facts));
     if (signature !== HISTORY_DRAWN) {
@@ -955,29 +992,17 @@ function historyChooseDates(parts) {
     return true;
 }
 
-// «הצג עוד»: the next chunk drawn UNDER the drawn rows - not the whole list again, which would
-// cost what had been unfolded - and never past HISTORY_SHOWN_MAX. The focus goes to the first
-// new row. A record that moved since the last draw is drawn whole instead.
+// «הצג עוד»: the next chunk drawn UNDER the drawn rows - the list is built again only where it
+// moved (historyDrawList), so the days already unfolded stay as they are - and never past
+// HISTORY_SHOWN_MAX. The focus goes to the first new row.
 function historyMore() {
     if (!historyIsOpen()) return;
     const parts = historyParts();
     const facts = historyFacts();
     const before = historyShownNow(facts);
-    const fresh = historySignature(facts, before) === HISTORY_DRAWN;
     HISTORY.shown = Math.min(before + HISTORY_CHUNK, HISTORY_SHOWN_MAX);
-    HISTORY_FACTS = facts;
     const after = historyShownNow(facts);
-    if (!fresh || !parts.list) {
-        HISTORY_DRAWN = null;
-        historyDraw();
-    } else if (after > before) {
-        const foot = parts.list.querySelector('.history-foot');
-        if (foot) parts.list.removeChild(foot);
-        historyRowsInto(parts.list, facts, before, after);
-        historyFootInto(parts.list, facts, after);
-        HISTORY_DRAWN = historySignature(facts, after);
-        if (HISTORY.textOpen) historyFillText(facts);
-    }
+    historyDraw(facts);
     if (after > before) historyFocusKey(parts.list, `row:${facts.rows[before].date}:${facts.rows[before].workerId}`);
 }
 

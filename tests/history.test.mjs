@@ -1023,9 +1023,12 @@ const YEAR = { range: 'thisYear', from: null, to: null };
     const foot = () => season.byId('historyList').querySelectorAll('.history-foot')[0].children.map(child => child.textContent);
     same('the first draw shows 200 rows, «מוצגות 200 שורות מתוך N.» and «הצג עוד 200»',
         [season.rowsDrawn().length, foot()], [200, ['לחיצה על יום פותחת אותו במסך היום.', `מוצגות 200 שורות מתוך ${total}.`, 'הצג עוד 200']]);
+    const firstChunk = season.rowsDrawn();
     season.run('historyMore()');
     same('«הצג עוד» draws 200 more under them', [season.rowsDrawn().length, foot().slice(1)],
         [400, [`מוצגות 400 שורות מתוך ${total}.`, 'הצג עוד 200']]);
+    check('and the 200 drawn before are the same nodes, where they were - only the new days and the foot are built',
+        season.rowsDrawn().slice(0, 200).every((node, at) => node === firstChunk[at]));
     season.run('historyMore()');
     same('up to 600 - and there no «הצג עוד», the line that says to narrow it', [season.rowsDrawn().length, foot().slice(1)],
         [600, [`מוצגות 600 השורות החדשות ביותר מתוך ${total}. כדי לראות את השאר, בחר טווח קצר יותר, אתר או עובד.`]]);
@@ -1268,7 +1271,7 @@ const YEAR = { range: 'thisYear', from: null, to: null };
         source('js/ui/journey.js').indexOf("entry: 'בניית סידור',") !== -1
         && device.run('HISTORY_TEXT.leaveMessage("א", "ב")').indexOf('«בניית סידור»') !== -1);
     check('every constant it reads at call time is read at call time - none at load',
-        !/^const [A-Z_]+ = (?!Object\.freeze|\d|\[|\{|null|false)/m.test(HISTORY_JS)
+        !/^const [A-Z_]+ = (?!Object\.freeze|\d|\[|\{|null|false|new WeakMap\(\))/m.test(HISTORY_JS)
         && !/^(?:const|let) \w+ = [A-Z_]+\./m.test(HISTORY_JS));
 
     const blocks = /const HISTORY_TEXT = Object\.freeze\(\{[\s\S]*?\n\}\);|const HISTORY_REUSED = Object\.freeze\(\{[\s\S]*?\n\}\);/g;
@@ -1394,12 +1397,34 @@ const YEAR = { range: 'thisYear', from: null, to: null };
             JSON.stringify(snap()) === beforeSnap], [1, true, true]);
     // And a record that moved is drawn again: today, the first man, a double at a site of his
     // that is not his home.
+    const listBefore = season.byId('historyList').children.slice();
     season.run("State.schedule.days['2026-11-19'].actual.w_01 = { entries: [makeEntry('p_5', 'double')] };");
     season.run('renderHistoryIfOpen()');
     const moved = nodes();
     check('while a record that moved is drawn again', moved.some((node, at) => node !== beforeNodes[at])
         && JSON.stringify(snap()) !== beforeSnap && season.rowsDrawn()[0].getAttribute('aria-label').indexOf('יום כפול') !== -1,
     season.rowsDrawn()[0].getAttribute('aria-label'));
+    // ONLY WHERE IT MOVED: of the list's 200 days and their headings, the one day is built
+    // again - and its month's heading and the foot only if a count they say moved - and every
+    // other node is the node it was. And the answer is the list a fresh draw makes.
+    const built = season.byId('historyList').children.filter(node => listBefore.indexOf(node) === -1);
+    same('only the day that moved is built again: every other node of the list is the node it was',
+        [built.length >= 1 && built.length <= 3, built.indexOf(season.rowsDrawn()[0]) !== -1,
+            built.every(node => node === season.rowsDrawn()[0] || node.className === 'history-month' || node.className === 'history-foot')],
+        [true, true, true]);
+    const listSnap = () => {
+        const out = [];
+        const walk = node => {
+            out.push([node.tagName, node._text, node.className, JSON.stringify(node.attributes), JSON.stringify(node.dataset || {}),
+                node.style ? node.style.background : '']);
+            node.children.forEach(walk);
+        };
+        walk(season.byId('historyList'));
+        return JSON.stringify(out);
+    };
+    const drawnInPlace = listSnap();
+    season.run('closeHistory(); openHistory(null); historyToggleText();');
+    same('and the list says, node for node, what a fresh draw of the same record says', listSnap() === drawnInPlace, true);
     season.run('closeHistory()');
     season.ctx.historyText = real;
     season.ctx.historyRead = realRead;
