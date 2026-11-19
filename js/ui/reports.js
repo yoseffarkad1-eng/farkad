@@ -84,11 +84,11 @@ let ADVANCE_ORDER_DRAFT = null;
 // above: another record goes to the real function every time, an append that can reach
 // this record forgets every answer, and the readers are put back in the same finally.
 //
-// AND BETWEEN READINGS OF A RECORD THAT DID NOT MOVE, those answers are kept
-// (REPORT_SHARED_KEPT) under a key that is the record (reportSharedKey: today,
-// the build's flags and the whole record as text - NOT the write tick, which a send's
-// queue, receipt and provenance writes move minutes after a write without moving the
-// record) and under the very readers they were worked out with (REPORT_SHARED_DEPENDS,
+// AND BETWEEN READINGS OF A RECORD THAT DID NOT MOVE, those answers and each range's pay
+// sheet are kept (REPORT_SHARED_KEPT) under a key that is the record (reportSharedKey:
+// today, the build's flags and the whole record as text - NOT the write tick, which a
+// send's queue, receipt and provenance writes move minutes after a write without moving
+// the record) and under the very readers they were worked out with (REPORT_SHARED_DEPENDS,
 // compared by identity: an answer of advanceOutstanding with no advanceHistory loaded is
 // another answer). One record's answers at a time; the next reading of the same schedule
 // object, the same key and the same readers starts from them, anything else drops them.
@@ -182,6 +182,15 @@ function reportSharedFound() {
     return REPORT_SHARED_DEPENDS.map(name => page[name]);
 }
 
+// A pay sheet's rows as a reader may be handed them: a new list of new rows. A row of
+// payrollReport is flat - strings, numbers, booleans, null (js/model/money.js; pinned by
+// tests/speed.test.mjs) - so a shallow copy is a whole one, and a reader that wrote into a
+// row it was handed could never reach the rows kept for the next reading.
+function reportSharedRows(rows) {
+    if (!Array.isArray(rows)) return rows;
+    return rows.map(row => (row !== null && typeof row === 'object' ? Object.assign({}, row) : row));
+}
+
 // An append that cannot reach this record: its first argument is an object other than the
 // record, with a ledger object of its own and a map of entries of its own - the copy
 // «סגירת שבוע» closes a man's empty periods on first (weeklyCloseWithoutEmpties). The
@@ -214,6 +223,10 @@ function reportSharedApart(asked, schedule) {
 // could reach the record, something was asked, and the record still reads as it did. A key
 // that throws means nothing adopted and nothing kept. A reading that asks none of the seven
 // (the month's summary) works out no key at all.
+//
+// The pay sheets (S4) are kept with it: a range this reading works out is put aside as rows
+// nobody has touched; a range asked after the memo was adopted is handed a fresh copy of the
+// kept rows, and that copy is then the reading's, shared inside it exactly as v196 shares one.
 function reportShareLedger(schedule, found) {
     const page = typeof globalThis === 'object' && globalThis ? globalThis : {};
     const real = {};
@@ -240,6 +253,7 @@ function reportShareLedger(schedule, found) {
     let keyed = false;
     let key = null;
     let adopted = null;
+    const pristine = new Map();
     const fresh = () => ({ held: liveMap(), legacy: liveLegacy(), moved, entries: null, fold: null, history: null,
         overpaid: new Map(), outstanding: new Map(), walks: new Map(), positions: new Map() });
     const ensureKey = () => {
@@ -253,7 +267,8 @@ function reportShareLedger(schedule, found) {
         REPORT_SHARED_KEPT = null;
         if (kept.schedule !== schedule || key === null || kept.key !== key || !sameFound(kept.found)
             || moved !== 0 || !kept.memo) return;
-        adopted = { memo: kept.memo, held: liveMap(), legacy: liveLegacy() };
+        adopted = { memo: kept.memo, sheets: kept.sheets instanceof Map ? kept.sheets : new Map(),
+            held: liveMap(), legacy: liveLegacy() };
         memo = kept.memo;
         memo.held = adopted.held;
         memo.legacy = adopted.legacy;
@@ -287,11 +302,13 @@ function reportShareLedger(schedule, found) {
         }
     };
     if (real.ledgerEntries) wrap.ledgerEntries = function (asked) {
-        if (asked !== schedule || arguments.length !== 1 || !asPresent()) return real.ledgerEntries.apply(this, arguments);
+        if (asked !== schedule) return real.ledgerEntries.apply(this, arguments);
+        if (arguments.length !== 1 || !asPresent()) return real.ledgerEntries.apply(this, arguments);
         return entriesOf(now()).slice();
     };
     if (real.foldLedger) wrap.foldLedger = function (asked) {
-        if (asked !== schedule || arguments.length !== 1 || !asPresent()) return real.foldLedger.apply(this, arguments);
+        if (asked !== schedule) return real.foldLedger.apply(this, arguments);
+        if (arguments.length !== 1 || !asPresent()) return real.foldLedger.apply(this, arguments);
         const slot = now();
         if (!slot.fold) slot.fold = real.foldLedger(schedule);
         return slot.fold;
@@ -300,8 +317,9 @@ function reportShareLedger(schedule, found) {
     // ledger grouped once, in that order. It needs ledgerEntries to group from - with that
     // absent it is not wrapped, and asks for itself exactly as it would.
     if (real.advanceHistory && real.ledgerEntries) wrap.advanceHistory = function (asked, advanceId) {
-        const one = asked === schedule && arguments.length === 2 ? idKey(advanceId) : null;
-        if (asked !== schedule || one === null || !asPresent()) return real.advanceHistory.apply(this, arguments);
+        if (asked !== schedule) return real.advanceHistory.apply(this, arguments);
+        const one = arguments.length === 2 ? idKey(advanceId) : null;
+        if (one === null || !asPresent()) return real.advanceHistory.apply(this, arguments);
         const slot = now();
         if (!slot.history) {
             const history = new Map();
@@ -315,32 +333,36 @@ function reportShareLedger(schedule, found) {
         return (slot.history.get(String(advanceId)) || []).slice();
     };
     if (real.overpaidAdvances) wrap.overpaidAdvances = function (asked, workerId) {
-        const one = asked === schedule && arguments.length === 2 ? idKey(workerId) : null;
-        if (asked !== schedule || one === null || !asPresent()) return real.overpaidAdvances.apply(this, arguments);
+        if (asked !== schedule) return real.overpaidAdvances.apply(this, arguments);
+        const one = arguments.length === 2 ? idKey(workerId) : null;
+        if (one === null || !asPresent()) return real.overpaidAdvances.apply(this, arguments);
         const slot = now();
         if (!slot.overpaid.has(one)) slot.overpaid.set(one, real.overpaidAdvances(schedule, workerId));
         const answer = slot.overpaid.get(one);
         return Array.isArray(answer) ? answer.map(state => Object.assign({}, state)) : answer;
     };
     if (real.advanceOutstanding) wrap.advanceOutstanding = function (asked, advanceId) {
-        const one = asked === schedule && arguments.length === 2 ? idKey(advanceId) : null;
-        if (asked !== schedule || one === null || !asPresent()) return real.advanceOutstanding.apply(this, arguments);
+        if (asked !== schedule) return real.advanceOutstanding.apply(this, arguments);
+        const one = arguments.length === 2 ? idKey(advanceId) : null;
+        if (one === null || !asPresent()) return real.advanceOutstanding.apply(this, arguments);
         const slot = now();
         if (!slot.outstanding.has(one)) slot.outstanding.set(one, real.advanceOutstanding(schedule, advanceId));
         return Object.assign({}, slot.outstanding.get(one));
     };
     if (real.advanceWalk) wrap.advanceWalk = function (asked, workerId, from, to, carriedIn) {
-        const one = asked === schedule && arguments.length === 5 && typeof from === 'string' && typeof to === 'string'
+        if (asked !== schedule) return real.advanceWalk.apply(this, arguments);
+        const one = arguments.length === 5 && typeof from === 'string' && typeof to === 'string'
             && typeof carriedIn === 'number' ? idKey(workerId) : null;
-        if (asked !== schedule || one === null || !asPresent()) return real.advanceWalk.apply(this, arguments);
+        if (one === null || !asPresent()) return real.advanceWalk.apply(this, arguments);
         const slot = now();
         const walk = `${one}|${from}|${to}|${idKey(carriedIn)}`;
         if (!slot.walks.has(walk)) slot.walks.set(walk, real.advanceWalk(schedule, workerId, from, to, carriedIn));
         return Object.assign({}, slot.walks.get(walk));
     };
     if (real.advancePositionInto) wrap.advancePositionInto = function (asked, workerId, fromDate) {
-        const one = asked === schedule && arguments.length === 3 && typeof fromDate === 'string' ? idKey(workerId) : null;
-        if (asked !== schedule || one === null || !asPresent()) return real.advancePositionInto.apply(this, arguments);
+        if (asked !== schedule) return real.advancePositionInto.apply(this, arguments);
+        const one = arguments.length === 3 && typeof fromDate === 'string' ? idKey(workerId) : null;
+        if (one === null || !asPresent()) return real.advancePositionInto.apply(this, arguments);
         const slot = now();
         const at = `${one}|${fromDate}`;
         if (!slot.positions.has(at)) slot.positions.set(at, real.advancePositionInto(schedule, workerId, fromDate));
@@ -351,13 +373,23 @@ function reportShareLedger(schedule, found) {
     return {
         install() { Object.keys(wrap).forEach(name => { page[name] = wrap[name]; }); },
         uninstall() { Object.keys(wrap).forEach(name => { page[name] = real[name]; }); },
+        // S4: a kept range for this reading, as fresh rows - only once the memo was adopted
+        // and while the record is still the state it was adopted in.
+        keptSheet(range) {
+            if (!adopted || moved !== 0 || liveMap() !== adopted.held || liveLegacy() !== adopted.legacy
+                || !adopted.sheets.has(range)) return undefined;
+            return reportSharedRows(adopted.sheets.get(range));
+        },
+        sawSheet(range, rows) { if (!pristine.has(range)) pristine.set(range, reportSharedRows(rows)); },
         // After everything is put back: kept only when a key was worked out, nothing could
         // reach the record, something was asked, and the record still reads as it did.
         finish() {
             if (!keyed || key === null || moved !== 0 || !anything()) return;
             try {
                 if (reportSharedKey(schedule) !== key) return;
-                REPORT_SHARED_KEPT = { schedule, key, found, memo };
+                const sheets = new Map(adopted ? adopted.sheets : []);
+                pristine.forEach((rows, range) => { if (!sheets.has(range)) sheets.set(range, rows); });
+                REPORT_SHARED_KEPT = { schedule, key, found, memo, sheets };
             } catch (error) { /* nothing kept */ }
         }
     };
@@ -391,7 +423,15 @@ function reportReadOnce(read, self, args) {
                     return real.sheet.apply(this, arguments);
                 }
                 const key = `${from}..${to}`;
-                if (!sheets.has(key)) sheets.set(key, real.sheet(asked, from, to));
+                if (!sheets.has(key)) {
+                    const kept = shared ? shared.keptSheet(key) : undefined;
+                    if (kept !== undefined) sheets.set(key, kept);
+                    else {
+                        const rows = real.sheet(asked, from, to);
+                        if (shared) shared.sawSheet(key, rows);
+                        sheets.set(key, rows);
+                    }
+                }
                 return sheets.get(key);
             };
             closedPeriods = function (asked, workerId) {
