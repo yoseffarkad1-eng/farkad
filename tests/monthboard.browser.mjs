@@ -169,6 +169,22 @@ for (const [width, height] of PHONES) {
             await page.evaluate(() => openMonthBoard(null, 'p1'));
             await page.waitForTimeout(300);
             holdFloors(`${label}, one site`, await boardFloors(page), large);
+            // OFF THIS MONTH «החודש» ends the site's row: the header is no taller for it, and
+            // it holds the floors with everything else. On a row of its own it cost the 320
+            // phone with the mode the one man its first screen holds (the review of v206).
+            // Both read after the same settle: the buttons' glyphs are put in after a draw, and
+            // with the mode «שיתוף כתמונה» on two lines grows its row by a pixel when they are.
+            await page.evaluate(() => openMonthBoard(null, null));
+            await page.waitForTimeout(300);
+            const headOn = await page.evaluate(() => document.querySelector('.month-board-head').getBoundingClientRect().height);
+            await page.evaluate(() => openMonthBoard('2026-10', null));
+            await page.waitForTimeout(300);
+            const headOff = await page.evaluate(() => ({ height: document.querySelector('.month-board-head').getBoundingClientRect().height,
+                home: document.querySelector('[data-month-board="home"]') ? document.querySelector('[data-month-board="home"]').getBoundingClientRect().top : null,
+                site: document.getElementById('monthBoardPlace').getBoundingClientRect().top }));
+            check(`${label}: off this month «החודש» stands in the site's row, and the board's header is no taller for it`,
+                headOff.home !== null && Math.abs(headOff.home - headOff.site) <= 8 && headOff.height <= headOn + 0.5, JSON.stringify({ headOn, headOff }));
+            holdFloors(`${label}, October (with «החודש»)`, await boardFloors(page), large);
             if (SHOTS && ((width === 440 && scheme === 'dark' && !large) || (width === 320 && large && scheme === 'light'))) {
                 await page.evaluate(() => openMonthBoard(null, null));
                 await page.waitForTimeout(300);
@@ -655,6 +671,16 @@ for (const [width, height] of [[320, 568], [375, 667]]) {
         .flatMap(([what, boxes]) => boxes.filter(([w, h]) => w < 43.5 || h < 43.5).map(box => `${what} ${box.map(Math.round).join('x')}`));
     check(`${width}: every target still 44px both ways - the controls, the cells, the dates, the names`, small.length === 0 && tiny.length === 0,
         brief(small, t => `${t.w}x${t.h} «${t.words}»`) + tiny.slice(0, 3).join(' | '));
+    // And off this month, «החודש» at the end of the site's row at twice the size.
+    await page.evaluate(() => { openMonthBoard('2026-10', null); window.scrollTo(0, 0); });
+    await page.waitForTimeout(400);
+    const october = await boardFloors(page);
+    const octoberSmall = october.read.targets.filter(t => t.w < 43.5 || t.h < 43.5);
+    check(`${width}: October's board at twice the size - «החודש» there, every control 44px both ways, nothing over another, no words past their control`,
+        await page.evaluate(() => Boolean(document.querySelector('[data-month-board="home"]'))) && octoberSmall.length === 0
+        && october.read.overlaps.length === 0 && october.read.spills.length === 0,
+        brief(octoberSmall.concat(october.read.overlaps, october.read.spills), t => `${t.w || ''}x${t.h || ''} ${t.by || ''} «${t.words}» ${t.where || ''}`));
+    check(`${width}: and it makes the page no wider than the week's grid does`, october.page[0] <= gridWidth, `${october.page[0]} / ${gridWidth}`);
     await context.close();
 }
 

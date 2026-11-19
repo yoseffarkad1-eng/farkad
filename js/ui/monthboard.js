@@ -443,16 +443,6 @@ function monthBoardHeader(facts) {
     next.setAttribute('aria-describedby', 'monthBoardTitle');
     steps.appendChild(next);
     head.appendChild(steps);
-    // «החודש» on a row of its own UNDER the arrows, and only off this month - on it, the chip
-    // would be a button that does nothing. Drawn between the arrows it took the inner third of
-    // each the moment the board left this month, and a second «חודש קודם» at a person's pace
-    // landed on it and went back to this month (the review of v206). The worker card's own
-    // «חזרה לחודש הנוכחי» stands the same way (js/ui/workercard.js).
-    if (!facts.thisMonth) {
-        const home = button(R.thisMonth, 'btn-secondary month-board-home', monthBoardHome);
-        home.dataset.monthBoard = 'home';
-        head.appendChild(home);
-    }
 
     // The filter: a native list, the phone's own picker - one finger, no drawn menu.
     const filter = el('label', 'month-board-filter');
@@ -472,6 +462,18 @@ function monthBoardHeader(facts) {
     filter.setAttribute('for', 'monthBoardPlace');
     filter.appendChild(select);
     head.appendChild(filter);
+    // «החודש», only off this month - on it, the chip would be a button that does nothing - at
+    // the END OF THE SITE'S ROW, which shortens the list beside it and moves nothing else.
+    // Never between the arrows: drawn there it took the inner third of each the moment the
+    // board left this month, and a second «חודש קודם» at a person's pace landed on it and went
+    // back to this month. Nor on a row of its own under them, the worker card's way: that row
+    // cost the 320px phone with «תצוגה גדולה» the one man its first screen holds, on the
+    // month-end board of last month (the review of v206, measured).
+    if (!facts.thisMonth) {
+        const home = button(R.thisMonth, 'btn-secondary month-board-home', monthBoardHome);
+        home.dataset.monthBoard = 'home';
+        head.appendChild(home);
+    }
 
     // Paper and the picture, when there is a board to put on them - the week's own two
     // words, and the week's rule for a week with nobody on it.

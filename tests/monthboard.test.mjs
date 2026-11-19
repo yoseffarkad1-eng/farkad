@@ -1142,8 +1142,9 @@ if (!MUTANT) {
     device.dom.querySelector('#weekView [data-month-board="prev"]').click();
     const home = device.dom.querySelector('#weekView [data-month-board="home"]');
     const head = steps().parentNode;
-    same('off it, still the two arrows and nothing between them - «החודש» a row of its own, straight under them',
-        [arrows(), home ? home.parentNode === head : false, home ? head.children.indexOf(home) - head.children.indexOf(steps()) : null],
+    const site = device.dom.querySelector('#weekView .month-board-filter');
+    same('off it, still the two arrows and nothing between them - «החודש» at the end of the site\'s row, after the list',
+        [arrows(), home ? home.parentNode === head : false, home && site ? head.children.indexOf(home) - head.children.indexOf(site) : null],
         [['prev', 'next'], true, 1]);
 
     // A MAN'S SPOKEN NAME SAYS WHAT HIS BUTTON SHOWS, AND THE LAST COLUMN'S WORD WHAT IT COUNTS.
