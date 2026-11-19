@@ -175,10 +175,11 @@
     :root.display-large .week-phone-date { min-height: 58px !important; }
 }
 /* «תמונת מצב» (v206, js/ui/status.js): a site's row. And the door round the sync chip: the
-   floor above made it 52 tall, and its margin is said again for 52 - -(52 - 24) / 2 - so its
-   line in the strip is still the pill's 24px (css/app.css, .status-door). */
+   floor above makes it 52 tall, and its padding and margin are said again for 52 -
+   (52 - 24) / 2 each - so its line in the strip is still the pill's own (css/app.css,
+   .status-door). */
 :root.display-large .status-site { min-height: 64px !important; }
-:root.display-large .status-door { margin-block: -14px; }
+:root.display-large .status-door { padding-block: 14px; margin-block: -14px; }
 
 /* ---- 3. THE SIZES, RESTATED --------------------------------------------------------- */
 :root.display-large body { font-size: 20px; line-height: 1.6; }
