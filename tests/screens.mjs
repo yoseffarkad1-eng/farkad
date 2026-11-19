@@ -287,6 +287,15 @@ export const SCREENS = [
     { name: 'week - days', scope: APP,
         open: async page => { await view('week')(page); await run(page, () => setWeekPhoneMode('days')); await pause(page); },
         close: page => run(page, () => setWeekPhoneMode('grid')) },
+    // «לוח חודשי» (js/ui/monthboard.js): the crew's month, a third mode of the week tab - every
+    // site, then the one site that has Rima (its own men, Rima and the billed count at the foot).
+    // Opened by its own function, as «מה חדש» opens it; closed back onto the grid.
+    { name: 'week - the month board', scope: APP,
+        open: async page => { await run(page, () => { openMonthBoard(null, null); }); await pause(page, 300); },
+        close: page => run(page, () => setWeekPhoneMode('grid')) },
+    { name: 'week - the month board, one site', scope: APP,
+        open: async page => { await run(page, () => { openMonthBoard(null, 'p1'); }); await pause(page, 300); },
+        close: page => run(page, () => setWeekPhoneMode('grid')) },
 
     { name: 'crew', scope: APP, open: view('roster') },
     { name: 'crew - worker card', scope: ['#workerCardModal'],
