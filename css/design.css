@@ -1999,8 +1999,10 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .status-site-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; min-width: 0; }
 /* The name takes the room left on its line and wraps INSIDE it, so its swatch stays beside its
    first line - a long name used to drop below the swatch and leave it alone on a line; the
-   chips after it go to the next line when they do not fit. */
-.status-site-name { flex: 1 1 0; min-width: 8em; font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+   chips after it go to the next line when they do not fit. It asks for 8em of that line, but
+   never more than the line has beside the swatch (14px and its 8px gap): at twice the text
+   size 8em is wider than the row, and the name would stand out of its own button. */
+.status-site-name { flex: 1 1 0; min-width: min(8em, calc(100% - 22px)); font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
 .status-site-off { color: var(--ink-2); font-size: 15px; font-weight: 700; }
 .status-phase { padding: 1px 10px; border-radius: 999px; font-size: 15px; font-weight: 800; }
 .status-phase-rising,

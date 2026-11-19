@@ -114,9 +114,13 @@ const stripWith = (page, line) => page.evaluate(line => {
         const hit = at(pill.l + pill.w / 2, y);
         if (hit && door.contains(hit)) reach += 1;
     }
-    // «הגדרות» its own: its centre and corners, 2px in, are never the door's.
-    const settingsOwn = [[settings.l + settings.w / 2, settings.t + settings.h / 2], [settings.l + 2, settings.t + 2],
-        [settings.r - 2, settings.t + 2], [settings.l + 2, settings.b - 2], [settings.r - 2, settings.b - 2]]
+    // «הגדרות» its own: its centre, the middle of each of its edges and two points along its top,
+    // 3px in, are never the door's (not its corners: they are rounded off, and a finger there
+    // lands on whatever is under the curve - in v204 too).
+    const cx = settings.l + settings.w / 2;
+    const cy = settings.t + settings.h / 2;
+    const settingsOwn = [[cx, cy], [settings.l + 3, cy], [settings.r - 3, cy], [cx, settings.t + 3], [cx, settings.b - 3],
+        [settings.l + settings.w / 4, settings.t + 3], [settings.r - settings.w / 4, settings.t + 3]]
         .every(([x, y]) => { const hit = at(x, y); return Boolean(hit) && settingsBtn.contains(hit); });
     const out = { wrapped: bar(), door: box(door), name: door.getAttribute('aria-label'), chipShown: !chip.hidden,
         words: getComputedStyle(door.querySelector('.status-door-words')).display !== 'none',
@@ -143,6 +147,21 @@ const stripWith = (page, line) => page.evaluate(line => {
     out.again = bar();
     return out;
 }, line);
+// The strip's height, for one chip: as tall as without the door. The one exception is the
+// door's OWN words, on a phone with no chip (local only): they stand where a chip would, and
+// on a window whose strip holds the tabs and has no room for a word that wide beside them
+// (701-768px, and 768-880 with the mode) they cost it the line a chip costs it there in v204 -
+// never more than the chip of a sync error, «שגיאת סנכרון», which is wider than they are.
+// Printed where it happens; features/status/handoff.md says it.
+function stripHeight(label, m, word, wider) {
+    if (word || m.wrapped === m.unwrapped) {
+        same(`${label}, «${word || 'no chip'}»: the strip is the height it is without the door`, m.wrapped, m.unwrapped);
+        return;
+    }
+    console.log(`        ${label}, «no chip»: the door's own words (${Math.round(m.pill.w)}px) take the line a chip takes - ${m.unwrapped}px without the door, ${m.wrapped}px with it; v204 with «שגיאת סנכרון» (${wider ? Math.round(wider.w) : '?'}px): ${wider ? wider.strip : '?'}px`);
+    check(`${label}, «no chip»: the door's own words, no wider than the chip of a sync error, cost the strip no more than that chip does in v204`,
+        Boolean(wider) && m.pill.w <= wider.w && m.wrapped <= wider.strip, `${m.unwrapped} -> ${m.wrapped}; ${JSON.stringify(wider)}`);
+}
 // The pill where v204 drew it, to the half pixel.
 const samePlace = (a, b) => !a || !b || (Math.abs(a.l - b.l) <= 0.5 && Math.abs(a.t - b.t) <= 0.5 && Math.abs(a.w - b.w) <= 0.5 && Math.abs(a.h - b.h) <= 0.5);
 // What one width, scheme and mode holds for every chip, besides the strip's height itself -
@@ -168,7 +187,6 @@ function stripChecks(label, m, word, large, bound) {
     } else {
         check(`${label}, «${which}»: the door's reach down the pill, ${large ? 52 : 44}px`, m.reach >= floor, `${m.reach}px`);
     }
-    same(`${label}, «${which}»: its name`, m.name, word ? `תמונת מצב · ${word}` : 'תמונת מצב');
     same(`${label}, «${which}»: the chip, or the door's own words - one of them; no chevron`,
         [m.chipShown, m.words, m.chevron], [Boolean(word), !word, false]);
     check(`${label}, «${which}»: «הגדרות» whole on the glass`, m.settingsWhole, JSON.stringify(m.settings));
@@ -232,9 +250,12 @@ for (const [width, height] of PHONES) {
             keep(seen);
             suite(`B12 ${label}: the door costs the strip nothing`);
             given(`${label}: the mode is ${large ? 'on' : 'off'}`, await page.evaluate(() => document.documentElement.classList.contains('display-large')) === large);
+            let wider = null;
             for (const [word, line] of CHIPS) {
                 const m = await stripWith(page, line);
-                same(`${label}, «${word || 'no chip'}»: the strip is the height it is without the door`, m.wrapped, m.unwrapped);
+                if (word === 'שגיאת סנכרון') wider = { w: m.pill.w, strip: m.unwrapped };
+                same(`${label}, «${word || 'no chip'}»: the door's name is the chip's`, m.name, word ? `תמונת מצב · ${word}` : 'תמונת מצב');
+                stripHeight(label, m, word, wider);
                 stripChecks(label, m, word, large, true);
             }
             await stripBack(page);
@@ -268,9 +289,12 @@ for (const [width, height] of [[340, 640], [360, 640], [390, 844], [412, 892], [
         const { context, page, errors: seen } = await openApp(browser, server.url, { width, height, scheme: 'light', large, seeded: false });
         keep(seen);
         suite(`B12 ${label}: the door costs the strip nothing${width > 700 ? ', the tabs in it' : ''}`);
+        let wider = null;
         for (const [word, line] of CHIPS) {
             const m = await stripWith(page, line);
-            same(`${label}, «${word || 'no chip'}»: the strip is the height it is without the door`, m.wrapped, m.unwrapped);
+            if (word === 'שגיאת סנכרון') wider = { w: m.pill.w, strip: m.unwrapped };
+            same(`${label}, «${word || 'no chip'}»: the door's name is the chip's`, m.name, word ? `תמונת מצב · ${word}` : 'תמונת מצב');
+            stripHeight(label, m, word, wider);
             stripChecks(label, m, word, large, width <= 700 && height > 500);
         }
         await stripBack(page);
