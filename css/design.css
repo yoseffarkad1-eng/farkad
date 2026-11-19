@@ -1637,6 +1637,65 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
    buttons. No fixed height and no text in a fixed box: doubled text and «תצוגה גדולה» make
    the rows taller and nothing else. */
 .weekly-close-entry { width: 100%; min-height: 48px; margin: 0 0 14px; font-size: 17px; font-weight: 700; white-space: normal; }
+/* ---- «יום תשלום» (js/ui/payday.js) ------------------------------------------------------
+   THE ROW ON «מקדמות»: «יום תשלום» and «סגירת שבוע» half the width each, in the one row the
+   full-width «סגירת שבוע» stood in - so the board under it does not move (measured: 0px at
+   320, 375 and 440; with «תצוגה גדולה» at 320 both words wrap and it is 18px taller) - and
+   «יום תשלום» alone at full width where «סגירת שבוע» is not drawn. The row's margin is the
+   one the button had.
+   THE DIALOG: a card per pay group - its payday, its period, the three figures label over
+   value with «לתשלום» across the card and the largest, its edge in the group's colour
+   (v192's two tokens, data-cycle) - on the dialog's own ground with a line round it, so that
+   its buttons (the tonal look) stand out on it; the checks drawn the way the board's warnings
+   are, ink on the warning's ground. No colour of its own, no fixed height, no text in a
+   fixed box: doubled text and «תצוגה גדולה» make it taller and nothing else. */
+.owes-actions { display: flex; gap: 8px; margin: 0 0 14px; }
+.owes-actions > button { flex: 1 1 0; min-width: 0; width: auto; margin: 0; white-space: normal; overflow-wrap: break-word; }
+.payday-entry { width: 100%; min-height: 48px; margin: 0 0 14px; font-size: 17px; font-weight: 700; white-space: normal; }
+#paydayModal .modal-content > h3 { margin: 0 0 8px; font-size: 22px; line-height: 1.3; }
+.payday-lead { margin: 0 0 14px; color: var(--ink); font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; }
+.payday-reading { margin: 8px 0 14px; color: var(--ink); font-size: 18px; font-weight: 600; line-height: 1.45; }
+.payday-section { margin: 0 0 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.payday-section-head { margin: 0 0 10px; color: var(--ink); font-size: 19px; font-weight: 800; line-height: 1.3; }
+.payday-none,
+.payday-nothing { margin: 0 0 10px; color: var(--ink); font-size: 17px; line-height: 1.5; }
+.payday-card { display: grid; gap: 8px; margin: 0 0 12px; padding: 14px 16px; border-radius: 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); border-inline-start: 8px solid var(--line); }
+.payday-card[data-cycle="weekly"] { border-inline-start-color: var(--group-weekly-mark); }
+.payday-card[data-cycle="biweekly"] { border-inline-start-color: var(--group-biweekly-mark); }
+.payday-card-head { margin: 0; color: var(--ink); font-size: 20px; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; }
+.payday-card-range { margin: 0; color: var(--ink-2); font-size: 16px; font-weight: 600; }
+.payday-card-note { margin: 0; color: var(--ink); font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
+.payday-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin: 4px 0 0; }
+.payday-figure { display: grid; gap: 2px; min-width: 0; align-content: start; }
+.payday-figure-pay { grid-column: 1 / -1; }
+.payday-figure-label { color: var(--ink-2); font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.payday-amount { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px; min-width: 0; }
+.payday-value { color: var(--ink); font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.payday-currency { color: var(--ink); font-size: 17px; font-weight: 700; }
+.payday-figure-pay .payday-value { font-size: 32px; font-weight: 900; line-height: 1.15; }
+.payday-count { margin: 0; color: var(--ink); font-size: 16px; font-weight: 700; }
+.payday-card-line { margin: 0; color: var(--ink); font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
+.payday-fold { justify-self: start; min-height: 48px; padding: 8px 16px; font-size: 17px; font-weight: 700; }
+.payday-men { display: grid; padding: 2px 12px; border-radius: 12px; background: var(--surface-2); }
+.payday-men[hidden] { display: none; }
+.payday-man { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.payday-man:last-child { border-bottom: 0; }
+.payday-man-name { min-width: 0; color: var(--ink); font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+.payday-man .payday-value { font-size: 18px; }
+.payday-check { display: grid; gap: 6px; margin: 0 0 10px; padding: 12px 14px; border-inline-start: 4px solid var(--warn); border-radius: 12px; background: var(--warn-bg); color: var(--ink); }
+.payday-check-review { border-inline-start-color: var(--danger); background: var(--danger-bg); }
+.payday-check-forgotten { border-inline-start-color: var(--line); background: var(--surface-2); }
+.payday-check-who { font-size: 18px; font-weight: 800; line-height: 1.4; overflow-wrap: anywhere; }
+.payday-check-say { display: block; margin: 0; font-size: 17px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.payday-check-line { margin: 0; font-size: 16px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.payday-check-forgotten .payday-door { background: var(--surface) !important; }
+.payday-door { width: 100%; min-height: 48px; font-size: 17px; white-space: normal; overflow-wrap: break-word; }
+.payday-close-say { margin: 0 0 10px; color: var(--ink); font-size: 18px; font-weight: 700; line-height: 1.45; }
+.payday-held { margin: 0 0 10px; padding: 10px 12px; border-inline-start: 4px solid var(--danger); border-radius: 12px; background: var(--danger-bg); color: var(--ink); }
+.payday-held-head { display: block; font-size: 17px; font-weight: 800; line-height: 1.4; }
+.payday-held-man { margin: 4px 0 0; font-size: 16px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.payday-doors { display: grid; gap: 8px; }
+.payday-gate { margin: 0 0 12px; }
 #weeklyCloseModal .modal-content { padding-bottom: 0; }
 #weeklyCloseModal .modal-content > h3 { margin: 0 0 4px; font-size: 22px; line-height: 1.3; }
 .weekly-close-meta { margin: 0 0 10px; color: var(--ink-2); font-size: 16px; font-weight: 500; }

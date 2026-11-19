@@ -970,6 +970,33 @@
 :root.display-large .owes-closure-fix { font-size: 21px; }
 /* «סגירת שבוע» (js/ui/weeklyclose.js), one rule for one rule. */
 :root.display-large .weekly-close-entry { font-size: 21px; font-weight: 700; }
+/* «יום תשלום» (js/ui/payday.js), one rule for one rule. */
+:root.display-large .payday-entry { font-size: 21px; font-weight: 700; }
+:root.display-large #paydayModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
+:root.display-large .payday-lead { font-size: 21px; line-height: 1.5; }
+:root.display-large .payday-reading { font-size: 22px; font-weight: 600; line-height: 1.45; }
+:root.display-large .payday-section-head { font-size: 22px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-none,
+:root.display-large .payday-nothing { font-size: 21px; line-height: 1.5; }
+:root.display-large .payday-card-head { font-size: 23px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-card-range { font-size: 20px; font-weight: 600; }
+:root.display-large .payday-card-note { font-size: 20px; line-height: 1.45; }
+:root.display-large .payday-figure-label { font-size: 20px; font-weight: 600; }
+:root.display-large .payday-value { font-size: 23px; font-weight: 800; }
+:root.display-large .payday-currency { font-size: 21px; font-weight: 700; }
+:root.display-large .payday-figure-pay .payday-value { font-size: 35px; font-weight: 900; line-height: 1.4; }
+:root.display-large .payday-count { font-size: 20px; font-weight: 700; }
+:root.display-large .payday-card-line { font-size: 20px; line-height: 1.45; }
+:root.display-large .payday-fold { font-size: 21px; font-weight: 700; }
+:root.display-large .payday-man-name { font-size: 22px; font-weight: 700; }
+:root.display-large .payday-man .payday-value { font-size: 22px; }
+:root.display-large .payday-check-who { font-size: 22px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-check-say { font-size: 21px; font-weight: 600; line-height: 1.45; }
+:root.display-large .payday-check-line { font-size: 20px; font-weight: 500; line-height: 1.45; }
+:root.display-large .payday-door { font-size: 21px; }
+:root.display-large .payday-close-say { font-size: 22px; font-weight: 700; line-height: 1.45; }
+:root.display-large .payday-held-head { font-size: 21px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-held-man { font-size: 20px; font-weight: 500; line-height: 1.45; }
 :root.display-large #weeklyCloseModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
 :root.display-large .weekly-close-meta { font-size: 20px; font-weight: 500; }
 :root.display-large .weekly-close-step { font-size: 20px; font-weight: 600; }
@@ -1274,6 +1301,13 @@
     :root.display-large .topbar { padding-block: 4px !important; margin-bottom: 6px !important; }
     :root.display-large .day-header { padding-top: max(4px, env(safe-area-inset-top)) !important; }
     :root.display-large .day-header .day-tools { margin-top: 2px !important; row-gap: 3px !important; }
+}
+
+/* «יום תשלום» (js/ui/payday.js): on the narrowest phone the card's two smaller figures stand
+   one under the other, each its label over its value, and «לתשלום» under them across the
+   card - two side by side left «נוכה מהשכר» at these sizes a word to a line. */
+@media (max-width: 359px) {
+    :root.display-large .payday-figures { grid-template-columns: minmax(0, 1fr) !important; }
 }
 
 }

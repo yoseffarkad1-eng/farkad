@@ -940,6 +940,22 @@
     </div>
 </div>
 
+<!-- «יום תשלום» (js/ui/payday.js): the moment before he pays - each pay group's next payday
+     and the three figures «דוחות» prints under it, what will stop or distort the close, how
+     many accounts «סגירת שבוע» would close now, and the doors he uses after closing. A
+     READING: nothing in it writes, and every button in it only navigates or opens a screen
+     that keeps its own rules. Entered from «מקדמות», beside «סגירת שבוע». Every word is set
+     by that file from its blocks; this is the frame. -->
+<div class="modal" id="paydayModal">
+    <div class="modal-content modal-wide">
+        <h3 id="paydayTitle" tabindex="-1"></h3>
+        <div id="paydayBody" class="payday-body"></div>
+        <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="paydayClose" onclick="closePayday()"></button>
+        </div>
+    </div>
+</div>
+
 <!-- «בדיקת היום»: what may have been forgotten on the day on screen, read off the record
      and compared with the working day before it. Entered from the one button at the foot
      of the day's list. It only shows: nothing in it writes, and a name or a site in it
@@ -1210,6 +1226,12 @@
      and its words) and backup.js is below it but asked for only when a button is pressed.
      Runs nothing at load; owes.js asks for its button by name, through typeof. -->
 <script src="js/ui/advancereset.js"></script>
+<!-- «יום תשלום»: after owes.js (the key a reading is kept under, the board's warnings, the
+     row it stands in), weeklyclose.js (its list, its memory scope and its words) and
+     reports.js (the pay sheet's own rows, band and words); closereminder.js's readers, below
+     it, are called only when it is opened. Runs nothing at load; owes.js asks for its button
+     by name, through typeof. -->
+<script src="js/ui/payday.js"></script>
 <script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>
 <script src="js/ui/migration.js"></script>

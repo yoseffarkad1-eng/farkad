@@ -170,6 +170,9 @@ function render() {
     if (typeof renderWeeklyCloseIfOpen === 'function') renderWeeklyCloseIfOpen();
     // And for «איפוס מקדמות» (js/ui/advancereset.js), the same way: one line, nothing redrawn.
     if (typeof renderAdvanceResetIfOpen === 'function') renderAdvanceResetIfOpen();
+    // And for «יום תשלום» (js/ui/payday.js): nothing is read here - a record that moved under
+    // it puts the placeholder over its figures at once, and is read once the draws stop.
+    if (typeof renderPaydayIfOpen === 'function') renderPaydayIfOpen();
     // And for the finder (js/ui/find.js): a man added or turned off on another phone is
     // found, or not, as the record has him now.
     if (typeof renderFindIfOpen === 'function') renderFindIfOpen();
