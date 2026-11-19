@@ -1208,14 +1208,16 @@ const YEAR = { range: 'thisYear', from: null, to: null };
         device.run('HISTORY_TEXT.rowName("יום שני 12/10/2026", "אחמד", "", "נעדר")'),
         device.run('HISTORY_TEXT.shown(200, 9412)'), device.run('HISTORY_TEXT.more(200)'), device.run('HISTORY_TEXT.capped(600, 9412)'),
         device.run('HISTORY_TEXT.textHead("כל העובדים", "רמת גן")'), device.run('HISTORY_TEXT.textCut(1072, 9412)'),
-        device.run('HISTORY_TEXT.leaveMessage("יום שני 12/10/2026", "יום שישי 20/11/2026")')], [
+        device.run('HISTORY_TEXT.leaveMessage("יום שני 12/10/2026", "יום שישי 20/11/2026", "בניית סידור")'),
+        device.run('HISTORY_TEXT.leaveMessage("יום שני 12/10/2026", "יום שישי 20/11/2026", "")')], [
         'אחמד · כל האתרים · 01/09/2026 - 19/11/2026', 'נובמבר 2026 · 3 ימי נוכחות', 'נובמבר 2026', 'אחמד · 3 ימים',
         'יום שני 12/10/2026 · אחמד · רמת גן · רגיל', 'יום שני 12/10/2026 · אחמד · נעדר',
         'מוצגות 200 שורות מתוך 9412.', 'הצג עוד 200',
         'מוצגות 600 השורות החדשות ביותר מתוך 9412. כדי לראות את השאר, בחר טווח קצר יותר, אתר או עובד.',
         '📄 כל העובדים · רמת גן',
         'ההודעה כוללת רק את 1072 השורות החדשות ביותר מתוך 9412, כי כל הרשימה ארוכה מדי להודעה אחת. כדי לקבל את כולן, בחר טווח קצר יותר, אתר או עובד.',
-        'כדי לפתוח את יום שני 12/10/2026 צריך לצאת מבניית הסידור ליום שישי 20/11/2026. אפשר לחזור אליה אחר כך מ«בניית סידור».']);
+        'כדי לפתוח את יום שני 12/10/2026 צריך לצאת מבניית הסידור ליום שישי 20/11/2026. אפשר לחזור אליה אחר כך מ«בניית סידור».',
+        'כדי לפתוח את יום שני 12/10/2026 צריך לצאת מבניית הסידור ליום שישי 20/11/2026.']);
     same('and those are all it adds', device.run('Object.keys(HISTORY_TEXT).join()'),
         'title,door,man,site,last3,thisYear,all,now,asText,noRima,dayOne,dayMany,empty,month,who,rowName,shown,more,capped,textHead,textCut,tooLongForLink,leaveTitle,leaveMessage,leaveOk');
     check('the block is frozen', device.run('Object.isFrozen(HISTORY_TEXT) && Object.isFrozen(HISTORY_REUSED)'));
@@ -1267,9 +1269,14 @@ const YEAR = { range: 'thisYear', from: null, to: null };
         return said;
     })(), ['מי עבד איפה', 'סגור', 'עובד', 'אתר', 'תקופה', 'מתאריך', 'עד תאריך', 'הרשימה כטקסט', '💬 שלח בוואטסאפ', 'העתק',
         ['החודש', 'חודש שעבר', '3 החודשים האחרונים', 'השנה', 'מתחילת הרישום', 'תאריכים אחרים']]);
-    check('the journey\'s name inside the question is JOURNEY_TEXT.entry, in its own source',
+    // The way back is named by the journey's own JOURNEY_TEXT.entry, read when the question is
+    // asked - the asked sentence holds it (the evening device above) - and never spelled here.
+    check('the journey\'s name inside the question is JOURNEY_TEXT.entry, handed in, and this file does not spell it',
         source('js/ui/journey.js').indexOf("entry: 'בניית סידור',") !== -1
-        && device.run('HISTORY_TEXT.leaveMessage("א", "ב")').indexOf('«בניית סידור»') !== -1);
+        && device.run('HISTORY_TEXT.leaveMessage("א", "ב", "שם אחר")').indexOf('«שם אחר»') !== -1
+        && (() => { const code = HISTORY_JS.split('\n').filter(line => line.trim().indexOf('//') !== 0)
+            .map(line => line.replace(/\s\/\/ .*$/, '')).join('\n');
+        return code.indexOf('«בניית סידור»') === -1 && /JOURNEY_TEXT\.entry/.test(code); })());
     check('every constant it reads at call time is read at call time - none at load',
         !/^const [A-Z_]+ = (?!Object\.freeze|\d|\[|\{|null|false|new WeakMap\(\))/m.test(HISTORY_JS)
         && !/^(?:const|let) \w+ = [A-Z_]+\./m.test(HISTORY_JS));

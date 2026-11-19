@@ -105,9 +105,12 @@ const HISTORY_TEXT = Object.freeze({
     // The share door's own sentence (js/ui/share.js), its first half changed: with no share
     // sheet the text would travel inside a link, and a long one is not put in a link at all.
     tooLongForLink: '⚠️ הרשימה ארוכה מדי לקישור של וואטסאפ - השתמש בהעתק ושלח ידנית',
-    // A day's door while «בניית סידור» is open: it asks before it leaves the journey.
+    // A day's door while «בניית סידור» is open: it asks before it leaves the journey. The way
+    // back is named by the journey's own word for its button, JOURNEY_TEXT.entry, handed in
+    // when the question is asked (js/ui/journey.js); without it the sentence ends before it.
     leaveTitle: 'לצאת מבניית הסידור?',
-    leaveMessage: (day, sederDay) => `כדי לפתוח את ${day} צריך לצאת מבניית הסידור ל${sederDay}. אפשר לחזור אליה אחר כך מ«בניית סידור».`,
+    leaveMessage: (day, sederDay, entry) => `כדי לפתוח את ${day} צריך לצאת מבניית הסידור ל${sederDay}.`
+        + (entry ? ` אפשר לחזור אליה אחר כך מ«${entry}».` : ''),
     leaveOk: 'צא ופתח את היום'
 });
 
@@ -1090,8 +1093,9 @@ function historyGoDay(date, key) {
     const T = HISTORY_TEXT;
     const named = day => { const parsed = parseLocalDate(day); return `${hebrewDayName(parsed)} ${formatFullDate(parsed)}`; };
     const sederDay = typeof journeyDate === 'function' && isRealDate(journeyDate()) ? journeyDate() : State.date;
+    const entry = typeof JOURNEY_TEXT === 'object' && JOURNEY_TEXT ? JOURNEY_TEXT.entry : '';
     HISTORY_ASKING = true;
-    return askConfirm({ title: T.leaveTitle, message: T.leaveMessage(named(date), named(sederDay)), ok: T.leaveOk })
+    return askConfirm({ title: T.leaveTitle, message: T.leaveMessage(named(date), named(sederDay), entry), ok: T.leaveOk })
         .then(yes => {
             HISTORY_ASKING = false;
             if (!historyIsOpen()) return false;
