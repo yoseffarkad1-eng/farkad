@@ -241,6 +241,17 @@ async function openWeeklyCloseScreen(page) {
     await pause(page);
 }
 
+// «יום תשלום» (js/ui/payday.js), opened by its button in the row on «מקדמות» and read (after a
+// frame), on the record owesRecord leaves in memory. Runs its steps in the page.
+async function openPaydayScreen(page) {
+    await run(page, owesRecord);
+    await run(page, () => { ADVANCE_WORKER = null; OWES_PAGE = null; });
+    await view('advances')(page);
+    await byText(page, '#advancesView', 'יום תשלום');
+    await page.waitForFunction(() => typeof PAYDAY !== 'undefined' && PAYDAY && PAYDAY.state === 'shown');
+    await pause(page);
+}
+
 async function openAdvanceResetScreen(page) {
     await run(page, () => openAdvanceReset());
     await page.waitForFunction(() => typeof ADVANCE_RESET !== 'undefined' && ADVANCE_RESET && ADVANCE_RESET.read !== null);
@@ -337,6 +348,19 @@ export const SCREENS = [
         open: async page => { await run(page, owesRecord); await view('advances')(page);
             await run(page, () => owesOpenPage(owesClosures(State.schedule).filter(group => group.items.length > 1)[0].key)); await pause(page); },
         close: page => run(page, owesRecordBack) },
+    // «יום תשלום» (js/ui/payday.js): the desk as it is read on that record, and the same with
+    // every card's «לפי עובד» unfolded. It writes nothing; closing it and taking the record back
+    // leaves the page as it was.
+    { name: 'advances - «יום תשלום», read', scope: ['#paydayModal'],
+        open: async page => { await openPaydayScreen(page); },
+        close: page => run(page, () => { closePayday(); owesRecordBack(); }) },
+    { name: 'advances - «יום תשלום», the fold opened', scope: ['#paydayModal'],
+        open: async page => { await openPaydayScreen(page);
+            await run(page, () => document.querySelectorAll('#paydayModal .payday-fold').forEach(node => {
+                if (node.getAttribute('aria-expanded') !== 'true') node.click();
+            }));
+            await pause(page); },
+        close: page => run(page, () => { closePayday(); owesRecordBack(); }) },
     { name: 'reports - «שים לב», opened', scope: APP,
         open: async page => { await run(page, reportsDefault); await run(page, owesRecord); await view('reports')(page);
             // The row is read after the page has painted when the record moved since the
