@@ -13,8 +13,8 @@
 // points at a picture this dialog has not got, «שמירה חוזרת» asking the YEAR's export again;
 // that Escape, the backdrop and «סגור» shut it and give the focus back, Tab stays inside it and
 // midEdit() holds an update back while it is open; that a commit and a snapshot adopted under
-// it are never read inside render() - the figures go at once and the year is read ONCE, 1.5 s
-// after the last of three commits, the reader's place kept; that it fits 320x568, 375x667 and
+// it are never read inside render() - the figures are marked at once, kept where they are, and the
+// year is read ONCE, 1.5 s after the last of three commits, the reader never moved meanwhile; that it fits 320x568, 375x667 and
 // 440x956, dark and light, with and without «תצוגה גדולה», and at doubled text - no sideways
 // scroll, nothing cut, every target 48px (52 with the mode), nothing under 16px (18 with it),
 // 4.5:1 (7:1 with it); that a season is read inside its budget at 4x CPU and the workbook
@@ -511,7 +511,7 @@ try {
     same('and the record in memory', await page.evaluate(() => JSON.stringify(State.schedule)), record);
 
     // ------------------------------------------------------------ 16. a change under it
-    suite('a change under it: nothing read inside render(), the figures gone at once, ONE reading after the draws stop');
+    suite('a change under it: nothing read inside render(), the figures marked at once and kept, ONE reading after the draws stop');
     await openYear(page);
     const content = '#yearSummaryModal .modal-content';
     const attendance = () => page.locator('#yearSummaryBody .msum-tile[data-figure="attendance"] .msum-value').innerText();

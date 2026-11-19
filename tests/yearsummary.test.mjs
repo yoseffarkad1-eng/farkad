@@ -39,8 +39,9 @@
 //      never costs the file; the CSV that leaves when the library is missing; a refusal.
 //   9. IT WRITES NOTHING: every key on the disk, byte for byte, across the reading, the open,
 //      the arrows, a month's row, the export - then shown to notice a real write. And a redraw
-//      never reads: shut, render() asks nothing of the record; open on a moved record, the
-//      figures go at once and the year is read ONCE, 1.5 s after the last of three draws.
+//      never reads: shut, render() asks nothing of the record; open on an unmoved record it marks
+//      and owes nothing; open on a moved record, the figures are marked at once - kept where they
+//      are - and the year is read ONCE, 1.5 s after the last of three draws (fix round 1).
 //  10. THE WORDS: each new one pinned, each borrowed one found where its owner keeps it.
 //  11. THE COST: a season year read under the budget, the gate asked at most once a reading
 //      and never planned on an approved record.
