@@ -583,10 +583,16 @@ async function twoTaps(chipLocator, target, gap) {
         const flags = await activeFlags();
         const before = await disk(page);
         await page.evaluate(() => { window.__downs.length = 0; });
-        await chipLocator.scrollIntoViewIfNeeded();
+        // To the middle of the dialog, and the chip itself under the point: the dialog's sticky
+        // foot lies over the bottom of its list, and a chip that is in the list's scrollport
+        // but under «סגור» is "in view" to a locator - fix round 1's lines pushed the site's chip
+        // there, and a raw touch at its centre pressed «סגור» (fix1/probe/hold-probe.out).
+        await chipLocator.evaluate(node => node.scrollIntoView({ block: 'center' }));
         await pause(page, 60);
         const box = await chipLocator.boundingBox();
         const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        const onChip = await chipLocator.evaluate((node, { x, y }) => { const hit = document.elementFromPoint(x, y); return Boolean(hit && node.contains(hit)); }, at);
+        if (!onChip) return { covered: true };
         const started = Date.now();
         await page.touchscreen.tap(at.x, at.y);
         const point = typeof target === 'function' ? await target(at) : (target || at);
@@ -699,6 +705,7 @@ const openModals = () => page.evaluate(() => [...document.querySelectorAll('.mod
         const done = await make();
         const name = `${door} door, ${gap} ms, on ${where}`;
         if (done.missing) { check(`${name}: there was such a point on the glass`, false); await settle(); continue; }
+        if (done.covered) { check(`${name}: the chip itself was under the finger`, false); await settle(); continue; }
         check(`${name}: the page saw the second press inside the hold`, !done.failed, JSON.stringify({ seen: done.seen, attempts: done.attempts }));
         seenGaps.push(`${door}/${gap}:${done.seen}`);
         if (where.includes('«פעיל»')) check(`${name}: what was under the finger was a switch`, /worker-active-toggle/.test(done.under || ''), String(done.under));
