@@ -327,7 +327,7 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
 /* v206: THE CHIP IS A DOOR - «תמונת מצב» (js/ui/status.js). The button is a hit area round
    the pill and nothing else: no ground, no border, no padding of its own, 44px both ways (the
    floor; «תצוגה גדולה» raises every button to 52), so the strip stands exactly as tall as it
-   did on every phone - tests/status.browser.mjs measures it against the same page with the
+   did on every phone - tests/statusscreen.browser.mjs measures it against the same page with the
    button taken off. The pill inside is drawn as it always was. Its chevron says "this opens
    something" and goes whenever there is no word beside it to belong to. */
 .status-door {

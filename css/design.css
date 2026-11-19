@@ -77,15 +77,18 @@
     --group-weekly-mark: #dc6400;
     --group-biweekly-ink: #0b4a8f;
     --group-biweekly-mark: #2f7de1;
-    /* v206: «תמונת מצב»'s pulse (js/ui/status.js) - five steps of ONE hue, few to many, the
-       accent's family and no site's colour. Computed, not eyeballed (the program's proposal,
-       §1.4): lightness falls step by step, the lightest is 2:1 and more on a surface, and a
-       cell carries no digit to be read on it. In the dark scheme "more" is BRIGHTER. */
-    --pulse-1: #9eb6e7;
-    --pulse-2: #809fdf;
-    --pulse-3: #3054a7;
-    --pulse-4: #1d3f90;
-    --pulse-5: #0f2c75;
+    /* v206: «תמונת מצב»'s pulse (js/ui/status.js) - five steps of ONE hue (OKLCH 264, the
+       accent's family; no site's colour), few to many. Computed, not eyeballed: the step
+       nearest the surface 3:1 and more on it (WCAG 1.4.11 - so an empty day, which is the
+       surface itself, is told from a slow one), each step 1.25:1 and more from the next, the
+       lightness strictly monotone. Light, on #fff: 3.48, 5.06, 7.38, 10.39, 14.03; neighbours
+       1.46, 1.46, 1.41, 1.35. A cell carries no digit. In the dark scheme "more" is BRIGHTER
+       (tests/statusscreen.browser.mjs measures both from the computed styles). */
+    --pulse-1: #6288d9;
+    --pulse-2: #426bc6;
+    --pulse-3: #2950ad;
+    --pulse-4: #163990;
+    --pulse-5: #09256d;
     --radius: 12px;
     --radius-sm: 12px;
     --shadow: none;
@@ -113,11 +116,12 @@
     --group-weekly-mark: #ffb066;
     --group-biweekly-ink: #86d0ff;
     --group-biweekly-mark: #86d0ff;
-    --pulse-1: #324a7c;
-    --pulse-2: #7d9fe5;
-    --pulse-3: #94b4f5;
-    --pulse-4: #afc9fe;
-    --pulse-5: #cddeff;
+    /* Dark, on #14171c: 3.13, 4.50, 6.32, 8.80, 12.28; neighbours 1.44, 1.40, 1.39, 1.40. */
+    --pulse-1: #4364ac;
+    --pulse-2: #5b7ec8;
+    --pulse-3: #7999db;
+    --pulse-4: #9ab6ed;
+    --pulse-5: #c4d6fb;
     --shadow-lift: 0 12px 40px -8px rgba(0, 0, 0, .9);
 }
 @media (prefers-color-scheme: dark) {
@@ -143,11 +147,11 @@
         --group-weekly-mark: #ffb066;
         --group-biweekly-ink: #86d0ff;
         --group-biweekly-mark: #86d0ff;
-        --pulse-1: #324a7c;
-        --pulse-2: #7d9fe5;
-        --pulse-3: #94b4f5;
-        --pulse-4: #afc9fe;
-        --pulse-5: #cddeff;
+        --pulse-1: #4364ac;
+        --pulse-2: #5b7ec8;
+        --pulse-3: #7999db;
+        --pulse-4: #9ab6ed;
+        --pulse-5: #c4d6fb;
         --shadow-lift: 0 12px 40px -8px rgba(0, 0, 0, .9);
     }
 }
@@ -1901,11 +1905,11 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .status-hero-said { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .status-hero-label { color: var(--ink); font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
 .status-hero-sites { color: var(--ink-2); font-size: 16px; font-weight: 600; }
-.status-bar { display: flex; gap: 2px; height: 10px; margin: 2px 0 10px; border-radius: 5px; overflow: hidden; }
+.status-bar { display: flex; gap: 2px; min-height: 10px; margin: 2px 0 10px; border-radius: 5px; overflow: hidden; }
 .status-bar-part { display: block; min-width: 4px; border-radius: 3px; }
 .status-today-sites { display: flex; flex-direction: column; gap: 6px; margin: 0 0 10px; }
 .status-today-site { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.status-swatch { flex: none; width: 14px; height: 14px; border-radius: 4px; }
+.status-swatch { flex: none; width: 14px; min-height: 14px; border-radius: 4px; }
 .status-today-name { flex: 1 1 auto; min-width: 0; font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
 .status-today-count { flex: none; color: var(--ink); font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .status-today-rima { flex: none; color: var(--ink-2); font-size: 15px; font-weight: 700; }
@@ -1944,7 +1948,7 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .status-week:hover { background: var(--surface-2); filter: none; }
 .status-week-date { color: var(--ink-2); font-size: 14px; font-weight: 700; text-align: start; font-variant-numeric: tabular-nums; }
 .status-week-total { color: var(--ink); font-size: 16px; font-weight: 800; text-align: end; font-variant-numeric: tabular-nums; }
-.status-cell { display: block; height: 30px; border-radius: 6px; color: var(--ink-3); font-size: 14px; font-weight: 700; line-height: 30px; }
+.status-cell { display: block; min-height: 30px; border-radius: 6px; color: var(--ink-3); font-size: 14px; font-weight: 700; line-height: 30px; }
 .status-step-0 { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
 .status-step-1 { background: var(--pulse-1); }
 .status-step-2 { background: var(--pulse-2); }
@@ -1954,7 +1958,7 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .status-step-later { background: transparent; }
 .status-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 10px 0 0; }
 .status-legend-word { color: var(--ink-2); font-size: 14px; font-weight: 600; }
-.status-legend-step { display: block; width: 18px; height: 14px; border-radius: 4px; }
+.status-legend-step { display: block; width: 18px; min-height: 14px; border-radius: 4px; }
 
 /* 5. The sites: a row per site, a button to its card - its name, this month's count, its
    word, and its eight weeks as a strip in the inks (emphasis, never its colour). */
@@ -1986,10 +1990,14 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .status-site-n { color: var(--ink); font-size: 26px; font-weight: 900; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .status-site-label { color: var(--ink-2); font-size: 15px; font-weight: 600; }
 .status-site-rima { color: var(--ink-2); font-size: 15px; font-weight: 700; }
-.status-strip { display: flex; align-items: flex-end; gap: 3px; height: 28px; }
-.status-strip-bar { flex: 1 1 0; height: 2px; border-radius: 3px 3px 0 0; background: var(--ink-3); }
-.status-strip-none { background: var(--line); }
-.status-strip-now { background: var(--accent); }
+/* No fixed height in this layer (tests/payslips.test.mjs holds the tail of it to that): the
+   strip is at least 28px, each week a column stretched to it, and the week's fill a share of
+   the column, written on the fill by js/ui/status.js. */
+.status-strip { display: flex; align-items: stretch; gap: 3px; min-height: 28px; }
+.status-strip-bar { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; min-width: 0; }
+.status-strip-fill { display: block; min-height: 2px; border-radius: 3px 3px 0 0; background: var(--ink-3); }
+.status-strip-none .status-strip-fill { background: var(--line); }
+.status-strip-now .status-strip-fill { background: var(--accent); }
 .status-yosef { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
 
 }

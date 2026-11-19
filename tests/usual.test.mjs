@@ -765,16 +765,20 @@ await block('the shell: on the page after the files it calls, in the offline she
     // «עוד ⋯»'s, and the last - three blocks after this one, named in their order.
     // AND AGAIN («סגירת שבוע», js/ui/weeklyclose.js): the week's close is one more block
     // after the readings of who owes, and the last - four blocks after this one, in order.
+    // AND AGAIN («תמונת מצב», js/ui/status.js, v206): where the business stands is one more
+    // block after the week's close, and the last - five blocks after this one, in order.
     const next = css.indexOf('/* ---- ', from + 10);
     const holiday = css.indexOf('/* ---- «עוד ⋯» at the foot of the day, «הכל חופש» behind it');
     const owes = css.indexOf('/* ---- «מי חייב כסף», «שים לב»');
     const weekly = css.indexOf('/* ---- «סגירת שבוע» (js/ui/weeklyclose.js)');
+    const status = css.indexOf('/* ---- «תמונת מצב» (v206, js/ui/status.js)');
     check('the last block of the screen layer but for the ones added since', css.trimEnd().endsWith('}')
         && (next === -1 || (css.indexOf('/* ---- the reports say the account') === next
             && css.indexOf('/* ---- ', next + 10) === holiday && holiday > next
             && css.indexOf('/* ---- ', holiday + 10) === owes && owes > holiday
             && css.indexOf('/* ---- ', owes + 10) === weekly && weekly > owes
-            && css.indexOf('/* ---- ', weekly + 10) === -1)));
+            && css.indexOf('/* ---- ', weekly + 10) === status && status > weekly
+            && css.indexOf('/* ---- ', status + 10) === -1)));
     const block = next === -1 ? css.slice(from) : css.slice(from, next);
     check('48px and 18px, written there', /min-height: 48px/.test(block) && /font-size: 18px/.test(block));
     same('css/readability.css does not name it', /chip-usual|usual-note/.test(source('css/readability.css')), false);

@@ -10,7 +10,7 @@
 // target's own opener, exactly as a person pressing that screen's own button would. The
 // one byte any of them ever causes is the journey's own place key, written by the journey
 // when its door starts it - the same byte a press of «בניית סידור» in the dock writes.
-// tests/status.test.mjs and tests/status.browser.mjs hold the whole disk and the record
+// tests/statusscreen.test.mjs and tests/statusscreen.browser.mjs hold the whole disk and the record
 // byte for byte across opening, every redraw and every door.
 //
 // IT PRICES NOTHING AND COUNTS ONLY WHAT EXISTING FUNCTIONS RETURN. Every line, and the
@@ -20,10 +20,10 @@
 //   today's men, its words   journeyCrewStatus / journeyCrewWords        js/ui/journey.js
 //   today's sites            workersAtPlace / rimaCount                  js/model/schema.js
 //   the next working day     journeyDefaultDate, JOURNEY_TEXT.forDay     js/ui/journey.js
-//   its rides                journeyRideStatus over transportPeekDay     js/ui/journey.js, transport.js
+//   its rides                journeyRideStatus over the STORED day       js/ui/journey.js, transport.js
 //   its messages             sederRun(sederCrew(...))                    js/ui/seder.js
-//   the next payday          periodRangeFor, dates and the roster only   js/dates.js
-//   the accounts to close    closeReminderCount(weeklyCloseRead(...))    js/ui/closereminder.js
+//   the next payday          periodRangeFor and the days, no money       js/dates.js, js/model/schema.js
+//   the accounts to close    the close reminder's line, MIRRORED         js/ui/closereminder.js
 //   what the men owe         owesReadNow / owesCountLine / owesMoney     js/ui/owes.js
 //   the pulse                invoiceByDate's workerIds per date          js/model/money.js
 //   a site's month           invoiceWithoutRima / rimaReport             js/model/money.js, schema.js
@@ -36,15 +36,22 @@
 // that is rising, falling, new or quiet - a pure rule over the same counts, its constants
 // in STATUS_PHASE and pinned.
 //
-// THE MONEY IS READ THE HOUSE WAY. It is the one costly part (the close count walks every
-// man's history): never inside render(), never before the dialog has painted, in ONE
-// synchronous reading - reportReadOnce around weeklyCloseOnce, the nesting weeklyCloseRead
-// itself uses - and kept under the record itself (owesKey, js/ui/owes.js: the write tick,
-// today, both gates and the record as text). A record that did not move reads nothing, and
-// neither does one whose board (OWES_KEPT) and close count (CLOSE_REMINDER_KEPT) are already
-// kept under it. Until it is read, the section says «מחשב את החשבונות…» and no figure of an
-// older reading is ever shown as current. With the carry shut or the migration unapproved it
-// is the board's own words, «מקדמות רשומות» and the sum handed over, and no close line.
+// THE MONEY IS READ THE HOUSE WAY, AND IT IS ONE READING - THE BOARD'S. Never inside render(),
+// never before the dialog has painted, in ONE synchronous call - owesReadNow inside
+// reportReadOnce around weeklyCloseOnce, the nesting «סגירת שבוע» itself uses - kept by the
+// board's own keeper under the record itself (OWES_KEPT under owesKey, js/ui/owes.js: the write
+// tick, today, both gates and the record as text). A record that did not move reads nothing and
+// its lines are in the first paint; until a moved one is read, the board's place says «מחשב את
+// החשבונות…», and no figure of an older reading is ever shown as current. With the carry shut or
+// the migration unapproved it is the board's own words, «מקדמות רשומות» and the sum handed over.
+//
+// THE CLOSE COUNT IS NEVER READ HERE. It is the close reminder's line, MIRRORED: while that line
+// is up (closeReminderShown, js/ui/closereminder.js) this screen says its sentence, byte for
+// byte, with its button; while it is down there is no close line here and «דוחות» is the way.
+// weeklyCloseRead walks every man's history - a second and a half in Node on a season nobody
+// closed - and after a write on the day screen the reminder keeps its count under an older key
+// on purpose, so a screen that read whenever that key was stale would run it at nearly every
+// opening. This file never calls weeklyCloseRead, closeReminderReadCount or closeReminderRefresh.
 //
 // It does not print and has no picture: a dialog never reaches paper (app.css), and nothing
 // leaves the phone from here.
@@ -52,7 +59,7 @@
 // ================================================================== THE WORDS
 //
 // Every Hebrew string this file adds, in one block. PROPOSED, not approved: the owner has not
-// read them. Pinned word for word in tests/status.test.mjs (CLAUDE.md, law 6). A name inside
+// read them. Pinned word for word in tests/statusscreen.test.mjs (CLAUDE.md, law 6). A name inside
 // a template is isolated by the caller, a range is dateRange's.
 const STATUS_TEXT = Object.freeze({
     title: 'תמונת מצב',
@@ -61,7 +68,7 @@ const STATUS_TEXT = Object.freeze({
     doorName: label => `תמונת מצב · ${label}`,
 
     // --- 1. today
-    heroLabel: 'עובדים באתרים היום',
+    heroLabel: n => (n === 1 ? 'עובד היום' : 'עובדים היום'),
     inSites: n => (n === 1 ? 'באתר אחד' : `ב-${n} אתרים`),
     nobodyToday: 'עוד אין היום אף עובד באתר.',
     // «רימא» is the day screen's own word (STATUS_REUSED.rima); the template is this file's.
@@ -69,9 +76,14 @@ const STATUS_TEXT = Object.freeze({
 
     // --- 3. the money
     money: 'חשבונות ומקדמות',
-    nextPayday: (day, date, men) => `יום התשלום הבא: ${day} ${date} · ${men}`,
-    // The cycles' own words (PAY_CYCLE_LABELS, js/ui/reports.js); the template is this file's.
-    payCycles: (weekly, biweekly) => `${weekly} ${PAY_CYCLE_LABELS.weekly}, ${biweekly} ${PAY_CYCLE_LABELS.biweekly}`,
+    // «היום, » are the words «יום תשלום» (js/ui/payday.js) proposes for its own card.
+    nextPayday: (day, date, isToday) => `יום התשלום הבא: ${isToday ? 'היום, ' : ''}${day} ${date}`,
+    // The men who WORKED in that pay period so far - not the men to pay (the desk's «סה״כ
+    // לתשלום · N עובדים» counts rows with a wage, which an advance alone keeps alive).
+    worked: n => `עבדו בתקופה: ${n}`,
+    // The cycles' own words (PAY_CYCLE_LABELS, js/ui/reports.js), never a number before a
+    // singular adjective; the template is this file's.
+    workedBoth: (weekly, biweekly) => `עבדו בתקופה: ${PAY_CYCLE_LABELS.weekly}: ${weekly} · ${PAY_CYCLE_LABELS.biweekly}: ${biweekly}`,
 
     // --- 4. the pulse
     pulse: '12 השבועות האחרונים',
@@ -85,13 +97,17 @@ const STATUS_TEXT = Object.freeze({
     // --- 5. the sites
     sites: 'האתרים',
     siteDays: 'ימי עובד־אתר החודש',
-    rising: 'עולה',
-    falling: 'יורד',
+    // «בעלייה», not «עולה»: beside a number, on a screen that also shows money, «עולה» reads as
+    // "costs".
+    rising: 'בעלייה',
+    falling: 'בירידה',
     fresh: 'חדש',
     quiet: 'שקט',
     siteName: (name, count, weeks) =>
         `${name}: ${count === 1 ? 'יום עובד־אתר אחד' : `${count} ימי עובד־אתר`} החודש · 8 השבועות האחרונים: ${weeks}`,
-    phaseNote: 'עולה או יורד: כמה עובדים היו ביום עבודה בשבועיים האחרונים, לעומת ארבעת השבועות שלפניהם. שקט: אתר פעיל שלא עבד בו אף עובד בחמשת ימי העבודה האחרונים.',
+    // The numbers in it are STATUS_PHASE's; tests/statusscreen.test.mjs builds the sentence it
+    // expects from those constants, so a constant changed alone fails.
+    phaseNote: 'בעלייה או בירידה: כמה עובדים היו ביום עבודה ב-12 ימי העבודה האחרונים, לעומת 24 ימי העבודה שלפניהם. חדש: אתר שהתחיל לעבוד ב-12 ימי העבודה האחרונים. שקט: אתר פעיל שלא עבד בו אף עובד ב-5 ימי העבודה האחרונים.',
     // The list's own title (YOSEF_GEVES_TITLE, js/ui/reports.js); the template is this file's.
     yosef: n => `${YOSEF_GEVES_TITLE} החודש: ${n}`,
     noSites: 'לא נרשמה עבודה באתרים ב-8 השבועות האחרונים.',
@@ -101,7 +117,7 @@ const STATUS_TEXT = Object.freeze({
 });
 
 // The words this screen borrows, each beside the screen that owns it. Repeated here only where
-// the owner builds them inline; tests/status.test.mjs finds every one of them in its owner's
+// the owner builds them inline; tests/statusscreen.test.mjs finds every one of them in its owner's
 // source, so a word changed there and not here fails by name. JOURNEY_TEXT, SEDER_TEXT,
 // CLOSE_REMINDER_TEXT, OWES_TEXT, OWES_REUSED, WEEKLY_CLOSE_TEXT, PAY_CYCLE_LABELS,
 // YOSEF_GEVES_TITLE, YOSEF_GEVES_NOTE, BACKUP_REMINDER and HEBREW_DAY_LETTERS are not repeated
@@ -114,9 +130,7 @@ const STATUS_REUSED = Object.freeze({
     inactive: 'לא פעיל',                  // js/ui/roster.js, the site's row
     cloud: 'ענן וסנכרון',                  // index.html, the first card of ⋯
     backup: 'גיבוי',                      // index.html, the row of ⋯
-    close: 'סגור',                        // index.html, every reading's last button
-    oneMan: 'עובד אחד',                   // js/ui/reports.js, countedIn
-    manyMen: 'עובדים'                     // js/ui/reports.js, countedIn
+    close: 'סגור'                         // index.html, every reading's last button
 });
 
 // ================================================================== THE RULES
@@ -136,13 +150,13 @@ const STATUS_QUIET_MS = 1500;
 //
 //   «שקט»  the site is ACTIVE, had own men on some working day of B, and none on each of
 //          the last `quietDays` working days;
-//   «יורד»  mean(B) >= fallFrom, mean(R) <= fallShare x mean(B), mean(B) - mean(R) >= fallBy;
+//   «בירידה» mean(B) >= fallFrom, mean(R) <= fallShare x mean(B), mean(B) - mean(R) >= fallBy;
 //   «חדש»   its first own day in the whole record is inside R, and it has had at least
 //          `freshDays` own worker-site days since;
-//   «עולה»  mean(B) >= riseFrom, mean(R) >= riseShare x mean(B), mean(R) - mean(B) >= riseBy.
+//   «בעלייה» mean(B) >= riseFrom, mean(R) >= riseShare x mean(B), mean(R) - mean(B) >= riseBy.
 //
 // Under `history` working days on the record, no site gets a word: there is no "before" to
-// compare with. tests/status.test.mjs pins every one of these numbers.
+// compare with. tests/statusscreen.test.mjs pins every one of these numbers.
 const STATUS_PHASE = Object.freeze({
     history: 36,
     recent: 12,
@@ -164,10 +178,6 @@ const STATUS_EPSILON = 1e-9;
 
 function statusDate(dateStr) {
     return parseLocalDate(dateStr);
-}
-
-function statusPlaceOf(schedule, placeId) {
-    return ((schedule && schedule.places) || []).find(place => place && String(place.id) === String(placeId)) || null;
 }
 
 // The sentence he tapped, verbatim. Never composed again: updateSyncNotice owns its words and
@@ -198,9 +208,45 @@ function statusToday(schedule, today, layer) {
 // «מחר» on a Friday evening), its crew in the journey's words, its rides only on a phone that
 // turned them on, and the seder's own progress when there is a list.
 //
-// THE RIDES ARE PEEKED, NEVER LOADED. transportDayOf copies unreadable bytes aside and keeps
-// the day in memory; transportPeekDay writes nothing and remembers nothing. transportPrune is
-// never called from here.
+// THE RIDES ARE READ, NEVER LOADED - and never at the price of a write. Two guards, both reads:
+//
+//   THE VEHICLE LIST. transportContext asks transportSettings, which - on a session that has
+//   not loaded the list yet - asks transportLoad, which copies bytes that will not read to a
+//   key of their own before it starts empty (js/ui/transport.js). So when the list is not in
+//   memory and its bytes on the disk will not read, there is no ride line at all. Absent bytes
+//   and bytes that read are loaded as the journey loads them, and nothing is written.
+//
+//   THE DAY. The session's own copy when it has one - the one the journey sees, a change the
+//   disk refused included; otherwise the day's bytes read the way transportPeekDay reads them
+//   (transportJson, transportReadDay), but kept AS THEY ARE: a day with men going another way
+//   or a vehicle kept home and nobody seated yet is still that day, where the peek would answer
+//   no plan. No key is the empty day. Bytes that will not read: no ride line. transportDayOf,
+//   transportLoad of a day, openTransport and transportPrune are never called from here.
+function statusRideSettingsReadable() {
+    if (typeof transportSettingsMemory !== 'undefined' && transportSettingsMemory) return true;
+    let raw = null;
+    // A disk that will not answer is "no bytes" to transportLoad too: it starts empty, writing nothing.
+    try { raw = Store.get(TRANSPORT_SETTINGS_KEY); } catch (error) { return true; }
+    return raw === null || raw === undefined || Boolean(transportJson(raw));
+}
+
+function statusRideDay(date) {
+    if (typeof transportDays !== 'undefined' && transportDays[date]) return transportDays[date];
+    let raw = null;
+    try { raw = Store.get(TRANSPORT_DAY_PREFIX + date); } catch (error) { raw = null; }
+    if (raw === null || raw === undefined) return transportEmptyDay();
+    const parsed = transportJson(raw);
+    return parsed ? transportReadDay(parsed) : null;
+}
+
+function statusRides(date) {
+    if (typeof journeyRidesOn !== 'function' || !journeyRidesOn()) return null;
+    if (!statusRideSettingsReadable()) return null;
+    const day = statusRideDay(date);
+    if (!day) return null;
+    return journeyRideWords(journeyRideStatus(transportContext(date), day));
+}
+
 function statusNext(schedule, today, layer) {
     const date = journeyDefaultDate(today);
     const parsed = statusDate(date);
@@ -208,13 +254,9 @@ function statusNext(schedule, today, layer) {
         date,
         heading: JOURNEY_TEXT.forDay(hebrewDayName(parsed), formatFullDate(parsed)),
         words: journeyCrewWords(journeyCrewStatus(schedule, date, layer)),
-        rides: null,
+        rides: statusRides(date),
         seder: null
     };
-    if (typeof journeyRidesOn === 'function' && journeyRidesOn()) {
-        const peek = transportPeekDay(date);
-        next.rides = journeyRideWords(journeyRideStatus(transportContext(date), peek.day || transportEmptyDay()));
-    }
     if (typeof sederRun === 'function' && typeof sederCrew === 'function') {
         const run = sederRun(sederCrew(schedule, date, layer), date);
         if (run.total > 0) next.seder = `${JOURNEY_TEXT.sendWorkers}: ${SEDER_TEXT.progress(run.done, run.total)}`;
@@ -222,29 +264,41 @@ function statusNext(schedule, today, layer) {
     return next;
 }
 
-// 3. THE NEXT PAYDAY, from dates and the roster alone: every ACTIVE man's own period holding
-// today (periodRangeFor - a history, so a cycle changed mid-fortnight is the stub it cuts),
-// the earliest of their ends, and the men whose period ends then, by cycle. No money: what
-// that day pays is «יום תשלום»'s, or the pay sheet's.
-function statusPayday(schedule, today) {
-    const ends = ((schedule && schedule.workers) || [])
-        .filter(worker => worker && worker.id && worker.active !== false)
-        .map(worker => periodRangeFor(worker, today))
-        .filter(period => period && period.to >= today);
-    if (ends.length === 0) return null;
-    const date = ends.reduce((first, period) => (period.to < first ? period.to : first), ends[0].to);
-    const on = ends.filter(period => period.to === date);
+// 3. THE NEXT PAYDAY, from the roster and the days, and no money. For every man of the roster -
+// archived men too, whose days still count - his own period holding today (periodRangeFor: a
+// history, so a cycle changed mid-fortnight is the stub it cuts). He is IN it when a date of it
+// holds a site of his and no absence (entriesFor / isAbsent: the days payrollReport counts as
+// attendance; a date to come already recorded, like tomorrow's seder, counts). The payday is the
+// earliest end among the men in their period, and the men counted are those it ends for, by
+// cycle: the men who WORKED in that pay period so far - not the men to pay, which the desk
+// counts by a wage (an advance alone keeps a row of its alive). No man in his period: no line.
+function statusWorkedIn(schedule, worker, period, layer) {
+    for (let date = period.from; date && date <= period.to; date = addDays(date, 1)) {
+        if (!isAbsent(schedule, date, worker.id, layer) && entriesFor(schedule, date, worker.id, layer).length > 0) return true;
+    }
+    return false;
+}
+
+function statusPayday(schedule, today, layer) {
+    const men = ((schedule && schedule.workers) || [])
+        .filter(worker => worker && worker.id)
+        .map(worker => ({ worker, period: periodRangeFor(worker, today) }))
+        .filter(one => one.period && statusWorkedIn(schedule, one.worker, one.period, layer));
+    if (men.length === 0) return null;
+    const date = men.reduce((first, one) => (one.period.to < first ? one.period.to : first), men[0].period.to);
+    const on = men.filter(one => one.period.to === date);
     return {
         date,
-        men: on.length,
-        weekly: on.filter(period => period.cycle === 'weekly').length,
-        biweekly: on.filter(period => period.cycle === 'biweekly').length
+        isToday: date === today,
+        worked: on.length,
+        weekly: on.filter(one => one.period.cycle === 'weekly').length,
+        biweekly: on.filter(one => one.period.cycle === 'biweekly').length
     };
 }
 
 // The week's columns as day offsets from its Friday, in the order the app's week reads them
 // (workerCardWeekdays, js/ui/workercard.js: Friday first, the Saturday left out) - and the
-// Saturday put back in its place when one of the twelve weeks holds work on it.
+// Saturday put back in its place when one of the twelve weeks holds anything recorded on it.
 function statusWeekColumns(saturday) {
     const weekdays = typeof workerCardWeekdays === 'function' ? workerCardWeekdays() : [5, 0, 1, 2, 3, 4];
     const offsets = weekdays.map(day => (day - 5 + 7) % 7);
@@ -286,9 +340,14 @@ function statusPulse(schedule, today) {
 
     const fridays = [];
     for (let back = 0; back < STATUS_WEEKS; back += 1) fridays.push(addDays(thisWeek, -7 * back));
-    // A worked Saturday is never hidden: the column is there for every row when any of the
-    // twelve holds one.
-    const saturday = fridays.some(friday => (count(addDays(friday, 1)) || 0) > 0);
+    // A Saturday with anything on it is never hidden: the column is there for every row when
+    // one of the twelve holds a record - anyRecordOnRestDay (js/ui/day.js), the rule the day's
+    // own arrows step by and «לוח חודשי» draws by, so the screens agree about Saturdays. One that
+    // holds only an absence or only a Rima count is a column of cells at 0.
+    const saturday = fridays.some(friday => {
+        const date = addDays(friday, 1);
+        return typeof anyRecordOnRestDay === 'function' ? anyRecordOnRestDay(date) : (count(date) || 0) > 0;
+    });
     const columns = statusWeekColumns(saturday);
 
     let max = 0;
@@ -299,7 +358,9 @@ function statusPulse(schedule, today) {
             if (n !== null && n > max) max = n;
             return { date, n };
         });
-        return { from: friday, to: addDays(friday, 6), days,
+        // Each row starts with its Friday, written, so a reader tells the weeks apart without
+        // counting rows.
+        return { from: friday, to: addDays(friday, 6), label: formatShortDate(statusDate(friday)), days,
             total: days.reduce((sum, day) => sum + (day.n || 0), 0) };
     });
     weeks.forEach(week => {
@@ -374,19 +435,27 @@ function statusPhases(schedule, today, layer, places) {
     return out;
 }
 
-const STATUS_PHASE_KIND = Object.freeze({ 'עולה': 'rising', 'יורד': 'falling', 'חדש': 'fresh', 'שקט': 'quiet' });
+const STATUS_PHASE_KIND = Object.freeze({ 'בעלייה': 'rising', 'בירידה': 'falling', 'חדש': 'fresh', 'שקט': 'quiet' });
 
-// 5. THE SITES: every site of the roster with any of his own men in the last eight weeks;
-// active first, by this month's own count, then the archived. A month is the calendar month
-// «סיכום חודש» reads (monthSummaryRange). Its count is his men's worker-site days there
-// (the invoice without Rima), and Rima beside it: the two make the client's billing count.
+// 5. THE SITES: every site with any of his own men in the last eight weeks; active first, by
+// this month's own count, then the archived, then a site the record names and the roster has
+// not got («אתר שאינו ברשימה N», placeLabelsIn) - written the same way, as a plain row, since
+// there is no card behind it. THE MONTH SO FAR, like the pulse and the strip: from the first of
+// the month «סיכום חודש» reads (monthSummaryRange) up to today - a seder typed for tomorrow is
+// not worked yet. Its count is his men's worker-site days there (the invoice without Rima), and
+// Rima beside it: the two make the client's billing count of those days.
 function statusSites(schedule, today, layer) {
-    const month = monthSummaryRange(monthSummaryKeyOf(today));
+    const monthFrom = monthSummaryRange(monthSummaryKeyOf(today)).from;
     const thisWeek = toLocalDateStr(snapToWeekStart(statusDate(today)));
     const from = addDays(thisWeek, -7 * (STATUS_SITE_WEEKS - 1));
     const eight = invoiceWithoutRima(schedule, from, today);
-    const worked = new Set(eight.places.filter(row => row.workerDays > 0).map(row => String(row.placeId)));
-    const order = ((schedule && schedule.places) || []).filter(place => place && worked.has(String(place.id)));
+    const roster = (schedule && schedule.places) || [];
+    const listed = id => roster.some(place => place && String(place.id) === id);
+    const worked = eight.places.filter(row => row.workerDays > 0);
+    const order = roster.filter(place => place && worked.some(row => String(row.placeId) === String(place.id)))
+        .map(place => ({ id: place.id, name: String(place.name || ''), active: place.active !== false, listed: true }))
+        .concat(worked.filter(row => !listed(String(row.placeId)))
+            .map(row => ({ id: row.placeId, name: String(row.name || ''), active: false, listed: false })));
     const phases = statusPhases(schedule, today, layer, order);
     const weekOf = friday => {
         const dates = [];
@@ -404,10 +473,11 @@ function statusSites(schedule, today, layer) {
         const phase = phases[id] || null;
         return {
             placeId: id,
-            name: String(place.name || ''),
-            active: place.active !== false,
-            month: invoiceWithoutRima(schedule, month.from, month.to, place.id).total,
-            rima: rimaReport(schedule, month.from, month.to, place.id).total,
+            name: place.name,
+            active: place.active,
+            listed: place.listed,
+            month: invoiceWithoutRima(schedule, monthFrom, today, place.id).total,
+            rima: rimaReport(schedule, monthFrom, today, place.id).total,
             // Oldest first: the strip reads the way the app's time does, right to left.
             weeks: fridays.map(friday => weekOf(friday).reduce((sum, date) => sum + eight.countAt(place.id, date), 0)),
             phase,
@@ -415,10 +485,10 @@ function statusSites(schedule, today, layer) {
             rank
         };
     });
-    sites.sort((a, b) => (a.active !== b.active ? (a.active ? -1 : 1)
-        : b.month !== a.month ? b.month - a.month : a.rank - b.rank));
+    const band = site => (site.listed ? (site.active ? 0 : 1) : 2);
+    sites.sort((a, b) => (band(a) !== band(b) ? band(a) - band(b) : b.month !== a.month ? b.month - a.month : a.rank - b.rank));
     sites.forEach(site => { delete site.rank; });
-    return { sites, yosef: typeof yosefGevesReport === 'function' ? yosefGevesReport(schedule, month.from, month.to).total : 0 };
+    return { sites, yosef: typeof yosefGevesReport === 'function' ? yosefGevesReport(schedule, monthFrom, today).total : 0 };
 }
 
 // 6. THIS PHONE: the backup row's own sentence and its reminder (js/ui/backup.js).
@@ -433,9 +503,16 @@ function statusBackup(today) {
     };
 }
 
-// EVERYTHING BUT THE MONEY, as plain data and nothing drawn - so the suite can hold every
-// figure against the function it is read from without a browser. Cheap: a few invoices over
-// weeks, no walk, no gate.
+// The close reminder's count, MIRRORED - the count its line on the glass says, or null when
+// the line is down. Never read here (the top of this file).
+function statusCloseShown() {
+    const shown = typeof closeReminderShown !== 'undefined' ? closeReminderShown : null;
+    return Number.isInteger(shown) && shown > 0 ? shown : null;
+}
+
+// EVERYTHING BUT THE BOARD'S MONEY, as plain data and nothing drawn - so the suite can hold
+// every figure against the function it is read from without a browser. Cheap: a few invoices
+// over weeks, no walk, no gate.
 function statusFacts(today) {
     const day = today || todayStr();
     const schedule = State.schedule;
@@ -446,7 +523,8 @@ function statusFacts(today) {
         sync: statusSyncSentence(),
         crew: statusToday(schedule, day, layer),
         next: typeof journeyDefaultDate === 'function' ? statusNext(schedule, day, layer) : null,
-        payday: statusPayday(schedule, day),
+        payday: statusPayday(schedule, day, layer),
+        close: statusCloseShown(),
         pulse: statusPulse(schedule, day),
         sites: sites.sites,
         yosef: sites.yosef,
@@ -456,79 +534,45 @@ function statusFacts(today) {
 
 // ================================================================== the money
 //
-// { close, owes } - the close count «סגירת שבוע» would offer, and the board's own figures.
-// `owes` is null when nobody owes; its words are the board's (renderOwesInto): the label by
-// the gate, the sum, the count line.
-let STATUS_MONEY_KEPT = null;
+// THE BOARD'S, AND ONLY THE BOARD'S: `{ folded, total, countLine }`, or `{ none: true }` when
+// nobody owes. Its words are the board's (renderOwesInto, js/ui/owes.js): the label by the
+// gate, the sum, the count line.
 
-function statusMoneyKey(today) {
-    if (typeof owesKey === 'function') return owesKey(State.schedule, today);
-    return `${typeof Store === 'object' && Store ? Store.tick : 0}|${today}|${JSON.stringify(State.schedule)}`;
-}
-
-// The board's reading wanted at all: no advance and no close on the record, nobody can owe -
-// renderOwesInto's own short cut, which reads nothing.
+// The board read at all: no advance and no close on the record, nobody can owe - renderOwesInto's
+// own short cut, which reads nothing.
 function statusOwesWanted(schedule) {
     return (typeof owesAnyAdvance === 'function' && owesAnyAdvance(schedule))
         || (typeof owesAnyClosure === 'function' && owesAnyClosure(schedule));
 }
 
-function statusMoneyFrom(close, read) {
-    const owes = read && Array.isArray(read.rows) && read.rows.length > 0
-        ? { folded: read.folded === true, total: read.total, count: owesCountLine(read) } : null;
-    return { close: Number.isInteger(close) && close > 0 ? close : 0, owes };
+function statusMoneyFrom(read) {
+    return read && Array.isArray(read.rows) && read.rows.length > 0
+        ? { folded: read.folded === true, total: read.total, countLine: owesCountLine(read) }
+        : { none: true };
 }
 
-// What can be said WITHOUT READING: the money kept under this record, or - when the board and
-// the close count are both already kept under it by their own screens - the two of them.
-// null when something would have to be read.
-function statusMoneyKeptNow(today) {
-    const key = statusMoneyKey(today);
-    if (STATUS_MONEY_KEPT && STATUS_MONEY_KEPT.key === key) return STATUS_MONEY_KEPT.facts;
-    const close = typeof CLOSE_REMINDER_KEPT !== 'undefined' && CLOSE_REMINDER_KEPT && CLOSE_REMINDER_KEPT.key === key
-        ? CLOSE_REMINDER_KEPT.count : null;
-    if (close === null) return null;
-    let read = null;
-    if (statusOwesWanted(State.schedule)) {
-        read = typeof owesKeptNow === 'function' ? owesKeptNow() : null;
-        if (!read) return null;
-    }
-    const facts = statusMoneyFrom(close, read);
-    STATUS_MONEY_KEPT = { key, facts };
-    return facts;
+// What can be said WITHOUT READING: nothing to read at all, or the board's own reading kept
+// under this very record (OWES_KEPT, owesKeptNow). null when the board would have to be read.
+function statusMoneyKept() {
+    if (!statusOwesWanted(State.schedule)) return { none: true };
+    const kept = typeof owesKeptNow === 'function' ? owesKeptNow() : null;
+    return kept ? statusMoneyFrom(kept) : null;
 }
 
-// THE READING. Synchronous, no write, no await: to be called inside reportReadOnce and
-// weeklyCloseOnce (statusMoneyNow does), so the gate is answered once - without planning on a
-// record that carries the approval - and the ledger is folded once for both readers.
-function statusMoneyRead(today, at) {
-    const schedule = State.schedule;
-    const key = statusMoneyKey(today);
-    const close = typeof CLOSE_REMINDER_KEPT !== 'undefined' && CLOSE_REMINDER_KEPT && CLOSE_REMINDER_KEPT.key === key
-        ? CLOSE_REMINDER_KEPT.count
-        : (typeof weeklyCloseRead === 'function' && typeof closeReminderCount === 'function'
-            ? closeReminderCount(weeklyCloseRead(schedule, today, at)) : 0);
-    const read = statusOwesWanted(schedule) ? owesReadNow() : null;
-    return statusMoneyFrom(close, read);
-}
-
-// The money of this moment: kept if the record has not moved, read otherwise - in ONE reading.
-// A reading that throws is no line, never a crash (the close reminder's own rule): its place
-// on the screen is left empty, and «מקדמות» and «דוחות» are one tap away.
-function statusMoneyNow() {
-    const today = todayStr();
-    const kept = statusMoneyKeptNow(today);
+// THE READING: ONE synchronous call, no write, no await - owesReadNow inside reportReadOnce and
+// weeklyCloseOnce, so the gate is answered once (without planning on a record that carries the
+// approval) and the ledger folded once, and the board's keeper keeps it. Called only after the
+// dialog has painted (statusMoneyLater). A reading that throws is no line, never a crash (the
+// close reminder's rule): the board's place is left empty, and «מקדמות» is one tap away.
+function statusMoneyFacts() {
+    const kept = statusMoneyKept();
     if (kept) return kept;
-    const key = statusMoneyKey(today);
-    const at = new Date().toISOString();
-    const read = () => statusMoneyRead(today, at);
+    const read = () => owesReadNow();
     const inner = () => (typeof weeklyCloseOnce === 'function' ? weeklyCloseOnce(read) : read());
     try {
-        const facts = typeof reportReadOnce === 'function' ? reportReadOnce(inner) : inner();
-        STATUS_MONEY_KEPT = { key, facts };
-        return facts;
+        return statusMoneyFrom(typeof reportReadOnce === 'function' ? reportReadOnce(inner) : inner());
     } catch (error) {
-        if (typeof console !== 'undefined' && console.warn) console.warn('status: the money was not read', error);
+        if (typeof console !== 'undefined' && console.warn) console.warn('status: the board was not read', error);
         return null;
     }
 }
@@ -577,7 +621,7 @@ function drawStatusToday(body, facts) {
         const hero = el('div', 'status-hero');
         hero.appendChild(el('strong', 'status-hero-n', String(crew.placed)));
         const said = el('div', 'status-hero-said');
-        said.appendChild(el('span', 'status-hero-label', T.heroLabel));
+        said.appendChild(el('span', 'status-hero-label', T.heroLabel(crew.placed)));
         said.appendChild(el('span', 'status-hero-sites', T.inSites(crew.sites.length)));
         hero.appendChild(said);
         section.appendChild(hero);
@@ -631,16 +675,17 @@ function statusPaydayWords() {
         ? PAYDAY_TEXT.entry : STATUS_REUSED.reports;
 }
 
-function statusPaydayLine(payday) {
+// The payday's two lines: the day, then who worked in the period so far.
+function statusPaydayLines(payday) {
     const parsed = statusDate(payday.date);
-    let line = STATUS_TEXT.nextPayday(hebrewDayName(parsed), formatShortDate(parsed),
-        countedIn(payday.men, STATUS_REUSED.oneMan, STATUS_REUSED.manyMen));
-    if (payday.weekly > 0 && payday.biweekly > 0) line += ` (${STATUS_TEXT.payCycles(payday.weekly, payday.biweekly)})`;
-    return line;
+    return [STATUS_TEXT.nextPayday(hebrewDayName(parsed), formatShortDate(parsed), payday.isToday),
+        payday.weekly > 0 && payday.biweekly > 0 ? STATUS_TEXT.workedBoth(payday.weekly, payday.biweekly)
+            : STATUS_TEXT.worked(payday.worked)];
 }
 
-// The two money lines, or their placeholder: «מחשב את החשבונות…» in their place until they
-// are read, and nothing of a reading of another record.
+// The board's lines, or their placeholder: «מחשב את החשבונות…» in their place until they are
+// read, and nothing of a reading of another record. `money` undefined is "not read yet", null a
+// reading that threw (nothing said).
 function drawStatusMoneyInto(node, money) {
     clear(node);
     if (money === undefined) {
@@ -650,36 +695,33 @@ function drawStatusMoneyInto(node, money) {
     }
     node.removeAttribute('aria-busy');
     if (!money) return;
-    if (money.close > 0) {
-        const row = el('div', 'status-money-row status-money-close');
-        row.appendChild(el('p', 'status-line status-money-line', CLOSE_REMINDER_TEXT.line(money.close)));
-        row.appendChild(statusDoorButton(CLOSE_REMINDER_TEXT.open, 'go:close', () => statusGoClose()));
-        node.appendChild(row);
-    }
-    if (money.owes) {
-        const row = el('div', 'status-money-row status-money-owes');
-        const line = el('p', 'status-line status-money-line');
-        line.appendChild(el('span', 'status-money-label',
-            `${money.owes.folded ? OWES_TEXT.total : OWES_REUSED.recorded}: `));
-        line.appendChild(el('strong', 'status-money-amount', owesMoney(money.owes.total)));
-        row.appendChild(line);
-        row.appendChild(el('p', 'status-line status-money-count', money.owes.count));
-        row.appendChild(statusDoorButton(OWES_TEXT.board, 'go:board', () => statusGoBoard()));
-        node.appendChild(row);
-    } else {
+    if (money.none) {
         node.appendChild(el('p', 'status-line status-money-line status-money-none', OWES_TEXT.none));
+        return;
     }
+    const line = el('p', 'status-line status-money-line');
+    line.appendChild(el('span', 'status-money-label', `${money.folded ? OWES_TEXT.total : OWES_REUSED.recorded}: `));
+    line.appendChild(el('strong', 'status-money-amount', owesMoney(money.total)));
+    node.appendChild(line);
+    node.appendChild(el('p', 'status-line status-money-count', money.countLine));
+    node.appendChild(statusDoorButton(OWES_TEXT.board, 'go:board', () => statusGoBoard()));
 }
 
 function drawStatusMoney(body, facts, money) {
     const section = statusSection('money', STATUS_TEXT.money);
-    if (facts.payday) {
-        const row = el('div', 'status-money-row status-money-payday');
-        row.appendChild(el('p', 'status-line status-money-line', statusPaydayLine(facts.payday)));
-        row.appendChild(statusDoorButton(statusPaydayWords(), 'go:payday', () => statusGoPayday()));
-        section.appendChild(row);
+    // Drawn at once - dates and counts, no money. The door stays when there is no line.
+    const payday = el('div', 'status-money-row status-money-payday');
+    if (facts.payday) statusPaydayLines(facts.payday).forEach(text => payday.appendChild(el('p', 'status-line status-money-line', text)));
+    payday.appendChild(statusDoorButton(statusPaydayWords(), 'go:payday', () => statusGoPayday()));
+    section.appendChild(payday);
+    // The close reminder's own line, mirrored at once - only while it is up.
+    if (facts.close) {
+        const close = el('div', 'status-money-row status-money-close');
+        close.appendChild(el('p', 'status-line status-money-line', CLOSE_REMINDER_TEXT.line(facts.close)));
+        close.appendChild(statusDoorButton(CLOSE_REMINDER_TEXT.open, 'go:close', () => statusGoClose()));
+        section.appendChild(close);
     }
-    const lines = el('div', 'status-money');
+    const lines = el('div', 'status-money-row status-money');
     lines.id = 'statusMoney';
     drawStatusMoneyInto(lines, money);
     section.appendChild(lines);
@@ -702,7 +744,7 @@ function drawStatusPulse(body, facts) {
         const row = button('', 'status-week', () => statusGoWeek(week.from), week.name);
         row.dataset.statusKey = `week:${week.from}`;
         row.dataset.week = week.from;
-        row.appendChild(el('span', 'status-week-date', formatShortDate(statusDate(week.from))));
+        row.appendChild(el('span', 'status-week-date', week.label));
         week.days.forEach(day => {
             const cell = el('span', `status-cell status-step-${day.n === null ? 'later' : day.step}`, day.n === null ? '·' : '');
             cell.dataset.date = day.date;
@@ -730,7 +772,7 @@ function statusSiteName(site) {
     const T = STATUS_TEXT;
     const parts = [T.siteName(isolate(site.name), site.month, site.weeks.join(' · '))];
     if (site.rima > 0) parts.push(T.rima(site.rima));
-    if (!site.active) parts.push(STATUS_REUSED.inactive);
+    if (site.listed && !site.active) parts.push(STATUS_REUSED.inactive);
     if (site.phase) parts.push(site.phase);
     return parts.join(' · ');
 }
@@ -740,14 +782,24 @@ function drawStatusSites(body, facts) {
     const section = statusSection('sites', T.sites);
     if (facts.sites.length === 0) section.appendChild(el('p', 'status-line status-empty', T.noSites));
     facts.sites.forEach(site => {
-        const row = button('', 'status-site', () => statusGoSite(site.placeId), statusSiteName(site));
-        row.dataset.statusKey = `site:${site.placeId}`;
+        // A site of the roster is a button to its card; one the record names and the roster has
+        // not got has no card (openSiteCard says nothing for it), so it is a plain row with the
+        // same words - never a button that opens nothing.
+        let row;
+        if (site.listed) {
+            row = button('', 'status-site', () => statusGoSite(site.placeId), statusSiteName(site));
+            row.dataset.statusKey = `site:${site.placeId}`;
+            row.setAttribute('aria-haspopup', 'dialog');
+        } else {
+            row = el('div', 'status-site status-site-unlisted');
+            row.setAttribute('role', 'group');
+            row.setAttribute('aria-label', statusSiteName(site));
+        }
         row.dataset.placeId = site.placeId;
-        row.setAttribute('aria-haspopup', 'dialog');
         const top = el('span', 'status-site-top');
         top.appendChild(statusSwatch(site.placeId));
         top.appendChild(el('span', 'status-site-name', isolate(site.name)));
-        if (!site.active) top.appendChild(el('span', 'status-site-off', STATUS_REUSED.inactive));
+        if (site.listed && !site.active) top.appendChild(el('span', 'status-site-off', STATUS_REUSED.inactive));
         if (site.phase) top.appendChild(el('span', `status-phase status-phase-${site.phaseKind}`, site.phase));
         row.appendChild(top);
         const mid = el('span', 'status-site-mid');
@@ -764,13 +816,16 @@ function drawStatusSites(body, facts) {
         site.weeks.forEach((n, at) => {
             const bar = el('span', 'status-strip-bar' + (at === site.weeks.length - 1 ? ' status-strip-now' : '')
                 + (n === 0 ? ' status-strip-none' : ''));
-            if (n > 0 && most > 0) bar.style.height = `${Math.max(12, Math.round((100 * n) / most))}%`;
+            const fill = el('span', 'status-strip-fill');
+            if (n > 0 && most > 0) fill.style.height = `${Math.max(12, Math.round((100 * n) / most))}%`;
+            bar.appendChild(fill);
             strip.appendChild(bar);
         });
         row.appendChild(strip);
         section.appendChild(row);
     });
-    if (facts.sites.some(site => site.phase)) section.appendChild(el('p', 'status-note', T.phaseNote));
+    // What the words mean, under the list - its numbers are the rule's constants.
+    if (facts.sites.length > 0) section.appendChild(el('p', 'status-note', T.phaseNote));
     if (facts.yosef > 0) {
         const apart = el('div', 'status-yosef');
         apart.appendChild(el('p', 'status-line status-yosef-line', T.yosef(facts.yosef)));
@@ -800,7 +855,7 @@ function drawStatus() {
     const active = document.activeElement;
     const held = active && active.dataset && parts.body.contains(active) ? active.dataset.statusKey : '';
     const facts = statusFacts(todayStr());
-    const kept = statusMoneyKeptNow(facts.today);
+    const kept = statusMoneyKept();
 
     clear(parts.body);
     const sync = el('p', 'status-sync', facts.sync);
@@ -828,7 +883,7 @@ function statusMoneyLater() {
     const ask = ++statusMoneyWaiting;
     const run = () => {
         if (ask !== statusMoneyWaiting || !statusIsOpen()) return;
-        const money = statusMoneyNow();
+        const money = statusMoneyFacts();
         const node = document.getElementById('statusMoney');
         if (node && statusIsOpen()) drawStatusMoneyInto(node, money);
     };
@@ -868,9 +923,9 @@ function closeStatus() {
 
 // render() calls this (js/app.js). Shut, it returns at its first line. Open, the cheap sections
 // are drawn again from the record as it is - the place the reader had scrolled to kept - and a
-// record whose money moved shows «מחשב את החשבונות…» again and is read once the draws have
+// record the board moved under shows «מחשב את החשבונות…» again and is read once the draws have
 // stopped for STATUS_QUIET_MS (the close reminder's rule): a snapshot adopted, a commit on
-// another phone, is never read in the draw.
+// another phone, is never read in the draw, and the board at most once for a run of them.
 function renderStatusIfOpen() {
     if (!statusIsOpen()) return;
     const content = statusParts().modal.querySelector('.modal-content');
@@ -918,13 +973,18 @@ function statusFocusDoor() {
 
 // ================================================================== the doors
 //
-// NAVIGATION ONLY. Each closes this dialog first and then calls the screen's own opener. When
-// that opener puts up another dialog in the same step, js/ui/modal.js never sees a moment with
-// none open and does not enter the new one by itself, so its heading is given the focus here,
-// by hand (siteCardGoMan's rule, js/ui/sitecard.js); the focus it kept - this door - is what
-// closing that one gives back. A panel or a view that takes the keyboard itself (⋯, the
-// journey, the month board) is opened a task later, after modal.js has given the focus back
-// for the dialog that just closed (whatsNewGo's rule, js/ui/whatsnew.js).
+// NAVIGATION ONLY. Each closes this dialog first and then calls the screen's own opener - and
+// WHEN depends on what that screen is, because js/ui/modal.js gives the focus back to this
+// dialog's opener (#statusDoor, always on the page) from a MutationObserver, at the microtask
+// checkpoint AFTER the whole block that shut the last dialog:
+//
+//   A DIALOG (the site's card, «סגירת שבוע», «יום תשלום»): opened in the SAME task. modal.js then
+//   never sees a moment with no dialog open and gives nothing back - so the new dialog's heading
+//   is given the focus here, by hand (siteCardGoMan's rule, js/ui/sitecard.js), and closing it
+//   later gives the focus back to this door.
+//   ANYTHING ELSE (a view, the journey, ⋯, the month board): closed now, opened a task later
+//   (whatsNewGo's rule, js/ui/whatsnew.js) - so modal.js's focus return lands first, and the
+//   focus then ends where the target puts it: ⋯'s heading, the board's title.
 
 function statusFocusNewDialog() {
     if (typeof topModal !== 'function') return;
@@ -940,13 +1000,16 @@ function statusAfterClose(go) {
 }
 
 // Today, on the day screen - a day chosen by hand, so a midnight follow still owed is settled
-// by it (dayChosenByHand, js/app.js).
+// by it (dayChosenByHand, js/app.js). Set in the task after the dialog shut: the follow made at
+// the shut (watchDayRollover) comes first, and his choice after it.
 function statusGoToday() {
     if (!statusIsOpen()) return false;
     closeStatus();
-    State.date = todayStr();
-    if (typeof dayChosenByHand === 'function') dayChosenByHand();
-    showView('day');
+    statusAfterClose(() => {
+        State.date = todayStr();
+        if (typeof dayChosenByHand === 'function') dayChosenByHand();
+        showView('day');
+    });
     return true;
 }
 
@@ -959,7 +1022,8 @@ function statusGoJourney() {
     return true;
 }
 
-// «יום תשלום» where this build has it; the pay sheet otherwise.
+// «יום תשלום» where this build has it - a dialog, in this task; the pay sheet otherwise - a
+// view, a task later.
 function statusGoPayday() {
     if (!statusIsOpen()) return false;
     closeStatus();
@@ -967,7 +1031,7 @@ function statusGoPayday() {
         openPayday();
         statusFocusNewDialog();
     } else {
-        showView('reports');
+        statusAfterClose(() => showView('reports'));
     }
     return true;
 }
@@ -984,9 +1048,11 @@ function statusGoClose() {
 function statusGoBoard() {
     if (!statusIsOpen()) return false;
     closeStatus();
-    if (typeof OWES_PAGE !== 'undefined') OWES_PAGE = null;
-    if (typeof ADVANCE_WORKER !== 'undefined') ADVANCE_WORKER = null;
-    showView('advances');
+    statusAfterClose(() => {
+        if (typeof OWES_PAGE !== 'undefined') OWES_PAGE = null;
+        if (typeof ADVANCE_WORKER !== 'undefined') ADVANCE_WORKER = null;
+        showView('advances');
+    });
     return true;
 }
 
@@ -995,9 +1061,11 @@ function statusGoBoard() {
 function statusGoWeek(friday) {
     if (!statusIsOpen() || !isRealDate(friday)) return false;
     closeStatus();
-    showView('week');
-    setWeekFromDate(friday);
-    render();
+    statusAfterClose(() => {
+        showView('week');
+        setWeekFromDate(friday);
+        render();
+    });
     return true;
 }
 
