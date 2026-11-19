@@ -2,17 +2,59 @@
 
 - **Branch:** `feat-payday`, worktree `/home/user/farkad/.claude/worktrees/feat-payday`.
 - **Base:** `6ab193d68c960e4a56d947673c282b867acd258f` (origin/main when the track was cut).
-- **Final code commit (fix round 1):** `a372a92`. `e9ce62b` is the repair of the review of
-  2026-11-19 (the section «Fix round 1» below) and the whole `npm test` chain and the browser suites
-  listed under «Test output» ran on it, one by one, from a clean tree; `a372a92` adds two checks to
-  `tests/payday.test.mjs` and nothing else (the look's place, finding 7), and `test:payday`,
-  `test:nonassertions` and `test:isolation` ran again on it. The round before ended at `73ca0e0`.
-- **Final commit:** the one that updates this file and nothing else - no file the app serves or a
-  suite reads - so the results below are the final commit's.
+- **Final code commit:** `a372a92` (fix round 1). `e9ce62b` is the repair of the review of
+  2026-11-19 (the section «Fix round 1» below); `a372a92` adds two checks to `tests/payday.test.mjs`
+  and nothing else (the look's place, finding 7). **Fix round 2 changed no code, no test and no
+  stamp** (the section «Fix round 2» below); its runs - the whole `npm test` chain one step at a
+  time, and this track's browser suite - are on `6aeacb2`, whose one change after `a372a92` is this
+  file. The round before fix round 1 ended at `73ca0e0`.
+- **Final commit:** the one that updates this file for fix round 2 and nothing else - no file the
+  app serves or a suite reads (every `features/` path a suite names is in a comment, and `sw.js`
+  caches none) - so the results below are the final commit's.
 - **Contract:** `features/payday/contract.md`, REVISION 2 (2026-11-19). The track was built on
   revision 1, then reconciled with revision 2 in `682a253` and `b030d53` (below).
 - **Not pushed, no PR.** The three build stamps, `js/ui/whatsnew.js`, `docs/releases.md` and
   `CLAUDE.md` are untouched (the integrator's).
+
+## Fix round 2 - the verifier's three reds (2026-11-19)
+
+The independent verifier ran the suites on `6aeacb2` and sent back ONE finding, P1 «verification
+failures»: three checks red, each of which its own report marks as the red this contract expects.
+Triaged in the manner of `.claude/skills/triage`: **reproduced, and ALREADY HANDLED - discarded,
+not fixed.** No code, no test and no stamp changed this round.
+
+| check (suite) | on `6aeacb2` | what it measures |
+|---|---|---|
+| «the stamps were moved by the commit that moved the bytes» :: «and nothing in the shell has changed since» (tests/build.test.mjs) | red: «7 changed since 6ab193d6: css/design.css, css/large.css, index.html, js/app.js, js/ui/modal.js, js/ui/owes.js, js/ui/payday.js» | iron law 5 read off git: the commit that last wrote the three stamp LINES (`git log -S`), then any shell file changed after it |
+| the same :: «and neither has the worker that names the shelf» (tests/build.test.mjs) | red: «sw.js» (its `SHELL` entry) | the same, for the worker |
+| §4 «no cached file has changed since the three stamps last moved» (tests/gate.integrity.test.mjs) | red: `e9ce62b`, `682a253`, `17452d1` | the same law, as a list of commits |
+
+Why it is not a fault of this branch - each point checked on the tree, not taken from the contract:
+- **It is the red the contract names, and only that.** «Expected red on this branch, and only
+  this: tests/build.test.mjs «the stamps were moved by the commit that moved the bytes» (and its
+  sw.js line) and tests/gate.integrity.test.mjs §4» (contract, §Base). The run under «Test output»
+  holds the «only»: of the chain's 13,184 checks, these three are the ones that failed.
+- **Green here needs one of two things, and both are ruled out.** The three stamps moved - which
+  the task's hard rules and the contract (§Base: «MUST NOT be touched: … the three stamps») give to
+  the integrator, who ships the four tracks together as v206 - or the feature taken out. Neither
+  was done; no test was weakened, and none was touched.
+- **What moved is this track's, and nothing else.** `git diff 6ab193d..6aeacb2` touches the shell
+  in exactly the seven files named and `sw.js`, each hunk one the contract names (the table «Every
+  hook in an existing file»); the stamp lines read v204 at the base and at `6aeacb2`; the commits
+  that touch the shell are exactly the three §4 names, all this track's; no protected path
+  (js/model, js/sync, js/state.js, js/store.js, js/recovery.js, firestore.rules, functions,
+  firebase.json, .github, docs/releases.md, CLAUDE.md, js/ui/whatsnew.js, js/ui/offline.js,
+  js/ui/reports.js, js/ui/weeklyclose.js, another track's files) is in the diff.
+- **The proof that the reds are the stamp lag and nothing else** (`payday-fix2/stamp-probe.sh` in
+  the scratchpad, its four logs beside it): a throwaway CLONE of the repository - a repository of
+  its own, so no branch or worktree of this one was touched, nothing was fetched back, and it was
+  deleted afterwards - at `6aeacb2`. Before: build **67/69**, gate-integrity **19/20**, the same three
+  checks. After ONE commit that moves the three stamps v204 → v206 together, as the integrator
+  will: **build 69/69 and gate-integrity 20/20, both exit 0.**
+
+For the workflow: on this branch those three checks are red BY CONSTRUCTION until the integrator's
+stamp commit. A verification that counts them answers `allGreen: false` whatever this track does,
+and no fix round can change that without breaking the rule that forbids it.
 
 ## Fix round 1 - the review of 2026-11-19
 
@@ -98,7 +140,8 @@ Track `status` uses only `openPayday()` and `PAYDAY_TEXT.entry`, both unchanged.
 | `96f8d88` | features/payday/handoff.md (the round reviewed) |
 | `e9ce62b` | fix round 1: js/ui/payday.js, css/design.css, css/large.css, the two suites, tests/screens.mjs, tests/usual.test.mjs (a comment), tests/README.md |
 | `a372a92` | tests/payday.test.mjs: the look's place held in P11 (finding 7) |
-| (this one) | features/payday/handoff.md, updated for fix round 1 |
+| `6aeacb2` | features/payday/handoff.md, updated for fix round 1 |
+| (this one) | features/payday/handoff.md, updated for fix round 2 - no code, no test, no stamp |
 
 ## Files changed against the base (`git diff --stat 6ab193d a372a92`)
 
@@ -122,7 +165,9 @@ Track `status` uses only `openPayday()` and `PAYDAY_TEXT.entry`, both unchanged.
  tests/usual.test.mjs         |    8 +-
  17 files changed, 4708 insertions(+), 9 deletions(-)
 ```
-(Fix round 1 alone, `git diff --stat 73ca0e0 a372a92`: 9 files changed, 1665 insertions(+), 242 deletions(-).)
+(Fix round 1 alone, `git diff --stat 73ca0e0 a372a92`: 9 files changed, 1665 insertions(+), 242 deletions(-).
+After `a372a92` only this file changed: in `6aeacb2` for fix round 1, and in the final commit for
+fix round 2.)
 
 One line each:
 - `js/ui/payday.js` (new) - the desk: the reading (`paydayFacts`), its memory, the dialog, the doors, every word.
@@ -348,127 +393,137 @@ two screens added and this track's closes repaired (no expectation lives there).
 ## Test output (pasted; every line is that suite's own last count line, its exit code and its time)
 
 Run on this machine, shared with other agents building at the same time; browser suites one at a
-time through the slot wrapper (`scratchpad/bt`), Node suites one by one in the chain's order. The
-previous round's outputs (on `73ca0e0` and `b030d53`) are in this file's history
-(`git show 96f8d88:features/payday/handoff.md`); everything below is fix round 1's, on `e9ce62b`.
+time through the slot wrapper (`scratchpad/bt`), Node suites one by one in the chain's order (the
+chain itself is `&&`, and the expected red of `test:build`, its third step, would stop it there
+and hide the other 106). The build round's outputs (on `73ca0e0` and `b030d53`) are in this
+file's history (`git show 96f8d88:features/payday/handoff.md`), and fix round 1's `npm test` (on
+`e9ce62b`: the same 109 steps, the same two reds) and its run of the three suites that read
+`a372a92`'s change in `git show 6aeacb2:features/payday/handoff.md`. Below: fix round 2's `npm test`
+and this track's browser suite, on `6aeacb2`; then fix round 1's other browser suites, on
+`e9ce62b`, whose served bytes `6aeacb2` carries unchanged.
 
-### `npm test`, suite by suite, on `e9ce62b` (clean tree)
+### `npm test`, suite by suite, on `6aeacb2` (fix round 2; clean tree before and after)
 
 ```
-HEAD e9ce62bb8e1ac6d7e724eb44e0ac4f787c10fdfd status[0]
-test:isolation | exit 0 | 0s | 18/18 checks passed
+HEAD 6aeacb2cdd415aff7c45348a6deed1ca54135dad status[0]
+test:isolation | exit 0 | 1s | 18/18 checks passed
 test:blobs | exit 0 | 1s | 11/11 checks passed
 test:build | exit 1 | 2s | 67/69 checks passed
 test:poison | exit 0 | 0s | 37/37 checks passed
-test:merge | exit 0 | 0s | 28/28 checks passed
+test:merge | exit 0 | 1s | 28/28 checks passed
 test:contested | exit 0 | 16s | 73/73 checks passed
-test:held | exit 0 | 5s | 83/83 checks passed
+test:held | exit 0 | 4s | 83/83 checks passed
 test:snapshot-stale | exit 0 | 2s | 16/16 checks passed
-test:reports-rules | exit 0 | 3s | 26/26 checks passed
-test:finance | exit 0 | 9s | 57/57 checks passed
-test:weekly-range | exit 0 | 1s | 21/21 checks passed
-test:finance-wording | exit 0 | 2s | 12/12 checks passed
-test:weekly-unpriced | exit 0 | 1s | 23/23 checks passed
+test:reports-rules | exit 0 | 2s | 26/26 checks passed
+test:finance | exit 0 | 8s | 57/57 checks passed
+test:weekly-range | exit 0 | 0s | 21/21 checks passed
+test:finance-wording | exit 0 | 3s | 12/12 checks passed
+test:weekly-unpriced | exit 0 | 0s | 23/23 checks passed
 test:receipt | exit 0 | 2s | 28/28 checks passed
-test:data | exit 0 | 47s | 1970/1970 checks passed
+test:data | exit 0 | 45s | 1970/1970 checks passed
 test:recovery | exit 0 | 2s | 82/82 checks passed
-test:adversarial | exit 0 | 6s | 116/116 checks passed
-test:probes | exit 0 | 7s | 35/35 checks passed
+test:adversarial | exit 0 | 5s | 116/116 checks passed
+test:probes | exit 0 | 8s | 35/35 checks passed
 test:capacity | exit 0 | 16s | 48/48 checks passed
 test:concurrency | exit 0 | 3s | 46/46 checks passed
 test:exports | exit 0 | 2s | 112/112 checks passed
 test:fence | exit 0 | 3s | 35/35 checks passed
-test:fence-ingress | exit 0 | 1s | 43/43 checks passed
-test:fence-legacy | exit 0 | 0s | 21/21 checks passed
+test:fence-ingress | exit 0 | 0s | 43/43 checks passed
+test:fence-legacy | exit 0 | 1s | 21/21 checks passed
 test:money-history | exit 0 | 0s | 9/9 checks passed
-test:money-units | exit 0 | 1s | 21/21 checks passed
-test:money-cloud | exit 0 | 1s | 17/17 checks passed
-test:money-display | exit 0 | 1s | 4/4 checks passed
+test:money-units | exit 0 | 0s | 21/21 checks passed
+test:money-cloud | exit 0 | 2s | 17/17 checks passed
+test:money-display | exit 0 | 0s | 4/4 checks passed
 test:snapshot-poison | exit 0 | 2s | 82/82 checks passed
 test:samefact | exit 0 | 6s | 37/37 checks passed
-test:wording | exit 0 | 1s | 37/37 checks passed
-test:closure | exit 0 | 32s | 122/122 checks passed
+test:wording | exit 0 | 0s | 37/37 checks passed
+test:closure | exit 0 | 23s | 122/122 checks passed
 test:closure-echo | exit 0 | 1s | 79/79 checks passed
 test:correction | exit 0 | 0s | 33/33 checks passed
-test:quarantine | exit 0 | 4s | 82/82 checks passed
-test:approval | exit 0 | 15s | 72/72 checks passed
-test:repayment | exit 0 | 13s | 240/240 checks passed
+test:quarantine | exit 0 | 3s | 82/82 checks passed
+test:approval | exit 0 | 9s | 72/72 checks passed
+test:repayment | exit 0 | 8s | 240/240 checks passed
 test:ledger-ingress | exit 0 | 0s | 167/167 checks passed
-test:cas | exit 0 | 14s | 88/88 checks passed
-test:status | exit 0 | 9s | 37/37 checks passed
-test:money | exit 0 | 4s | 40/40 checks passed
+test:cas | exit 0 | 13s | 88/88 checks passed
+test:status | exit 0 | 7s | 37/37 checks passed
+test:money | exit 0 | 2s | 40/40 checks passed
 test:money-ingress | exit 0 | 10s | 206/206 checks passed
-test:method | exit 0 | 3s | 51/51 checks passed
-test:restore | exit 0 | 1s | 51/51 checks passed
+test:method | exit 0 | 4s | 51/51 checks passed
+test:restore | exit 0 | 0s | 51/51 checks passed
 test:upgrade | exit 0 | 2s | 48/48 checks passed
 test:vehicles | exit 0 | 3s | 86/86 checks passed
-test:xlsx | exit 0 | 4s | 104/104 checks passed
+test:xlsx | exit 0 | 2s | 104/104 checks passed
 test:nonassertions | exit 0 | 1s | 23/23 checks passed
-test:labels | exit 0 | 1s | 23/23 checks passed
-test:labelcache | exit 0 | 0s | 32/32 checks passed
+test:labels | exit 0 | 0s | 23/23 checks passed
+test:labelcache | exit 0 | 1s | 32/32 checks passed
 test:restore-ledger | exit 0 | 3s | 26/26 checks passed
 test:roster-upgrade | exit 0 | 7s | 55/55 checks passed
-test:roster-race | exit 0 | 7s | 63/63 checks passed
-test:exports-proof | exit 0 | 4s | 92/92 checks passed
-test:ledger-truth | exit 0 | 9s | 148/148 checks passed
+test:roster-race | exit 0 | 6s | 63/63 checks passed
+test:exports-proof | exit 0 | 3s | 92/92 checks passed
+test:ledger-truth | exit 0 | 7s | 148/148 checks passed
 test:races | exit 0 | 5s | 109/109 checks passed
 test:overlap-restore | exit 0 | 21s | 117/117 checks passed
 test:refute-roster | exit 0 | 10s | 24/24 checks passed
-test:refute-restore | exit 0 | 45s | 25/25 checks passed
+test:refute-restore | exit 0 | 43s | 25/25 checks passed
 test:gate-integrity | exit 1 | 1s | 19/20 checks passed
-test:queuecost | exit 0 | 10s | 18/18 checks passed
-test:paycycle | exit 0 | 1s | 43/43 checks passed
-test:paycycle-blockers | exit 0 | 3s | 17/17 checks passed
+test:queuecost | exit 0 | 7s | 18/18 checks passed
+test:paycycle | exit 0 | 0s | 43/43 checks passed
+test:paycycle-blockers | exit 0 | 2s | 17/17 checks passed
 test:paycycle-completion | exit 0 | 6s | 31/31 checks passed
-test:crew-controls | exit 0 | 2s | 46/46 checks passed
-test:simple-advances | exit 0 | 1s | 66/66 checks passed
-test:worker-deletion | exit 0 | 11s | 86/86 checks passed
+test:crew-controls | exit 0 | 1s | 46/46 checks passed
+test:simple-advances | exit 0 | 2s | 66/66 checks passed
+test:worker-deletion | exit 0 | 10s | 86/86 checks passed
 test:calendar | exit 0 | 1s | 58/58 checks passed
 test:reminders | exit 0 | 0s | 48/48 checks passed
-test:move-late | exit 0 | 6s | 48/48 checks passed
+test:move-late | exit 0 | 5s | 48/48 checks passed
 test:codex-probes | exit 0 | 1s | 17/17 checks passed
 test:codex2-probes | exit 0 | 1s | 36/36 checks passed
 test:codex3-probes | exit 0 | 4s | 59/59 checks passed
-test:rima | exit 0 | 95s | 496/496 checks passed
-test:yosefgeves | exit 0 | 94s | 562/562 checks passed
-test:seder | exit 0 | 0s | 135/135 checks passed
-test:bars-stale | exit 0 | 1s | 60/60 checks passed
-test:transport | exit 0 | 0s | 566/566 checks passed
-test:transport-share | exit 0 | 12s | 304/304 checks passed
-test:oracle | exit 0 | 53s | 121/121 checks passed
-test:overpayment | exit 0 | 9s | 105/105 checks passed
+test:rima | exit 0 | 93s | 496/496 checks passed
+test:yosefgeves | exit 0 | 100s | 562/562 checks passed
+test:seder | exit 0 | 1s | 135/135 checks passed
+test:bars-stale | exit 0 | 0s | 60/60 checks passed
+test:transport | exit 0 | 1s | 566/566 checks passed
+test:transport-share | exit 0 | 13s | 304/304 checks passed
+test:oracle | exit 0 | 54s | 121/121 checks passed
+test:overpayment | exit 0 | 5s | 105/105 checks passed
 test:polish | exit 0 | 0s | 73/73 checks passed
-test:daycheck | exit 0 | 6s | 169/169 checks passed
+test:daycheck | exit 0 | 5s | 169/169 checks passed
 test:journey | exit 0 | 1s | 233/233 checks passed
-test:workercard | exit 0 | 29s | 180/180 checks passed
-test:monthsummary | exit 0 | 89s | 98/98 checks passed
-test:payslips | exit 0 | 34s | 202/202 checks passed
-test:find | exit 0 | 2s | 91/91 checks passed
-test:whatsnew | exit 0 | 1s | 160/160 checks passed
-test:account-view | exit 0 | 32s | 456/456 checks passed
+test:workercard | exit 0 | 22s | 180/180 checks passed
+test:monthsummary | exit 0 | 96s | 98/98 checks passed
+test:payslips | exit 0 | 31s | 202/202 checks passed
+test:find | exit 0 | 1s | 91/91 checks passed
+test:whatsnew | exit 0 | 0s | 160/160 checks passed
+test:account-view | exit 0 | 20s | 456/456 checks passed
 test:usual | exit 0 | 2s | 150/150 checks passed
-test:sitecard | exit 0 | 3s | 119/119 checks passed
+test:sitecard | exit 0 | 2s | 119/119 checks passed
 test:reportsclarity | exit 0 | 4s | 1119/1119 checks passed
-test:largetext | exit 0 | 0s | 107/107 checks passed
-test:reportnames | exit 0 | 12s | 36/36 checks passed
+test:largetext | exit 0 | 1s | 107/107 checks passed
+test:reportnames | exit 0 | 11s | 36/36 checks passed
 test:holiday | exit 0 | 0s | 109/109 checks passed
 test:undo-stale | exit 0 | 2s | 32/32 checks passed
 test:auditfix | exit 0 | 1s | 34/34 checks passed
-test:owes | exit 0 | 61s | 190/190 checks passed
-test:weeklyclose | exit 0 | 109s | 146/146 checks passed
-test:reports-speed | exit 0 | 187s | 167/167 checks passed
-test:closeorder | exit 0 | 1s | 22/22 checks passed
+test:owes | exit 0 | 65s | 190/190 checks passed
+test:weeklyclose | exit 0 | 110s | 146/146 checks passed
+test:reports-speed | exit 0 | 179s | 167/167 checks passed
+test:closeorder | exit 0 | 0s | 22/22 checks passed
 test:closuresize | exit 0 | 11s | 13/13 checks passed
 test:closerace | exit 0 | 39s | 29/29 checks passed
-test:advancereset | exit 0 | 50s | 77/77 checks passed
+test:advancereset | exit 0 | 45s | 77/77 checks passed
 test:overpaidfix | exit 0 | 1s | 85/85 checks passed
-test:xlsxlook | exit 0 | 12s | 293/293 checks passed
-test:closereminder | exit 0 | 16s | 107/107 checks passed
-test:payday | exit 0 | 34s | 283/283 checks passed
-DONE
+test:xlsxlook | exit 0 | 6s | 293/293 checks passed
+test:closereminder | exit 0 | 12s | 107/107 checks passed
+test:payday | exit 0 | 26s | 285/285 checks passed
+DONE status[0]
 ```
 
-**Red, and only the two the contract expects** (the build stamps are the integrator's):
+109 steps: 107 exit 0, 2 exit 1; **13,181 of 13,184 checks passed**; 1,332 s, on a machine at a
+load of 4 to 8 on 4 CPUs (another track's release gate and the other tracks' browser suites beside
+it). `test:payday` 285/285 is `a372a92`'s suite, the two checks of P11 included.
+
+**Red, and only the three checks the contract expects** (the build stamps are the integrator's; the
+section «Fix round 2» proves that a stamp commit alone turns them green):
 
 ```
 test:build
@@ -479,20 +534,26 @@ test:gate-integrity
   the build stamps describe the bytes a phone would be handed :: no cached file has changed since the three stamps last moved  — e9ce62bb «יום תשלום»: fix round 1 - the review of 2026-11-19, every c | 682a2539 «יום תשלום»: revision 2 of the contract, reconciled | 17452d10 «יום תשלום»: the payday desk (js/ui/payday.js), its row on «
 ```
 
-### On `a372a92` (it adds two checks to `tests/payday.test.mjs` and nothing else; the suites that read that file)
+### The stamp probe (fix round 2): a throwaway clone at `6aeacb2`
 
 ```
-test:payday | exit 0 | 44s | 285/285 checks passed
-test:nonassertions | exit 0 | 1s | 23/23 checks passed
-test:isolation | exit 0 | 1s | 18/18 checks passed
+before the stamp commit:                                   build 67/69 exit 1 | gate-integrity 19/20 exit 1
+after ONE commit moving the three stamps v204 -> v206:     build 69/69 exit 0 | gate-integrity 20/20 exit 0
 ```
-(Run with this file modified in the tree; no suite reads or serves it.)
 
-### Browser suites on `e9ce62b`
+### Browser suites
 
-This track's suite, then the existing suites fix round 1 touches: `largetext.browser.mjs` walks
-`tests/screens.mjs` (two screens added, the closes repaired) and measures every rule of
-`css/large.css`; `design.browser.mjs` reads the whole design layer (a block moved in it);
+**Fix round 2, on `6aeacb2`** - this track's suite, through the slot wrapper:
+
+```
+payday.browser.mjs | queued for a browser slot when this commit was made (both slots held by
+                     another track's release gate and verification chain); the result follows
+                     in the next commit
+```
+
+**Fix round 1, on `e9ce62b`** - this track's suite, then the existing suites fix round 1 touches:
+`largetext.browser.mjs` walks `tests/screens.mjs` (two screens added, the closes repaired) and
+measures every rule of `css/large.css`; `design.browser.mjs` reads the whole design layer (a block moved in it);
 `owes.browser.mjs` draws «מקדמות» with the row; `weeklyclose.browser.mjs` draws «סגירת שבוע», whose block
 the desk's no longer sits inside. (The chain of the last four started while this file was modified -
 `status[1]` - and this file is read or served by no suite.)
@@ -513,9 +574,13 @@ double-tap guard swallows it only inside its few hundred milliseconds; under thi
 gap was longer. Nothing of this track is on that path (the desk is shut there, and its watch on the
 sync line exists only while it is open). Run again alone through the wrapper: 408/408, exit 0.
 
-Not run this round: `smoke.mjs` and `mobile.test.mjs` (they never open the desk; they ran green on
-the previous round's bytes, and fix round 1 changes no rule outside the desk's own block but its
-place), and the rest of `test:all`, `test:release` and the emulator suites (the task forbids them on
+Not run in fix round 2: every existing browser suite. Fix round 2 changed nothing, and no file the
+app serves has changed since `e9ce62b`, where fix round 1 ran the four above; the independent
+verifier ran its own list on `6aeacb2` (largetext, mobile, design, smoke and the suites the
+contract names) and its report lists no failure but the three stamp checks. Not run in fix round 1:
+`smoke.mjs` and `mobile.test.mjs` (they never open the desk; they ran green on the build round's
+bytes, and fix round 1 changes no rule outside the desk's own block but its place). Not run in any
+round: the rest of `test:all`, `test:release` and the emulator suites (the task forbids them on
 this shared machine).
 
 ## Measured
@@ -559,14 +624,17 @@ the crew tests/screens.mjs seeds and the record with every check changed in memo
   `e9ce62b`, and the browser suites its changes touch (this track's, largetext, design, owes,
   weeklyclose) one at a time through the slot wrapper. The previous round also ran smoke, mobile,
   closereminder, payslips, whatsnew, forms, polish, advancereset, overpaidfix and simple-advances
-  (green); they were not run again this round, which changes no rule outside the desk's own block
-  but its place in the two sheets.
+  (green); they were not run again in fix round 1, which changes no rule outside the desk's own
+  block but its place in the two sheets. Fix round 2, which changed nothing: the npm test chain step
+  by step and this track's browser suite, on `6aeacb2`; no existing browser suite again (no served
+  byte moved after `e9ce62b`).
 - **Fix round 1 left two findings, or parts of them, to the owner** (13 and 14c in its table): the
   morning after payday, and the tense of «נוכה מהשכר» on a payday still ahead.
 - **The three build stamps, the «מה חדש» entry, docs/releases.md and CLAUDE.md** are the
   integrator's; texts for them are below. Until the stamps move, `tests/build.test.mjs` (its stamp
   check and the sw.js line) and `tests/gate.integrity.test.mjs` §4 are red - expected, the contract
-  says so; see the output above.
+  says so; see the output above. Fix round 2 proved, in a throwaway clone, that one commit moving
+  the three stamps turns both suites green (69/69 and 20/20) and that nothing else in them is red.
 - **The owner has not read one word of it.** Every string is proposed.
 
 ## Known risks, observations, and open questions (each with the default kept)
@@ -624,6 +692,11 @@ the crew tests/screens.mjs seeds and the record with every check changed in memo
    which would raise a phone's keyboard over the list it searches.
 
 ## For the integrator
+
+**The three build stamps** are all this track's three red checks need (fix round 2's probe: one
+commit moving them, and build 69/69, gate-integrity 20/20). Law 5 reads git history, so in the
+merged tree that commit has to be the LAST one to touch a cached file - a shell file changed after
+it turns the same checks red again, whichever track it belongs to.
 
 **«מה חדש» item (PROPOSED):**
 `{ title: 'יום תשלום', text: 'בעמוד המקדמות: כמה לשלם בכל קבוצה ביום התשלום הבא לפי מה שנרשם, ומה כדאי לסדר לפני שסוגרים.', where: 'מקדמות ← יום תשלום', go: 'payday' }`
