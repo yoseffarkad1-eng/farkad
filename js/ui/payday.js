@@ -92,8 +92,10 @@ const PAYDAY_TEXT = Object.freeze({
     bothGroups: 'ביום הזה משלמים לשתי הקבוצות. לכל קבוצה הסכום שלה - הם לא מחוברים כאן.',
     // --- «לפני שסוגרים»
     before: 'לפני שסוגרים',
-    endsTodayOne: name => `החשבון של ${name} נגמר היום, והיום עוד לא נרשם לו.`,
-    endsTodayMany: (count, names) => `החשבון של ${count} עובדים נגמר היום, והיום עוד לא נרשם להם: ${names}.`,
+    // Built on «סגירת שבוע»'s own sentence for the same fact (WEEKLY_CLOSE_TEXT.heldEndsToday,
+    // «התקופה שלו נגמרת היום, והיום עוד לא נרשם לו.»), with the name in it - and plural throughout.
+    endsTodayOne: name => `התקופה של ${name} נגמרת היום, והיום עוד לא נרשם לו.`,
+    endsTodayMany: (count, names) => `התקופות של ${count} עובדים נגמרות היום, והיום עוד לא נרשם להם: ${names}.`,
     toToday: 'לרישום היום',
     nothing: 'אין מה לסדר לפני הסגירה.',
     forgotten: 'מקדמה שניתנה ולא נרשמה לא תנוכה. רושמים אותה לפני שסוגרים.',
@@ -257,9 +259,15 @@ function paydayCard(schedule, span, today, gate) {
     const T = PAYDAY_TEXT;
     const heading = (span.to === today ? T.today : '')
         + T.heading(hebrewDayName(to), formatShortDate(to), PAY_CYCLE_LABELS[span.cycle] || '');
-    // The sheet's note for a period a boundary cut short, said as the sheet says it - of the
-    // first man it draws in the group (groupPeriodNote): his work row, else his money row.
+    // The sheet's note for a period a boundary cut short (groupPeriodNote) - of the first man it
+    // draws in the group: his work row, else his money row. ONLY for a stub that WEEKLY pay
+    // follows: the sentence names the move to weekly pay, and of a man going back to the
+    // fortnight it would be untrue - there the period's dates stand alone.
     const first = (work.length ? work : finance)[0];
+    const firstWorker = first ? ((schedule && schedule.workers) || [])
+        .filter(worker => worker && String(worker.id) === String(first.workerId))[0] || null : null;
+    const toWeekly = Boolean(first && first.periodIsTransition === true
+        && periodRangeFor(firstWorker, paydayNextDay(span.to)).cycle === 'weekly');
     const lines = [T.soFar];
     if (gate && band.taken > 0) lines.push(T.fullDeduction);
     const ahead = paydayAhead(schedule, span, today);
@@ -274,10 +282,11 @@ function paydayCard(schedule, span, today, gate) {
         from: span.from,
         to: span.to,
         transition: Boolean(first && first.periodIsTransition === true),
+        toWeekly,
         today: span.to === today,
         heading,
         range: paydayRange(span.from, span.to),
-        note: first && first.periodIsTransition === true ? R.transition : null,
+        note: toWeekly ? R.transition : null,
         rows: rows.map(row => {
             const net = moneyOf(row).net;
             return { workerId: String(row.workerId), name: String(row.name === undefined || row.name === null ? '' : row.name),
@@ -367,10 +376,11 @@ function paydayChecks(schedule, cards, spans, today, gate, close) {
                 door: { words: OWES_TEXT.advancesOf(isolate(row.name)), go: 'advancesOf', args: [String(row.workerId)] } });
         });
     }
-    // f. EXTRA HOURS WITH NO HOURLY RATE - the sheet's starred sentence, and the men.
+    // f. EXTRA HOURS WITH NO HOURLY RATE - the sheet's sentence, and the men. WITHOUT its leading
+    // «* »: on the sheet the star points at the starred amount, and the desk stars no figure.
     const hours = rows.filter(row => row.hoursUnpriced);
     if (hours.length && typeof HOURS_UNPRICED_NOTE === 'string') {
-        checks.push({ kind: 'hoursUnpriced', say: HOURS_UNPRICED_NOTE, lines: [names(hours)],
+        checks.push({ kind: 'hoursUnpriced', say: HOURS_UNPRICED_NOTE.replace(/^\*\s*/, ''), lines: [names(hours)],
             door: { words: PAYDAY_REUSED.roster, go: 'roster', args: [] } });
     }
     return checks;
@@ -718,20 +728,43 @@ function paydayDraw(facts) {
 
 // ================================================================== the doors
 //
-// EVERY DOOR CLOSES THE DESK FIRST, then calls the target's own opener - the screen it opens
-// keeps its own rules, and a dialog it opens is entered at its title, by hand: js/ui/modal.js
-// sees no moment with no dialog open between the two, so it neither enters the new one nor
-// forgets the button the desk was opened from (siteCardGoMan's note, js/ui/sitecard.js). None
-// writes anything; the payslips write only what their own opener writes.
+// EVERY DOOR CLOSES THE DESK FIRST, then calls the target's own opener - and WHEN depends on
+// what the target is. js/ui/modal.js gives the keyboard back to the desk's opener from a
+// MutationObserver, at the microtask checkpoint after the whole block that shut the last dialog:
+//
+//   - a target that is a DIALOG («סגירת שבוע», «תלוש לכל עובד») is opened in the SAME task and
+//     its title focused by hand: modal.js never sees a moment with no dialog open, so it neither
+//     enters the new one nor forgets the button the desk was opened from (siteCardGoMan's note,
+//     js/ui/sitecard.js);
+//   - a target that is anything else - a view, a page of «מקדמות» - runs ONE TASK LATER, after
+//     that checkpoint (whatsNewGo's rule, js/ui/whatsnew.js), so that whatever the target
+//     focuses keeps the focus and nothing is left on a node of the shut desk.
+//
+// None writes anything; the payslips write only what their own opener writes.
 function paydayGo(door) {
     if (!door) return false;
     const args = door.args || [];
+    closePayday(true);
+    if (door.go === 'weeklyClose' || door.go === 'payslips') return paydayOpenDialog(door.go, args);
+    setTimeout(() => paydayGoView(door.go, args), 0);
+    return true;
+}
+
+function paydayOpenDialog(go, args) {
     const titled = id => {
         const heading = document.getElementById(id);
         if (heading && heading.focus) heading.focus({ preventScroll: true });
     };
-    closePayday(true);
-    switch (door.go) {
+    if (go === 'weeklyClose') {
+        if (typeof openWeeklyClose === 'function' && openWeeklyClose()) titled('weeklyCloseTitle');
+        return true;
+    }
+    if (typeof openPayslips === 'function' && openPayslips(args[0])) titled('payslipsTitle');
+    return true;
+}
+
+function paydayGoView(go, args) {
+    switch (go) {
     case 'account':
         owesShowAccount(args[0], { from: args[1], to: args[2] });
         return true;
@@ -750,12 +783,6 @@ function paydayGo(door) {
         OWES_PAGE = null;
         ADVANCE_WORKER = null;
         showView('advances');
-        return true;
-    case 'weeklyClose':
-        if (typeof openWeeklyClose === 'function' && openWeeklyClose()) titled('weeklyCloseTitle');
-        return true;
-    case 'payslips':
-        if (typeof openPayslips === 'function' && openPayslips(args[0])) titled('payslipsTitle');
         return true;
     case 'closures':
         owesOpenPage('closures');

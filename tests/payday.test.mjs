@@ -11,11 +11,17 @@
 //       work table's footer, or «סיכום התקופה» where the group has a man with money and no
 //       day) - the groups in the sheet's own order; under both readings of the gate.
 //   P2  EACH MAN'S FIGURE is moneyOf of the sheet's row; on a Thursday whose period ends today
-//       it is also «סגירת שבוע»'s own net at the most it proposes, for every man it offers.
-//   P3  «לסגירה» is the close reminder's count of «סגירת שבוע»'s list, and the men it holds.
+//       it is also «סגירת שבוע»'s own net at the most it proposes, for every man it offers -
+//       except a man with a deduction chosen on the sheet, whose figure is the sheet's under
+//       the choice while his card says so (revision 2).
+//   P3  «לסגירה» is the close reminder's count of «סגירת שבוע»'s list, and the men it holds -
+//       read by the desk itself: the section drawn byte for byte the same with a fresh
+//       CLOSE_REMINDER_KEPT and without one (revision 2).
 //   P4  EVERY CHECK fires on the fixture made for it and is silent on one that is not; its
 //       words word for word; every door - the drawn button itself - only navigates: no
-//       commit, no close, no repayment, no financial write, the disk byte for byte.
+//       commit, no close, no repayment, no financial write, the disk byte for byte; a door
+//       to a dialog opens it in the task of the press, a door to anything else runs in the
+//       next task (revision 2).
 //   P5  A WEEK WALKED DAY BY DAY and a fortnight's Thursday: the groups, «היום, » on the last
 //       day, the days recorded ahead, the sentence that two paydays on one date are not added.
 //   P6  THE MEMORY AGREES: the reading inside the pay sheet's and «סגירת שבוע»'s scopes equals
@@ -32,6 +38,8 @@
 //       Arabic letter, and what the file may not do.
 //   P12 THE ROW ON «מקדמות»: the two buttons in one row; the button alone where «סגירת שבוע» is
 //       not drawn; and a build without the file draws the page exactly as before.
+//   P13 THE TRANSITION SENTENCE only of a stub that weekly pay follows; a stub the fortnight
+//       follows shows its dates alone (revision 2).
 //
 // Synthetic names and money throughout. No browser, no emulator.
 
@@ -361,6 +369,30 @@ await block('P2 each man\'s figure is the sheet\'s; on a Thursday it is «סגי
         same(`${man.name}: the desk's figure is weeklyCloseFigures(man, man.max).net`, net(man.id),
             t.call('weeklyCloseFigures', man, man.max).net);
     });
+
+    // EXCEPT A MAN WITH A DEDUCTION CHOSEN ON THE SHEET (revision 2). His row follows the sheet's
+    // choice; «סגירת שבוע» starts from the full deduction - the two differ by design. For him the
+    // desk's figure is the sheet's under the choice, and his card says that a choice is in it.
+    const c = reopen(everything({ today: '2026-11-19' }), OPEN);
+    c.run('REPORT_DEDUCTIONS.set(reportDeductionKey("w_wa", "2026-11-13", "2026-11-19"), 200); 1');
+    const cf = facts(c);
+    const chosenRead = c.call('weeklyCloseRead', c.State.schedule, '2026-11-19', at(c));
+    const chosenOffered = chosenRead.men.filter(man => !man.held && man.to === '2026-11-19');
+    same('200 chosen on the sheet for ואליד: «סגירת שבוע» offers the same three men', chosenOffered.map(man => man.id), ['w_wa', 'w_wb', 'w_tr']);
+    const chosenNet = id => deskNets(cf).filter(([who]) => who === id)[0][1];
+    chosenOffered.filter(man => man.id !== 'w_wa').forEach(man => {
+        same(`${man.name}, nothing chosen for him: still «סגירת שבוע»'s own net`, chosenNet(man.id), c.call('weeklyCloseFigures', man, man.max).net);
+    });
+    const under = {};
+    sheetNets(c).forEach(([id, value]) => { under[id] = value; });
+    const wa = chosenOffered.filter(man => man.id === 'w_wa')[0];
+    // Six days of 400 (Friday, Sunday to Thursday): 2,400; 200 chosen leaves 2,200, the full 600 1,800.
+    same('ואליד: his figure is the sheet\'s under the choice (2,400 less 200)', [chosenNet('w_wa'), under.w_wa], [2200, 2200]);
+    same('ואליד: «סגירת שבוע» starts from the full 600 - a different figure, by design', [wa.max, c.call('weeklyCloseFigures', wa, wa.max).net],
+        [600, 1800]);
+    check('ואליד\'s card says that a deduction chosen on the sheet is in it, and that «סגירת שבוע» starts from the full one',
+        card(cf, 'weekly|2026-11-13|2026-11-19').lines.indexOf('לחלק מהעובדים נבחר בדוח ניכוי אחר, והוא כלול כאן. «סגירת שבוע» מתחילה מהניכוי המלא.') !== -1,
+        j(card(cf, 'weekly|2026-11-13|2026-11-19').lines));
 });
 
 // ================================================================== P3 the count
@@ -386,6 +418,38 @@ await block('P3 «לסגירה» is the close reminder\'s count of «סגירת 
         'יש 6 עובדים שהחשבון שלהם עוד לא נסגר');
     same('the clean crew: nobody to close, «סגירת שבוע»\'s own sentence, and no door', [facts(reopen(clean(), OPEN)).close.say,
         facts(reopen(clean(), OPEN)).close.door], ['אין עכשיו חשבונות לסגור.', null]);
+
+    // REVISION 2: «לסגירה» IS ALWAYS READ BY THE DESK ITSELF, never taken from CLOSE_REMINDER_KEPT
+    // (which keeps a count and no men): the same record shows the same held men whatever the
+    // reminder happened to read first. The section, drawn, node for node and word for word -
+    // with a fresh CLOSE_REMINDER_KEPT on this very record, and without one.
+    const shape = node => ({ tag: node.tagName, cls: node.className, data: Object.assign({}, node.dataset || {}),
+        attrs: Object.assign({}, node.attributes), text: node._text, kids: node.children.map(shape) });
+    const section = d => {
+        d.call('openPayday');
+        const drawn = d.dom.getElementById('paydayBody').querySelectorAll('.payday-close');
+        const out = drawn.length ? j(shape(drawn[0])) : null;
+        d.call('closePayday');
+        return out;
+    };
+    for (const [name, make] of [['the crew with everything', () => everything()],
+        ['Thursday morning, today not written', () => everything({ today: '2026-11-19', until: '2026-11-18' })],
+        ['the clean crew', () => clean()]]) {
+        const made = make();
+        const disk0 = made.dump();
+        const alone = phone({ storage: disk0, flags: OPEN, today: made.ctx.todayStr() });
+        given(`${name}: no reminder has read anything on the first phone`, alone.run('CLOSE_REMINDER_KEPT') === null);
+        const without = section(alone);
+        const after = phone({ storage: disk0, flags: OPEN, today: alone.ctx.todayStr() });
+        after.call('closeReminderRefresh', 'boot');
+        const keptNow = JSON.parse(after.run('JSON.stringify(CLOSE_REMINDER_KEPT)'));
+        given(`${name}: on the second the reminder read first, fresh for this record`, keptNow !== null
+            && keptNow.key === after.call('closeReminderKey', after.State.schedule, after.ctx.todayStr()), j(keptNow && keptNow.count));
+        const withKept = section(after);
+        check(`${name}: «לסגירה» is drawn`, without !== null);
+        same(`${name}: «לסגירה» byte for byte the same with a fresh CLOSE_REMINDER_KEPT and without one`, withKept, without);
+    }
+    check('and payday.js never names CLOSE_REMINDER_KEPT', !/CLOSE_REMINDER_KEPT/.test(PAYDAY.replace(/\/\/[^\n]*/g, '')));
 });
 
 // ================================================================== P4 the checks and their doors
@@ -421,8 +485,13 @@ function instrument(d) {
     return d;
 }
 
-// Opens the desk, presses its n-th door, and says what happened.
-function pressDoor(d, n) {
+// Opens the desk, presses its n-th door, and says what happened - in the task of the press
+// (`soon`: what had been called before that task ended) and once the next task has run.
+// Revision 2: a door to a DIALOG opens it in the same task (js/ui/modal.js must never see a
+// moment with no dialog open); a door to anything else runs one task later, after modal.js has
+// given the keyboard back, so that what the target focuses keeps the focus.
+const nextTask = () => new Promise(resolve => setTimeout(resolve, 5));
+async function pressDoor(d, n) {
     d.run('currentView = "advances"; REPORT_WORKERS = null; ADVANCE_WORKER = null; OWES_PAGE = null; __writes = []; __calls = []; __dayChosen = 0; 1');
     d.views.length = 0;
     const before = disk(d);
@@ -430,9 +499,15 @@ function pressDoor(d, n) {
     const doors = d.dom.getElementById('paydayBody').querySelectorAll('.payday-door');
     const door = doors[n];
     const words = bare(door.textContent);
+    const where = () => d.run('JSON.stringify({ owesPage: OWES_PAGE, advanceWorker: ADVANCE_WORKER, date: State.date, workers: REPORT_WORKERS ? [...REPORT_WORKERS] : null })');
+    const was = where();
     press(door);
+    const soon = { open: d.call('paydayIsOpen'), views: d.views.slice(), calls: JSON.parse(d.run('JSON.stringify(__calls)')),
+        dayChosen: d.global('__dayChosen'), moved: where() !== was };
+    await nextTask();
     return {
         words,
+        soon,
         open: d.call('paydayIsOpen'),
         views: d.views.slice(),
         writes: d.global('__writes').slice(),
@@ -468,8 +543,11 @@ await block('P4 every check fires on the fixture made for it, is silent elsewher
         [of(f, 'review').who, of(f, 'review').say, bare(of(f, 'review').door.words), of(f, 'review').door.go, of(f, 'review').door.args],
         ['עומר', REVIEW_500, 'המקדמות של עומר', 'advancesOf', ['w_ov']]);
     // f
-    same('f: the starred sentence, the men, and the roster', [of(f, 'hoursUnpriced').say, of(f, 'hoursUnpriced').lines.map(bare), of(f, 'hoursUnpriced').door.go],
-        [HOURS_NOTE, ['גסאן'], 'roster']);
+    // Revision 2: borrowed WITHOUT its leading «* » - on the sheet the star points at the starred
+    // amount, and the desk stars no figure.
+    same('f: the sheet\'s sentence without its star, the men, and the roster', [of(f, 'hoursUnpriced').say, of(f, 'hoursUnpriced').lines.map(bare), of(f, 'hoursUnpriced').door.go],
+        ['שעות נוספות בלי שכר שעה - לא נכללו בסכום.', ['גסאן'], 'roster']);
+    same('f: and it is the sheet\'s own sentence, the star and its space taken off', `* ${of(f, 'hoursUnpriced').say}`, HOURS_NOTE);
     // h, and «אין מה לסדר»
     same('h: always last, quiet, and its door is «מקדמות»', [f.forgotten.say, f.forgotten.door.words, f.forgotten.door.go],
         ['מקדמה שניתנה ולא נרשמה לא תנוכה. רושמים אותה לפני שסוגרים.', 'מקדמות', 'advances']);
@@ -493,14 +571,14 @@ await block('P4 every check fires on the fixture made for it, is silent elsewher
     const morning = reopen(everything({ today: '2026-11-19', until: '2026-11-18' }), OPEN);
     const mf = facts(morning);
     same('d: Thursday morning - the three men whose period ends today, in the roster\'s order, in one sentence',
-        bare(of(mf, 'endsToday').say), 'החשבון של 3 עובדים נגמר היום, והיום עוד לא נרשם להם: ואליד, באסל, טארק.');
+        bare(of(mf, 'endsToday').say), 'התקופות של 3 עובדים נגמרות היום, והיום עוד לא נרשם להם: ואליד, באסל, טארק.');
     same('d: its door goes to today\'s day', [of(mf, 'endsToday').door.words, of(mf, 'endsToday').door.go, of(mf, 'endsToday').door.args],
         ['לרישום היום', 'day', ['2026-11-19']]);
     same('d names exactly the men «סגירת שבוע» holds for «נגמרת היום»', ['w_wa', 'w_wb', 'w_tr'],
         mf.close.held.filter(man => /נגמרת היום/.test(man.why)).map(man => man.id));
     morning.State.commitMany(['w_wa', 'w_wb'].map(id => morning.call('assignPlace', morning.State.schedule, '2026-11-19', id, 'actual', 'p_01')));
     same('d: today written for two of them - the one left, in the singular', bare(of(facts(morning), 'endsToday').say),
-        'החשבון של טארק נגמר היום, והיום עוד לא נרשם לו.');
+        'התקופה של טארק נגמרת היום, והיום עוד לא נרשם לו.');
     const evening = reopen(everything({ today: '2026-11-19' }), OPEN);
     check('d: silent once today is written for everybody', kinds(facts(evening)).indexOf('endsToday') === -1, j(kinds(facts(evening))));
 
@@ -512,7 +590,8 @@ await block('P4 every check fires on the fixture made for it, is silent elsewher
     same('the Wednesday desk\'s doors, in the order they stand', words,
         ['הצג את החשבון 30/10 - 12/11', 'עובדים ואתרים', 'המקדמות של עומר', 'עובדים ואתרים', 'מקדמות', 'לסגירת שבוע', '💬 תלוש לכל עובד']);
     w.call('closePayday');
-    const pressed = words.map((word, n) => pressDoor(w, n));
+    const pressed = [];
+    for (let n = 0; n < words.length; n += 1) pressed.push(await pressDoor(w, n));
     const nothingWritten = pressed.filter(one => one.writes.length || !one.unmoved || one.open);
     same('every door shut the desk, called no writer and left the disk byte for byte', nothingWritten.map(one => one.words), []);
     same('b: the pay sheet, narrowed to פואד, at his open fortnight', [pressed[0].views, pressed[0].state.workers, pressed[0].state.range, pressed[0].state.section],
@@ -523,6 +602,18 @@ await block('P4 every check fires on the fixture made for it, is silent elsewher
     same('«לסגירה»: «סגירת שבוע»\'s own opener, and nothing else', [pressed[5].calls, pressed[5].views], [[['openWeeklyClose']], []]);
     same('«אחרי הסגירה»: the payslips, of the period before (no period ends today)', [pressed[6].calls, pressed[6].views],
         [[['openPayslips', 'previous']], []]);
+    // REVISION 2: WHEN each door runs. js/ui/modal.js gives the keyboard back at the microtask
+    // after the block that shut the last dialog, so a door to a view runs one task later (what the
+    // target focuses then keeps the focus), and a door to a dialog opens it in the same task.
+    const dialogs = ['לסגירת שבוע', '💬 תלוש לכל עובד'];
+    check('every door shut the desk in the task of the press', pressed.every(one => one.soon.open === false), j(pressed.map(one => one.soon.open)));
+    same('a door to a view: nothing of its target had run when the task of the press ended - it ran in the next',
+        pressed.filter(one => dialogs.indexOf(one.words) === -1 && (one.soon.views.length || one.soon.dayChosen || one.soon.moved || one.soon.calls.length))
+            .map(one => one.words), []);
+    given('and in the next task each of them had arrived', pressed.filter(one => dialogs.indexOf(one.words) === -1).every(one => one.views.length > 0),
+        j(pressed.map(one => one.views)));
+    same('a door to a dialog: its opener called in the task of the press', pressed.filter(one => dialogs.indexOf(one.words) !== -1)
+        .map(one => [one.words, one.soon.calls]), [['לסגירת שבוע', [['openWeeklyClose']]], ['💬 תלוש לכל עובד', [['openPayslips', 'previous']]]]);
 
     const k = instrument(reopen(clean(), OPEN));
     k.call('openPayday');
@@ -530,18 +621,21 @@ await block('P4 every check fires on the fixture made for it, is silent elsewher
     k.call('closePayday');
     same('the clean desk\'s doors: h, the payslips and the closes on record (there are some)', cleanWords,
         ['מקדמות', '💬 תלוש לכל עובד', 'סגירות שנרשמו']);
-    const closures = pressDoor(k, 2);
+    const closures = await pressDoor(k, 2);
     same('«סגירות שנרשמו»: that page of «מקדמות», nothing written', [closures.state.owesPage, closures.writes, closures.unmoved], ['closures', [], true]);
+    check('«סגירות שנרשמו»: a page of «מקדמות», so one task later - nothing of it in the task of the press', closures.soon.moved === false && closures.soon.views.length === 0);
 
     const m = instrument(reopen(everything({ today: '2026-11-19', until: '2026-11-18' }), OPEN));
     m.call('openPayday');
     const mWords = m.dom.getElementById('paydayBody').querySelectorAll('.payday-door').map(node => bare(node.textContent));
     m.call('closePayday');
-    const dayDoor = pressDoor(m, mWords.indexOf('לרישום היום'));
+    const dayDoor = await pressDoor(m, mWords.indexOf('לרישום היום'));
     same('d: «לרישום היום» - today on the day screen, chosen by hand, nothing written',
         [dayDoor.views, dayDoor.state.date, dayDoor.dayChosen, dayDoor.writes, dayDoor.unmoved], [['day'], '2026-11-19', 1, [], true]);
-    const slipDoor = pressDoor(m, mWords.indexOf('💬 תלוש לכל עובד'));
-    same('on a Thursday whose period ends today the payslips open on the current period', slipDoor.calls, [['openPayslips', 'current']]);
+    same('d: and none of it in the task of the press', [dayDoor.soon.views, dayDoor.soon.dayChosen, dayDoor.soon.moved], [[], 0, false]);
+    const slipDoor = await pressDoor(m, mWords.indexOf('💬 תלוש לכל עובד'));
+    same('on a Thursday whose period ends today the payslips open on the current period - in the task of the press',
+        [slipDoor.soon.calls, slipDoor.calls], [[['openPayslips', 'current']], [['openPayslips', 'current']]]);
 });
 
 // ================================================================== P5 the week, walked
@@ -847,7 +941,7 @@ await block('P10 the whole disk byte for byte across the reading, the opening, a
         d.call('closePayday');
         const moved = [];
         for (let n = 0; n < count; n += 1) {
-            const one = pressDoor(d, n);
+            const one = await pressDoor(d, n);
             if (!one.unmoved || one.writes.length) moved.push(one.words);
         }
         same(`${name}: each of its ${count} doors`, moved, []);
@@ -877,8 +971,8 @@ await block('P11 every proposed word pinned, every borrowed word in its owner, a
         chosen: 'לחלק מהעובדים נבחר בדוח ניכוי אחר, והוא כלול כאן. «סגירת שבוע» מתחילה מהניכוי המלא.',
         bothGroups: 'ביום הזה משלמים לשתי הקבוצות. לכל קבוצה הסכום שלה - הם לא מחוברים כאן.',
         before: 'לפני שסוגרים',
-        endsTodayOne: 'החשבון של אחמד נגמר היום, והיום עוד לא נרשם לו.',
-        endsTodayMany: 'החשבון של 3 עובדים נגמר היום, והיום עוד לא נרשם להם: אחמד, באסל, טארק.',
+        endsTodayOne: 'התקופה של אחמד נגמרת היום, והיום עוד לא נרשם לו.',
+        endsTodayMany: 'התקופות של 3 עובדים נגמרות היום, והיום עוד לא נרשם להם: אחמד, באסל, טארק.',
         toToday: 'לרישום היום',
         nothing: 'אין מה לסדר לפני הסגירה.',
         forgotten: 'מקדמה שניתנה ולא נרשמה לא תנוכה. רושמים אותה לפני שסוגרים.',
@@ -886,6 +980,11 @@ await block('P11 every proposed word pinned, every borrowed word in its owner, a
         after: 'אחרי הסגירה'
     });
     same('PAYDAY_TEXT has nothing else in it', Object.keys(T).length, 20);
+    // Revision 2: check d is built on «סגירת שבוע»'s own sentence for the same fact - its first
+    // sentence, with the man's name where it says «שלו» - and its plural is plural throughout.
+    const held = d.run('WEEKLY_CLOSE_TEXT.heldEndsToday');
+    same('«סגירת שבוע»\'s sentence for the same fact, on this build', held, 'התקופה שלו נגמרת היום, והיום עוד לא נרשם לו. רשום את היום ואז סגור.');
+    same('d, for one man, is its first sentence with his name in it', T.endsTodayOne, `${held.split('. ')[0].replace('התקופה שלו', 'התקופה של אחמד')}.`);
     const R = JSON.parse(d.run('JSON.stringify(PAYDAY_REUSED)'));
     const reports = source('js/ui/reports.js');
     const page = source('index.html');
@@ -1004,6 +1103,58 @@ await block('P12 the row on «מקדמות»: two buttons in one, one alone wher
         j(shape(board(without))), j(shape(board(plain))));
     check('and there «סגירת שבוע» is the board\'s first child, at full width, as before',
         board(plain).children[0].className === 'btn-secondary weekly-close-entry' && board(plain).querySelectorAll('.owes-actions').length === 0);
+});
+
+// ================================================================== P13 the transition sentence
+//
+// Revision 2. The sheet's sentence for a period a boundary cut short names the move TO WEEKLY
+// pay («…לפני המעבר לתשלום שבועי.», js/ui/reports.js). The desk says it only of a stub that
+// weekly pay follows; of a man going back to the fortnight it would be untrue, and there the
+// period's dates stand alone.
+await block('P13 the transition sentence only before weekly pay; any other stub shows its dates alone', async () => {
+    const TRANSITION = 'תקופת מעבר: הימים שנשארו מהמחזור הקודם, לפני המעבר לתשלום שבועי.';
+    const drawnCards = d => {
+        d.call('openPayday');
+        const out = d.dom.getElementById('paydayBody').querySelectorAll('.payday-card').map(node => [node.dataset.group,
+            node.querySelectorAll('.payday-card-note').map(note => note.textContent), bare(node.querySelectorAll('.payday-card-range')[0].textContent)]);
+        d.call('closePayday');
+        return out;
+    };
+
+    // TO WEEKLY: טארק of the crew with everything, his fortnight cut by Friday 20/11.
+    const e = reopen(everything(), OPEN);
+    const ef = facts(e);
+    const cut = card(ef, 'biweekly|2026-11-13|2026-11-19');
+    given('טארק\'s period on 18/11 is the cut fortnight, and the week follows it',
+        e.call('periodRangeFor', e.State.schedule.workers[5], '2026-11-20').cycle === 'weekly');
+    same('a stub that weekly pay follows: a transition, toWeekly, and the sheet\'s sentence', [cut.transition, cut.toWeekly, cut.note],
+        [true, true, TRANSITION]);
+    same('no other card of that desk is a transition', ef.groups.filter(group => group !== cut).map(group => [group.key, group.transition, group.toWeekly, group.note]),
+        [['weekly|2026-11-13|2026-11-19', false, false, null], ['biweekly|2026-11-13|2026-11-26', false, false, null]]);
+    same('drawn: the note on that card, and on no other', drawnCards(e).map(([key, notes]) => [key, notes]),
+        [['weekly|2026-11-13|2026-11-19', []], ['biweekly|2026-11-13|2026-11-26', []], ['biweekly|2026-11-13|2026-11-19', [TRANSITION]]]);
+
+    // BACK TO THE FORTNIGHT: a weekly man who returns to fortnightly pay on Friday 20/11, the
+    // second Friday of the fortnight 13/11-26/11 - from that day his period is a stub of that
+    // fortnight (js/dates.js), and the full fortnight follows it.
+    const b = phone({ today: '2026-11-22' });
+    b.State.schedule.workers = [
+        { id: 'w_bk', name: 'ראיד', active: true, dailyRate: 400, hourlyRate: 0, payCycles: '2026-08-07=weekly;2026-11-20=biweekly' },
+        { id: 'w_st', name: 'נאדר', active: true, dailyRate: 450, hourlyRate: 0 }
+    ];
+    b.State.schedule.places = PLACES;
+    weekdays('2026-11-13', '2026-11-22').forEach(date => ['w_bk', 'w_st'].forEach(id => day(b, id, date)));
+    approve(b);
+    kept(b);
+    const back = reopen(b, OPEN);
+    const his = JSON.parse(back.run('JSON.stringify([periodRangeFor(State.schedule.workers[0], "2026-11-22"), periodRangeFor(State.schedule.workers[0], "2026-11-27")])'));
+    given('ראיד on 22/11: the stub 20/11-26/11 of the fortnight, cut short, and a full fortnight after it',
+        his[0].from === '2026-11-20' && his[0].to === '2026-11-26' && his[0].transition === true && his[1].cycle === 'biweekly' && his[1].transition === false, j(his));
+    const bf = facts(back);
+    const stub = card(bf, 'biweekly|2026-11-20|2026-11-26');
+    same('a stub the fortnight follows: a transition, not toWeekly, and no sentence', [stub.transition, stub.toWeekly, stub.note], [true, false, null]);
+    same('drawn: its card has no note - its dates alone - and נאדר\'s full fortnight none either', drawnCards(back),
+        [['biweekly|2026-11-13|2026-11-26', [], '13/11 - 26/11'], ['biweekly|2026-11-20|2026-11-26', [], '20/11 - 26/11']]);
 });
 
 report();
