@@ -11,6 +11,33 @@ own screen and its own file: the months as rows, the men, the sites - every figu
 function «סיכום חודש» and «דוחות» already ask, pointed at the year - framed as what it is: what was
 WORKED in the year as recorded, never what was paid.
 
+## Revision 2 - after the critic (2026-11-19). A builder who started from revision 1 reconciles THIS
+
+Each point was checked against the code at the base; the text below is already changed in place.
+1. **The hook that words the year button goes BEFORE any return of `drawMonthSummary`** - right
+   after `const facts = monthSummaryFacts(MONTH_SUMMARY_KEY);` - because the function returns early
+   on an empty month (js/ui/monthsummary.js:486-489), where a hook at its end would leave the button
+   hidden, or worded for the year before an arrow step.
+2. **The hand-over sentence borrows only what is true here.** exportReports' sentence ends by
+   sending him to «🖼️ שיתוף כתמונה» (reports.js:5666-5674), a door this dialog does not have, and
+   its «שמירה חוזרת» calls exportReports. The year borrows the title, the file name «נמסר לדפדפן»,
+   «פתח את "קבצים"…» and the RTL caveat, verbatim and nothing more, and «שמירה חוזרת» calls
+   `yearSummaryExport()`.
+3. **The workbook carries its own honesty.** A man with ONE unpriced worked day has `amount: null`
+   for the whole year (js/model/money.js:290-291), so the year's «נצבר» leaves out his whole year:
+   the «סיכום» sheet says so beside «נצבר» (the unpriced sentence, and the not-summed sentence when
+   it applies), and the «עובדים» sheet ends with a note naming every man whose «נצבר» is «—». Tested
+   through the vendored workbook on the March fixture.
+4. **notSummed adds no shekel.** It is decided from the unpriced lists (a man unpriced over the
+   year who is priced, and worked, in some month), and its sentence now says the reason.
+5. **A redraw under the open dialog does not re-read the year inside `render()`**: on a moved
+   record the placeholder goes up and the year is read again once the draws have stopped for 1.5 s
+   (closereminder.js:263's rule), the scroll kept.
+6. «מה חדש»: `whatsNewReportsMenu` (whatsnew.js:523-533) opens «הפקת דוח» and focuses its TRIGGER,
+   not a row - the interface now says so; its «איפה» ends «סיכום שנת …», the button's own words.
+7. The dialog suite asserts `midEdit() === true` while the dialog is open (v205's automatic update
+   waits on it; js/ui/offline.js:491-498 on release-v205).
+
 ## Is a year honest? (the question the program asked - answered from the code)
 
 - A calendar year is never anybody's pay period (`wholeAccountRange`, js/ui/reports.js:911), so
@@ -26,11 +53,18 @@ WORKED in the year as recorded, never what was paid.
   a fortnight Fri 2026-12-25..Thu 2027-01-07 puts its first week in 2026 and its second in 2027. A
   CLOSED period's frozen gross is not used (`frozenPeriodFor` matches only the exact period,
   js/model/schema.js:2324), so where days were corrected after a close the year reads the live record.
+  The one exception is a closure recorded before `periodTo` existed: it is matched by ANY range that
+  starts on its first day (schema.js:2319-2321). No Friday-anchored period starts on 1 January 2026
+  (a Thursday), so the year line is not touched by it; a month row of a month that starts on such a
+  period's first day reads it frozen - exactly as «סיכום חודש» does for that month, which the row is
+  pinned equal to.
 - One trap: `payrollReport` gives a man `amount: null` for a WHOLE range when one worked day of it
   has no daily rate (js/model/money.js:290-291), and the band counts him as 0. Over a year he drops
   out of the year's «נצבר» entirely, but out of only one month's. So the year line is read over the
   year and NEVER added up from the months, the men without a rate are named in the sheet's own
-  sentence, and when the two differ one sentence says why.
+  sentence - on the screen AND in the workbook - and when such a man was priced in some month one
+  sentence says why the year is smaller than the months (decided from the unpriced lists; no shekel
+  is added to decide it).
 
 ## Goal
 
@@ -60,9 +94,11 @@ Store key. The export hands a file to the browser; that is not a Store write. St
 **One extraction, behaviour-preserving**: `monthSummaryRead(key)` (js/ui/monthsummary.js:172-270)
 becomes `monthSummaryReadRange(key, range)` with the same body, and `monthSummaryRead(key)` returns
 `monthSummaryReadRange(key, monthSummaryRange(key))`. Nothing else in monthsummary.js changes but
-one hook line at the end of `drawMonthSummary` (:472):
+one hook line in `drawMonthSummary` (:472), placed RIGHT AFTER
+`const facts = monthSummaryFacts(MONTH_SUMMARY_KEY);` and BEFORE any `return` (the function returns
+early on an empty month, :486-489):
 `if (typeof yearSummaryEntryLabel === 'function') yearSummaryEntryLabel(MONTH_SUMMARY_KEY);` - which
-words the year button for the month on screen. tests/monthsummary.test.mjs and
+words (and shows) the year button for the month on screen, empty months included. tests/monthsummary.test.mjs and
 tests/monthsummary.browser.mjs stay green (but the one Tab-order pin below).
 
 **The reading** - `yearSummaryFacts(year)`:
@@ -88,8 +124,14 @@ answers the gate once; nothing awaits, writes or renders inside; `REPORT_DEDUCTI
 
 **Opening** paints the frame with `YEAR_SUMMARY_TEXT.reading` first and reads after the paint
 (`requestAnimationFrame(() => setTimeout(read, 0))`, the weekly close's own step,
-js/ui/weeklyclose.js:796-798). `renderYearSummaryIfOpen` re-reads on a moved record (key
-`owesKey(State.schedule, todayStr())`, js/ui/owes.js:644) and keeps `.modal-content.scrollTop`.
+js/ui/weeklyclose.js:796-798), keeping `YEAR_SUMMARY_KEPT = { key: owesKey(State.schedule,
+todayStr()), year, facts }` (js/ui/owes.js:644). `renderYearSummaryIfOpen` (called from `render()`)
+NEVER reads: an unmoved key draws nothing new; a moved key puts `YEAR_SUMMARY_TEXT.reading` over the
+figures at once (no figure of the old reading shown as current) and reads again ONCE, after the
+draws have stopped for 1.5 s (closereminder.js:263's rule: each draw restarts the wait), keeping
+`.modal-content.scrollTop` across it. The year's reading costs about six of the month summary's
+(scout-api §4.3), which re-reads two months synchronously on every render (monthsummary.js:676-683)
+- that habit is not copied.
 
 ## Permissions and privacy
 
@@ -126,9 +168,21 @@ hand-over sentence is the existing export's. Synthetic names in the suites.
   flag), `XLSX.writeFile(wb, \`farkad-year_${year}.xlsx\`)`. THE LOOK NEVER COSTS THE FILE
   (v202's rule): if dressing throws, the same rows are written plain. With the library not loaded,
   the same rows leave as CSV files through `downloadCsv` (js/ui/share.js:350) with
-  `exportReports`' own sentence for that case (reports.js:5577-5580, BORROWED). After the hand-over,
-  the existing export's hand-over sentence (BORROWED, the `askChoice` text exportReports shows after
-  `XLSX.writeFile`) - never «נשמר».
+  `exportReports`' own sentence for that case (reports.js:5577-5580, BORROWED) - and a refused
+  download is said by `downloadRefusedNotice` (reports.js:5218), as exportReports says it. After the
+  hand-over, `askChoice` (js/ui/ask.js) with exportReports' OWN title and choices and only the parts
+  of its message that hold here (reports.js:5666-5674), each BORROWED verbatim and found in
+  reports.js by the suite: the title `'קובץ ה-Excel נמסר לשמירה'`, and the message made of these
+  four fragments in this order, each copied exactly (one per line here; `name` is
+  `farkad-year_<YYYY>.xlsx`):
+      '\u2066' + name + '\u2069 נמסר לדפדפן — '
+      'פתח את "קבצים" וודא שהוא מופיע. '
+      'ב-Excel הטבלה נפתחת מימין לשמאל; תצוגה מקדימה ("קבצים", וואטסאפ, Numbers) '
+      'עשויה להציג אותה משמאל לימין, עם אותם מספרים.'
+  - and NOT its last sentence («טבלה שנקראת נכון בכל מקום יוצאת מהכפתור «🖼️ שיתוף כתמונה».»): this dialog has no
+  picture, by design, and the sentence would send him looking for a door that is not there. Choices
+  `[EXPORT_CHOICE_DONE, EXPORT_CHOICE_AGAIN]` (reports.js:5202-5203); «שמירה חוזרת» calls
+  `yearSummaryExport()` - never `exportReports()`; every other way out writes nothing. Never «נשמר».
 
 ## The screen, section by section, in this order
 
@@ -149,10 +203,15 @@ repeated in `YEAR_SUMMARY_REUSED` and found in the owner's source. Names through
    שעבדו», «סה״כ ימי עובד־אתר», «בלי עובדי רימא» (only when Rima has a count), `RIMA_TOTAL`,
    «נצבר», **«מקדמות שניתנו»** (PROPOSED: the year's «מקדמות» - handed over), and, gate open,
    «הוחזר במזומן» and «תיקון-היפוך» (BORROWED: `LEDGER_KIND_LABELS`, reports.js:3911) when non-zero;
-   then apart `YOSEF_GEVES_TOTAL` with its note. The unpriced sentence (BORROWED) when the year has
-   men without a rate. When Σ of the twelve rows' «נצבר» differs from the year's:
-   **«הנצבר של השנה מחושב על כל השנה ולא מחיבור החודשים, ולכן הוא שונה כאן מחיבור החודשים.»**
-   (PROPOSED).
+   then apart `YOSEF_GEVES_TOTAL` with its note. The unpriced sentence (BORROWED,
+   `MONTH_SUMMARY_TEXT.unpriced(count, names)`) when the year has men without a rate. When
+   `notSummed` holds - decided WITHOUT adding a shekel: some man of the year line's unpriced rows
+   (by id) has, in some month, a row with `attendanceDays > 0` and `amount !== null` (that month's
+   own rows, `payrollRows()` over the month inside the same scope - the memo answers it) - the
+   reason, in one sentence:
+   **«עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.»**
+   (PROPOSED). No Σ of the twelve rows' «נצבר» is computed anywhere, so no rounding difference can
+   raise it.
 3. **«חודש אחר חודש»** (PROPOSED) - twelve rows, January first; each ONE button named and showing:
    the month (`MONTH_SUMMARY_TEXT.months`, BORROWED), own worker-site days with a bar in `--accent`
    (one hue: magnitude of one series, never a site colour; the number written beside it), «עובדים
@@ -169,9 +228,13 @@ repeated in `YEAR_SUMMARY_REUSED` and found in the owner's source. Names through
 6. **«📊 יצוא השנה»** (PROPOSED) and «סגור» (BORROWED) in the frame.
 
 **The workbook's sheets**, in this order: «סיכום» (BORROWED: v202's first sheet's name - the frame
-sentences and the tiles), **«חודשים»**, **«עובדים»**, **«אתרים»** (PROPOSED), and
-`YOSEF_GEVES_TITLE` last (BORROWED) with its note row. Columns as on the screen; numbers as numbers
-(money with the v202 money format, counts as counts); Hebrew headers.
+sentences and the tiles, and, in the row right under «נצבר», the unpriced sentence when the year has
+men without a rate and the not-summed sentence when it applies - the accountant reads the file
+without the screen), **«חודשים»**, **«עובדים»** (its «נצבר» cell «—» for every man with
+`amount === null`, and, after the last man, ONE note row: `MONTH_SUMMARY_TEXT.unpriced(count,
+names)` naming every one of them - so no «—» stands without its reason), **«אתרים»** (PROPOSED),
+and `YOSEF_GEVES_TITLE` last (BORROWED) with its note row. Columns as on the screen; numbers as
+numbers (money with the v202 money format, counts as counts); Hebrew headers.
 
 ## Floors and looks
 
@@ -196,6 +259,8 @@ sentences and the tiles), **«חודשים»**, **«עובדים»**, **«אתר
 | tap → figures, on a season seeded in the page at 4x CPU | ≤ 3,000 ms | browser, `Emulation.setCPUThrottlingRate` |
 | the workbook built and handed over (library loaded) | ≤ 1,500 ms on the season | browser, `XLSX.writeFile` recorded |
 | «סיכום חודש» | its reading unchanged in cost (the extraction adds a call, nothing else) | tests/monthsummary.test.mjs green |
+| `render()` with the dialog open, the record moved | 0 readings inside `render()`; ONE reading 1.5 s after the last draw | spies, Node (fake timers) and browser |
+| `render()` with the dialog shut | `renderYearSummaryIfOpen` returns at its first line; 0 calls to `monthSummaryReadRange` over 20 renders | spies |
 
 ## Success criteria
 
@@ -211,7 +276,11 @@ readings):
    its figure strings equals what «סיכום חודש» draws for that month (`monthSummaryFacts(key)`).
 2. The year line equals `monthSummaryReadRange(year, …)` and is NOT the sum of the rows: on the
    March fixture the man is out of the year's «נצבר» and only out of March's, he is named by the
-   unpriced sentence, and the not-summed sentence appears exactly when the two differ.
+   unpriced sentence, and `notSummed` (and its sentence) is true exactly when a man unpriced over
+   the year worked priced in some month - pinned on three fixtures: the March man (true), a man whose
+   ONLY worked month is the unpriced one (false: the two agree), and a year with no unpriced man
+   whose twelve rounded months do not add to the rounded year to the agora (false: no shekel is
+   added to decide it; a spy holds that no sum of month «נצבר» is taken).
 3. The men equal `payrollRows()` over the year field by field; «—» exactly for `amount === null`;
    Σ «מקדמות שניתנו» = the tile's advances, and Σ «נצבר» = the tile's «נצבר» on every seeded year
    with no unpriced man - within one agora per man, because each row is rounded to the agora and the
@@ -228,21 +297,36 @@ readings):
    rule), every other figure unchanged (a year has no carry either way).
 8. The workbook, built with the shipped `vendor/xlsx-0.18.5.min.js` in Node and read back
    (tests/xlsx.test.mjs's way): every cell equals the facts; the sheets in order with
-   `YOSEF_GEVES_TITLE` last; the RTL view; the frame sentence on «סיכום»; the name `farkad-year_<YYYY>.xlsx`.
+   `YOSEF_GEVES_TITLE` last; the RTL view; the frame sentences on «סיכום»; the name
+   `farkad-year_<YYYY>.xlsx`. On the March fixture: on «סיכום», right under «נצבר», the unpriced
+   sentence naming him and the not-summed sentence; on «עובדים», his «נצבר» cell «—» and, after the
+   last man, the one note row naming every man whose cell is «—»; on a year with nobody unpriced,
+   neither sentence and no note row. The look's failure path (dressing throws) writes the same rows
+   - the sentences included - plain.
 9. The whole disk byte for byte across the reading, the open, the arrows, a month row's
    navigation and the export.
 10. Every PROPOSED word pinned; every BORROWED word found in its owner; the Hebrew/Arabic scan green.
 11. The cost rows of the budget.
 
 Browser (tests/yearsummary.browser.mjs):
-12. «סיכום חודש» shows the year button worded for the month on screen (and re-worded across a
-    January/December step); the button ≥ 48 × 48 with its words inside; a tap closes the month and
-    opens the year entered at its title, «מחשב את השנה…» painted before any figure.
+12. «סיכום חודש» shows the year button worded for the month on screen - ON AN EMPTY MONTH TOO (the
+    hook runs before drawMonthSummary's early return) - and re-worded across a January/December
+    step where one side of the boundary is an empty month (a record that starts in 2026: January
+    2026 ← December 2025 says «סיכום שנת 2025», and back says «סיכום שנת 2026»); the button ≥ 48 × 48
+    with its words inside; a tap closes the month and opens the year entered at its title, «מחשב את
+    השנה…» painted before any figure.
 13. The arrows step years and keep the focus; a month row opens «סיכום חודש» on that month at its title.
 14. The export through recorders (`XLSX.writeFile` and `downloadCsv` stubbed): the file's name and
-    sheets; with the library unavailable, the CSV path and its sentence.
-15. Escape, the backdrop and «סגור» close it with the focus given back; Tab stays inside.
-16. A commit under the open dialog re-reads with the scroll kept.
+    sheets; the hand-over dialog's title and message equal to the four borrowed fragments, word for
+    word, and containing NO «שיתוף כתמונה»; «שמירה חוזרת» calls `yearSummaryExport` again (a spy) and
+    `exportReports` never; Escape and the backdrop export nothing; with the library unavailable, the
+    CSV path and its sentence.
+15. Escape, the backdrop and «סגור» close it with the focus given back; Tab stays inside;
+    `midEdit()` is `true` while the dialog is open and `false` once it is shut.
+16. A commit and an adopted snapshot under the open dialog: `render()` reads nothing (a spy on
+    `yearSummaryFacts`/`monthSummaryReadRange` at 0 inside it), the placeholder covers the figures at
+    once, the year is read again ONCE after the draws stop for 1.5 s (three commits 500 ms apart: one
+    reading, 1.5 s after the last), and `.modal-content.scrollTop` is kept.
 17. Floors at every phone, scheme and mode and at doubled text (the ruler, `measureInPage`); no
     sideways scroll; nothing cut.
 18. The browser budget rows; nothing written (`censusOnly`); no uncaught error.
@@ -280,9 +364,13 @@ Existing suites touched, deliberately and only as said:
 
 ## «מה חדש» (for the integrator; PROPOSED)
 
-`{ title: 'סיכום שנה', text: 'השנה חודש אחר חודש, לפי עובד ולפי אתר, וקובץ Excel לרואה החשבון - לפי מה שנרשם, לא מה ששולם.', where: 'דוחות ← הפקת דוח ← סיכום חודש ← סיכום שנה', go: 'yearSummary' }`
-- `go: 'yearSummary'` only navigates: `whatsNewReportsMenu(...)` (whatsnew.js:523) opens «הפקת דוח»
-  and focuses the «סיכום חודש» row without pressing it - «הראה לי» never opens a reading of money.
+`{ title: 'סיכום שנה', text: 'השנה חודש אחר חודש, לפי עובד ולפי אתר, וקובץ Excel לרואה החשבון - לפי מה שנרשם, לא מה ששולם.', where: 'דוחות ← הפקת דוח ← סיכום חודש ← סיכום שנת …', go: 'yearSummary' }`
+- «איפה» ends with the button's own words («סיכום שנת» and the year, here «…», because the year in
+  it is the month's on screen), not «סיכום שנה», which no button says.
+- `go: 'yearSummary'` only navigates: `whatsNewReportsMenu(false)` (whatsnew.js:523-533) opens
+  «הפקת דוח» on the glass and focuses its TRIGGER (the menu's `<summary>`), as it does for every
+  item that lands there - it focuses no row, and this item asks no new focus of it. Nothing is
+  pressed: «הראה לי» never opens a reading of money.
 
 ## Interfaces
 
@@ -293,7 +381,8 @@ Provided (globals of `js/ui/yearsummary.js`, and one of `js/ui/monthsummary.js`)
 - `yearSummaryFacts(year)` → `{ year, range: {from, to}, inProgress, empty, line: <monthSummaryReadRange
   fields>, months: [<monthSummaryRead fields> × 12], men: [{ workerId, name, active, attendanceDays,
   payUnits, doubleDays, extraHours, gross|null, handedOver }], sites: [{ placeId, name, billed, own,
-  rima, first, last }], yosef: [{ placeId, name, total }], notSummed: boolean }`.
+  rima, first, last }], yosef: [{ placeId, name, total }], unpriced: [names], notSummed: boolean }`
+  - `notSummed` decided from the unpriced lists (above), never from a sum of shekels.
 - `monthSummaryReadRange(key, range)` (monthsummary.js) - `monthSummaryRead(key)` is it with the
   month's range.
 - `YEAR_SUMMARY_TEXT`. No other track calls into this one; it calls none of theirs.

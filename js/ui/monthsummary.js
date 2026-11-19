@@ -482,10 +482,10 @@ function drawMonthSummary() {
     const month = document.getElementById('monthSummaryMonth');
     const field = document.getElementById('monthSummaryText');
     if (!body || !month || MONTH_SUMMARY_KEY === null) return;
-    if (typeof yearSummaryEntryLabel === 'function') yearSummaryEntryLabel(MONTH_SUMMARY_KEY);
     const T = MONTH_SUMMARY_TEXT;
     const R = MONTH_SUMMARY_REUSED;
     const facts = monthSummaryFacts(MONTH_SUMMARY_KEY);
+    if (typeof yearSummaryEntryLabel === 'function') yearSummaryEntryLabel(MONTH_SUMMARY_KEY);
 
     month.textContent = facts.name;
     if (field && field.value !== facts.text) field.value = facts.text;

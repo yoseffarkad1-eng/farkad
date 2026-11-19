@@ -14,7 +14,11 @@
 //      month's own dialog draws (monthSummaryFacts).
 //   2. THE YEAR'S LINE IS THE YEAR'S, NEVER THE ROWS ADDED: monthSummaryReadRange over the
 //      year; the man with one unpriced day is out of the year's «נצבר» and out of March's
-//      only; he is named; the sentence that says so appears exactly when the two differ.
+//      only; he is named; and the sentence that says why the year is smaller stands exactly
+//      where a man the year cannot price worked priced in some month - decided from the
+//      unpriced lists, never from a sum (contract revision 2): true for the March man, false
+//      for a man whose only month is the unpriced one, false for a year whose rounded months
+//      miss the rounded year by an agora, with a spy holding that no month's «נצבר» is read.
 //   3. THE MEN ARE THE PAY SHEET'S ROWS over the year, field by field, «—» exactly for an
 //      unknown wage, and their two money columns add up to the year's tiles (to the agora
 //      per man - each row is rounded once and the band once, the sheet's own two roundings).
@@ -34,7 +38,9 @@
 //      «עובדי יוסף גבס» last, right to left, the frame on «סיכום», the name; the look that
 //      never costs the file; the CSV that leaves when the library is missing; a refusal.
 //   9. IT WRITES NOTHING: every key on the disk, byte for byte, across the reading, the open,
-//      the arrows, a month's row, the export - then shown to notice a real write.
+//      the arrows, a month's row, the export - then shown to notice a real write. And a redraw
+//      never reads: shut, render() asks nothing of the record; open on a moved record, the
+//      figures go at once and the year is read ONCE, 1.5 s after the last of three draws.
 //  10. THE WORDS: each new one pinned, each borrowed one found where its owner keeps it.
 //  11. THE COST: a season year read under the budget, the gate asked at most once a reading
 //      and never planned on an approved record.
@@ -92,6 +98,37 @@ const datesBetween = (from, to) => {
 };
 const saturday = date => new Date(`${date}T12:00:00`).getDay() === 6;
 const MONTH_KEYS = year => Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+const lastOf = key => {
+    const [y, m] = key.split('-').map(Number);
+    return `${key}-${String(new Date(y, m, 0, 12).getDate()).padStart(2, '0')}`;
+};
+
+// A clock in the device's hands: setTimeout and clearTimeout replaced inside its context, and
+// time moved only by advance() - so "1.5 s after the last draw" is asked of the code, not of
+// the machine's load.
+function fakeClock(device) {
+    let now = 0;
+    let next = 0;
+    const queue = new Map();
+    device.ctx.setTimeout = (fn, ms) => { next += 1; queue.set(next, { at: now + (Number(ms) || 0), fn }); return next; };
+    device.ctx.clearTimeout = id => { queue.delete(id); };
+    return {
+        advance(ms) {
+            const until = now + ms;
+            for (;;) {
+                let due = null;
+                queue.forEach((timer, id) => {
+                    if (timer.at <= until && (!due || timer.at < due.timer.at)) due = { id, timer };
+                });
+                if (!due) break;
+                queue.delete(due.id);
+                now = due.timer.at;
+                due.timer.fn();
+            }
+            now = until;
+        }
+    };
+}
 
 const IDS = ['reportsView', 'advancesView', 'workerDaysTitle', 'workerDaysMeta', 'workerDaysBody', 'workerDaysModal',
     'monthSummaryModal', 'monthSummaryTitle', 'monthSummaryPrev', 'monthSummaryNext', 'monthSummaryMonth',
@@ -356,7 +393,8 @@ function handPhone(flags, options = {}) {
     schedule.places = [{ id: 'p_1', name: 'צפון', active: true }, { id: 'p_2', name: 'דרום', active: true }];
     const put = (date, worker, place, rate, hours) =>
         first.call('assignPlace', schedule, date, worker, 'actual', place, rate, hours);
-    put('2026-01-05', 'w_a', 'p_1'); put('2026-01-05', 'w_b', 'p_1'); put('2026-01-05', 'w_c', 'p_2');
+    put('2026-01-05', 'w_a', 'p_1'); put('2026-01-05', 'w_c', 'p_2');
+    if (!options.onlyMarch) put('2026-01-05', 'w_b', 'p_1');
     put('2026-03-10', 'w_a', 'p_1');
     if (options.priced) put('2026-03-10', 'w_b', 'p_2');
     else {
@@ -364,7 +402,8 @@ function handPhone(flags, options = {}) {
         put('2026-03-10', 'w_b', 'p_2');
         schedule.workers[1].dailyRate = 300;
     }
-    put('2026-06-15', 'w_a', 'p_2', 'double'); put('2026-06-15', 'w_b', 'p_2', 'extra', 2);
+    put('2026-06-15', 'w_a', 'p_2', 'double');
+    if (!options.onlyMarch) put('2026-06-15', 'w_b', 'p_2', 'extra', 2);
     first.call('setRimaCount', schedule, '2026-01-05', 'p_1', 2);
     if (options.geves !== false) first.call('setYosefGevesCount', schedule, '2026-06-15', 'p_2', 3);
     first.call('addAdvance', schedule, 'w_a', '2026-03-12', 500, '');
@@ -454,10 +493,16 @@ for (const [reading, flags] of [['the money gates open', OPEN], ['the money gate
             const line = JSON.parse(device.run(`JSON.stringify(monthSummaryScope(() =>
                 monthSummaryReadRange(${JSON.stringify(String(year))}, { from: '${from}', to: '${to}' })))`));
             eq(`${year} the line is monthSummaryReadRange over the year`, facts.line, line);
-            const added = agora(months.reduce((sum, month) => sum + (month.gross === null ? 0 : month.gross), 0));
-            const differs = added !== (line.gross === null ? 0 : line.gross);
-            eq(`${year} the sentence stands exactly where the rows do not add up to the year`, facts.notSummed, differs);
-            if (differs) seen.notSummed += 1; else if (!line.empty) seen.summed += 1;
+            // Whether the year is smaller than its months: decided from who the year cannot price,
+            // asked of the sheet here man by man and month by month - never by adding shekels.
+            const yearSheet = sheetRows(device, from, to);
+            const unknownIds = new Set(yearSheet.filter(row => row.amount === null).map(row => row.id));
+            const pricedInAMonth = unknownIds.size > 0 && MONTH_KEYS(year).some(key => sheetRows(device, `${key}-01`, lastOf(key))
+                .some(row => unknownIds.has(row.id) && row.attendanceDays > 0 && row.amount !== null));
+            eq(`${year} the sentence stands exactly where a man the year cannot price worked priced in some month`,
+                facts.notSummed, pricedInAMonth);
+            eq(`${year} the men the year cannot price, named as its line names them`, facts.unpriced, line.unpriced);
+            if (pricedInAMonth) seen.notSummed += 1; else if (!line.empty) seen.summed += 1;
             if (line.unpriced.length > 0) seen.unpriced += 1;
             if (line.empty) seen.empty += 1;
 
@@ -558,7 +603,7 @@ for (const [reading, flags] of [['the money gates open', OPEN], ['the money gate
 suite('the corpus really held what it claims to');
 check('years read under both readings, and an empty one each time', seen.years === SEEDS.length * 2 * 2 + 4
     && seen.empty >= SEEDS.length * 2, `${seen.years} ${seen.empty}`);
-check('a year whose rows do not add up to it (the man with one unpriced day), and years that do',
+check('a year smaller than its months (the man with one unpriced day, priced elsewhere), and years that are not',
     seen.notSummed >= 4 && seen.summed >= 4 && seen.unpriced >= 4, `${seen.notSummed} ${seen.summed} ${seen.unpriced}`);
 check('Rima and יוסף גבס counts', seen.rima >= 8 && seen.yosef >= 8, `${seen.rima} ${seen.yosef}`);
 check('a man switched off, weekly men and a cycle that changes', seen.archived >= 8 && seen.weekly === seen.readings
@@ -580,8 +625,8 @@ check('fortnights across 1 January, closed and corrected', seen.crossing === 4, 
         [month('2026-01').gross, month('2026-03').gross, month('2026-06').gross, month('2026-03').unpriced, month('2026-01').unpriced],
         [1050, 400, 1200, ['בית'], []]);
     same('the year: 1,950 - בית out of all of it, not only out of March', [facts.line.gross, facts.line.unpriced], [1950, ['בית']]);
-    same('the twelve rows add to 2,650, and the year says why it is not that', [agora(facts.months.reduce((s, m) => s + m.gross, 0)), facts.notSummed],
-        [2650, true]);
+    same('his months add to more than the year (2,650 against 1,950), and the year says why: he was priced in January and June',
+        [agora(facts.months.reduce((s, m) => s + m.gross, 0)), facts.notSummed, facts.unpriced], [2650, true, ['בית']]);
     same('the men: his wage «—», the others\' theirs, and what each was handed', facts.men.map(m => [m.name, m.active,
         m.attendanceDays, m.payUnits, m.doubleDays, m.extraHours, m.gross, m.handedOver]), [
         ['אלף', true, 3, 4, 1, 0, 1600, 500],
@@ -608,7 +653,10 @@ check('fortnights across 1 January, closed and corrected', seen.crossing === 4, 
     same('he is named in the sheet\'s own sentence, and the year says why its rows do not add up',
         [body.querySelectorAll('.msum-warn').map(n => plain(n.textContent)), body.querySelectorAll('.ysum-notsummed').map(n => n.textContent)],
         [['⚠️ 1 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: בית. הוסף להם שכר במסך "עובדים ואתרים".'],
-            ['הנצבר של השנה מחושב על כל השנה ולא מחיבור החודשים, ולכן הוא שונה כאן מחיבור החודשים.']]);
+            ['עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.']]);
+    check('the reason stands straight under the figures, before יוסף גבס apart',
+        body.querySelectorAll('.ysum-figures')[0].children.map(n => n.className).join(' | ')
+        === 'msum-head | msum-tiles | hint hint-warn msum-warn | msum-note ysum-notsummed | ysum-apart');
     check('his name travels isolated', body.querySelectorAll('.msum-warn')[0].textContent.indexOf('⁨בית⁩') !== -1);
     same('יוסף גבס apart, with its note, in no tile with the others', [body.querySelectorAll('.ysum-apart .msum-tile')
         .map(t => t.getAttribute('data-figure')), body.querySelectorAll('.ysum-apart .msum-note').map(n => n.textContent)],
@@ -640,6 +688,50 @@ check('fortnights across 1 January, closed and corrected', seen.crossing === 4, 
     same('with his day priced the year is the twelve rows, and the sentence is gone',
         [priced.line.gross, agora(priced.months.reduce((s, m) => s + m.gross, 0)), priced.notSummed, priced.line.unpriced],
         [2950, 2950, false, []]);
+}
+
+{
+    suite('why the year is smaller than its months: decided from the unpriced lists, never from a sum');
+
+    // A man whose ONLY worked month is the one with the unpriced day: the year and the months
+    // agree about him (he is out of both), so there is nothing to explain.
+    const only = handPhone(OPEN, { onlyMarch: true }).facts(2026);
+    same('a man whose only month is the unpriced one: named, the months the year, and no sentence',
+        [only.unpriced, only.line.gross, agora(only.months.reduce((s, m) => s + m.gross, 0)), only.notSummed],
+        [['בית'], 1950, 1950, false]);
+
+    // A year with nobody unpriced whose rounded months miss the rounded year by an agora: an
+    // hourly rate of 10.003, an hour and a half on two days in two months - each month's wage
+    // 115.0045, rounded to 115; the year's 230.009, rounded to 230.01.
+    const first = makeDevice({ deviceId: 'd_agora', flags: OPEN });
+    first.setToday('2026-11-19');
+    first.State.schedule.workers = [{ id: 'w_r', name: 'רבע', active: true, dailyRate: 100, hourlyRate: 10.003 }];
+    first.State.schedule.places = [{ id: 'p_1', name: 'צפון', active: true }];
+    ['2026-02-02', '2026-05-04'].forEach(date => first.call('assignPlace', first.State.schedule, date, 'w_r', 'actual', 'p_1', 'extra', 1.5));
+    first.State.save({ silent: true });
+    const device = reopen(first.dump(), OPEN, '2026-11-19', { deviceId: 'd_agora' });
+    const spied = JSON.parse(device.run(`(() => {
+        let reads = 0;
+        const real = monthSummaryRead;
+        monthSummaryRead = function () {
+            const out = real.apply(this, arguments);
+            let gross = out.gross;
+            Object.defineProperty(out, 'gross', { enumerable: true, configurable: true,
+                get() { reads += 1; return gross; }, set(value) { gross = value; } });
+            return out;
+        };
+        try {
+            const facts = yearSummaryFacts(2026);
+            const during = reads;
+            return JSON.stringify({ during, notSummed: facts.notSummed, unpriced: facts.unpriced, year: facts.line.gross,
+                months: facts.months.filter(m => !m.empty).map(m => m.gross) });
+        } finally { monthSummaryRead = real; }
+    })()`));
+    given('the rounded months miss the rounded year by an agora', JSON.stringify([spied.months, spied.year]) === '[[115,115],230.01]',
+        JSON.stringify([spied.months, spied.year]));
+    same('nobody unpriced: no sentence, whatever the agorot do', [spied.unpriced, spied.notSummed], [[], false]);
+    same('and no month\'s «נצבר» was read to decide it - not one', spied.during, 0);
+    check('the file adds no shekel to decide it: nothing in it rounds to the agora', YEAR_SRC.replace(/\/\/[^\n]*/g, '').indexOf('agora(') === -1);
 }
 
 // ---------------------------------------------------------------- 5. across 1 January (crossingPhone, above)
@@ -693,11 +785,11 @@ for (const [reading, flags] of [['gates open', OPEN], ['gates shut', SHUT]]) {
 // the plain way, a month and a year alike (wholeAccountRange, js/ui/reports.js).
 function monthSummaryReadRange(key, range) {
     const schedule = State.schedule;`)
-        .replace(`    if (!body || !month || MONTH_SUMMARY_KEY === null) return;
-    const T = MONTH_SUMMARY_TEXT;`, `    if (!body || !month || MONTH_SUMMARY_KEY === null) return;
+        .replace(`    const facts = monthSummaryFacts(MONTH_SUMMARY_KEY);
+`, `    const facts = monthSummaryFacts(MONTH_SUMMARY_KEY);
     if (typeof yearSummaryEntryLabel === 'function') yearSummaryEntryLabel(MONTH_SUMMARY_KEY);
-    const T = MONTH_SUMMARY_TEXT;`);
-    check('js/ui/monthsummary.js is the base\'s but for the extraction and the hook, byte for byte',
+`);
+    check('js/ui/monthsummary.js is the base\'s but for the extraction and the hook - right after the month is read, before any return - byte for byte',
         extracted === MONTH_SRC && extracted !== base);
 
     const reads = device => device.run(`JSON.stringify(monthSummaryScope(() =>
@@ -812,6 +904,10 @@ function bookOf(bytes) {
     return { names, sheets, views };
 }
 
+// The sheet's own sentence for a wage it cannot price, as the year writes it.
+const unpricedSentence = names => `⚠️ ${names.length} עובדים בלי שכר יומי, ולכן הסכום חסר אותם: `
+    + `${names.map(name => `\u2068${name}\u2069`).join(', ')}. הוסף להם שכר במסך "עובדים ואתרים".`;
+
 // The workbook's rows written out again here from the reading and the pinned words - not
 // from the file's own builder - so a cell that is not the reading's is a cell that differs.
 function expectedBook(facts, today) {
@@ -824,12 +920,14 @@ function expectedBook(facts, today) {
         .concat([[`הופק: ${today.slice(8, 10)}/${today.slice(5, 7)}/${today.slice(0, 4)}`], [],
             ['ימי עבודה', L.workingDays], ['ימי נוכחות', L.attendance], ['עובדים שעבדו', L.men], ['סה״כ ימי עובד־אתר', L.siteDays]])
         .concat(L.ownSiteDays !== null ? [['בלי עובדי רימא', L.ownSiteDays]] : [])
-        .concat([['סה״כ עובדי רימא', L.rima ? L.rima.total : 0], ['נצבר', money(L.gross)], ['מקדמות שניתנו', L.advances]])
+        .concat([['סה״כ עובדי רימא', L.rima ? L.rima.total : 0], ['נצבר', money(L.gross)]])
+        // Right under «נצבר»: the men it leaves out, why the year is smaller, the hours left out.
+        .concat(L.unpriced.length ? [[unpricedSentence(L.unpriced)]] : [])
+        .concat(facts.notSummed ? [['עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.']] : [])
+        .concat(L.hoursUnpriced ? [['* שעות נוספות בלי שכר שעה - לא נכללו בסכום.']] : [])
+        .concat([['מקדמות שניתנו', L.advances]])
         .concat(L.repaid ? [['הוחזר במזומן', L.repaid]] : [])
         .concat(L.reversed ? [['תיקון-היפוך', L.reversed]] : [])
-        .concat(L.unpriced.length ? [[`⚠️ ${L.unpriced.length} עובדים בלי שכר יומי, ולכן הסכום חסר אותם: ${L.unpriced.map(n => `⁨${n}⁩`).join(', ')}. הוסף להם שכר במסך "עובדים ואתרים".`]] : [])
-        .concat(L.hoursUnpriced ? [['* שעות נוספות בלי שכר שעה - לא נכללו בסכום.']] : [])
-        .concat(facts.notSummed ? [['הנצבר של השנה מחושב על כל השנה ולא מחיבור החודשים, ולכן הוא שונה כאן מחיבור החודשים.']] : [])
         .concat(L.yosef ? [[], ['סה״כ עובדי יוסף גבס', L.yosef.total], ['עובדי יוסף גבס בלבד. אינם נכללים בשכר ואינם נכללים בחיוב.']] : []);
     const NAMES = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
     const withRima = L.rima !== null;
@@ -838,7 +936,9 @@ function expectedBook(facts, today) {
             : [NAMES[i], m.ownSiteDays !== null ? m.ownSiteDays : m.siteDays, m.men, money(m.gross), m.advances])));
     const men = [['עובד', 'ימי נוכחות', 'ימי שכר', 'כפולים', 'שעות נוספות', 'נצבר', 'מקדמות שניתנו']]
         .concat(facts.men.map(m => [m.active ? m.name : `${m.name} · לא פעיל`, m.attendanceDays, m.payUnits, m.doubleDays,
-            m.extraHours, money(m.gross), m.handedOver]));
+            m.extraHours, money(m.gross), m.handedOver]))
+        // No «—» without its reason: one row after the last man names every man whose cell it is.
+        .concat(facts.men.some(m => m.gross === null) ? [[unpricedSentence(facts.men.filter(m => m.gross === null).map(m => m.name))]] : []);
     const span = s => (s.first === s.last ? NAMES[Number(s.first.slice(5)) - 1]
         : `${NAMES[Number(s.first.slice(5)) - 1]}–${NAMES[Number(s.last.slice(5)) - 1]}`);
     const sites = [['אתר', 'סה״כ ימי עובד־אתר'].concat(withRima ? ['בלי עובדי רימא', 'רישום לרימא'] : [], ['חודשים'])]
@@ -894,14 +994,34 @@ function withLibrary(device) {
             .map(c => men.looks[r + 1][c] === (Number.isInteger(row[c]) ? MONEY : MONEY_AGORA)));
         check(`${name}: «נצבר» and «מקדמות שניתנו» are shekels in the file`, moneyLooks.length > 0 && moneyLooks.every(Boolean),
             JSON.stringify(men.looks.slice(1, 3)));
-        check(`${name}: the counts are numbers in the General format`, men.rows.slice(1).every((row, r) =>
+        check(`${name}: the counts are numbers in the General format`, men.rows.slice(1, 1 + facts.men.length).every((row, r) =>
             [1, 2, 3, 4].every(c => typeof row[c] === 'number' && men.looks[r + 1][c] === 'General')));
+        if (facts.unpriced.length === 0) {
+            check(`${name}: nobody unpriced, so no sentence about it anywhere in the file`, Object.values(book.sheets)
+                .every(sheet => sheet.rows.flat().every(cell => String(cell).indexOf('בלי שכר יומי') === -1)));
+        }
         same(`${name}: handed to the browser, in the export's own words - never «נשמר»`, [device.chosen.length,
             device.chosen[0].title, device.chosen[0].message, device.chosen[0].choices], [1, 'קובץ ה-Excel נמסר לשמירה',
             `⁦farkad-year_${year}.xlsx⁩ נמסר לדפדפן — פתח את "קבצים" וודא שהוא מופיע. `
             + 'ב-Excel הטבלה נפתחת מימין לשמאל; תצוגה מקדימה ("קבצים", וואטסאפ, Numbers) עשויה להציג אותה משמאל לימין, עם אותם מספרים.',
             ['הבנתי', 'שמירה חוזרת']]);
     }
+
+    // THE MARCH MAN IN THE FILE: right under «נצבר» his sentence and the year's reason; on «עובדים»
+    // his cell «—» and, after the last man, the one row naming him.
+    const march = withLibrary(handPhone(OPEN));
+    march.run('openYearSummary(2026)');
+    await march.run('yearSummaryExport()');
+    const marchBook = bookOf(Buffer.from(march.caught[0].bytes));
+    const summaryRows = marchBook.sheets['סיכום'].rows;
+    const grossAt = summaryRows.findIndex(row => row[0] === 'נצבר');
+    same('«סיכום»: right under «נצבר», his sentence and then the year\'s reason', [summaryRows[grossAt],
+        plain(summaryRows[grossAt + 1][0]), summaryRows[grossAt + 2][0], summaryRows[grossAt + 3][0]],
+    [['נצבר', 1950], '⚠️ 1 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: בית. הוסף להם שכר במסך "עובדים ואתרים".',
+        'עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.', 'מקדמות שניתנו']);
+    const menRows = marchBook.sheets['עובדים'].rows;
+    same('«עובדים»: his «נצבר» «—», and after the last man the one row that names him', [menRows[2][5], menRows.length,
+        plain(menRows[4][0])], ['—', 5, '⚠️ 1 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: בית. הוסף להם שכר במסך "עובדים ואתרים".']);
 
     // «שמירה חוזרת» writes it again; anything else (a tap beside it, Escape, «הבנתי») writes nothing more.
     const again = withLibrary(handPhone(OPEN));
@@ -919,7 +1039,7 @@ function withLibrary(device) {
     await broken.run('yearSummaryExport()');
     const plainBook = bookOf(Buffer.from(broken.caught[0].bytes));
     const plainWant = expectedBook(broken.facts(2026), broken.run('todayStr()'));
-    same('with the look broken the file is still written, every cell the same', [broken.caught.length,
+    same('with the look broken the file is still written, every cell the same - the sentences under «נצבר» and the men\'s note row included', [broken.caught.length,
         Object.keys(plainWant).every(sheet => JSON.stringify(plainBook.sheets[sheet].rows) === JSON.stringify(plainWant[sheet]))], [1, true]);
     check('and plain: no money format on it', Object.values(plainBook.sheets).every(sheet =>
         sheet.looks.flat().every(look => look === 'General')));
@@ -1017,7 +1137,9 @@ function withLibrary(device) {
     same('and the record in memory', JSON.stringify(device.State.schedule), record);
     same('and nothing was drawn by render() for it', device.renders.count, renders);
 
-    // A REAL WRITE: the disk notices, and the open year reads the record again.
+    // A REAL WRITE: the disk notices, and the open year reads the record again - once the draws
+    // have stopped (a clock in the suite's hands).
+    const clock = fakeClock(device);
     device.run('openYearSummary(2026)');
     const attendance = () => device.dom.getElementById('yearSummaryBody').querySelectorAll('.msum-tile')
         .filter(t => t.getAttribute('data-figure') === 'attendance')[0].children[1].textContent;
@@ -1025,7 +1147,10 @@ function withLibrary(device) {
     device.State.commit(device.call('assignPlace', device.State.schedule, '2026-11-02', 'w_a', 'actual', 'p_1'));
     check('the comparison notices a real write', disk() !== before);
     device.run('renderYearSummaryIfOpen()');
-    same('and the open year says what the record says now', attendance(), '8');
+    same('the figures go at once, «מחשב את השנה…» in their place', [body.querySelectorAll('.msum-tile').length,
+        body.querySelectorAll('.ysum-reading').map(n => n.textContent)], [0, ['מחשב את השנה…']]);
+    clock.advance(1500);
+    same('and once the draws have stopped the open year says what the record says now', attendance(), '8');
     let read = 0;
     const real = device.ctx.yearSummaryFacts;
     device.ctx.yearSummaryFacts = function () { read += 1; return real.apply(this, arguments); };
@@ -1036,10 +1161,64 @@ function withLibrary(device) {
     const src = YEAR_SRC.replace(/\/\/[^\n]*/g, '');
     check('the file names no writer: no Store, no commit, no save, no localStorage',
         !/\bStore\b|\.commit|commitMany|\.save\(|localStorage|setVerified|saveFinancialAction/.test(src));
-    check('and prices nothing: no rate is read in it', !/dailyRate|hourlyRate|ratesForDay|\.amount\b/.test(src));
+    // A row's amount is only ever asked whether it is known (the not-summed rule, revision 2):
+    // never added, multiplied or compared to a number.
+    check('and prices nothing: no rate is read in it, and a row\'s amount is only asked whether it is known',
+        !/dailyRate|hourlyRate|ratesForDay/.test(src) && !/\.amount\b(?!\s*[!=]==\s*null)/.test(src)
+        && /\.amount\s*!==\s*null/.test(src));
     check('nor does it name a layer - only the reports of them', !/schedule\.days|rimaCount|yosefGevesCount|_LAYER/.test(src));
     check('it never prints by itself and never asks the browser a question', !/window\.print|\balert\(|\bconfirm\(|\bprompt\(/.test(src));
     check('and no word of a payslip is in it', !/לתשלום|נשמר|נשלח|נוכה|ניכוי|יתרת/.test(src));
+}
+
+// ---------------------------------------------------------------- 9b. a redraw never reads
+{
+    suite('a redraw never reads the year: shut it asks nothing, moved it waits for the draws to stop');
+
+    const device = handPhone(OPEN);
+    const clock = fakeClock(device);
+    const counted = { read: 0, range: 0, keys: 0 };
+    const spy = (name, field) => {
+        const real = device.ctx[name];
+        device.ctx[name] = function () { counted[field] += 1; return real.apply(this, arguments); };
+    };
+    spy('yearSummaryRead', 'read');
+    spy('monthSummaryReadRange', 'range');
+    spy('owesKey', 'keys');
+    for (let n = 0; n < 20; n += 1) device.run('renderYearSummaryIfOpen()');
+    same('shut: twenty draws, and not one reading, not one month read, not even the record\'s key', counted, { read: 0, range: 0, keys: 0 });
+
+    device.run('openYearSummary(2026)');
+    given('opened, it read the year once', counted.read === 1, JSON.stringify(counted));
+    const body = device.dom.getElementById('yearSummaryBody');
+    const tiles = () => body.querySelectorAll('.msum-tile').length;
+    const days = () => body.querySelectorAll('.msum-tile').filter(t => t.getAttribute('data-figure') === 'attendance')[0].children[1].textContent;
+    given('seven days on it', days() === '7');
+    counted.read = 0;
+    counted.range = 0;
+    const inside = [];
+    // Three commits 500 ms apart - Saturdays nobody worked - each followed by the draw render() makes.
+    ['2026-11-14', '2026-11-07', '2026-10-31'].forEach((date, at) => {
+        if (at > 0) clock.advance(500);
+        device.State.commit(device.call('assignPlace', device.State.schedule, date, 'w_a', 'actual', 'p_1'));
+        device.run('renderYearSummaryIfOpen()');
+        inside.push([counted.read, counted.range, tiles()]);
+    });
+    same('not one reading inside the three draws, and the figures gone from the first', inside, [[0, 0, 0], [0, 0, 0], [0, 0, 0]]);
+    clock.advance(1499);
+    same('1.499 s after the last draw: still nothing read', [counted.read, tiles()], [0, 0]);
+    clock.advance(1);
+    same('1.5 s after it: read ONCE, and the three days on it', [counted.read, days()], [1, '10']);
+    clock.advance(10000);
+    for (let n = 0; n < 20; n += 1) device.run('renderYearSummaryIfOpen()');
+    clock.advance(10000);
+    same('and a record that did not move again: twenty more draws, nothing read and nothing taken off', [counted.read, tiles() > 0], [1, true]);
+
+    // An arrow or the dialog shut meanwhile: the reading owed to the moved record is not owed.
+    device.State.commit(device.call('assignPlace', device.State.schedule, '2026-10-24', 'w_a', 'actual', 'p_1'));
+    device.run('renderYearSummaryIfOpen(); closeYearSummary()');
+    clock.advance(5000);
+    same('shut while it waited: nothing read for a dialog that is not there', counted.read, 1);
 }
 
 // ---------------------------------------------------------------- 10. the words
@@ -1062,7 +1241,7 @@ function withLibrary(device) {
         inProgress: 'השנה עוד לא נגמרה. המספרים הם של מה שנרשם עד עכשיו.',
         figures: 'השנה במספרים',
         handedOver: 'מקדמות שניתנו',
-        notSummed: 'הנצבר של השנה מחושב על כל השנה ולא מחיבור החודשים, ולכן הוא שונה כאן מחיבור החודשים.',
+        notSummed: 'עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.',
         months: 'חודש אחר חודש',
         monthsHint: 'לחיצה על חודש פותחת את סיכום החודש.',
         men: 'העובדים בשנה',

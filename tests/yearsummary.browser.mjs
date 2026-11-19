@@ -9,9 +9,12 @@
 // «מחשב את השנה…» painted in a frame of its own before one figure is read; that the arrows walk
 // the years and keep the focus; that a month's row opens «סיכום חודש» on that month at its
 // heading; that the export hands the browser farkad-year_<YYYY>.xlsx with its sheets in order,
-// or the CSV files where the library is missing, in the export's own sentences; that Escape,
-// the backdrop and «סגור» shut it and give the focus back, and Tab stays inside it; that a
-// commit under it is read again with the reader's place kept; that it fits 320x568, 375x667 and
+// or the CSV files where the library is missing, in the export's own sentences - and never
+// points at a picture this dialog has not got, «שמירה חוזרת» asking the YEAR's export again;
+// that Escape, the backdrop and «סגור» shut it and give the focus back, Tab stays inside it and
+// midEdit() holds an update back while it is open; that a commit and a snapshot adopted under
+// it are never read inside render() - the figures go at once and the year is read ONCE, 1.5 s
+// after the last of three commits, the reader's place kept; that it fits 320x568, 375x667 and
 // 440x956, dark and light, with and without «תצוגה גדולה», and at doubled text - no sideways
 // scroll, nothing cut, every target 48px (52 with the mode), nothing under 16px (18 with it),
 // 4.5:1 (7:1 with it); that a season is read inside its budget at 4x CPU and the workbook
@@ -327,6 +330,7 @@ try {
         await page.keyboard.press('Tab');
         order.push(await active(page));
     }
+    same('while it is open midEdit() says so: an update waits for it (js/ui/offline.js)', await page.evaluate(() => midEdit()), true);
     same('Tab walks the arrow, the twelve months, the export and «סגור», and comes round inside the dialog (no next year on 2026)',
         order, ['yearSummaryPrev'].concat(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'].map(m => `2026-${m}`),
             ['yearSummaryExport', 'yearSummaryClose', 'yearSummaryPrev']));
@@ -340,6 +344,7 @@ try {
     await page.mouse.click(4, 4);
     await page.waitForTimeout(60);
     check('a tap on the backdrop closes it', !(await isOpen(page, 'yearSummaryModal')));
+    same('and shut, midEdit() lets an update through again', await page.evaluate(() => midEdit()), false);
     await openYear(page);
     await page.locator('#yearSummaryClose').click();
     await page.waitForTimeout(80);
@@ -398,12 +403,38 @@ try {
         plain(await page.locator('#askMessage').innerText()), await page.locator('#askChoices button').allTextContents()],
     ['קובץ ה-Excel נמסר לשמירה', 'farkad-year_2026.xlsx נמסר לדפדפן — פתח את "קבצים" וודא שהוא מופיע. ב-Excel הטבלה נפתחת מימין לשמאל; '
         + 'תצוגה מקדימה ("קבצים", וואטסאפ, Numbers) עשויה להציג אותה משמאל לימין, עם אותם מספרים.', ['הבנתי', 'שמירה חוזרת']]);
+    check('and not one word of it points at a picture this dialog has not got',
+        (await page.locator('#askModal').innerText()).indexOf('שיתוף כתמונה') === -1);
     await shot(page, '06-export-handed-440-dark');
+    await page.evaluate(() => {
+        window.__again = { year: 0, reports: 0 };
+        const year = yearSummaryExport;
+        const reports = exportReports;
+        yearSummaryExport = function () { window.__again.year += 1; return year.apply(this, arguments); };
+        exportReports = function () { window.__again.reports += 1; return reports.apply(this, arguments); };
+    });
+    await page.locator('#askChoices button', { hasText: 'שמירה חוזרת' }).click();
+    await page.waitForFunction(() => window.__written.length === 2 && document.getElementById('askModal').style.display === 'flex');
+    same('«שמירה חוזרת» is the year\'s export again - never the reports\' - and the same file', await page.evaluate(() =>
+        [window.__again, window.__written[1].name]), [{ year: 1, reports: 0 }, 'farkad-year_2026.xlsx']);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    same('Escape shuts the question and exports nothing', [await isOpen(page, 'askModal'), await isOpen(page, 'yearSummaryModal'),
+        await page.evaluate(() => window.__written.length)], [false, true, 2]);
+    await page.locator('#yearSummaryExport').click();
+    await page.waitForFunction(() => window.__written.length === 3 && document.getElementById('askModal').style.display === 'flex');
+    await page.mouse.click(4, 4);
+    await page.waitForTimeout(300);
+    same('a tap beside the question shuts it and exports nothing either', [await isOpen(page, 'askModal'),
+        await isOpen(page, 'yearSummaryModal'), await page.evaluate(() => window.__written.length)], [false, true, 3]);
+    await page.locator('#yearSummaryExport').click();
+    await page.waitForFunction(() => window.__written.length === 4 && document.getElementById('askModal').style.display === 'flex');
     await page.locator('#askChoices button', { hasText: 'הבנתי' }).click();
     await page.waitForTimeout(60);
-    same('«הבנתי» shuts the question, the year still open, the focus back on the export', [await isOpen(page, 'askModal'),
-        await isOpen(page, 'yearSummaryModal'), await active(page), await page.evaluate(() => window.__written.length)],
-    [false, true, 'yearSummaryExport', 1]);
+    same('«הבנתי» shuts the question, the year still open, the focus back on the export, and nothing more written',
+        [await isOpen(page, 'askModal'), await isOpen(page, 'yearSummaryModal'), await active(page),
+            await page.evaluate(() => [window.__written.length, window.__again])],
+        [false, true, 'yearSummaryExport', [4, { year: 1, reports: 0 }]]);
     // The library missing: CSV files, through a recorder, and the export's own sentence for it.
     await page.evaluate(() => {
         window.__xlsx = XLSX;
@@ -433,20 +464,62 @@ try {
     same('and the record in memory', await page.evaluate(() => JSON.stringify(State.schedule)), record);
 
     // ------------------------------------------------------------ 16. a change under it
-    suite('a change arriving under it is read again, and the reader keeps his place');
+    suite('a change under it: nothing read inside render(), the figures gone at once, ONE reading after the draws stop');
     await openYear(page);
-    await page.evaluate(() => { document.querySelector('#yearSummaryModal .modal-content').scrollTop = 600; });
+    const content = '#yearSummaryModal .modal-content';
     const attendance = () => page.locator('#yearSummaryBody .msum-tile[data-figure="attendance"] .msum-value').innerText();
     const was = Number(await attendance());
-    // A Saturday nobody worked: a day of attendance the record did not have.
-    await page.evaluate(() => State.commit(assignPlace(State.schedule, '2026-11-14', 'w_03', 'actual', 'p_02')));
-    await page.waitForFunction(was => {
-        const node = document.querySelector('#yearSummaryBody .msum-tile[data-figure="attendance"] .msum-value');
-        return node && Number(node.textContent) === was + 1;
-    }, was);
-    same('a day recorded while it is open is on it, and the place he had scrolled to is kept',
-        [Number(await attendance()), await page.evaluate(() => document.querySelector('#yearSummaryModal .modal-content').scrollTop)],
-        [was + 1, 600]);
+    await page.evaluate(sel => { document.querySelector(sel).scrollTop = 600; }, content);
+    await page.evaluate(() => {
+        window.__reads = { read: 0, range: 0, inRender: 0 };
+        const read = yearSummaryRead;
+        const range = monthSummaryReadRange;
+        const draw = render;
+        let drawing = false;
+        yearSummaryRead = function () { window.__reads.read += 1; if (drawing) window.__reads.inRender += 1; return read.apply(this, arguments); };
+        monthSummaryReadRange = function () { window.__reads.range += 1; if (drawing) window.__reads.inRender += 1; return range.apply(this, arguments); };
+        render = function () { drawing = true; try { return draw.apply(this, arguments); } finally { drawing = false; } };
+    });
+    // Three commits 500 ms apart, each a Saturday nobody worked.
+    const placeholder = () => page.evaluate(() => ({ tiles: document.querySelectorAll('#yearSummaryBody .msum-tile').length,
+        reading: (document.querySelector('#yearSummaryBody .ysum-reading') || { textContent: '' }).textContent,
+        reads: Object.assign({}, window.__reads) }));
+    const seen = [];
+    for (const [at, date] of [[0, '2026-11-14'], [1, '2026-11-07'], [2, '2026-10-31']]) {
+        if (at > 0) await page.waitForTimeout(500);
+        await page.evaluate(date => State.commit(assignPlace(State.schedule, date, 'w_03', 'actual', 'p_02')), date);
+        seen.push(await placeholder());
+    }
+    const afterLast = Date.now();
+    same('each commit\'s render() read nothing, and the figures went at the first', seen.map(one => [one.tiles, one.reading, one.reads]),
+        seen.map(() => [0, 'מחשב את השנה…', { read: 0, range: 0, inRender: 0 }]));
+    await page.waitForTimeout(1000);
+    const midway = await placeholder();
+    same('a second after the last commit: still nothing read', [midway.tiles, midway.reads.read], [0, 0]);
+    await page.waitForFunction(() => document.querySelector('#yearSummaryBody .msum-tile') !== null, null, { timeout: 10000 });
+    const after = await page.evaluate(() => Object.assign({}, window.__reads));
+    const waited = Date.now() - afterLast;
+    same('then ONE reading, none of it inside render()', [after.read, after.inRender], [1, 0]);
+    check('and it came only once the draws had stopped for 1.5 s', waited >= 1400, `${waited} ms after the last commit`);
+    same('the three days are on it, and the reader is where he was', [Number(await attendance()),
+        await page.evaluate(sel => document.querySelector(sel).scrollTop, content)], [was + 3, 600]);
+
+    // A snapshot adopted from another phone: the same rule.
+    await page.evaluate(() => { window.__reads = { read: 0, range: 0, inRender: 0 }; });
+    await page.evaluate(() => {
+        const raw = JSON.parse(JSON.stringify(State.schedule));
+        raw.updatedAt = new Date(Date.now() + 1000).toISOString();
+        raw.updatedBy = 'other-device';
+        assignPlace(raw, '2026-10-24', 'w_03', 'actual', 'p_02');
+        FarkadSync.receive(raw);
+    });
+    const adopted = await placeholder();
+    same('a snapshot adopted under it: the figures go at once, nothing read inside the draw', [adopted.tiles, adopted.reads],
+        [0, { read: 0, range: 0, inRender: 0 }]);
+    await page.waitForFunction(() => document.querySelector('#yearSummaryBody .msum-tile') !== null, null, { timeout: 10000 });
+    same('then ONE reading with the other phone\'s day on it, the place kept', [await page.evaluate(() => window.__reads.read),
+        await page.evaluate(() => window.__reads.inRender), Number(await attendance()),
+        await page.evaluate(sel => document.querySelector(sel).scrollTop, content)], [1, 0, was + 4, 600]);
     await page.context().close();
 
     // ------------------------------------------------------------ 17. the phones
