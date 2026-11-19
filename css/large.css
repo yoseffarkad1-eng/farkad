@@ -707,6 +707,9 @@
 :root.display-large .daycheck-plain { font-size: 20px; font-weight: 600; }
 :root.display-large .daycheck-lead { font-size: 18px; line-height: 1.45; }
 :root.display-large .daycheck-foot button { font-size: 20px; }
+:root.display-large .crewcheck-entry { font-size: 20px; font-weight: 600; }
+:root.display-large #crewCheckModal .modal-content > h3 { line-height: 1.4; }
+:root.display-large .crewcheck-note { font-size: 18px; line-height: 1.45; }
 :root.display-large #transportReportModal .modal-content > h3 { line-height: 1.4; }
 :root.display-large .transport-report-ranges button { font-size: 20px; font-weight: 700; }
 :root.display-large #transportReportText { font-size: 20px; line-height: 1.65; }

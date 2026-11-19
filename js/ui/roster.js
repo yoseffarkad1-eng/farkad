@@ -29,6 +29,11 @@ function renderRoster() {
     renderWorkerList();
     renderPlaceList();
     renderVehicleList();
+    // «בדיקת הצוות» (js/ui/crewcheck.js): its one button at the foot, and the dialog over
+    // this screen read again when it is open. Asked for by name: a build without that file
+    // draws this screen exactly as before.
+    if (typeof renderCrewCheckEntry === 'function') renderCrewCheckEntry();
+    if (typeof renderCrewCheckIfOpen === 'function') renderCrewCheckIfOpen();
     // The backup, the restore points and the version live on הגדרות וכלים now - see
     // js/ui/settings.js. This screen is about people and sites; it was also about files,
     // which on a phone meant scrolling past thirty men to reach the backup button.
@@ -754,6 +759,9 @@ function renderPlaceList() {
 
     State.schedule.places.forEach(place => {
         const row = el('div', place.active === false ? 'roster-row roster-off' : 'roster-row');
+        // How a screen finds this row without putting an id into a selector - the twin of
+        // a worker row's data-worker-id (js/ui/crewcheck.js lands on it).
+        row.dataset.placeId = place.id;
 
         const details = el('div', 'roster-details');
         // The site list is where the colour is learned, so it is shown here in the same

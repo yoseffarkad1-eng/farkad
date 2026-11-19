@@ -803,6 +803,23 @@ input, select, textarea { border-radius: 12px; }
 .daycheck-lead { margin: 16px 0 0; color: var(--ink-2); font-size: 14px; line-height: 1.45; }
 .daycheck-foot { position: sticky; bottom: 0; z-index: 1; display: flex; margin-top: 10px; padding: 12px 0 18px; border-top: 1px solid var(--line); background: var(--surface); }
 .daycheck-foot button { flex: 1 1 auto; min-height: 48px; font-size: 16px; }
+/* «בדיקת הצוות» (js/ui/crewcheck.js): the crew's housekeeping, asked for. ITS WAY IN is one
+   tonal button at the foot of the crew screen, after the sites, the width of the column and no
+   wider than 520px where the screen has two (measured: nothing before it moves, and the page
+   is 68px taller - 72 with «תצוגה גדולה»); hidden with no men, and an author's `display` beats
+   the browser's rule for [hidden], so the row says it again. THE DIALOG is the day check's
+   look, class for class - the same kind of thing gets the same look, and those sizes are
+   already restated - and only what it adds is here: the quiet note (the too-few line first in
+   the list, and the archive switch's sentence under the idle men) and the mark a row it
+   lands on wears for a moment, an outline in the accent and no animation. No colour of its
+   own, and no site's. */
+.crewcheck-row { display: flex; margin: 20px 0 4px; }
+.crewcheck-row[hidden] { display: none; }
+.crewcheck-entry { flex: 1 1 auto; max-width: 520px; min-height: 48px; font-size: 16px; font-weight: 600; }
+#crewCheckModal .modal-content { padding-bottom: 0; }
+#crewCheckModal .modal-content > h3 { line-height: 1.3; margin: 0 0 4px; overflow-wrap: anywhere; }
+.crewcheck-note { margin: 8px 0 0; color: var(--ink-2); font-size: 14px; line-height: 1.45; }
+.crewcheck-here { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
 /* THE REPORT OF A PERIOD: the summary's dialog over again - the same tier, for the same
    reason, the same field and the same buttons - with the four ranges above the field,
    two to a row so that each is a finger tall and wide on the 375px phone. The chosen one
