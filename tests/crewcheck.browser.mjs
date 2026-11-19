@@ -78,10 +78,10 @@ const CREW = [
     ['w_12', 'דוגמה חדשה', 400, 0, '0520000112'],               // no day of work at all
     ['w_13', 'דוגמה 13', 420, 0, '0520000113'], ['w_14', 'דוגמה 14', 430, 0, '0520000114'],
     ['w_15', 'דוגמה 15', 440, 0, '0520000115'], ['w_16', 'דוגמה 16', 450, 0, '0520000116'],
-    ['w_17', 'דוגמה 17', 460, 0, '0520000117'], ['w_18', 'דוגמה 18', 470, 0, '0520000118'],
+    ['w_17', 'דוגמה 17', 460, 0, '0520000117'],
+    ['w_18', 'דוגמה 18', 470, 0, '0520000118'],                  // his days stamped at 470, then his rate cleared
     ['w_19', HOSTILE, 0, 0, '0520000119'],                       // a name written as markup, with no rate
-    ['w_20', 'דוגמה כבויה', 0, 0, '1234', false],                // switched off: on no line
-    ['w_21', 'דוגמה שכר שנמחק', 400, 0, '0520000121']            // his days stamped at 400, then his rate cleared
+    ['w_20', 'דוגמה כבויה', 0, 0, '1234', false]                 // switched off: on no line
 ];
 const SITES = [['p_1', 'אתר צפון'], ['p_2', 'אתר דרום'], ['p_3', 'אתר ישן'], ['p_4', 'אתר חדש']];
 
@@ -90,15 +90,17 @@ function seedInPage([crew, sites, days]) {
     S.workers = crew.map(([id, name, dailyRate, hourlyRate, phone, active]) =>
         ({ id, name, active: active !== false, dailyRate, hourlyRate, phone, idNumber: '' }));
     S.places = sites.map(([id, name]) => ({ id, name, active: true }));
-    const working = ['w_01', 'w_02', 'w_03', 'w_04', 'w_05', 'w_06', 'w_07', 'w_09', 'w_10', 'w_13', 'w_14', 'w_15', 'w_16', 'w_17', 'w_18', 'w_19', 'w_21'];
+    const working = ['w_01', 'w_02', 'w_03', 'w_04', 'w_05', 'w_06', 'w_07', 'w_09', 'w_10', 'w_13', 'w_14', 'w_15', 'w_16', 'w_17', 'w_18', 'w_19'];
     days.forEach((date, at) => {
         working.forEach((id, i) => assignPlace(S, date, id, 'actual', i % 2 ? 'p_2' : 'p_1'));
         if (at < 10) assignPlace(S, date, 'w_08', 'actual', 'p_1');
         if (at < 6) assignPlace(S, date, 'w_20', 'actual', 'p_3');
         if (at >= days.length - 3) assignPlace(S, date, 'w_11', 'actual', 'p_2');
     });
-    // Cleared in the form after his days were stamped: the sheet still prices them at 400.
-    S.workers.find(w => w.id === 'w_21').dailyRate = 0;
+    // Cleared in the form after his days were stamped: the sheet still prices them at 470. An
+    // existing man and not one more: the crew screen keeps the rows the slow-tap trials find
+    // their switches on (a man added at the end moved them under the top bar at full scroll).
+    S.workers.find(w => w.id === 'w_18').dailyRate = 0;
     State.save();
     State.date = todayStr();
     showView('roster');
@@ -327,19 +329,19 @@ const switchesBefore = await switches();
     const read = await reading(page);
     same('its title, the line under it, the lead and its one button',
         [read.title, read.context, read.lead, read.close],
-        ['בדיקת הצוות', 'יום חמישי 19/11/2026 · עובדים פעילים: 20 · אתרים פעילים: 4',
+        ['בדיקת הצוות', 'יום חמישי 19/11/2026 · עובדים פעילים: 19 · אתרים פעילים: 4',
             'הבדיקה רק מראה מה כדאי לבדוק. היא לא משנה ולא שומרת דבר.', 'סגור']);
     same('the list, line by line, is the flat list drawn', read.list, await expected(page));
     same('every kind, in the order the contract gives them - «בלי שכר יומי» twice, as what the men\'s days carry tells them apart',
         read.list.flatMap(group => (group.findings || []).map(f => f.kind)),
         ['noRate', 'noRate', 'badPhone', 'sharedPhone', 'sameName', 'idle', 'idleSites', 'otherPhone', 'noPhone', 'zeroStamped', 'never', 'neverSites']);
-    same('«בלי שכר יומי»: the men none of whose days is priced, then the man whose days at 400 still are - told of the days from now on',
+    same('«בלי שכר יומי»: the men none of whose days is priced, then the man whose days at 470 still are - told of the days from now on',
         read.list[0].findings.filter(f => f.kind === 'noRate').map(f => [f.say, f.chips.map(c => c[0])]),
         [['בלי שכר יומי - ימי העבודה שלהם לא יחושבו בשכר:', ['דוגמה בלי שכר', 'דוגמה לפי שעה', HOSTILE]],
-            ['בלי שכר יומי - ימי עבודה שיירשמו לו מעכשיו לא יחושבו בשכר:', ['דוגמה שכר שנמחק']]]);
+            ['בלי שכר יומי - ימי עבודה שיירשמו לו מעכשיו לא יחושבו בשכר:', ['דוגמה 18']]]);
     same('and the pay sheet prices his days at their stamp all the same', await page.evaluate(() => {
-        const row = payrollReport(State.schedule, '2026-11-01', '2026-11-19').find(r => r.workerId === 'w_21');
-        return row.amount > 0 && row.amount % 400 === 0;
+        const row = payrollReport(State.schedule, '2026-11-01', '2026-11-19').find(r => r.workerId === 'w_18');
+        return row.amount > 0 && row.amount % 470 === 0;
     }), true);
     same('the idle man and his note, as the dialog says them', read.list[0].findings.find(f => f.kind === 'idle'),
         { kind: 'idle', say: 'לא עבד ב-25 ימי העבודה האחרונים (מאז 22/10), ועדיין פעיל:',
