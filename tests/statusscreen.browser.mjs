@@ -189,7 +189,10 @@ for (const [width, height] of PHONES) {
             // The reminder's line up (its own function), so the close row is on the dialog too.
             await page.evaluate(() => closeReminderShow(4));
             await openRead(page);
-            given(`${label}: the close row is on it`, await page.evaluate(() => Boolean(document.querySelector('#statusBody .status-money-close'))));
+            check(`${label}: the reminder's line up, the close row is on the dialog, its own sentence`, await page.evaluate(() => {
+                const row = document.querySelector('#statusBody .status-money-close');
+                return Boolean(row) && row.querySelector('p').textContent === CLOSE_REMINDER_TEXT.line(4);
+            }));
             await floors(page, label, large, width);
             if (SHOTS && ((width === 440 && scheme === 'dark' && !large) || (width === 320 && large))) {
                 await page.screenshot({ path: join(SHOTS, `status-${width}-${scheme}${large ? '-large' : ''}.jpg`), type: 'jpeg', quality: 80 });
