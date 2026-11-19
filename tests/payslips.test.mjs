@@ -860,7 +860,12 @@ const mark = (device, id, which) => device.onRow(id, which, 'row => payslipsMark
     same('holding only when, and a fingerprint - no name, no number, no figure, no text',
         [Object.keys(kept.periods['2026-11-06~2026-11-12'].opened), Object.keys(kept.periods['2026-11-06~2026-11-12'].opened.w_01).sort()],
         [['w_01'], ['at', 'sig']]);
-    check('nothing a man is paid is in it', !/800|אחמד|97252/.test(device.raw(KEY)), device.raw(KEY));
+    // Asked of the key with its clock readings taken out. An `at` is milliseconds since 1970,
+    // and thirteen digits of a clock contain "800" or "97252" on some runs and not on others
+    // (1795099725257 did, in the v205 gate): what the check means is that no figure, name or
+    // number was KEPT, and the line above already pins that `at` and `sig` are all a mark holds.
+    const keptWithoutClock = device.raw(KEY).replace(/"at":\d+/g, '"at":0');
+    check('nothing a man is paid is in it', !/800|אחמד|97252/.test(keptWithoutClock), device.raw(KEY));
 
     const again = reopen(device);
     same('after a reopen the mark is still there', stateOf(again, 'w_01'), 'opened');
