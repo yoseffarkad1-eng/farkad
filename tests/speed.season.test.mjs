@@ -13,6 +13,12 @@
 //                   the week before their last finished one and did not come that week
 //
 // What it holds (the contract's numbers, features/speed/contract.md):
+//    1, 3. THE MEDIUM SEASON'S v204 SIDE, moved here from tests/speed.test.mjs by the contract's
+//       own rule (that suite ran 11.2 minutes against tests/reports.speed.test.mjs's 2.9 right
+//       after it): every way in on both medium records under three readings of the gate, cold,
+//       again and the list again, against v204; «איפוס מקדמות»'s step 3 after a real write on
+//       both; and after every kind of write, every way in against v204's files on the same
+//       record (tests/speed.test.mjs holds the same scenario against the same way drawn afresh).
 //    2. the season records against v204 (6ab193d's three files out of Git, every other file
 //       the same bytes): season-closed every way in; season-open «דוחות» once, every man's
 //       statement, the cards, days and closing boxes of two weekly and two fortnightly men
@@ -30,8 +36,8 @@
 //       disk, interleaved v204 / this, the median of three each, printed side by side.
 
 import { suite, check, same, given, report } from './runner.mjs';
-import { TODAY, AT, SHUT, OPEN, filesOf, seasonDisk, RANGE_NAMES, PAGE_WAYS, MAN_WAYS, BOOK_WAYS, BOOK_MAN_WAYS,
-    SEVEN, phone, counted, realCalls, twice, waysOf, outcome } from './speed.seed.mjs';
+import { TODAY, AT, SHUT, OPEN, filesOf, seasonDisk, mediumDisk, RANGE_NAMES, PAGE_WAYS, MAN_WAYS, BOOK_WAYS, BOOK_MAN_WAYS,
+    SEVEN, phone, counted, realCalls, twice, waysOf, outcome, compareAll, writesScenario, resetStep } from './speed.seed.mjs';
 import { loadavg } from 'node:os';
 
 process.env.TZ = 'Asia/Jerusalem';
@@ -41,6 +47,43 @@ const OLD = filesOf('base');
 const j = value => JSON.stringify(value);
 const ms = value => `${Math.round(value)}`;
 const load = () => loadavg().map(value => value.toFixed(1)).join(' ');
+
+// ---------------------------------------------------------------- 1, 3. the medium season against v204
+{
+    suite('1. the medium season: every way in is v204\'s bytes - cold, again, and the whole list again');
+    const tally = { records: 0, readings: 0, compared: 0, wrong: [], threw: [], dirty: [], writes: 0, diskMoved: [], kept: 0, states: {},
+        flat: { sheets: 0, rows: 0, bad: [] } };
+    const READINGS = [['the gates shut', SHUT, false], ['the gates open', OPEN, false], ['the gates open, nobody approved', OPEN, true]];
+    const MEDIUM = { without: mediumDisk(), with: mediumDisk({ closes: true }) };
+    for (const [name, record] of [['the medium season', MEDIUM.without], ['the medium season, closed in order', MEDIUM.with]]) {
+        for (const [reading, flags, unapproved] of READINGS) {
+            const old = phone(record.disk, OLD, { flags, unapproved });
+            const now = phone(record.disk, NOW, { flags, unapproved });
+            compareAll(`${name}, ${reading}`, old, now, waysOf(now, record.men), tally);
+            tally.readings += 1;
+        }
+    }
+    check(`both medium records x 3 readings, ${tally.compared} readings of a screen: every one v204's bytes`, tally.wrong.length === 0,
+        tally.wrong.slice(0, 6).join(' | '));
+    same('every way in ended as v204\'s did, and none of v204\'s threw', tally.threw, []);
+    same('5. after every way in, every reader is the one it was and no reading is left open', tally.dirty, []);
+    same('10. not one write at any door, and the disk byte for byte', [tally.writes, tally.diskMoved], [0, []]);
+    same('20. every row of every pay sheet flat', tally.flat.bad, []);
+
+    suite('1. the medium season: «איפוס מקדמות»\'s step 3, the board read after a real write, is v204\'s');
+    for (const [name, record] of [['the medium season', MEDIUM.without], ['the medium season, closed in order', MEDIUM.with]]) {
+        const old = resetStep(record, OLD);
+        const now = resetStep(record, NOW);
+        check(`${name}: v204's reset wrote something (${old.done} of ${old.men} men)`, old.men > 0 && old.done > 0, j(old).slice(0, 200));
+        same(`${name}: the result and the names it says still owe are v204's`, [now.done, now.failure, now.result], [old.done, old.failure, old.result]);
+        same(`${name}: 10. reading it writes nothing, and 12. asks the gate nothing on an approved record`, [now.writes, now.questions, now.plans], [0, 0, 0]);
+    }
+
+    suite('3. the medium season, after every kind of write: every way in is v204\'s');
+    const out = await writesScenario(MEDIUM.with, { afresh: false, v204: true }, given);
+    same(`every way in, after each of ${out.steps} kinds of write: v204's files on the same record`, out.wrongs, []);
+    console.log(`        (the seven, called by the first reading after each: ${out.realAfter.join(', ')}; load ${load()})`);
+}
 
 // ---------------------------------------------------------------- the seasons
 const SEASON = {};

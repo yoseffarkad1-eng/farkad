@@ -42,7 +42,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeDevice, loadOrder } from './harness.mjs';
+import { makeDevice, makeCloud, settle, settleUntil, loadOrder } from './harness.mjs';
 import { makeDom } from './moneydom.mjs';
 
 process.env.TZ = 'Asia/Jerusalem';
@@ -575,4 +575,191 @@ export function compareAll(label, oldDevice, nowDevice, ways, tally) {
     tally.flat.sheets += flat.sheets;
     tally.flat.rows += flat.rows;
     flat.bad.forEach(one => tally.flat.bad.push(`${label}: ${one}`));
+}
+
+// ---------------------------------------------------------------- the writes (criterion 3)
+//
+// One phone on `record` (the medium season), connected to a cloud with a second phone beside
+// it. After each kind of write, every way in as this build reads it - the first reading after
+// the write counted - and compared, as `columns` asks, with (afresh) the same way drawn afresh
+// on the same phone - a reading marked open before it, so every reader runs with nothing
+// shared, the gate answered once for the record's one text - and (v204) v204's files on the
+// same record. tests/speed.test.mjs asks for the first, tests/speed.season.test.mjs for the
+// second (the medium season's v204 side lives there: the contract's rule for a Node suite
+// that runs longer than tests/reports.speed.test.mjs). `given` is the runner's.
+export const FRESH = (device, men) => waysOf(device, men, { ranges: [RANGE_NAMES[0]], manRanges: [RANGE_NAMES[0]], someMen: ['w_1', 'w_2'] });
+// (Inside one afresh way in the record cannot change, so its gate is asked once for it: the
+// answer of the record's one text.)
+export const AFRESH = body => `const was = REPORT_ONCE; const gate = carryReportingEnabled; const record = State.schedule; let answer;
+    carryReportingEnabled = function (schedule) { if (schedule !== record || arguments.length !== 1) return gate.apply(this, arguments);
+        if (answer === undefined) answer = gate(schedule); return answer; };
+    REPORT_ONCE = { schedule: State.schedule };
+    try { return (function () {\n${body}\n})(); } finally { REPORT_ONCE = was; carryReportingEnabled = gate; }`;
+export async function writesScenario(record, columns, given) {
+    const cloud = makeCloud();
+    const A = phone(record.disk, filesOf('now'));
+    A.Sync.pushDelayMs = 5;
+    A.run('weeklyCloseShared = () => true; 1');
+    A.Sync.connect(cloud.adapter);
+    given('the phone is connected and synced', await settleUntil(() => A.Sync.status === 'synced' && cloud.doc, 8000), A.Sync.status);
+    const B = makeDevice({ deviceId: 'd_second', flags: OPEN });
+    B.setToday(TODAY);
+    B.Sync.pushDelayMs = 5;
+    B.Sync.connect(cloud.adapter);
+    given('a second phone holds the same record', await settleUntil(() => B.State.schedule.workers.length === 15, 8000));
+    const quiet = async () => { await settleUntil(() => A.Sync.pendingCount() === 0 && B.Sync.pendingCount() === 0, 8000); await settle(20); };
+
+    // In-memory states the next phone must be given too: what a disk does not carry.
+    let memory = [];
+    const mirror = () => {
+        const old = phone(A.dump(), filesOf('base'), { today: A.run('todayStr()') });
+        memory.forEach(code => old.run(code));
+        return old;
+    };
+    const wrongs = [];
+    const realAfter = [];
+    const step = (name, expectWalks) => {
+        const old = mirror();
+        given(`${name}: the v204 phone holds the same record`, JSON.stringify(old.State.schedule) === JSON.stringify(A.State.schedule));
+        // The list is made on the v204 phone (the same record): making it asks for the closes
+        // inside a reading, and on this phone that reading would be the first after the change.
+        const ways = FRESH(old, record.men);
+        // The first reading after the change that asks the seven anything (works out a key):
+        // a reading of the old way - the gate shut by the change - asks none, and so is handed
+        // nothing kept either.
+        let first = null;
+        ways.forEach(([way, body]) => {
+            const read = counted(A, body);
+            if (first === null && read.counted.keys > 0) first = read.counted;
+            const mine = read.error === null ? `ok:${read.out}` : `threw:${read.error}`;
+            if (columns.afresh && mine !== outcome(A, AFRESH(body))) wrongs.push(`${name}: ${way}: not as afresh`);
+            if (columns.v204 && mine !== outcome(old, body)) wrongs.push(`${name}: ${way}: not v204's`);
+        });
+        const walks = first === null ? 0 : realCalls(first, SEVEN).length;
+        realAfter.push(`${name} ${first === null ? '(none asked)' : walks}`);
+        if (first === null && expectWalks !== null) wrongs.push(`${name}: no reading after it asked the seven anything`);
+        if (expectWalks === true && walks < 1) wrongs.push(`${name}: the first reading after it asked the model nothing - an answer kept across it`);
+        if (expectWalks === false && walks !== 0) wrongs.push(`${name}: the first reading after it called the seven ${walks} times - nothing was kept across it`);
+    };
+    const S = () => A.State.schedule;
+    const W = id => S().workers.filter(one => one.id === id)[0];
+    step('before anything', true);
+    step('nothing changed', false);
+    given('a day typed', A.State.commit(A.call('assignPlace', S(), TODAY, 'w_3', 'actual', 'p_y', 'double')) !== false);
+    step('a day typed', true);
+    given('an absence', A.State.commit(A.call('markAbsent', S(), addDays(TODAY, -1), 'w_4', 'actual')) !== false);
+    step('an absence', true);
+    given('a Rima count and a יוסף גבס count', A.State.commit(A.call('setRimaCount', S(), TODAY, 'p_x', 3)) !== false
+        && A.State.commit(A.call('setYosefGevesCount', S(), TODAY, 'p_y', 2)) !== false);
+    step('the two counts', true);
+    given('an advance, as the form writes it', A.State.commitMany(A.call('recordNewAdvance', S(), 'w_5', TODAY, 700, '', `${TODAY}T10:00:00.000Z`, 'd_office', 'cash')) !== false);
+    step('an advance', true);
+    const mine = A.call('advancesFor', S(), 'w_6', '0000-01-01', '9999-12-31');
+    const last = mine[mine.length - 1];
+    given('a repayment', A.run(`saveFinancialAction(() => recordAdvanceRepaid(State.schedule, ${j(last.id)}, 100, ${j(TODAY)}, '', '${TODAY}T11:00:00.000Z', 'd_office', 'cash'))`) === true);
+    step('a repayment', true);
+    const entry = Object.values(S().ledger.advances).filter(one => one.kind === 'repaid' && one.at === `${TODAY}T11:00:00.000Z`)[0];
+    given('a reversal of it', A.run(`saveFinancialAction(() => recordEventReversed(State.schedule, ${j(entry.id)}, 100, ${j(TODAY)}, 'נרשם בטעות', '${TODAY}T11:05:00.000Z', 'd_office'))`) === true);
+    step('a reversal', true);
+    // His first period - he has never been closed, so in order it is the one that may be.
+    const open = A.call('periodRangeFor', W('w_8'), A.call('advancesFor', S(), 'w_8', '0000-01-01', '9999-12-31')[0].date);
+    const closable = A.call('planPeriodClosure', S(), 'w_8', open.from, open.to, `${TODAY}T11:10:00.000Z`);
+    given('a close', closable.canClose && A.run(`speedClose(${j([['w_8', open.from, open.to, closable.deducted]])}, '${TODAY}T11:10:00.000Z')`) === true, j(closable.reasons));
+    step('a close', true);
+    const pass = JSON.parse(A.run(`(function () { const read = weeklyCloseRead(State.schedule, todayStr(), new Date().toISOString());
+        const picks = read.men.filter(man => !man.held).slice(0, 2).map(man => ({ man, x: man.max }));
+        const result = weeklyCloseWrite(picks); return JSON.stringify({ picks: picks.length, saved: result.saved, failure: result.failure, moved: result.moved }); })()`));
+    given('«סגירת שבוע»\'s pass', pass.picks > 0 && pass.saved === true, j(pass));
+    step('«סגירת שבוע»\'s pass', true);
+    const reset = JSON.parse(A.run(`(function () { ADVANCE_RESET = { step: 2, read: advanceResetRead(State.schedule, todayStr()), skip: {}, moved: [],
+        stale: false, key: null, saving: false, error: null, result: null };
+        const chosen = advanceResetChosen().slice(0, 1); const result = advanceResetWrite(chosen);
+        return JSON.stringify({ chosen: chosen.length, done: result.done.length, failure: result.failure }); })()`));
+    given('«איפוס מקדמות»', reset.chosen === 1 && reset.done === 1, j(reset));
+    step('«איפוס מקדמות»', true);
+    given('a rate and a pay cycle changed, the way the roster writes them', (() => {
+        W('w_9').dailyRate = 720;
+        // The roster's own history, a boundary on the Friday his current period opens.
+        const from = A.call('periodRangeFor', W('w_10'), TODAY).from;
+        W('w_10').payCycles = A.run(`payCyclesWith('w_10', ${j(from)}, 'weekly')`);
+        return A.State.commitRoster() !== false && A.call('parsePayCycles', W('w_10').payCycles) !== null;
+    })());
+    step('a rate and a cycle', true);
+    given('a man archived', (() => { W('w_12').active = false; return A.State.commitRoster() !== false; })());
+    step('a man archived', true);
+    await quiet();
+    memory = ['var SPEED_APPROVAL = State.schedule.ledger.migrations; State.schedule.ledger.migrations = {}; 1'];
+    A.run(memory[0]);
+    step('the approval removed in memory', true);
+    A.run('State.schedule.ledger.migrations = SPEED_APPROVAL; 1');
+    memory = [];
+    step('the approval put back', true);
+    const tick = A.run('Store.tick');
+    A.run('var SPEED_RATE = State.schedule.workers.filter(one => one.id === "w_4")[0].dailyRate; 1');
+    memory = ['State.schedule.workers.filter(one => one.id === "w_4")[0].dailyRate = 0; 1'];
+    A.run(memory[0]);
+    given('a change in memory no write carried: the tick did not move', A.run('Store.tick') === tick);
+    step('a change in memory', true);
+    A.run('State.schedule.workers.filter(one => one.id === "w_4")[0].dailyRate = SPEED_RATE; 1');
+    memory = [];
+    step('the change taken back', true);
+    await quiet();
+    B.State.commit(B.call('assignPlace', B.State.schedule, TODAY, 'w_11', 'actual', 'p_y', 'extra', 2));
+    given('a snapshot from the second phone adopted', await settleUntil(() => JSON.stringify((S().days[TODAY] || {}).actual || {}).includes('"w_11"')
+        && JSON.stringify(((S().days[TODAY] || {}).actual || {}).w_11).includes('extra'), 8000));
+    await quiet();
+    step('a snapshot adopted', true);
+    A.State.date = TODAY;
+    A.call('editWithUndo', 'w_13', 'נרשם', (date, layer) => A.call('assignPlace', A.State.schedule, date, 'w_13', layer, 'p_x', 'double', 0));
+    step('a day placed with ↶ ready', true);
+    A.call('runUndo');
+    step('↶', true);
+    A.setToday(addDays(TODAY, 1));
+    step('the day turned', true);
+    A.setToday(TODAY);
+    step('and back', true);
+    await quiet();
+    step('the sends settled', null);
+    const tickNow = A.run('Store.tick');
+    A.run('Store.set("farkad:prov:sent:advance:speed_probe", "1"); 1');
+    given('a provenance key, as a send leaves one: the tick moved, the record did not', A.run('Store.tick') !== tickNow);
+    step('a write that moves the tick and not the record', false);
+    const loaded = S();
+    A.State.load();
+    given('the record loaded again: a new schedule object, the same text', S() !== loaded && JSON.stringify(S()) === JSON.stringify(loaded));
+    step('a new schedule object with the same text', true);
+    // LAST, because a phone whose disk refused a commit goes to 'error' at the next snapshot it
+    // is handed (the sync layer's own answer to a full disk, measured; not this track's).
+    const before = S();
+    A.setQuota(() => true);
+    const refused = A.State.commit(A.call('assignPlace', S(), TODAY, 'w_7', 'actual', 'p_x', 'double'));
+    A.setQuota(null);
+    given('a commit the disk refused, rolled back onto a new schedule object', refused === false && S() !== before
+        && !JSON.stringify(S().days[TODAY] || {}).includes('"w_7":{"entries":[{"placeId":"p_x","rate":"double"'), String(refused));
+    step('a refused commit rolled back', true);
+    A.Sync.disconnect && A.Sync.disconnect();
+    B.Sync.disconnect && B.Sync.disconnect();
+    return { wrongs, realAfter, steps: realAfter.length };
+}
+
+// ---------------------------------------------------------------- «איפוס מקדמות»'s step 3
+//
+// A real write of «איפוס מקדמות» on a phone of `files` (the clock frozen, the phone taken as
+// synced), and what its result step says afterwards - the board advanceResetAfter reads (v204:
+// owesRead bare; this build: owesReadNow, the one line of js/ui/advancereset.js) - with what
+// that reading itself wrote and asked of the gate. Both builds write the same record, so the
+// two results are compared whole.
+export function resetStep(record, files) {
+    const device = phone(record.disk, files, { today: record.today || TODAY, frozen: `${record.today || TODAY}T10:00:00.000Z` });
+    device.run('weeklyCloseShared = () => true; 1');
+    return JSON.parse(device.way(`ADVANCE_RESET = { step: 2, read: advanceResetRead(State.schedule, todayStr()), skip: {}, moved: [], stale: false,
+        key: null, saving: false, error: null, result: null };
+    const chosen = advanceResetChosen();
+    const result = advanceResetWrite(chosen);
+    SPEED_WRITES = 0;
+    SPEED_COUNT = { calls: [], events: [], keys: 0, questions: 0, plans: 0 };
+    advanceResetAfter(result, chosen);
+    const after = SPEED_COUNT; SPEED_COUNT = null;
+    return JSON.stringify({ men: chosen.length, done: result.done.length, failure: result.failure, result: ADVANCE_RESET.result,
+        writes: SPEED_WRITES, questions: after.questions, plans: after.plans });`));
 }

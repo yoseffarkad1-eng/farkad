@@ -201,7 +201,7 @@ async function both(act, done, options = {}) {
         const said = await page.evaluate(() => ({ reads: window.speedReads, kept: CLOSE_REMINDER_KEPT.count,
             line: Boolean(document.getElementById('closeReminderOpen') && document.getElementById('closeReminderOpen').offsetParent) }));
         same(`17. ${tree}: the reminder read the record exactly once after the write`, said.reads, 1);
-        const act = said.line ? "document.getElementById('closeReminderOpen').click();" : 'openWeeklyClose();';
+        const act = `${SNAPSHOT} ${said.line ? "document.getElementById('closeReminderOpen').click();" : 'openWeeklyClose();'}`;
         opened[tree] = await measure(page, act, 'typeof WEEKLY_CLOSE !== "undefined" && WEEKLY_CLOSE && WEEKLY_CLOSE.read');
         opened[`${tree}Line`] = said.line;
         await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
@@ -217,9 +217,9 @@ async function both(act, done, options = {}) {
     await fifth.nowPage.context.close();
 
     // 7, 8. the closing box of a weekly man; the card of a fortnightly one.
-    const seventh = await both("openWorkerSettlement('w_01');", 'true');
+    const seventh = await both(`${SNAPSHOT} openWorkerSettlement('w_01');`, 'true');
     row('7. the closing box (a weekly man)', seventh.v204, seventh.now, seventh.v204.longest / 2, '<= 1/2 of v204\'s');
-    const eighth = await both("openWorkerCard('w_17');", 'true');
+    const eighth = await both(`${SNAPSHOT} openWorkerCard('w_17');`, 'true');
     row('8. «כרטיס עובד» (a fortnightly man)', eighth.v204, eighth.now, eighth.v204.longest / 2, '<= 1/2 of v204\'s');
 
     // 9. the payslips: v204 takes minutes for them in Node and is not timed.
