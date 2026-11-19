@@ -772,6 +772,121 @@ input, select, textarea { border-radius: 12px; }
     .week-cell .cell-double::after { position: static; inset: auto; margin: 0; flex: none; }
     .week-cell .cell-extra::after { position: static; inset: auto; display: block; flex: none; }
 }
+/* ---- «לוח חודשי» (js/ui/monthboard.js): THE CREW'S MONTH ON ONE BOARD ------------------
+   A third mode of the week tab, drawn in place of the week. Every selector here begins with
+   the board (or is its door's), so the week grid is not touched by one rule of it.
+
+   THE DOOR is the week grid's corner cell, which had the room: the header row is 50.4px with
+   3px of the cell's padding above and below, so a 44px button stands in it and the row is no
+   taller (62.8px and 52 with «תצוגה גדולה»). It reaches 2px into that padding at each edge -
+   measured, a 44px block plus the padding made the row 51px, 0.6 taller than the days beside
+   it - and is drawn 44px all the same. At 320 its two words take two lines («לוח» /
+   «חודשי»), each whole. The corner's own words stay in the document for paper and are not
+   drawn beside it.
+
+   THE CELL IS THE WEEK'S CELL. The board's cells carry the week cell's classes, so on a phone
+   the block above and css/large.css's copy of it draw them exactly as they draw the week's;
+   the rules below make the same look hold on every width - a month of site names written out
+   in thirty columns is no board - and the legend under the grid names what the letters
+   stand for. The letters are the board's: two of them where two of its sites share one.
+   A Saturday that is drawn is not faded: it is a day somebody worked.
+
+   THE GRID is the week's pitch: a day 48px both ways, the names in the week's own column,
+   pinned to the edge while the days move under them; the grid scrolls in its box (the
+   week's box, css/app.css) and the page never does. On the 320px phone that is five days on
+   the glass, two or three with «תצוגה גדולה» - a scroller, on purpose: paper and the picture
+   are the whole month. */
+#weekView .week-table .corner .month-board-door {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 44px;
+    min-height: 44px;
+    margin: -2px 0;
+    padding: 4px 3px;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: normal;
+}
+#weekView .week-table .corner .month-board-door + .name-clip { display: none; }
+.month-board { --month-board-name-w: var(--week-name-w, 160px); }
+.month-board-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.month-board-back { flex: 1 1 100%; font-size: 16px; white-space: normal; }
+.month-board-title { flex: 1 1 100%; margin: 2px 0; color: var(--ink); font-size: 18px; font-weight: 800; line-height: 1.3; text-align: center; overflow-wrap: anywhere; }
+/* The title takes the focus when the board opens, so a reader is told where he has arrived;
+   it is not a control, and it is ringed only for a keyboard, as the panels' headings are. */
+.month-board-title:focus { outline: none; }
+.month-board-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.month-board-steps, .month-board-out { display: flex; flex: 1 1 100%; gap: 8px; }
+.month-board-steps > button, .month-board-out > button { flex: 1 1 0; min-width: 0; justify-content: center; font-size: 16px; white-space: normal; }
+.month-board-filter { display: flex; flex: 1 1 100%; align-items: center; gap: 10px; color: var(--ink); font-size: 16px; font-weight: 700; }
+.month-board-filter select { flex: 1 1 auto; min-width: 0; min-height: 44px; }
+.month-board-table { border-collapse: collapse; width: max-content; min-width: 100%; }
+.month-board-table th, .month-board-table td { border: 1px solid var(--line-soft); padding: 2px 1px; text-align: center; vertical-align: middle; }
+.month-board-table thead th { background: var(--surface); color: var(--ink-2); }
+.month-board-corner, .month-board-name, .month-board-foot-label {
+    position: sticky;
+    inset-inline-start: 0;
+    z-index: 2;
+    width: var(--month-board-name-w);
+    min-width: var(--month-board-name-w);
+    max-width: var(--month-board-name-w);
+    text-align: start;
+}
+.month-board-table thead .month-board-corner { z-index: 3; padding: 4px 6px; font-size: 14px; font-weight: 600; line-height: 1.25; }
+.month-board-name { padding: 2px 4px; background: var(--paper); }
+.month-board-date { width: 48px; min-width: 48px; padding: 0; }
+.month-board-table thead .month-board-saturday { background: var(--surface-2); }
+.month-board-day { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; box-sizing: border-box; width: 100%; min-width: 44px; min-height: 48px; margin: 0; padding: 3px 0; border: 0; border-radius: 0; background: transparent; color: var(--ink-2); font-size: 14px; font-weight: 600; line-height: 1.15; }
+.month-board-dd { color: var(--ink); font-weight: 800; font-variant-numeric: tabular-nums; }
+.month-board-day[aria-current="date"] { box-shadow: inset 0 -3px 0 var(--accent); }
+.month-board-who { display: block; box-sizing: border-box; width: 100%; min-width: 44px; min-height: 44px; margin: 0; padding: 4px 2px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 14px; font-weight: 700; line-height: 1.2; text-align: start; white-space: normal; }
+.month-board-who-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: break-word; }
+.month-board-badge { display: inline-block; margin-top: 3px; font-size: 14px; font-weight: 600; }
+/* No size of its own: an absent man's cell is the dash alone, and a size here would beat the
+   `font-size: 0` that hides its word (v191's review found the week's «—נעדר» that way). */
+.month-board td.week-cell { width: 48px; min-width: 48px; height: 48px; padding: 2px 1px; }
+.month-board .col-rest { opacity: 1; }
+.month-board .week-cell .cell-line {
+    display: flex;
+    position: relative;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    box-sizing: border-box;
+    width: fit-content;
+    min-width: 20px;
+    max-width: 100%;
+    height: 20px;
+    min-height: 0;
+    padding: 0 3px;
+    margin: 1px auto;
+    border-radius: 6px;
+}
+.month-board .week-cell .cell-line .site-name,
+.month-board .week-cell .cell-line .tag-rate { display: none; }
+.month-board .week-cell .cell-line[data-initial]::before { content: attr(data-initial); color: #fff; font-size: 14px; font-weight: 800; line-height: 1; }
+.month-board .week-cell .cell-line .site-mark { position: static; order: -1; color: #fff; opacity: 1; font-size: 8px; line-height: 1; text-shadow: 0 0 2px rgba(0, 0, 0, .95); }
+.month-board .week-cell .cell-double::after { content: ''; position: static; inset: auto; flex: none; width: 6px; height: 6px; margin: 0; border-radius: 50%; background: #fff; }
+.month-board .week-cell .cell-extra::after { content: '+'; position: static; inset: auto; display: block; flex: none; color: #fff; font-size: 12px; font-weight: 800; line-height: 1; }
+.month-board .cell-absent { font-size: 0; }
+.month-board .cell-absent::before { content: '\2014'; color: var(--ink-3); font-size: 14px; }
+.month-board-total-head { min-width: 56px; padding: 4px 6px; font-size: 14px; font-weight: 700; line-height: 1.25; }
+.month-board-total { min-width: 56px; padding: 2px 6px; background: var(--surface); color: var(--ink); font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.month-board-table tfoot td { background: var(--surface-2); }
+.month-board-table tfoot tr:first-child td { border-top: 2px solid var(--line); }
+.month-board-foot-label { padding: 4px 6px; color: var(--ink); font-size: 14px; font-weight: 700; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
+.month-board-count { color: var(--ink); font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.month-board-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.month-board-key { max-width: 100%; height: auto; min-height: 30px; padding-block: 4px; white-space: normal; }
+.month-board-key .site-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.month-board-key-letters { flex: none; padding: 2px 5px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .75); font-size: 14px; font-weight: 800; line-height: 1.2; }
+.month-board-marks { margin: 8px 0 0; color: var(--ink-3); font-size: 14px; line-height: 1.45; }
+.month-board-note { margin: 6px 0 0; color: var(--ink-2); font-size: 14px; line-height: 1.45; }
+.month-board-hint { margin: 8px 0 0; }
 /* «בדיקת היום» (js/ui/daycheck.js): what may have been forgotten on the day on screen.
    ITS WAY IN is one tonal button the width of the list, at the list's foot - under the two
    trays, above the dock; nothing on the header or the dock moved for it. THE DIALOG is one
