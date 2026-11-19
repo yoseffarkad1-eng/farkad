@@ -231,7 +231,7 @@ function yearSummaryFacts(year) {
 // the record as text - owesKey's own (js/ui/owes.js), compared and never hashed.
 function yearSummaryKey() {
     if (typeof owesKey === 'function') return owesKey(State.schedule, todayStr());
-    return [typeof Store === 'object' && Store ? Store.tick : 0, todayStr(), JSON.stringify(State.schedule)].join('|');
+    return `${todayStr()}|${JSON.stringify(State.schedule)}`;
 }
 
 // The reading of this moment for `year`: the kept one when the record has not moved since it
