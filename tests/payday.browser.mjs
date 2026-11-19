@@ -13,7 +13,8 @@
 //       it and 48px tall (52 with the mode); the board under it where it stood without the
 //       row (0px; up to 18px at 320 with the mode); «סגירת שבוע» still opens from it. THE
 //       CENSUS: opening the payslips from the desk writes exactly the bytes their own entry in
-//       «הפקת דוח» writes, and opening, reading and closing the desk writes nothing.
+//       «הפקת דוח» writes, and opening, reading and closing the desk writes nothing. Fix round 1:
+//       the first card's «לתשלום» on the glass as the desk opens; the open «לפי עובד» marked.
 //   B13 THE TAP paints «מחשב את החשבונות…» before any figure (in the next frame); the figures
 //       then arrive within 1,500 ms and are, as text, the band «דוחות» draws for each group on
 //       the same page state.
@@ -22,17 +23,22 @@
 //       tree), «סגירת שבוע» at full width.
 //   B15 EVERY DOOR, TAPPED, lands where it says; a dialog it opens is entered at its title;
 //       a door to a view runs a task after the desk shut and the keyboard is then where the
-//       target put it, never on a node of the shut desk (revision 2).
+//       target put it, never on a node of the shut desk (revision 2). Fix round 1: Thursday's
+//       «לסגירה» says the men check d names once, in d's look; «מקדמות» lands on its men.
 //   B16 Escape, the backdrop and «סגור» close the desk and give the keyboard back to its
 //       button; Tab stays inside; «לפי עובד» unfolds and folds with the keyboard; midEdit()
-//       is true while it is open and false once it is shut (revision 2).
+//       is true while it is open and false once it is shut (revision 2). Fix round 1: each
+//       «לפי עובד» named by its group; check a follows the sync line while the desk is open.
 //   B17 A COMMIT UNDER THE OPEN DESK: the placeholder over the figures at once, then the new
-//       figures once the draws have stopped; the dialog left where it was scrolled to.
+//       figures once the draws have stopped; the dialog left where it was scrolled to. Fix
+//       round 1: the placeholder on the glass at that position, the keyboard back on its control.
 //   B18 THE FLOORS of the desk on every phone, scheme and mode, folded and unfolded (the
 //       ruler of tests/screens.mjs): 14px, 4.5:1, 44px - and 18px, 500, 7:1, 52px with the
 //       mode; no two controls over each other, no words past a control, nothing cut, nothing
 //       out of reach, no sideways scroll; the title on the glass. And every font doubled at
-//       320 and 440: no sideways scroll, nothing off the side, and the last door reachable.
+//       320, 375 and 440, the mode off and on: no sideways scroll, nothing off the side, the
+//       last door reachable - and (fix round 1) every figure on one line, every label's words
+//       whole, each count with its word.
 //   B20 WHERE «סגירת שבוע» IS NOT DRAWN (revision 2): the writer gate shut (the test seam) and,
 //       in B12's pages, a record nobody approved (in memory) - «יום תשלום» alone at the
 //       board's full width, its words inside it, and the board's move MEASURED, printed, and
@@ -146,6 +152,67 @@ function deskRecord() {
     recordAdvanceRepaid(State.schedule, id, 400, '2026-11-10', '', '2026-11-10T08:05:00.000Z', 'd_b', 'cash');
     OWES_PAGE = null;
     render();
+}
+
+// EVERY FONT DOUBLED (tests/mobile.test.mjs's doubleEveryFontSize): every rule that sets a size
+// in px said again at twice it, behind the same media queries. Runs in the page; answers how
+// many rules it doubled.
+function doubleEveryFont() {
+    const out = [];
+    const walkRules = (rules, wrap) => {
+        for (const rule of rules) {
+            if (rule.type === 4 || rule.type === 12) {
+                const head = rule.type === 4 ? `@media ${rule.media.mediaText}` : `@supports ${rule.conditionText}`;
+                walkRules(rule.cssRules, said => wrap(`${head}{${said}}`));
+                continue;
+            }
+            if (rule.type !== 1 || !rule.style) continue;
+            const raw = rule.style.getPropertyValue('font-size');
+            if (!raw || !/^[\d.]+px$/.test(raw.trim())) continue;
+            wrap(`${rule.selectorText}{font-size:${parseFloat(raw) * 2}px !important;}`);
+        }
+    };
+    for (const sheet of document.styleSheets) {
+        let rules = null;
+        try { rules = sheet.cssRules; } catch (error) { rules = null; }
+        if (rules) walkRules(rules, said => out.push(said));
+    }
+    const style = document.createElement('style');
+    style.textContent = out.join('\n');
+    document.head.appendChild(style);
+    return out.length;
+}
+
+// A FIGURE IS ONE PIECE (fix round 1). Every figure of the desk - the cards' three and each man's
+// - read off its line boxes: on how many lines it is drawn. And every word of a figure's label,
+// and the count with its word under a card. Runs in the page.
+function splitFigures() {
+    const lines = range => new Set([...range.getClientRects()].filter(r => r.width > 0.5 && r.height > 0.5).map(r => Math.round(r.top))).size;
+    const whole = node => { const range = document.createRange(); range.selectNodeContents(node); return lines(range); };
+    const shown = node => node.getClientRects().length > 0;
+    const clean = text => text.replace(/[⁦-⁩‎‏]/g, '');
+    const figures = [...document.querySelectorAll('#paydayBody .payday-value')].filter(shown);
+    const words = [];
+    document.querySelectorAll('#paydayBody .payday-figure-label').forEach(label => {
+        const text = label.firstChild;
+        if (!text || !shown(label)) return;
+        const re = /\S+/g;
+        let m;
+        while ((m = re.exec(text.nodeValue))) {
+            const range = document.createRange();
+            range.setStart(text, m.index);
+            range.setEnd(text, m.index + m[0].length);
+            if (lines(range) > 1) words.push(m[0]);
+        }
+    });
+    const counts = [...document.querySelectorAll('#paydayBody .payday-count-n')].filter(shown);
+    return {
+        figures: figures.length,
+        broken: figures.filter(node => whole(node) > 1).map(node => clean(node.textContent)),
+        labels: words.map(clean),
+        counts: counts.length,
+        countsBroken: counts.filter(node => whole(node) > 1).map(node => clean(node.textContent))
+    };
 }
 
 // The ruler's floors, said once.
@@ -336,12 +403,31 @@ for (const [width, height] of PHONES) {
             // ---- the desk, read
             await openDesk(page);
             check(`${label}: the desk opens at its title, on the glass`, await titleOnGlass(page));
+            // Fix round 1: the dialog opens on the figure it is for. At 320 with the mode the lead
+            // above the cards took six lines and the first «לתשלום» stood under the glass's edge.
+            const pay = await page.evaluate(() => {
+                const value = document.querySelector('#paydayBody .payday-card .payday-figure-pay .payday-value').getBoundingClientRect();
+                const box = document.querySelector('#paydayModal .modal-content').getBoundingClientRect();
+                const actions = document.querySelector('#paydayModal .modal-actions').getBoundingClientRect();
+                return { top: Math.round(value.top), bottom: Math.round(value.bottom), from: Math.round(Math.max(box.top, 0)),
+                    to: Math.round(Math.min(box.bottom, window.innerHeight, actions.top)) };
+            });
+            check(`${label}: as it opens, the first card's «לתשלום» is on the glass`, pay.top >= pay.from && pay.bottom <= pay.to, JSON.stringify(pay));
             holdFloors(`${label}: the desk`, await measure(page, ['#paydayModal']), large ? LARGE : FLOOR, width);
             await page.evaluate(() => document.querySelectorAll('#paydayModal .payday-fold').forEach(node => node.click()));
             await page.waitForTimeout(150);
             same(`${label}: every «לפי עובד» unfolded`, await page.evaluate(() => [...document.querySelectorAll('#paydayModal .payday-fold')]
                 .map(node => node.getAttribute('aria-expanded') === 'true' && !document.getElementById(node.getAttribute('aria-controls')).hidden)),
             [true, true]);
+            // Fix round 1: open and shut were the same button to the eye.
+            same(`${label}: an unfolded «לפי עובד» is marked on the glass, and a folded one is not`, await page.evaluate(() => {
+                const fold = document.querySelector('#paydayModal .payday-fold');
+                const open = getComputedStyle(fold).boxShadow;
+                fold.click();
+                const shut = getComputedStyle(fold).boxShadow;
+                fold.click();
+                return [open !== 'none', shut];
+            }), [true, 'none']);
             holdFloors(`${label}: the desk, every man unfolded`, await measure(page, ['#paydayModal']), large ? LARGE : FLOOR, width);
             if (SHOTS && ((width === 440 && scheme === 'dark' && !large) || (width === 320 && large))) {
                 const name = `${width}x${height}-${scheme}${large ? '-large' : ''}`;
@@ -369,11 +455,36 @@ for (const [width, height] of PHONES) {
             await page.keyboard.press('Escape');
             check(`${label}: reading, unfolding and closing the desk wrote nothing`, (await disk(page)) === before);
 
+            // ---- Thursday 12/11 on the same record (fix round 1: the review's state the screens'
+            // walk cannot hold - a period ends on a Thursday only, and the walk is a Tuesday): the
+            // morning of payday, today typed for nobody - «היום, » on every card, check d naming the
+            // men, «לסגירה» one line for them. Its floors, on all of it.
+            await page.clock.setSystemTime(new Date(THURSDAY));
+            await page.evaluate(() => { OWES_KEPT = null; ADVANCE_WORKER = null; OWES_PAGE = null; render(); });
+            await page.waitForTimeout(150);
+            await openDesk(page);
+            same(`${label}: Thursday, today typed for nobody - «היום, » on every card, d, and «לסגירה» one line in d's look`, await page.evaluate(() => [
+                [...document.querySelectorAll('#paydayBody .payday-card-head')].every(node => node.textContent.indexOf('היום, ') === 0),
+                document.querySelectorAll('#paydayBody .payday-check-endsToday').length,
+                document.querySelectorAll('#paydayBody .payday-held-today').length,
+                document.querySelectorAll('#paydayBody .payday-held').length]), [true, 1, 1, 0]);
+            holdFloors(`${label}: the desk on Thursday, today not typed`, await measure(page, ['#paydayModal']), large ? LARGE : FLOOR, width);
+            await page.keyboard.press('Escape');
+            check(`${label}: and on Thursday too, nothing written`, (await disk(page)) === before);
+
             // ---- a record nobody approved, in memory: «סגירת שבוע» not drawn, the desk's button alone
             const unapproved = await page.evaluate(aloneRow, 'unapproved');
             given(`${label}: the record, its approval taken off in memory, is one nobody approved`, unapproved.gate === false && unapproved.writes === true);
             await holdAlone(`${label}, a record nobody approved`, page, unapproved, large);
             check(`${label}: and that wrote nothing either`, (await disk(page)) === before);
+            // Fix round 1: the desk itself on that record - the plain bands and «מקדמות»'s own
+            // sentence in place of «לסגירה» - to the floors.
+            await openDesk(page);
+            same(`${label}: on a record nobody approved the desk reads the old way - «מקדמות»'s sentence, no «לסגירה»`, await page.evaluate(() => [
+                document.querySelectorAll('#paydayBody .payday-gate').length, document.querySelectorAll('#paydayBody .payday-close').length]), [1, 0]);
+            holdFloors(`${label}: the desk on a record nobody approved`, await measure(page, ['#paydayModal']), large ? LARGE : FLOOR, width);
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(100);
             if (SHOTS && width === 440 && scheme === 'dark' && !large) {
                 await page.reload({ waitUntil: 'load' });
                 await page.waitForFunction(() => typeof State !== 'undefined' && typeof render === 'function');
@@ -465,6 +576,21 @@ for (const [width, height] of PHONES) {
     const doors = await page.evaluate(() => [...document.querySelectorAll('#paydayBody .payday-door')].map(node => node.textContent.replace(/[⁦-⁩]/g, '')));
     same('the doors of the desk, in the order they stand', doors, ['הצג את החשבון 30/10 - 05/11', 'עובדים ואתרים', 'לרישום היום',
         'המקדמות של מוחמד אבו ראס חוסיין', 'עובדים ואתרים', 'מקדמות', 'לסגירת שבוע', '💬 תלוש לכל עובד', 'סגירות שנרשמו']);
+    // Fix round 1, THE MORNING THE DESK IS FOR: today is typed for nobody yet, so «סגירת שבוע»
+    // holds every man whose period ends today - and check d names them. «לסגירה» counted them in
+    // one line in the warning's look; it repeated check d's sentence a man, in a red list, under
+    // «אין עכשיו חשבונות לסגור».
+    same('Thursday, today not typed: «לסגירה» says the men check d names in one line, in d\'s own look - no red list, no «אין עכשיו חשבונות לסגור»',
+        await page.evaluate(() => {
+            const section = document.querySelector('#paydayBody .payday-close');
+            const today = section.querySelector('.payday-held-today');
+            const d = document.querySelector('#paydayBody .payday-check-endsToday');
+            const look = node => { const style = getComputedStyle(node); return [style.backgroundColor, style.borderInlineStartColor, style.borderInlineStartWidth]; };
+            const text = document.getElementById('paydayBody').textContent.replace(/[⁦-⁩]/g, '');
+            return { today: today && today.textContent, red: section.querySelectorAll('.payday-held').length, nobody: section.querySelectorAll('.payday-close-say').length,
+                look: Boolean(today && d) && JSON.stringify(look(today)) === JSON.stringify(look(d)),
+                d: text.split('נגמרות היום, והיום עוד לא נרשם להם').length - 1, held: text.split('התקופה שלו נגמרת היום').length - 1 };
+        }), { today: '13 עובדים לא ייסגרו עד שיירשם להם היום.', red: 0, nobody: 0, look: true, d: 1, held: 0 });
     await page.keyboard.press('Escape');
     const where = () => page.evaluate(() => ({
         view: currentView, desk: document.getElementById('paydayModal').style.display,
@@ -473,7 +599,14 @@ for (const [width, height] of PHONES) {
         weekly: document.getElementById('weeklyCloseModal').style.display, slips: document.getElementById('payslipsModal').style.display,
         focus: document.activeElement && document.activeElement.id,
         inDesk: document.getElementById('paydayModal').contains(document.activeElement),
-        onGroup: Boolean(document.activeElement) && document.activeElement === document.querySelector('#reportsView .report-payroll .report-group')
+        onGroup: Boolean(document.activeElement) && document.activeElement === document.querySelector('#reportsView .report-payroll .report-group'),
+        onMan: Boolean(document.activeElement) && document.activeElement === document.querySelector('#advancesView .advance-workers .advance-worker-card'),
+        searchOnGlass: (() => {
+            const search = document.querySelector('#advancesView input[type="search"]');
+            if (!search || currentView !== 'advances') return null;
+            const r = search.getBoundingClientRect();
+            return r.top >= 0 && r.bottom <= window.innerHeight;
+        })()
     }));
     const reset = () => page.evaluate(() => {
         if (typeof closeWeeklyClose === 'function') closeWeeklyClose();
@@ -527,6 +660,11 @@ for (const [width, height] of PHONES) {
     same('e: his advances, where «לסדר את המקדמה» is', pick(3, ['view', 'advanceWorker']), ['advances', 'w03']);
     same('f: the roster', pick(4, ['view', 'desk']), ['roster', 'none']);
     same('h: the list of «מקדמות»', pick(5, ['view', 'advanceWorker', 'owesPage']), ['advances', null, null]);
+    // Fix round 1: from a desk opened on «מקדמות» this door was «סגור» under another name - the page
+    // where it was, the keyboard on <body>. It lands where an advance is recorded: the men's list
+    // and its search on the glass, the keyboard on the first man (never on the search: a phone's
+    // keyboard would rise over the list).
+    same('h: the men\'s list and its search on the glass, the keyboard on the first man', pick(5, ['searchOnGlass', 'onMan', 'focus']), [true, true, '']);
     same('«לסגירת שבוע»: that dialog, entered at its title', pick(6, ['desk', 'weekly', 'focus']), ['none', 'flex', 'weeklyCloseTitle']);
     same('«💬 תלוש לכל עובד»: that list, on the period that ends today, entered at its title', pick(7, ['desk', 'slips', 'focus']),
         ['none', 'flex', 'payslipsTitle']);
@@ -623,6 +761,30 @@ for (const [width, height] of PHONES) {
     same('Enter on «לפי עובד»: unfolded, the button still under the keyboard', await fold(), ['true', false, true]);
     await page.keyboard.press('Space');
     same('Space: folded again', await fold(), ['false', true, true]);
+    // Fix round 1: two cards, two buttons of one name. Each says whose men it unfolds.
+    same('each «לפי עובד» is named by its group - its words, the cycle and the dates - and no two alike', await page.evaluate(() => {
+        const names = [...document.querySelectorAll('#paydayModal .payday-fold')].map(node => (node.getAttribute('aria-label') || '').replace(/[⁦-⁩]/g, ''));
+        return [names.length, names.every(name => name.indexOf('לפי עובד · ') === 0), new Set(names).size];
+    }), [2, true, 2]);
+    // Fix round 1: CHECK A FOLLOWS THE PHONE'S LINK WHILE THE DESK IS OPEN. A status changes the
+    // sync line under the board (#storageNotice, js/sync/status.js) and calls no render(); the desk
+    // watches that line. Here the phone is made one that may close, and the line says something
+    // new - then put back - and the record is never read again for it.
+    same('the sync line changing under the open desk: a goes and comes with it, the record not read again', await page.evaluate(async () => {
+        const said = () => document.querySelectorAll('#paydayBody .payday-check-notReady').length;
+        const notice = document.getElementById('storageNotice');
+        const real = window.weeklyCloseReadyWord;
+        const kept = PAYDAY_KEPT;
+        const before = said();
+        window.weeklyCloseReadyWord = () => null;
+        notice.textContent = `${notice.textContent} `;
+        await new Promise(done => setTimeout(done, 60));
+        const synced = said();
+        window.weeklyCloseReadyWord = real;
+        notice.textContent = notice.textContent.trim();
+        await new Promise(done => setTimeout(done, 60));
+        return { before, synced, again: said(), read: PAYDAY_KEPT !== kept, inDesk: document.getElementById('paydayModal').contains(document.activeElement) };
+    }), { before: 1, synced: 0, again: 1, read: false, inDesk: true });
     await page.keyboard.press('Escape');
     await context.close();
 }
@@ -640,76 +802,90 @@ for (const [width, height] of PHONES) {
     const was = await weekly();
     const scrolled = await page.evaluate(() => { const content = document.querySelector('#paydayModal .modal-content'); content.scrollTop = 260; return content.scrollTop; });
     given('the desk scrolls, and was scrolled', scrolled > 100, String(scrolled));
+    // The keyboard on the second card's «לפי עובד» (fix round 1: a redraw dropped it to <body>).
+    const held = await page.evaluate(() => { const fold = document.querySelectorAll('#paydayModal .payday-fold')[1]; fold.focus({ preventScroll: true }); return fold.dataset.focus; });
     // Thursday's day written for רון לוי (paid by the week) - a commit, and render() after it.
     await page.evaluate(() => State.commit(assignPlace(State.schedule, '2026-11-12', 'w07', 'actual', 'p1')));
     const stale = await page.evaluate(() => ({ state: PAYDAY.state, text: document.getElementById('paydayBody').textContent,
         figures: document.querySelectorAll('#paydayBody .payday-value').length, scrollTop: document.querySelector('#paydayModal .modal-content').scrollTop }));
     same('at once: the placeholder over the figures, no figure of the record before, the dialog where it was', stale,
         { state: 'stale', text: PLACEHOLDER, figures: 0, scrollTop: scrolled });
+    // Fix round 1: drawn at the body's top it stood above the visible part of a scrolled desk, and
+    // the dialog was an empty white box until the draws stopped. It is where the person is looking.
+    const glass = await page.evaluate(() => {
+        const said = document.querySelector('#paydayBody .payday-reading').getBoundingClientRect();
+        const box = document.querySelector('#paydayModal .modal-content').getBoundingClientRect();
+        const actions = document.querySelector('#paydayModal .modal-actions').getBoundingClientRect();
+        const to = Math.min(box.bottom, window.innerHeight, actions.top);
+        return { said: [Math.round(said.top), Math.round(said.bottom)], glass: [Math.round(Math.max(box.top, 0)), Math.round(to)],
+            on: said.top >= Math.max(box.top, 0) - 1 && said.bottom <= to + 1,
+            keyboard: document.activeElement && document.activeElement.id };
+    });
+    check('meanwhile «מחשב את החשבונות…» is on the glass, at the scrolled position', glass.on, JSON.stringify(glass));
+    same('and the keyboard waits on the title, inside the desk', glass.keyboard, 'paydayTitle');
     await page.waitForFunction(() => PAYDAY && PAYDAY.state === 'shown', null, { timeout: 8000 });
     const now = await weekly();
     // רון לוי: 400 + 10 x (6 mod 4) a day (tests/screens.mjs's seed).
     same('once the draws stopped: read again - the day written ahead is in the week\'s «נצבר» (+420)', Number(now) - Number(was), 420);
     same('and the dialog is where it was scrolled to', await page.evaluate(() => document.querySelector('#paydayModal .modal-content').scrollTop), scrolled);
+    same('and the keyboard is back on the control it was on - drawn again, found by what it is', await page.evaluate(() => [
+        document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.focus : null,
+        document.getElementById('paydayModal').contains(document.activeElement)]), [held, true]);
     await page.keyboard.press('Escape');
     await context.close();
 }
 
 // ================================================================== B18 doubled text
-for (const [width, height] of [[320, 568], [440, 956]]) {
-    suite(`${width}x${height} light, every font doubled: the desk still fits, and its last door is reachable`);
-    const { context, page } = await phone(server.url, { width, height, scheme: 'light' });
-    await page.evaluate(deskRecord);
-    await toAdvances(page);
-    const doubled = await page.evaluate(() => {
-        const out = [];
-        const walkRules = (rules, wrap) => {
-            for (const rule of rules) {
-                if (rule.type === 4 || rule.type === 12) {
-                    const head = rule.type === 4 ? `@media ${rule.media.mediaText}` : `@supports ${rule.conditionText}`;
-                    walkRules(rule.cssRules, said => wrap(`${head}{${said}}`));
-                    continue;
-                }
-                if (rule.type !== 1 || !rule.style) continue;
-                const raw = rule.style.getPropertyValue('font-size');
-                if (!raw || !/^[\d.]+px$/.test(raw.trim())) continue;
-                wrap(`${rule.selectorText}{font-size:${parseFloat(raw) * 2}px !important;}`);
-            }
-        };
-        for (const sheet of document.styleSheets) {
-            let rules = null;
-            try { rules = sheet.cssRules; } catch (error) { rules = null; }
-            if (rules) walkRules(rules, said => out.push(said));
+//
+// Every font doubled, at the three phones, with «תצוגה גדולה» off and on (fix round 1: at 320 and
+// 375 the figures broke in the middle - «4250» as «425» over «0», «32020» as «3202» over «0»,
+// «-1500» as «-150» over «0», and «נוכה מהשכר» as «מהשכ» over «ר» - a first line that is another
+// amount; this block measured only what was cut, and a wrapped number is not cut).
+for (const [width, height] of PHONES) {
+    for (const large of [false, true]) {
+        const label = `${width}x${height} light${large ? ', large display' : ''}, every font doubled`;
+        suite(`${label}: the desk still fits, no figure of it is broken, and its last door is reachable`);
+        const { context, page } = await phone(server.url, { width, height, scheme: 'light', large });
+        await page.evaluate(deskRecord);
+        await toAdvances(page);
+        const doubled = await page.evaluate(doubleEveryFont);
+        given(`${label}: the cascade is doubled`, doubled > 300, String(doubled));
+        await page.evaluate(() => render());
+        await page.waitForTimeout(250);
+        const row = await measure(page, ['#advancesView .owes-actions']);
+        check(`${label}: the row's words still inside its buttons`, row.spills.length === 0 && row.cut.length === 0, brief(row.spills.concat(row.cut), o => `${o.by} «${o.words}»`));
+        await openDesk(page);
+        await page.evaluate(() => document.querySelectorAll('#paydayModal .payday-fold').forEach(node => node.click()));
+        await page.waitForTimeout(150);
+        const split = await page.evaluate(splitFigures);
+        given(`${label}: every card's figures and every man's are there to measure`, split.figures >= 12, `${split.figures} figures`);
+        same(`${label}: every figure on one line, the cards' and each man's (${split.figures})`, split.broken, []);
+        same(`${label}: every word of a figure's label whole - a label breaks between its words only`, split.labels, []);
+        same(`${label}: each card's count kept with its word, and on one line`, [split.counts, split.countsBroken], [2, []]);
+        const read = await measure(page, ['#paydayModal']);
+        same(`${label}: no sideways scroll`, read.page.scrollWidth, width);
+        check(`${label}: nothing off the side`, read.offside.length === 0, brief(read.offside, o => `${o.left}..${o.right} ${o.where}`));
+        check(`${label}: nothing cut`, read.cut.length === 0, brief(read.cut, c => `${c.by} «${c.words}» ${c.where}`));
+        check(`${label}: no control's words past its edge`, read.spills.length === 0, brief(read.spills, o => `${o.by} «${o.words}»`));
+        const last = await page.evaluate(() => {
+            const content = document.querySelector('#paydayModal .modal-content');
+            content.scrollTop = content.scrollHeight;
+            const doors = document.querySelectorAll('#paydayBody .payday-door');
+            const door = doors[doors.length - 1].getBoundingClientRect();
+            const box = content.getBoundingClientRect();
+            return { top: Math.round(door.top), bottom: Math.round(door.bottom), boxTop: Math.round(box.top), boxBottom: Math.round(box.bottom),
+                close: Math.round(document.getElementById('paydayClose').getBoundingClientRect().bottom) };
+        });
+        check(`${label}: scrolled to its end, the last door and «סגור» are on the glass`, last.top >= last.boxTop - 1 && last.bottom <= last.boxBottom + 1
+            && last.close <= last.boxBottom + 1, JSON.stringify(last));
+        if (SHOTS && width === 320) {
+            await page.evaluate(() => { document.querySelector('#paydayModal .modal-content').scrollTop = 0; document.querySelector('#paydayBody .payday-figures').scrollIntoView({ block: 'start' }); });
+            await page.waitForTimeout(120);
+            await page.screenshot({ path: join(SHOTS, `payday-doubled-320x568${large ? '-large' : ''}.jpg`), type: 'jpeg', quality: 82 });
         }
-        const style = document.createElement('style');
-        style.textContent = out.join('\n');
-        document.head.appendChild(style);
-        return out.length;
-    });
-    given('the cascade is doubled', doubled > 300, String(doubled));
-    await page.evaluate(() => render());
-    await page.waitForTimeout(250);
-    const row = await measure(page, ['#advancesView .owes-actions']);
-    check(`${width}: the row's words still inside its buttons`, row.spills.length === 0 && row.cut.length === 0, brief(row.spills.concat(row.cut), o => `${o.by} «${o.words}»`));
-    await openDesk(page);
-    const read = await measure(page, ['#paydayModal']);
-    same(`${width}: no sideways scroll`, read.page.scrollWidth, width);
-    check(`${width}: nothing off the side`, read.offside.length === 0, brief(read.offside, o => `${o.left}..${o.right} ${o.where}`));
-    check(`${width}: nothing cut`, read.cut.length === 0, brief(read.cut, c => `${c.by} «${c.words}» ${c.where}`));
-    check(`${width}: no control's words past its edge`, read.spills.length === 0, brief(read.spills, o => `${o.by} «${o.words}»`));
-    const last = await page.evaluate(() => {
-        const content = document.querySelector('#paydayModal .modal-content');
-        content.scrollTop = content.scrollHeight;
-        const doors = document.querySelectorAll('#paydayBody .payday-door');
-        const door = doors[doors.length - 1].getBoundingClientRect();
-        const box = content.getBoundingClientRect();
-        return { top: Math.round(door.top), bottom: Math.round(door.bottom), boxTop: Math.round(box.top), boxBottom: Math.round(box.bottom),
-            close: Math.round(document.getElementById('paydayClose').getBoundingClientRect().bottom) };
-    });
-    check(`${width}: scrolled to its end, the last door and «סגור» are on the glass`, last.top >= last.boxTop - 1 && last.bottom <= last.boxBottom + 1
-        && last.close <= last.boxBottom + 1, JSON.stringify(last));
-    await page.keyboard.press('Escape');
-    await context.close();
+        await page.keyboard.press('Escape');
+        await context.close();
+    }
 }
 
 // ================================================================== B20 the writer gate shut

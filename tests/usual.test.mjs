@@ -766,8 +766,9 @@ await block('the shell: on the page after the files it calls, in the offline she
     // AND AGAIN («סגירת שבוע», js/ui/weeklyclose.js): the week's close is one more block
     // after the readings of who owes, and the last - four blocks after this one, in order.
     // AND AGAIN («יום תשלום», js/ui/payday.js): the payday desk's look is one more block after
-    // the week's close (its contract puts it straight after the .weekly-close-entry rule), and
-    // the last - five blocks after this one, in order.
+    // the week's close - after the WHOLE of it (its frame, its dialog and «איפוס מקדמות»'s pieces,
+    // which carry no dashed heading of their own), never inside it - and the last dashed one: five
+    // blocks after this one, in order.
     const next = css.indexOf('/* ---- ', from + 10);
     const holiday = css.indexOf('/* ---- «עוד ⋯» at the foot of the day, «הכל חופש» behind it');
     const owes = css.indexOf('/* ---- «מי חייב כסף», «שים לב»');

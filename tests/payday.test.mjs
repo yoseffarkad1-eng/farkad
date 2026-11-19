@@ -40,6 +40,12 @@
 //       not drawn; and a build without the file draws the page exactly as before.
 //   P13 THE TRANSITION SENTENCE only of a stub that weekly pay follows; a stub the fortnight
 //       follows shows its dates alone (revision 2).
+//   P14-P18 FIX ROUND 1 (the review of 2026-11-19): a reading is never drawn after a deduction
+//       chosen on «דוחות»; check a is the phone's state when drawn; the full-deduction line only
+//       of open accounts at the sheet's proposal, a closed man as closed; every man «סגירת שבוע»
+//       holds named before the close with his door, and each reason said once; the guards the
+//       review's mutations showed untested; h a check, one same-day sentence for three cards,
+//       the count line, «so far» once, each «לפי עובד» named by its group.
 //
 // Synthetic names and money throughout. No browser, no emulator.
 
@@ -142,7 +148,9 @@ const facts = d => d.call('paydayFacts', d.ctx.todayStr(), at(d));
 const fresh = d => d.run('OWES_KEPT = null; REPORT_GATE_KEPT = null; PAYDAY_KEPT = null; 1');
 const card = (f, key) => f.groups.filter(group => group.key === key)[0] || null;
 const fig = (group, kind) => group.figures.filter(one => one.kind === kind)[0].value;
-const kinds = f => f.checks.map(one => one.kind);
+// The findings of «לפני שסוגרים» - h ('forgotten'), the quiet last line, is not one of them
+// (since fix round 1 it is the last entry of `checks`; P14 holds that).
+const kinds = f => f.checks.map(one => one.kind).filter(kind => kind !== 'forgotten');
 const disk = d => j(d.dump());
 
 // ---------------------------------------------------------------- seeding through the app's own writers
@@ -535,9 +543,10 @@ await block('P4 every check fires on the fixture made for it, is silent elsewher
             ['הדוח הניח שנוכו 1500 ₪ בתקופה הזאת, אבל הניכוי לא נרשם במקדמות.', 'במקדמות רשום חוב של 1500 ₪.']]);
     same('b: its door is v195\'s, pointing at that period', [bare(of(f, 'unclosed').door.words), of(f, 'unclosed').door.go, of(f, 'unclosed').door.args],
         ['הצג את החשבון 30/10 - 12/11', 'account', ['w_fa', '2026-10-30', '2026-11-12']]);
-    // c
-    same('c: the sheet\'s sentence for a wage it cannot price, and the roster', [of(f, 'unpriced').say, of(f, 'unpriced').door.words, of(f, 'unpriced').door.go],
-        ['⚠️ 1 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: ⁨כמאל⁩. הוסף להם שכר במסך "עובדים ואתרים".', 'עובדים ואתרים', 'roster']);
+    // c - one man, said as one man (fix round 1: the sheet's sentence read «1 עובדים … אותם … להם»
+    // of him); two or more in the sheet's own sentence (P14).
+    same('c: one man with no daily rate, in the singular, and the roster', [of(f, 'unpriced').say, of(f, 'unpriced').door.words, of(f, 'unpriced').door.go],
+        ['⚠️ עובד אחד בלי שכר יומי, ולכן הסכום חסר אותו: ⁨כמאל⁩. הוסף לו שכר במסך "עובדים ואתרים".', 'עובדים ואתרים', 'roster']);
     // e
     same('e: the sheet\'s own sentence for an over-settled account, his name, and his advances',
         [of(f, 'review').who, of(f, 'review').say, bare(of(f, 'review').door.words), of(f, 'review').door.go, of(f, 'review').door.args],
@@ -549,15 +558,17 @@ await block('P4 every check fires on the fixture made for it, is silent elsewher
         ['שעות נוספות בלי שכר שעה - לא נכללו בסכום.', ['גסאן'], 'roster']);
     same('f: and it is the sheet\'s own sentence, the star and its space taken off', of(f, 'hoursUnpriced').say, HOURS_NOTE.slice(2));
     // h, and «אין מה לסדר»
-    same('h: always last, quiet, and its door is «מקדמות»', [f.forgotten.say, f.forgotten.door.words, f.forgotten.door.go],
-        ['מקדמה שניתנה ולא נרשמה לא תנוכה. רושמים אותה לפני שסוגרים.', 'מקדמות', 'advances']);
+    const h = f.checks[f.checks.length - 1];
+    same('h: always last, quiet, and its door is «מקדמות»', [h.kind, h.say, h.door.words, h.door.go],
+        ['forgotten', 'מקדמה שניתנה ולא נרשמה לא תנוכה. רושמים אותה לפני שסוגרים.', 'מקדמות', 'advances']);
     check('«אין מה לסדר» is not said while there is something', f.nothing === false);
 
     // SILENT: the clean crew - every check silent (a too: nothing to close and no period ends today).
     const c = reopen(clean(), OPEN);
     const cf = facts(c);
     same('the clean crew: no check at all', kinds(cf), []);
-    check('and «אין מה לסדר לפני הסגירה.» is said - with h still after it', cf.nothing === true && cf.forgotten !== null);
+    check('and «אין מה לסדר לפני הסגירה.» is said - with h still after it', cf.nothing === true
+        && cf.checks.map(one => one.kind).join() === 'forgotten');
     // a silent on a phone that may close (the predicate itself is tests/weeklyclose.test.mjs W6's)
     const ready = reopen(everything(), OPEN);
     ready.run('weeklyCloseReadyWord = () => null; 1');
@@ -666,7 +677,9 @@ await block('P5 a week walked day by day, and a fortnight\'s Thursday', async ()
         const f = facts(d);
         seen.push([date, f.groups.map(group => [group.key, bare(group.heading),
             group.lines.filter(line => line !== T.soFar).map(line => (line === T.full ? 'FULL' : bare(line)))])]);
-        check(`${date}: every card says it is what was recorded so far`, f.groups.every(group => group.lines[0] === T.soFar));
+        // Fix round 1: said ONCE, under the cards (P14 holds where) - never again a card.
+        check(`${date}: no card repeats that it is what was recorded so far`, f.groups.length > 0
+            && f.groups.every(group => group.lines.indexOf(T.soFar) === -1));
     }
     const week = (heading, lines) => ['weekly|2026-11-13|2026-11-19', heading, lines];
     const fortnight = ['biweekly|2026-11-13|2026-11-26', 'יום חמישי 26/11 · דו־שבועי', []];
@@ -688,12 +701,12 @@ await block('P5 a week walked day by day, and a fortnight\'s Thursday', async ()
         f.groups.map(group => [group.key, bare(group.heading), group.lines.filter(line => line !== T.soFar).map(bare)]), [
             ['weekly|2026-11-20|2026-11-26', 'היום, יום חמישי 26/11 · שבועי', []],
             ['biweekly|2026-11-13|2026-11-26', 'היום, יום חמישי 26/11 · דו־שבועי',
-                ['ביום הזה משלמים לשתי הקבוצות. לכל קבוצה הסכום שלה - הם לא מחוברים כאן.']]]);
+                ['ביום הזה משלמים לשתי הקבוצות. לכל קבוצה הסכום שלה - שני הסכומים לא מחוברים כאן.']]]);
     // The transition man's stub and the week, one date, from the crew with everything.
     const e = facts(reopen(everything(), OPEN));
     same('the cut fortnight ends with the week: the sheet\'s note on it, and the sentence under it', [card(e, 'biweekly|2026-11-13|2026-11-19').note,
         card(e, 'biweekly|2026-11-13|2026-11-19').lines.slice(-1)[0], card(e, 'biweekly|2026-11-13|2026-11-19').transition],
-    ['תקופת מעבר: הימים שנשארו מהמחזור הקודם, לפני המעבר לתשלום שבועי.', 'ביום הזה משלמים לשתי הקבוצות. לכל קבוצה הסכום שלה - הם לא מחוברים כאן.', true]);
+    ['תקופת מעבר: הימים שנשארו מהמחזור הקודם, לפני המעבר לתשלום שבועי.', 'ביום הזה משלמים לשתי הקבוצות. לכל קבוצה הסכום שלה - שני הסכומים לא מחוברים כאן.', true]);
     same('a deduction chosen on the sheet is said under its card', (() => {
         const x = reopen(everything(), OPEN);
         x.run('REPORT_DEDUCTIONS.set(reportDeductionKey("w_wa", "2026-11-13", "2026-11-19"), 200); 1');
@@ -955,12 +968,17 @@ await block('P11 every proposed word pinned, every borrowed word in its owner, a
     const T = JSON.parse(d.run(`JSON.stringify(Object.assign({}, PAYDAY_TEXT, {
         heading: PAYDAY_TEXT.heading('יום חמישי', '19/11', 'שבועי'),
         ahead: PAYDAY_TEXT.ahead('19/11, 20/11'),
+        closedOne: PAYDAY_TEXT.closedOne('אחמד'),
+        closedMany: PAYDAY_TEXT.closedMany(2, 'אחמד, באסל'),
+        sameDay: [PAYDAY_TEXT.sameDay(2), PAYDAY_TEXT.sameDay(3)],
+        unpricedOne: PAYDAY_TEXT.unpricedOne('אחמד'),
         endsTodayOne: PAYDAY_TEXT.endsTodayOne('אחמד'),
-        endsTodayMany: PAYDAY_TEXT.endsTodayMany(3, 'אחמד, באסל, טארק') }))`));
+        endsTodayMany: PAYDAY_TEXT.endsTodayMany(3, 'אחמד, באסל, טארק'),
+        heldToday: [PAYDAY_TEXT.heldToday(1), PAYDAY_TEXT.heldToday(13)] }))`));
     same('PAYDAY_TEXT, word for word (PROPOSED)', T, {
         entry: 'יום תשלום',
         title: 'יום תשלום',
-        lead: 'כמה לשלם ביום התשלום הבא לפי מה שנרשם עד עכשיו, ומה כדאי לסדר לפני שסוגרים. המסך הזה רק מראה - שום דבר לא נרשם ממנו.',
+        lead: 'המסך הזה רק מראה - שום דבר לא נרשם ממנו.',
         next: 'יום התשלום הבא',
         none: 'עוד אין רישומים בתקופה הנוכחית.',
         heading: 'יום חמישי 19/11 · שבועי',
@@ -969,17 +987,29 @@ await block('P11 every proposed word pinned, every borrowed word in its owner, a
         fullDeduction: 'הסכום לתשלום הוא אחרי כל הניכוי שהדוח מציע. ניכוי קטן יותר בסגירה - יותר לתשלום, עד הנצבר.',
         ahead: 'כולל ימים שכבר נרשמו מראש: 19/11, 20/11.',
         chosen: 'לחלק מהעובדים נבחר בדוח ניכוי אחר, והוא כלול כאן. «סגירת שבוע» מתחילה מהניכוי המלא.',
-        bothGroups: 'ביום הזה משלמים לשתי הקבוצות. לכל קבוצה הסכום שלה - הם לא מחוברים כאן.',
+        closedOne: 'החשבון של אחמד נסגר ולא ישתנה.',
+        closedMany: 'החשבונות של 2 עובדים נסגרו ולא ישתנו: אחמד, באסל.',
+        sameDay: ['ביום הזה משלמים לשתי הקבוצות. לכל קבוצה הסכום שלה - שני הסכומים לא מחוברים כאן.',
+            'ביום הזה משלמים ל-3 קבוצות. לכל קבוצה הסכום שלה - הסכומים לא מחוברים כאן.'],
         before: 'לפני שסוגרים',
+        unpricedOne: '⚠️ עובד אחד בלי שכר יומי, ולכן הסכום חסר אותו: אחמד. הוסף לו שכר במסך "עובדים ואתרים".',
         endsTodayOne: 'התקופה של אחמד נגמרת היום, והיום עוד לא נרשם לו.',
         endsTodayMany: 'התקופות של 3 עובדים נגמרות היום, והיום עוד לא נרשם להם: אחמד, באסל, טארק.',
         toToday: 'לרישום היום',
         nothing: 'אין מה לסדר לפני הסגירה.',
         forgotten: 'מקדמה שניתנה ולא נרשמה לא תנוכה. רושמים אותה לפני שסוגרים.',
         toClose: 'לסגירה',
+        heldToday: ['עובד אחד לא ייסגר עד שיירשם לו היום.', '13 עובדים לא ייסגרו עד שיירשם להם היום.'],
         after: 'אחרי הסגירה'
     });
-    same('PAYDAY_TEXT has nothing else in it', Object.keys(T).length, 20);
+    same('PAYDAY_TEXT has nothing else in it - every entry pinned above, functions said', [Object.keys(T).length, d.run('Object.keys(PAYDAY_TEXT).length')], [24, 24]);
+    // Fix round 1: a closed man is said in the sheet's own sentence for him, with his name in it.
+    const closedOnSheet = 'החשבון נסגר ולא ישתנה';
+    check('the sheet says a closed account in those words (js/ui/reports.js)', source('js/ui/reports.js').indexOf(`notes.push('${closedOnSheet}')`) !== -1);
+    same('closedOne is that sentence, with the man\'s name in it', T.closedOne, `${closedOnSheet.replace('החשבון', 'החשבון של אחמד')}.`);
+    // And one man with no daily rate is the sheet's sentence for many, said of one.
+    same('the sheet\'s sentence for many, as monthsummary.js has it', d.run('MONTH_SUMMARY_TEXT.unpriced(2, "אחמד, באסל")'),
+        '⚠️ 2 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: אחמד, באסל. הוסף להם שכר במסך "עובדים ואתרים".');
     // Revision 2: check d is built on «סגירת שבוע»'s own sentence for the same fact - its first
     // sentence, with the man's name where it says «שלו» - and its plural is plural throughout.
     const held = d.run('WEEKLY_CLOSE_TEXT.heldEndsToday');
@@ -1000,6 +1030,7 @@ await block('P11 every proposed word pinned, every borrowed word in its owner, a
         advances: [page, '<span>מקדמות</span></button>'],
         close: [page, 'onclick="closeWorkerCard()">סגור</button>'],
         shekel: [reports, `el('span', 'report-tile-currency', '₪')`],
+        total: [reports, `: 'סה״כ'].concat(columns.map(`],
         unknown: [reports, `money.gross === null ? '—'`]
     };
     const lost = Object.keys(owners).filter(key => owners[key][0].indexOf(owners[key][1]) === -1 || owners[key][1].indexOf(R[key]) === -1);
@@ -1039,9 +1070,11 @@ await block('P11 every proposed word pinned, every borrowed word in its owner, a
     const body = d.dom.getElementById('paydayBody');
     same('the title and «סגור» are the frame\'s', [d.dom.getElementById('paydayTitle').textContent, d.dom.getElementById('paydayClose').textContent],
         ['יום תשלום', 'סגור']);
-    same('drawn: the lead, then the four sections, in order', [body.querySelectorAll('.payday-lead')[0].textContent,
-        body.querySelectorAll('.payday-section-head').map(node => node.textContent)],
-    [T.lead, ['יום התשלום הבא', 'לפני שסוגרים', 'לסגירה', 'אחרי הסגירה']]);
+    // Fix round 1: the dialog opens on the cards; the lead is the desk's last line, quiet.
+    same('drawn: the four sections, in order, and the lead last', [body.querySelectorAll('.payday-section-head').map(node => node.textContent),
+        body.children[body.children.length - 1].className, body.children[body.children.length - 1].textContent,
+        body.querySelectorAll('.payday-lead').length],
+    [['יום התשלום הבא', 'לפני שסוגרים', 'לסגירה', 'אחרי הסגירה'], 'payday-lead', T.lead, 1]);
     same('each card: its payday, its period, «נצבר», the deduction and «לתשלום» - label over value - and «לפי עובד»',
         body.querySelectorAll('.payday-card').map(node => [bare(node.querySelectorAll('.payday-card-head')[0].textContent),
             bare(node.querySelectorAll('.payday-card-range')[0].textContent),
@@ -1155,6 +1188,298 @@ await block('P13 the transition sentence only before weekly pay; any other stub 
     same('a stub the fortnight follows: a transition, not toWeekly, and no sentence', [stub.transition, stub.toWeekly, stub.note], [true, false, null]);
     same('drawn: its card has no note - its dates alone - and נאדר\'s full fortnight none either', drawnCards(back),
         [['biweekly|2026-11-13|2026-11-26', [], '13/11 - 26/11'], ['biweekly|2026-11-20|2026-11-26', [], '20/11 - 26/11']]);
+});
+
+// ================================================================== fix round 1
+//
+// The review of 2026-11-19 (features/payday/handoff.md, «Fix round 1»). Each block below holds
+// a fault the review reproduced on this suite's own crews, and each check in it was run on the
+// code before the repair and seen red there.
+const FULL = 'הסכום לתשלום הוא אחרי כל הניכוי שהדוח מציע. ניכוי קטן יותר בסגירה - יותר לתשלום, עד הנצבר.';
+const CHOSEN = 'לחלק מהעובדים נבחר בדוח ניכוי אחר, והוא כלול כאן. «סגירת שבוע» מתחילה מהניכוי המלא.';
+const SO_FAR = 'לפי מה שנרשם עד עכשיו. ימים ומקדמות שעוד לא נרשמו - לא נכללים.';
+const WEEK = 'weekly|2026-11-13|2026-11-19';
+// The phone's link, as «סגירת שבוע» asks it (weeklyCloseShared): synced, and the signal gone.
+const synced = d => d.run(`FarkadSync.adapter = FarkadSync.adapter || {}; FarkadSync._heardFromCloud = true; FarkadSync._revision = 3;
+    FarkadSync.status = 'synced'; FarkadSync.honestStatusFor = () => 'synced'; FarkadSync.pendingCount = () => 0; 1`);
+const offline = d => d.run(`FarkadSync.status = 'offline'; FarkadSync.honestStatusFor = () => 'offline'; 1`);
+const drawnKinds = d => d.dom.getElementById('paydayBody').querySelectorAll('.payday-check').map(node => node.className.replace('payday-check payday-check-', ''));
+const drawnCard = (d, key) => {
+    const node = d.dom.getElementById('paydayBody').querySelectorAll('.payday-card').filter(one => one.dataset.group === key)[0];
+    return node ? { figures: node.querySelectorAll('.payday-figure').map(cell => bare(cell.children[1].children[0].textContent)),
+        lines: node.querySelectorAll('.payday-card-line').map(line => bare(line.textContent)) } : null;
+};
+const weekBand = d => {
+    const band = sheetBands(d).filter(one => one.cycle === 'weekly')[0];
+    return [band.cell('נצבר'), band.cell('נוכה מהשכר'), band.cell('לתשלום')].map(bare);
+};
+
+await block('P14 a kept reading is never drawn after a deduction chosen on «דוחות»; check a is the phone\'s state when the desk is drawn', async () => {
+    // THE REVIEW'S ROUND TRIP. The desk read; on «דוחות» he chooses 200 for ואליד («בחירת קיזוז
+    // מהשכר» … «הצג בדוח» sets REPORT_DEDUCTIONS and calls render() - the tick and the record do
+    // not move); back on «מקדמות», «יום תשלום» again.
+    const d = reopen(everything(), OPEN);
+    d.call('openPayday');
+    same('the first opening: the week at the full deduction', drawnCard(d, WEEK).figures, ['4250', '-600', '3650']);
+    d.call('closePayday');
+    const disk0 = disk(d);
+    d.run('REPORT_DEDUCTIONS.set(reportDeductionKey("w_wa", "2026-11-13", "2026-11-19"), 200); 1');
+    given('the choice moved nothing on the disk', disk(d) === disk0);
+    d.call('openPayday');
+    const second = drawnCard(d, WEEK);
+    d.call('closePayday');
+    same('opened again after the choice: the sheet\'s band under it, not the reading kept from before', second.figures, weekBand(d));
+    same('... 4,250 less the 200 chosen', second.figures, ['4250', '-200', '4050']);
+    check('and the card says that a deduction chosen on the sheet is in it', second.lines.indexOf(CHOSEN) !== -1, j(second.lines));
+    d.run('REPORT_DEDUCTIONS.delete(reportDeductionKey("w_wa", "2026-11-13", "2026-11-19")); 1');
+    d.call('openPayday');
+    same('the choice taken back on the sheet: the full deduction again, without the line', [drawnCard(d, WEEK).figures, drawnCard(d, WEEK).lines.indexOf(CHOSEN)],
+        [['4250', '-600', '3650'], -1]);
+    d.call('closePayday');
+
+    // CHECK A IS ASKED WHEN THE DESK IS DRAWN, never kept: the signal on a building site comes and
+    // goes, and none of it moves the record or the key a reading is kept under.
+    const s = reopen(everything(), OPEN);
+    synced(s);
+    given('synced: this phone may close', s.call('weeklyCloseReadyWord') === null);
+    s.call('openPayday');
+    check('opened while synced: no a', drawnKinds(s).indexOf('notReady') === -1, j(drawnKinds(s)));
+    offline(s);
+    given('the signal dropped: «סגירת שבוע» would refuse now', s.call('weeklyCloseReadyWord') === NOT_SYNCED);
+    s.call('renderPaydayIfOpen');
+    same('a render() under the open desk, the record unmoved: a is said now, the rest as it was', drawnKinds(s),
+        ['notReady', 'unclosed', 'unpriced', 'review', 'hoursUnpriced', 'forgotten']);
+    s.call('closePayday');
+    s.run(`var __rows = 0; (function () { const r = payrollRowsOver; payrollRowsOver = function () { __rows += 1; return r.apply(this, arguments); }; })(); 1`);
+    s.call('openPayday');
+    same('reopened while offline: a is said - and from the reading kept, nothing read again', [drawnKinds(s)[0], s.global('__rows')], ['notReady', 0]);
+    s.call('closePayday');
+    synced(s);
+    s.call('openPayday');
+    same('back in sync and reopened: no a, and still nothing read again', [drawnKinds(s).indexOf('notReady'), s.global('__rows')], [-1, 0]);
+    offline(s);
+    s.call('renderPaydayIfOpen');
+    synced(s);
+    s.call('renderPaydayIfOpen');
+    check('offline and back under the open desk: a came and went with the line', drawnKinds(s).indexOf('notReady') === -1 && s.global('__rows') === 0);
+    s.call('closePayday');
+});
+
+await block('P15 each card says what its deduction is: the full proposal only of open accounts, a closed one as closed, a choice as a choice', async () => {
+    // Thursday 19/11, today recorded for everybody: the week's two men open.
+    const t = reopen(everything({ today: '2026-11-19' }), OPEN);
+    same('the week, both men open: the full deduction', card(facts(t), WEEK).lines, [FULL]);
+    // ואליד closed with 200 of the 600 the sheet proposed, באסל with nothing - from their own box.
+    t.State.commitMany(t.call('closePeriodChanges', t.State.schedule, 'w_wa', '2026-11-13', '2026-11-19', '2026-11-19T16:00:00.000Z', 'd_office', 200));
+    t.State.commitMany(t.call('closePeriodChanges', t.State.schedule, 'w_wb', '2026-11-13', '2026-11-19', '2026-11-19T16:01:00.000Z', 'd_office'));
+    const closed = card(facts(t), WEEK);
+    same('both closed: the figures are the sheet\'s band - the 200 the close recorded', closed.figures.map(one => bare(one.value)), weekBand(t));
+    same('... and the card names them closed, in the sheet\'s own sentence - never that a smaller deduction at the close leaves more',
+        closed.lines.map(bare), ['החשבונות של 2 עובדים נסגרו ולא ישתנו: ואליד, באסל.']);
+    // Wednesday: a deduction chosen on the sheet for the one man something comes off in the week.
+    const c = reopen(everything(), OPEN);
+    c.run('REPORT_DEDUCTIONS.set(reportDeductionKey("w_wa", "2026-11-13", "2026-11-19"), 200); 1');
+    const cf = facts(c);
+    same('a deduction chosen: the choice is said, and not «all the deduction the sheet proposes»', card(cf, WEEK).lines, [CHOSEN]);
+    // THE GUARD THAT SURVIVED (review, mutation 4): the line is said on HIS card only.
+    same('and no other card says a choice was made', cf.groups.filter(group => group.key !== WEEK).map(group => group.lines.indexOf(CHOSEN)),
+        cf.groups.filter(group => group.key !== WEEK).map(() => -1));
+    given('there are other cards to say it on', cf.groups.length === 3);
+});
+
+// RAMEZ: paid by the fortnight; 500 on 03/11, handed back in full on 05/11; nobody closed 30/10-12/11.
+// He owes nothing - «שים לב» is silent - and «סגירת שבוע» holds him for that period.
+function heldEarlier(today = '2026-11-26') {
+    const d = phone({ today });
+    d.State.schedule.workers = [
+        { id: 'w_c1', name: 'נביל', active: true, dailyRate: 400, hourlyRate: 0, payCycles: '2026-08-07=weekly' },
+        { id: 'w_c2', name: 'ראמז', active: true, dailyRate: 500, hourlyRate: 0 }];
+    d.State.schedule.places = PLACES;
+    weekdays('2026-10-30', today).forEach(date => ['w_c1', 'w_c2'].forEach(id => day(d, id, date)));
+    approve(d);
+    byHand(d, 'w_c1', '2026-10-30', '2026-11-05', undefined, '2026-11-05T15:00:00.000Z');
+    byHand(d, 'w_c1', '2026-11-06', '2026-11-12', undefined, '2026-11-12T15:00:00.000Z');
+    byHand(d, 'w_c1', '2026-11-13', '2026-11-19', undefined, '2026-11-19T15:00:00.000Z');
+    const id = advance(d, 'w_c2', '2026-11-03', 500);
+    d.call('recordAdvanceRepaid', d.State.schedule, id, 500, '2026-11-05', '', '2026-11-05T08:00:00.000Z', 'd_A', 'cash');
+    const r = reopen(kept(d), OPEN);
+    synced(r);
+    return r;
+}
+// ZIAD: no daily rate; worked 30/10-12/11 and not since. «סגירת שבוע» holds him as unpriced while
+// check c, which reads the current period, has no row of his to say.
+function heldUnpriced() {
+    const d = phone({ today: '2026-11-18' });
+    d.State.schedule.workers = [
+        { id: 'w_c2', name: 'ראמז', active: true, dailyRate: 500, hourlyRate: 0 },
+        { id: 'w_zr', name: 'זיאד', active: true, dailyRate: 0, hourlyRate: 0 }];
+    d.State.schedule.places = PLACES;
+    weekdays('2026-10-30', '2026-11-18').forEach(date => day(d, 'w_c2', date));
+    weekdays('2026-10-30', '2026-11-12').forEach(date => day(d, 'w_zr', date));
+    approve(d);
+    byHand(d, 'w_c2', '2026-10-30', '2026-11-12', undefined, '2026-11-12T15:00:00.000Z');
+    const r = reopen(kept(d), OPEN);
+    synced(r);
+    return r;
+}
+
+await block('P16 every man «סגירת שבוע» holds is named before the close, with his door; and each reason is said once', async () => {
+    // (a) RAMEZ, on his payday.
+    const e = heldEarlier();
+    const ef = facts(e);
+    same('the record: he owes nothing, and «סגירת שבוע» holds him for that period', [e.call('openAdvanceBalance', e.State.schedule, 'w_c2'),
+        ef.close.held.map(man => [man.id, man.kind, man.from, man.to])], [null, [['w_c2', 'earlier', '2026-10-30', '2026-11-12']]]);
+    const held = ef.checks.filter(one => one.kind === 'held');
+    same('«לפני שסוגרים» names him, in «סגירת שבוע»\'s own sentence, with v195\'s door to that period',
+        held.map(one => [bare(one.say), bare(one.door.words), one.door.go, one.door.args]),
+        [['ראמז · חשבון קודם שלו לא נסגר (30/10 - 12/11). סוגרים מהישן לחדש: סגור קודם את החשבון ההוא, ידנית.',
+            'הצג את החשבון 30/10 - 12/11', 'account', ['w_c2', '2026-10-30', '2026-11-12']]]);
+    check('and «אין מה לסדר» is not said', ef.nothing === false);
+    e.call('openPayday');
+    check('drawn: no «אין מה לסדר» on the desk', e.dom.getElementById('paydayBody').textContent.indexOf('אין מה לסדר') === -1);
+    e.call('closePayday');
+    const pressed = await pressDoor(instrument(e), 0);
+    same('his door: the pay sheet, narrowed to him, at that period - nothing written', [pressed.words, pressed.views, pressed.state.workers,
+        pressed.state.range, pressed.writes, pressed.unmoved], ['הצג את החשבון 30/10 - 12/11', ['reports'], ['w_c2'], ['2026-10-30', '2026-11-12'], [], true]);
+
+    // (b) ZIAD, on a Wednesday.
+    const u = heldUnpriced();
+    const uf = facts(u);
+    same('«סגירת שבוע» holds him as unpriced, and the current period has no row of his', [uf.close.held.map(man => [man.id, man.kind]),
+        uf.groups.some(group => group.rows.some(row => row.workerId === 'w_zr'))], [[['w_zr', 'unpriced']], false]);
+    same('«לפני שסוגרים» names him, in its sentence, with the roster', uf.checks.filter(one => one.kind === 'held')
+        .map(one => [bare(one.say), one.door.words, one.door.go]), [['זיאד · בלי שכר יומי - הנצבר לא חושב.', 'עובדים ואתרים', 'roster']]);
+    check('and «אין מה לסדר» is not said', uf.nothing === false);
+    u.call('openPayday');
+    const ub = u.dom.getElementById('paydayBody');
+    same('«לסגירה» with nobody to close and a man held: no «אין עכשיו חשבונות לסגור» above him - he, in «לא ייסגר»',
+        [ub.querySelectorAll('.payday-close-say').length, ub.querySelectorAll('.payday-held-head').map(node => node.textContent),
+            ub.querySelectorAll('.payday-held-man').map(node => bare(node.textContent))],
+        [0, ['לא ייסגר'], ['זיאד · בלי שכר יומי - הנצבר לא חושב.']]);
+    u.call('closePayday');
+    // A man a check above already names is not named twice: עומר is e's, the three are d's.
+    const m = reopen(everything({ today: '2026-11-19', until: '2026-11-18' }), OPEN);
+    const mf = facts(m);
+    same('Thursday morning: every man held is named by a check above, so no check of its own', [mf.close.held.map(man => man.id).sort(),
+        mf.checks.filter(one => one.kind === 'held').length], [['w_ov', 'w_tr', 'w_wa', 'w_wb'], 0]);
+
+    // (c) SAID ONCE. Thursday morning, today not typed: check d names the three; «לסגירה» counts
+    // them in one line in the warning's look and lists, in its own words, only the man held for
+    // another reason.
+    m.call('openPayday');
+    const body = m.dom.getElementById('paydayBody');
+    const text = bare(body.textContent);
+    const times = (hay, needle) => hay.split(needle).length - 1;
+    same('check d\'s sentence once on the whole desk, and «סגירת שבוע»\'s sentence for the same fact not at all',
+        [times(text, 'נגמרות היום, והיום עוד לא נרשם להם'), times(text, 'התקופה שלו נגמרת היום')], [1, 0]);
+    same('«לסגירה»: the count of men ready, the three in one line, and «לא ייסגר» for עומר alone',
+        [body.querySelectorAll('.payday-close-say').map(node => node.textContent), body.querySelectorAll('.payday-held-today').map(node => node.textContent),
+            body.querySelectorAll('.payday-held-man').map(node => bare(node.textContent).split(' · ')[0])],
+        [[m.run(`CLOSE_REMINDER_TEXT.line(${mf.close.count})`)], ['3 עובדים לא ייסגרו עד שיירשם להם היום.'], ['עומר']]);
+    m.call('closePayday');
+    // The clean crew that morning: nobody to close, נביל held until today is typed.
+    const k = reopen(clean({ today: '2026-11-19', until: '2026-11-18' }), OPEN);
+    k.call('openPayday');
+    const kb = k.dom.getElementById('paydayBody');
+    same('nobody to close and one man waiting for today: one line, no «אין עכשיו חשבונות לסגור», no red list, and the door',
+        [kb.querySelectorAll('.payday-close-say').length, kb.querySelectorAll('.payday-held-today').map(node => node.textContent),
+            kb.querySelectorAll('.payday-held').length, kb.querySelectorAll('.payday-door').map(node => bare(node.textContent)).indexOf('לסגירת שבוע') !== -1],
+        [0, ['עובד אחד לא ייסגר עד שיירשם לו היום.'], 0, true]);
+    k.call('closePayday');
+});
+
+await block('P17 the guards the review found untested: a group nobody can price, a man with no day, a man closed this morning', async () => {
+    // (1) A GROUP NOBODY CAN PRICE: a crew pasted with no rates. The sheet prints no money in
+    // its band and «סה״כ» alone as its first cell; the desk says «—», never 0, and the same cell.
+    const n0 = phone({ today: '2026-11-18' });
+    n0.State.schedule.workers = [
+        { id: 'w_n1', name: 'סלים', active: true, dailyRate: 0, hourlyRate: 0 },
+        { id: 'w_n2', name: 'נאיף', active: true, dailyRate: 0, hourlyRate: 0 }];
+    n0.State.schedule.places = PLACES;
+    weekdays('2026-11-13', '2026-11-18').forEach(date => ['w_n1', 'w_n2'].forEach(id => day(n0, id, date)));
+    approve(n0);
+    const n = reopen(kept(n0), OPEN);
+    const nf = facts(n);
+    same('one group, unpriced: «נצבר» and «לתשלום» «—», and the count line the sheet\'s «סה״כ»',
+        nf.groups.map(group => [group.priced, fig(group, 'gross'), fig(group, 'pay'), group.count]), [[false, '—', '—', 'סה״כ']]);
+    check('and that is the band «דוחות» draws for it, cell for cell', bandsAgree('nobody priced', n, nf) === 1);
+    same('two men with no rate: the sheet\'s own sentence for many', bare(nf.checks.filter(one => one.kind === 'unpriced')[0].say),
+        '⚠️ 2 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: סלים, נאיף. הוסף להם שכר במסך "עובדים ואתרים".');
+
+    // (2) and (3), THURSDAY MORNING. מוסא, paid by the week, was marked absent Monday to Wednesday
+    // and has no day this week; באסל's week was closed from his own box at 07:30, before today was
+    // typed. Neither has anything for «לרישום היום» to settle.
+    const t0 = everything({ today: '2026-11-19', until: '2026-11-18' });
+    t0.State.schedule.workers.push({ id: 'w_lv', name: 'מוסא', active: true, dailyRate: 410, hourlyRate: 0, payCycles: '2026-08-07=weekly' });
+    weekdays('2026-10-30', '2026-11-12').forEach(date => day(t0, 'w_lv', date));
+    ['2026-11-16', '2026-11-17', '2026-11-18'].forEach(date => t0.call('markAbsent', t0.State.schedule, date, 'w_lv', 'actual'));
+    byHand(t0, 'w_wb', '2026-11-13', '2026-11-19', undefined, '2026-11-19T05:30:00.000Z');
+    const t = reopen(kept(t0), OPEN);
+    const tf = facts(t);
+    given('both have a row in the week that ends today, and today is not on the record for either', ['w_lv', 'w_wb']
+        .every(id => card(tf, WEEK).rows.some(row => row.workerId === id) && !t.call('weeklyCloseTodayRecorded', t.State.schedule, id, '2026-11-19', {})));
+    const d = tf.checks.filter(one => one.kind === 'endsToday')[0];
+    same('d names the two who worked and are open - not the man with no day, not the man closed this morning',
+        [d.workers, bare(d.say)], [['w_wa', 'w_tr'], 'התקופות של 2 עובדים נגמרות היום, והיום עוד לא נרשם להם: ואליד, טארק.']);
+    same('and they are exactly the men «סגירת שבוע» holds for today', tf.close.held.filter(man => man.kind === 'endsToday').map(man => man.id), ['w_wa', 'w_tr']);
+    same('the week\'s card: the full deduction (ואליד is open), and באסל named closed', card(tf, WEEK).lines.map(bare),
+        [FULL, 'החשבון של באסל נסגר ולא ישתנה.']);
+});
+
+await block('P18 the shapes: h the last check, one sentence for cards of one date, the count line, «so far» once, the folds named', async () => {
+    // h is a check (the contract's interface), last, and never what makes «אין מה לסדר» false.
+    const c = facts(reopen(clean(), OPEN));
+    same('the clean crew: h, alone, last - and «אין מה לסדר» is still said', [c.checks.map(one => one.kind), c.nothing, 'forgotten' in c],
+        [['forgotten'], true, false]);
+    // THREE CARDS ON ONE PAYDAY: the week, the fortnight, and a man back on the fortnight from 20/11.
+    const d0 = phone({ today: '2026-11-26' });
+    d0.State.schedule.workers = [
+        { id: 'w_w', name: 'עאדל', active: true, dailyRate: 400, hourlyRate: 0, payCycles: '2026-08-07=weekly' },
+        { id: 'w_b', name: 'ג\'מאל', active: true, dailyRate: 450, hourlyRate: 0 },
+        { id: 'w_k', name: 'רביע', active: true, dailyRate: 420, hourlyRate: 0, payCycles: '2026-08-07=weekly;2026-11-20=biweekly' }];
+    d0.State.schedule.places = PLACES;
+    weekdays('2026-11-13', '2026-11-26').forEach(date => ['w_w', 'w_b', 'w_k'].forEach(id => day(d0, id, date)));
+    approve(d0);
+    const three = facts(reopen(kept(d0), OPEN));
+    same('three cards end on 26/11: the sentence once, under the last of them, in words for three', three.groups.map(group => [group.key,
+        group.lines.filter(line => /ביום הזה משלמים/.test(line))]), [
+        ['weekly|2026-11-20|2026-11-26', []],
+        ['biweekly|2026-11-13|2026-11-26', []],
+        ['biweekly|2026-11-20|2026-11-26', ['ביום הזה משלמים ל-3 קבוצות. לכל קבוצה הסכום שלה - הסכומים לא מחוברים כאן.']]]);
+    // THE COUNT LINE, DRAWN: the sheet's text, character for character, the count kept with its word.
+    const e = reopen(everything(), OPEN);
+    e.call('openPayday');
+    const body = e.dom.getElementById('paydayBody');
+    same('each count line is the card\'s - the band\'s first cell - and its count and word stand in one piece',
+        body.querySelectorAll('.payday-count').map(node => [node.textContent, node.querySelectorAll('.payday-count-n').map(part => part.textContent)]),
+        facts(e).groups.map(group => [group.count, [group.count.split(' · ')[1]]]));
+    // «SO FAR», ONCE: under the cards, in their section - not once a card.
+    const next = body.querySelectorAll('.payday-next')[0];
+    same('«לפי מה שנרשם עד עכשיו» once on the desk, the last line of «יום התשלום הבא»', [body.querySelectorAll('.payday-sofar').length,
+        next.children[next.children.length - 1].className, next.children[next.children.length - 1].textContent,
+        body.querySelectorAll('.payday-card-line').filter(node => node.textContent === SO_FAR).length], [1, 'payday-sofar', SO_FAR, 0]);
+    // EACH «לפי עובד» NAMED BY ITS GROUP: two cards, two buttons of one name, was the review's.
+    const names = body.querySelectorAll('.payday-fold').map(node => node.getAttribute('aria-label'));
+    same('each fold says whose men it unfolds: its words, the cycle and the dates', names.map(bare),
+        ['לפי עובד · שבועי · 13/11 - 19/11', 'לפי עובד · דו־שבועי · 13/11 - 26/11', 'לפי עובד · דו־שבועי · 13/11 - 19/11']);
+    same('and every control the keyboard can be put back on has a key of its own', body.querySelectorAll('.payday-fold').concat(body.querySelectorAll('.payday-door'))
+        .map(node => node.dataset.focus).filter((key, at, all) => !key || all.indexOf(key) !== at), []);
+    e.call('closePayday');
+    // Friday 13/11 at seven: the week and the fortnight begin today, and nothing is in them yet.
+    const z = phone({ today: '2026-11-13' });
+    z.State.schedule.workers = [
+        { id: 'w_z1', name: 'כרים', active: true, dailyRate: 400, hourlyRate: 0, payCycles: '2026-08-07=weekly' },
+        { id: 'w_z2', name: 'פארס', active: true, dailyRate: 450, hourlyRate: 0 }];
+    z.State.schedule.places = PLACES;
+    weekdays('2026-10-30', '2026-11-12').forEach(date => ['w_z1', 'w_z2'].forEach(id => day(z, id, date)));
+    approve(z);
+    const none = reopen(kept(z), OPEN);
+    given('nothing is recorded in either current period', facts(none).groups.length === 0);
+    none.call('openPayday');
+    const nb = none.dom.getElementById('paydayBody');
+    same('a desk with no card says that there is none, and not «so far» under nothing', [nb.querySelectorAll('.payday-none').length,
+        nb.querySelectorAll('.payday-sofar').length], [1, 0]);
+    none.call('closePayday');
 });
 
 report();

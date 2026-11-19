@@ -225,6 +225,48 @@ function owesRecordBack() {
     render();
 }
 
+// «יום תשלום» on the two records the walk would otherwise never draw it on (the desk's review,
+// 2026-11-19). IN MEMORY ONLY - the model's own writers on the live schedule, nothing committed -
+// and taken back whole on leaving (paydayRecordBack). Both run in the page. (The third state
+// the review named - a period that ends TODAY - needs a Thursday: a pay cycle's boundary is a
+// Friday, so a period ends on a Thursday only, and the walk's clock is Tuesday for every screen.
+// tests/payday.browser.mjs B12 measures that desk on a page of its own, its clock on Thursday.)
+//   'every'      every check of the desk: an earlier week left open with a debt (b), a man with no
+//                daily rate (c), an advance handed back twice (e), extra hours with no hourly rate (f).
+//   'unapproved' the record's carry approval taken off: the plain bands, and «מקדמות»'s own
+//                sentence in place of «לסגירה» and «אחרי הסגירה».
+function paydayRecord(how) {
+    if (window.__paydayKept) return;
+    window.__paydayKept = JSON.stringify(State.schedule);
+    if (how === 'unapproved') {
+        const plan = planCarryMigration(State.schedule);
+        const held = State.schedule.ledger && State.schedule.ledger.migrations;
+        if (held && Object.prototype.hasOwnProperty.call(held, String(plan.id))) delete held[String(plan.id)];
+    } else {
+        addAdvance(State.schedule, 'w06', '2026-10-26', 1500, '');
+        State.schedule.workers[5].payCycles = '2026-08-07=weekly';
+        closePeriodChanges(State.schedule, 'w06', '2026-10-23', '2026-10-29', '2026-10-29T15:40:00.000Z', syncDeviceId(), 300);
+        State.schedule.workers.push({ id: 'w20', name: 'זיאד עמר', active: true, dailyRate: 0, hourlyRate: 0, phone: '' });
+        ['2026-11-09', '2026-11-10'].forEach(date => assignPlace(State.schedule, date, 'w20', 'actual', 'p1'));
+        State.schedule.workers.push({ id: 'w21', name: 'האני חלבי', active: true, dailyRate: 420, hourlyRate: 0, phone: '' });
+        assignPlace(State.schedule, '2026-11-09', 'w21', 'actual', 'p2', 'extra', 2);
+        const made = recordNewAdvance(State.schedule, 'w03', '2026-11-09', 400, '', '2026-11-09T07:00:00.000Z', syncDeviceId(), 'cash');
+        recordAdvanceRepaid(State.schedule, made[0].value.id, 400, '2026-11-10', '', '2026-11-10T08:00:00.000Z', 'd_a', 'cash');
+        recordAdvanceRepaid(State.schedule, made[0].value.id, 400, '2026-11-10', '', '2026-11-10T08:05:00.000Z', 'd_b', 'cash');
+    }
+    OWES_PAGE = null;
+    render();
+}
+
+function paydayRecordBack() {
+    if (!window.__paydayKept) return;
+    State.schedule = JSON.parse(window.__paydayKept);
+    window.__paydayKept = null;
+    OWES_PAGE = null;
+    ADVANCE_WORKER = null;
+    render();
+}
+
 // The pay sheet as it opens: «לפי עובד», the cards, the default range (v189: each group read
 // over its own period). Runs in the page.
 function reportsDefault() {
@@ -243,8 +285,8 @@ async function openWeeklyCloseScreen(page) {
 
 // «יום תשלום» (js/ui/payday.js), opened by its button in the row on «מקדמות» and read (after a
 // frame), on the record owesRecord leaves in memory. Runs its steps in the page.
-async function openPaydayScreen(page) {
-    await run(page, owesRecord);
+async function openPaydayScreen(page, record = owesRecord, how) {
+    await run(page, record, how);
     await run(page, () => { ADVANCE_WORKER = null; OWES_PAGE = null; });
     await view('advances')(page);
     await byText(page, '#advancesView', 'יום תשלום');
@@ -353,14 +395,25 @@ export const SCREENS = [
     // leaves the page as it was.
     { name: 'advances - «יום תשלום», read', scope: ['#paydayModal'],
         open: async page => { await openPaydayScreen(page); },
-        close: page => run(page, () => { closePayday(); owesRecordBack(); }) },
+        close: async page => { await run(page, () => closePayday()); await run(page, owesRecordBack); } },
     { name: 'advances - «יום תשלום», the fold opened', scope: ['#paydayModal'],
         open: async page => { await openPaydayScreen(page);
             await run(page, () => document.querySelectorAll('#paydayModal .payday-fold').forEach(node => {
                 if (node.getAttribute('aria-expanded') !== 'true') node.click();
             }));
             await pause(page); },
-        close: page => run(page, () => { closePayday(); owesRecordBack(); }) },
+        close: async page => { await run(page, () => closePayday()); await run(page, owesRecordBack); } },
+    // And the desk on the two records the review found the walk never drew it on: every check of
+    // the desk, and a record nobody approved (paydayRecord). The record is taken back by a
+    // function handed to the page (run(page, fn)): an arrow run there that names a function only
+    // this file holds throws, and the walk forgives a close that throws - the record was left on
+    // for every screen after it.
+    { name: 'advances - «יום תשלום», every check', scope: ['#paydayModal'],
+        open: async page => { await openPaydayScreen(page, paydayRecord, 'every'); },
+        close: async page => { await run(page, () => closePayday()); await run(page, paydayRecordBack); } },
+    { name: 'advances - «יום תשלום», a record nobody approved', scope: ['#paydayModal'],
+        open: async page => { await openPaydayScreen(page, paydayRecord, 'unapproved'); },
+        close: async page => { await run(page, () => closePayday()); await run(page, paydayRecordBack); } },
     { name: 'reports - «שים לב», opened', scope: APP,
         open: async page => { await run(page, reportsDefault); await run(page, owesRecord); await view('reports')(page);
             // The row is read after the page has painted when the record moved since the
