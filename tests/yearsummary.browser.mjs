@@ -294,7 +294,7 @@ try {
         [plain(await page.locator('#yearSummaryBody .ysum-figures .msum-warn').first().innerText()),
             await page.locator('#yearSummaryBody .ysum-notsummed').innerText(), facts.notSummed],
         ['⚠️ 1 עובדים בלי שכר יומי, ולכן הסכום חסר אותם: דוגמה דלת. הוסף להם שכר במסך "עובדים ואתרים".',
-            'הנצבר של השנה מחושב על כל השנה ולא מחיבור החודשים, ולכן הוא שונה כאן מחיבור החודשים.', true]);
+            'עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.', true]);
     same('the men in the roster\'s order, the one switched off said so', await page.locator('#yearSummaryBody .ysum-man')
         .evaluateAll(nodes => nodes.map(node => [node.querySelector('.ysum-man-name').textContent,
             (node.querySelector('.ysum-inactive') || { textContent: '' }).textContent])),
@@ -429,12 +429,15 @@ try {
         await isOpen(page, 'yearSummaryModal'), await page.evaluate(() => window.__written.length)], [false, true, 3]);
     await page.locator('#yearSummaryExport').click();
     await page.waitForFunction(() => window.__written.length === 4 && document.getElementById('askModal').style.display === 'flex');
+    // The spy counts every call of the year's export since «שמירה חוזרת»: that one, and the two
+    // presses of the button above (the button calls the same global) - three; «הבנתי» adds none.
+    const asked = await page.evaluate(() => Object.assign({}, window.__again));
     await page.locator('#askChoices button', { hasText: 'הבנתי' }).click();
     await page.waitForTimeout(60);
     same('«הבנתי» shuts the question, the year still open, the focus back on the export, and nothing more written',
         [await isOpen(page, 'askModal'), await isOpen(page, 'yearSummaryModal'), await active(page),
-            await page.evaluate(() => [window.__written.length, window.__again])],
-        [false, true, 'yearSummaryExport', [4, { year: 1, reports: 0 }]]);
+            await page.evaluate(() => [window.__written.length, window.__again]), asked],
+        [false, true, 'yearSummaryExport', [4, { year: 3, reports: 0 }], { year: 3, reports: 0 }]);
     // The library missing: CSV files, through a recorder, and the export's own sentence for it.
     await page.evaluate(() => {
         window.__xlsx = XLSX;
