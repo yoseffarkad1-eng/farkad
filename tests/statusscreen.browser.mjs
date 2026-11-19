@@ -145,10 +145,10 @@ const stripWith = (page, line) => page.evaluate(line => {
 }, line);
 // The pill where v204 drew it, to the half pixel.
 const samePlace = (a, b) => !a || !b || (Math.abs(a.l - b.l) <= 0.5 && Math.abs(a.t - b.t) <= 0.5 && Math.abs(a.w - b.w) <= 0.5 && Math.abs(a.h - b.h) <= 0.5);
-// What one width, scheme and mode holds for every chip.
+// What one width, scheme and mode holds for every chip, besides the strip's height itself -
+// which each loop below says in its own words.
 function stripChecks(label, m, word, large, bound) {
     const which = word || 'no chip';
-    same(`${label}, «${which}»: the strip is the height it is without the door`, m.wrapped, m.unwrapped);
     if (bound && !m.alone) check(`${label}, «${which}»: ${large ? 60 : 52}px or less`, m.wrapped <= (large ? 60 : 52), String(m.wrapped));
     same(`${label}, «${which}»: the door put back, the strip is what it was with it`, m.again, m.wrapped);
     check(`${label}, «${which}»: the pill where it was drawn without the door`, samePlace(m.pill, m.basePill),
@@ -232,7 +232,11 @@ for (const [width, height] of PHONES) {
             keep(seen);
             suite(`B12 ${label}: the door costs the strip nothing`);
             given(`${label}: the mode is ${large ? 'on' : 'off'}`, await page.evaluate(() => document.documentElement.classList.contains('display-large')) === large);
-            for (const [word, line] of CHIPS) stripChecks(label, await stripWith(page, line), word, large, true);
+            for (const [word, line] of CHIPS) {
+                const m = await stripWith(page, line);
+                same(`${label}, «${word || 'no chip'}»: the strip is the height it is without the door`, m.wrapped, m.unwrapped);
+                stripChecks(label, m, word, large, true);
+            }
             await stripBack(page);
 
             suite(`B18 ${label}: the floors of the open dialog`);
@@ -264,7 +268,11 @@ for (const [width, height] of [[340, 640], [360, 640], [390, 844], [412, 892], [
         const { context, page, errors: seen } = await openApp(browser, server.url, { width, height, scheme: 'light', large, seeded: false });
         keep(seen);
         suite(`B12 ${label}: the door costs the strip nothing${width > 700 ? ', the tabs in it' : ''}`);
-        for (const [word, line] of CHIPS) stripChecks(label, await stripWith(page, line), word, large, width <= 700 && height > 500);
+        for (const [word, line] of CHIPS) {
+            const m = await stripWith(page, line);
+            same(`${label}, «${word || 'no chip'}»: the strip is the height it is without the door`, m.wrapped, m.unwrapped);
+            stripChecks(label, m, word, large, width <= 700 && height > 500);
+        }
         await stripBack(page);
         await context.close();
     }
