@@ -755,6 +755,16 @@ for (const [reading, flags] of [['gates open', OPEN], ['gates shut', SHUT]]) {
     same('each year is its months: December 3,180, January 2,700', [y2026.line.gross, y2026.months[11].gross,
         y2027.line.gross, y2027.months[0].gross], [3180, 3180, 2700, 2700]);
     same('2026 is over and 2027 is not', [y2026.inProgress, y2027.inProgress], [false, true]);
+    // ON ITS LAST DAY THE YEAR READS WHOLE - «סיכום חודש»'s own rule for a month on its last
+    // day (tests/monthsummary.test.mjs), so that December's summary and the year's never
+    // disagree about whether what they show is finished. Deliberate, not an off-by-one.
+    const decemberOf = () => JSON.parse(device.run(`JSON.stringify(monthSummaryFacts('2026-12'))`)).inProgress;
+    device.setToday('2026-12-31');
+    same('on 31 December the year reads whole, as December does on its last day',
+        [device.facts(2026).inProgress, decemberOf()], [false, false]);
+    device.setToday('2026-12-30');
+    same('the day before, both are still being recorded', [device.facts(2026).inProgress, decemberOf()], [true, true]);
+    device.setToday('2027-01-10');
     ['2026', '2027'].forEach(year => {
         device.run(`openYearSummary(${year})`);
         const text = device.dom.getElementById('yearSummaryBody').textContent;
