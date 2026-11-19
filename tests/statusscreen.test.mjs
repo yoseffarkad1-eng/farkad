@@ -11,7 +11,8 @@
 // (features/status/contract.md, criteria 1-11):
 //
 //   S1  TODAY: the hero, the journey's words and every site line equal journeyCrewStatus,
-//       journeyCrewWords, workersAtPlace and rimaCount on thirty seeded days.
+//       journeyCrewWords, workersAtPlace and rimaCount on thirty seeded days; and its door is not
+//       offered while the journey builds another day on the day screen - a press moves nothing.
 //   S2  THE NEXT WORKING DAY: journeyDefaultDate (a Friday evening is Sunday, a recorded
 //       Saturday is opened), its crew words, the seder's own progress, and its rides - the
 //       journey's own words over the STORED day, equal to what the journey says on a twin
@@ -19,14 +20,17 @@
 //       session's copy of a day the disk refused, damaged day bytes (no line), a damaged vehicle
 //       list not yet loaded (no line, and not one byte written), no day at all; transportDayOf,
 //       transportPrune and openTransport never called, and transportLoad never on a day.
-//   S3  THE NEXT PAYDAY: the men who WORKED in the period that ends first - a Thursday that ends
-//       both cycles («היום, »), a Friday, a man a boundary cut short, an archived man who worked
-//       (counted), an active man with nothing, a man with only an absence and one with only an
-//       advance (not counted), tomorrow's seder already typed (counted), weekly and fortnightly
-//       crews; each count the sheet's own attendance for that period.
+//   S3  THE NEXT PAYDAY: the men who WORKED in the period that ends first, up to today - a
+//       Thursday that ends both cycles («היום, »), a Friday, a man a boundary cut short, an archived
+//       man who worked (counted), an active man with nothing, a man with only an absence and one
+//       with only an advance (not counted), a seder typed for days to come (not work: not
+//       counted), the first evening of both periods (no line), a week the fortnight does not end
+//       (the cycle named), weekly and fortnightly crews; each count the sheet's own attendance for
+//       that period up to today.
 //   S4  THE MONEY: the close line is the reminder's line MIRRORED - there exactly while
 //       #closeReminderLine is, byte for byte; absent with the switch off, ✕ today, nothing to
-//       close, the gate shut and before the reminder has read - and nothing read for it; the
+//       close, the gate shut and before the reminder has read - and nothing read for it; never
+//       the count of a record the money moved off under the open dialog, nor of yesterday; the
 //       board's own figures and words under both gates; «אף עובד לא חייב כסף כרגע.».
 //   S5  THE ONE READING: the board inside reportReadOnce + weeklyCloseOnce equal to the bare one;
 //       the gate never planned on an approved record, at most once on another; a fresh
@@ -417,6 +421,9 @@ const journeyRides = (d, date) => {
     const twin = reopen(d, { deviceId: 'd_twin' });
     return twin.run(`journeyRideWords(journeyRideStatus(transportContext(${j(date)}), transportDayOf(${j(date)})))`);
 };
+// The line says them with their subject - the הסעות screen's own name - so that under the crew's
+// «לא נרשמו: 6» the screen's bar («כל העובדים משובצים») is not read as the men on the sites.
+const rideLine = words => `הסעות: ${words}`;
 const RIDE_DAY = '2026-11-15';
 function ridePhone() {
     const d = phone({ today: '2026-11-13', rides: true });
@@ -448,8 +455,8 @@ await block('S2 the next working day: the journey\'s own day, crew and messages;
     // (e) No day key at all: the empty day - the journey's words for it.
     const empty = reopen(d);
     const spiedE = spyTransport(empty);
-    same('(e) no plan stored for the day: the journey\'s own words for an empty day', facts(empty, '2026-11-13').next.rides,
-        journeyRides(empty, RIDE_DAY));
+    same('(e) no plan stored for the day: the journey\'s own words for an empty day, with their subject', facts(empty, '2026-11-13').next.rides,
+        rideLine(journeyRides(empty, RIDE_DAY)));
 
     // (a) Two men getting there another way, a vehicle kept home, nobody seated - written by the
     // screen's own writers, then read in a fresh session, where only the disk has it.
@@ -463,10 +470,10 @@ await block('S2 the next working day: the journey\'s own day, crew and messages;
     const calls = spyTransport(stored);
     const before = [disk(stored), record(stored)];
     const rides = facts(stored, '2026-11-13').next.rides;
-    same('(a) the day as it is: the riders the journey counts, not every man on a site', rides, journeyRides(stored, RIDE_DAY));
-    same('two of the four go another way: two wait for a seat', rides, 'בלי מושב: 2');
-    check('where the peek would have said every man waits', rides !== stored.run(`journeyRideWords(journeyRideStatus(transportContext(${j(RIDE_DAY)}),
-        transportPeekDay(${j(RIDE_DAY)}).day || transportEmptyDay()))`));
+    same('(a) the day as it is: the riders the journey counts, not every man on a site', rides, rideLine(journeyRides(stored, RIDE_DAY)));
+    same('two of the four go another way: two wait for a seat - said as the rides\' line, never as the crew\'s', rides, 'הסעות: בלי מושב: 2');
+    check('where the peek would have said every man waits', rides !== rideLine(stored.run(`journeyRideWords(journeyRideStatus(transportContext(${j(RIDE_DAY)}),
+        transportPeekDay(${j(RIDE_DAY)}).day || transportEmptyDay()))`)));
     const counted = calls();
     same('transportDayOf, transportPrune and openTransport are never called', [counted.dayOf, counted.prune, counted.open], [0, 0, 0]);
     same('and transportLoad never on a day - only the vehicle list, loaded as the journey loads it', counted.load.filter(key => key !== 'farkadTransport:settings'), []);
@@ -481,8 +488,18 @@ await block('S2 the next working day: the journey\'s own day, crew and messages;
     given('the disk refused the day; the session holds it', b.Store.get(`farkadTransport:day:${RIDE_DAY}`) === null
         && b.run(`Boolean(transportDays[${j(RIDE_DAY)}])`));
     same('(b) the session\'s own copy is read - as the journey sees it', facts(b, '2026-11-13').next.rides,
-        b.run(`journeyRideWords(journeyRideStatus(transportContext(${j(RIDE_DAY)}), transportDayOf(${j(RIDE_DAY)})))`));
-    same('which is the day as changed', facts(b, '2026-11-13').next.rides, 'בלי מושב: 2');
+        rideLine(b.run(`journeyRideWords(journeyRideStatus(transportContext(${j(RIDE_DAY)}), transportDayOf(${j(RIDE_DAY)})))`)));
+    same('which is the day as changed', facts(b, '2026-11-13').next.rides, 'הסעות: בלי מושב: 2');
+
+    // Every rider seated, a driver in seat 1: the screen's bar says «כל העובדים משובצים» - and here
+    // it is the rides' line, under a crew line that still says who is not recorded.
+    const seated = reopen(a);
+    seated.call('transportPlace', RIDE_DAY, 'w_3', 'tv_01', 1);
+    seated.call('transportPlace', RIDE_DAY, 'w_4', 'tv_01', 2);
+    const all = facts(reopen(seated), '2026-11-13').next;
+    same('everyone who rides is seated: the journey\'s words, with their subject, under the crew\'s',
+        [all.words, all.rides], ['שובצו: 4 · לא נרשמו: 1 · נעדרים: 1', 'הסעות: כל העובדים משובצים']);
+    same('the words are the journey\'s own for that day', all.rides, rideLine(journeyRides(seated, RIDE_DAY)));
 
     // (c) The day's bytes damaged: no ride line, and nothing copied anywhere.
     const c = reopen(d);
@@ -536,12 +553,15 @@ await block('S3 the next payday: the men who WORKED in the period that ends firs
         return kept(d);
     };
     const lines = (d, payday) => d.call('statusPaydayLines', payday).map(plain);
-    // The sheet's own count: a man is counted when payrollReport over HIS period has him at a day
-    // of attendance - asked for the men whose period ends on the payday (no closure in these).
+    // A cycle's word is held to its count, and «·» to the word after it, by a no-break space.
+    const nb = text => text.replace(/(שבועי) (\d)/g, '$1\u00a0$2').replace(/· /g, '·\u00a0');
+    // The sheet's own count: a man is counted when payrollReport over HIS period UP TO TODAY has
+    // him at a day of attendance - asked for the men whose period ends on the payday (no closure
+    // in these). A date to come is a plan, not work: the line says «עבדו».
     const sheet = (d, today, date) => d.State.schedule.workers.filter(w => {
         const p = d.call('periodRangeFor', w, today);
         if (p.to !== date) return false;
-        const row = d.call('payrollReport', d.State.schedule, p.from, p.to).find(r => r.workerId === w.id);
+        const row = d.call('payrollReport', d.State.schedule, p.from, p.to < today ? p.to : today).find(r => r.workerId === w.id);
         return Boolean(row && row.attendanceDays > 0);
     }).length;
     const weekly = { payCycles: '2026-08-07=weekly' };
@@ -556,18 +576,39 @@ await block('S3 the next payday: the men who WORKED in the period that ends firs
     same('a Thursday that ends both cycles: today, and the men who worked - the archived man counted, the man with nothing, the one only absent and the one with only an advance not',
         thu, { date: '2026-11-12', isToday: true, worked: 6, weekly: 2, biweekly: 4 });
     same('the count is the sheet\'s own attendance over each man\'s period', thu.worked, sheet(thursday, '2026-11-12', thu.date));
-    same('said: «היום, », the day and the date; then who worked, by cycle', lines(thursday, thu),
-        ['יום התשלום הבא: היום, יום חמישי 12/11', 'עבדו בתקופה: שבועי: 2 · דו־שבועי: 4']);
+    same('said: «היום, », the day and the date; then who worked, by cycle - each word before its count, one colon',
+        lines(thursday, thu), ['יום התשלום הבא: היום, יום חמישי 12/11', nb('עבדו בתקופה: שבועי 2 · דו־שבועי 4')]);
 
-    // Friday 2026-11-13, in the morning: nothing of the new periods recorded yet but the seder for
-    // Sunday - which counts. The weekly week ends first.
+    // Friday 2026-11-13: of the new periods only today is recorded for one man, and the seder for
+    // Sunday and Monday is typed for two more. The weekly week ends first; the seder is a plan,
+    // not work, and is not counted.
     const friday = crew('2026-11-13', [weekly, weekly, {}, {}], [
         ['w_1', '2026-11-15'], ['w_2', '2026-11-13'], ['w_3', '2026-11-16'], ['w_4', '2026-11-12']]);
     const fri = facts(friday).payday;
-    same('a Friday: the weekly men\'s Thursday comes first; tomorrow\'s seder already typed counts', fri,
+    same('a Friday: the weekly men\'s Thursday comes first; the man who worked today counted, the seder typed for Sunday not',
+        fri, { date: '2026-11-19', isToday: false, worked: 1, weekly: 1, biweekly: 0 });
+    same('the sheet\'s own count again, over the period up to today', fri.worked, sheet(friday, '2026-11-13', fri.date));
+    same('one cycle: named, then counted', lines(friday, fri), ['יום התשלום הבא: יום חמישי 19/11', nb('עבדו בתקופה: שבועי 1')]);
+
+    // Friday evening 2026-11-27, which opens the week AND the fortnight, nobody at work today, and
+    // Sunday's seder typed for all twelve: nobody has worked in his period yet, so there is no
+    // payday line - never «עבדו בתקופה: 4» for the weekly men's Sunday.
+    const opening = crew('2026-11-27', Array.from({ length: 12 }, (_, i) => (i < 4 ? weekly : {})),
+        between('2026-11-01', '2026-11-26').filter(date => dow(date) !== 6).flatMap(date =>
+            Array.from({ length: 12 }, (_, i) => [`w_${i + 1}`, date])).concat(
+            Array.from({ length: 12 }, (_, i) => [`w_${i + 1}`, '2026-11-29'])));
+    given('both periods open today', [opening.call('periodRangeFor', opening.State.schedule.workers[0], '2026-11-27').from,
+        opening.call('periodRangeFor', opening.State.schedule.workers[5], '2026-11-27').from], ['2026-11-27', '2026-11-27']);
+    same('the first evening of both periods, the seder typed: nobody worked in them yet - no payday line', facts(opening).payday, null);
+
+    // Tuesday 2026-11-17, a week the fortnight does not end: the weekly men's Thursday comes first,
+    // and the line names whose it is - never «2» alone under a crew of seven at work.
+    const midweek = crew('2026-11-17', [weekly, weekly, {}, {}, {}, {}, {}],
+        ['2026-11-16', '2026-11-17'].flatMap(date => Array.from({ length: 7 }, (_, i) => [`w_${i + 1}`, date])));
+    const mid = facts(midweek).payday;
+    same('a week the fortnight does not end: the weekly men\'s payday, and the weekly men only', mid,
         { date: '2026-11-19', isToday: false, worked: 2, weekly: 2, biweekly: 0 });
-    same('the sheet\'s own count again', fri.worked, sheet(friday, '2026-11-13', fri.date));
-    same('one cycle: the count alone', lines(friday, fri), ['יום התשלום הבא: יום חמישי 19/11', 'עבדו בתקופה: 2']);
+    same('said with their cycle', lines(midweek, mid), ['יום התשלום הבא: יום חמישי 19/11', nb('עבדו בתקופה: שבועי 2')]);
 
     // Monday 2026-11-16: a man moving to the week from Friday 2026-11-20 - his fortnight 13/11-26/11 is cut at 19/11.
     const cut = crew('2026-11-16', [weekly, { payCycles: '2026-11-20=weekly' }, {}], [
@@ -582,8 +623,10 @@ await block('S3 the next payday: the men who WORKED in the period that ends firs
     const fortnight = crew('2026-11-17', [{}, {}, {}], [['w_1', '2026-11-13'], ['w_2', '2026-11-17'], ['w_3', '2026-11-16']]);
     same('a fortnightly crew: the end of the fortnight on the owner\'s seam', facts(fortnight).payday,
         { date: '2026-11-26', isToday: false, worked: 3, weekly: 0, biweekly: 3 });
-    same('one man: «עבדו בתקופה: 1»', lines(fortnight, { date: '2026-11-26', isToday: false, worked: 1, weekly: 0, biweekly: 1 }),
-        ['יום התשלום הבא: יום חמישי 26/11', 'עבדו בתקופה: 1']);
+    same('a fortnightly crew is named for its cycle too', lines(fortnight, facts(fortnight).payday),
+        ['יום התשלום הבא: יום חמישי 26/11', nb('עבדו בתקופה: דו־שבועי 3')]);
+    same('one man: «עבדו בתקופה: דו־שבועי 1»', lines(fortnight, { date: '2026-11-26', isToday: false, worked: 1, weekly: 0, biweekly: 1 }),
+        ['יום התשלום הבא: יום חמישי 26/11', nb('עבדו בתקופה: דו־שבועי 1')]);
     const nobody = crew('2026-11-17', [{}, weekly], [['w_1', '2026-11-12'], ['w_2', '2026-11-17', 'absent']]);
     same('nobody worked in his period yet: no payday line', facts(nobody).payday, null);
     check('no money in it: the reading asks no pay sheet', !/payroll|advance|owes|moneyOf/i.test(
@@ -705,6 +748,74 @@ await block('S4 the money: the close reminder\'s own line, mirrored and never re
     same('nobody owes: «אף עובד לא חייב כסף כרגע.», and no door', [none, moneyWords(n, none)], [{ none: true }, 'אף עובד לא חייב כסף כרגע.']);
     same('a record with no advance and no close asks the board nothing at all', nobodyReads().owesRead, 0);
     same('the placeholder until it is read: «מחשב את החשבונות…», no figure', moneyWords(n, undefined), 'מחשב את החשבונות…');
+
+    // THE LINE IS THE COUNT OF ITS OWN RECORD. While the dialog is open the reminder does not read
+    // (an open dialog is an edit, midEdit), so the count it left up is the record's of the moment
+    // the dialog opened. The money moving under it - the three accounts closed on another phone -
+    // takes the line away beside the board read again; the calendar turning a day does too; and a
+    // count the reminder itself puts up meanwhile is its own reading, mirrored as it is.
+    const o = frame(three());
+    o.call('closeReminderRefresh', 'boot');
+    given('the reminder\'s line up, with 3', o.run('closeReminderShown') === 3);
+    const lineOf = (dev, n) => JSON.parse(said(dev)).includes(dev.run(`CLOSE_REMINDER_TEXT.line(${n})`));
+    const anyClose = dev => JSON.parse(said(dev)).some(text => text.startsWith('יש ') && text.includes('שהחשבון שלהם'));
+    o.run('openStatus()');
+    check('open: the reminder\'s line mirrored', lineOf(o, 3));
+    const oReads = spy(o, ['weeklyCloseRead', 'closeReminderReadCount', 'closeReminderRefresh']);
+    o.State.commitMany(byHand(o, 'w_w', '2026-11-06', '2026-11-12', 0, '2026-11-13T08:00:00.000Z'));
+    o.State.commitMany(byHand(o, 'w_f', '2026-10-30', '2026-11-12', undefined, '2026-11-13T08:01:00.000Z'));
+    o.State.commitMany(byHand(o, 'w_g', '2026-10-30', '2026-11-12', undefined, '2026-11-13T08:02:00.000Z'));
+    o.run('renderStatusIfOpen()');
+    same('the accounts closed under the open dialog: the count of the record before is not said beside the board',
+        [anyClose(o), o.run('Boolean(document.getElementById("statusBody").querySelectorAll("button").find(b => b.dataset.statusKey === "go:close"))')],
+        [false, false]);
+    same('and nothing was read to say it: the close count is never this screen\'s to read', oReads(),
+        { weeklyCloseRead: 0, closeReminderReadCount: 0, closeReminderRefresh: 0 });
+    same('the reminder\'s own line is the reminder\'s - this screen took nothing down', o.run('closeReminderShown'), 3);
+    o.run('closeStatus(); openStatus()');
+    check('opened again over the record as it is now, its line is the line that is up', lineOf(o, 3));
+    o.run('closeStatus()');
+    const m = frame(three());
+    m.call('closeReminderRefresh', 'boot');
+    m.run('openStatus()');
+    check('open over Friday\'s record: the line mirrored', lineOf(m, 3));
+    m.setToday('2026-11-14');
+    m.run('renderStatusIfOpen()');
+    same('the calendar turned a day under the open dialog: the line of the day before goes', anyClose(m), false);
+    m.run('closeReminderShow(2)');
+    m.run('renderStatusIfOpen()');
+    check('a count the reminder itself puts up meanwhile is its own reading: mirrored as it is', lineOf(m, 2));
+    m.run('closeStatus()');
+});
+
+// ================================================================== S1 today's door and the journey
+// THE DAY SCREEN IS THE JOURNEY'S AT ITS FIRST STATION, its date the journey's: «פתיחת היום
+// לעריכה» there would carry tomorrow's seder to today and write the journey's place to say so.
+await block('S1 today\'s door: never while a journey builds another day on the day screen - and nothing written', async () => {
+    const d = frame(screensRecord());
+    const keys = () => JSON.parse(d.run('JSON.stringify(document.getElementById("statusBody").querySelectorAll("button").map(b => b.dataset.statusKey))'));
+    d.run('openStatus()');
+    check('no journey: the door to today is there', keys().includes('go:today'), j(keys()));
+    d.run('closeStatus()');
+    // The journey at its first station for tomorrow - the place the dock's own button leaves it.
+    d.run(`journeyLive = { version: 1, date: '2026-11-11', station: 1, at: Date.now(), open: true }; State.date = '2026-11-11';`);
+    const before = [disk(d), record(d)];
+    d.run('openStatus()');
+    same('a journey building Wednesday on the day screen: no door to today; the journey\'s own door is there',
+        [keys().includes('go:today'), keys().includes('go:journey')], [false, true]);
+    same('and a press that reached it anyway moves nothing: no date, no journey, no byte',
+        [d.run('statusGoToday()'), d.run('State.date'), d.run('journeyDate()'), d.run('journeyStation()'), disk(d), record(d)],
+        [false, '2026-11-11', '2026-11-11', 1, before[0], before[1]]);
+    d.run('closeStatus()');
+    // At a station that is not the day screen, or on today itself, the door moves no journey.
+    d.run(`journeyLive.station = 2;`);
+    d.run('openStatus()');
+    check('at the journey\'s second station the day screen is not its editor: the door is there', keys().includes('go:today'));
+    d.run('closeStatus()');
+    d.run(`journeyLive.station = 1; journeyLive.date = '2026-11-10'; State.date = '2026-11-10';`);
+    d.run('openStatus()');
+    check('a journey building today itself: the door to today is there - it moves nothing', keys().includes('go:today'));
+    d.run('closeStatus(); journeyLive = null;');
 });
 
 // ================================================================== S5 the one reading
@@ -850,7 +961,7 @@ await block('S6 the pulse: the week tab\'s own count per date, the sheet\'s atte
         return Math.round((worked.reduce((sum, n) => sum + n, 0) / worked.length) * 10) / 10;
     };
     same('the caption is the two averages', pulse.caption,
-        `בממוצע ${avg(pulse.weeks.slice(0, 4))} עובדים ביום עבודה ב-4 השבועות האחרונים, ו-${avg(pulse.weeks.slice(4, 8))} ב-4 השבועות שלפניהם.`);
+        `בממוצע ${avg(pulse.weeks.slice(0, 4))} עובדים ביום עבודה בארבעת השבועות האחרונים, ו-${avg(pulse.weeks.slice(4, 8))} בארבעת השבועות שלפניהם.`);
     // Each row is named with every day it shows.
     const named = pulse.weeks[1];
     same('a week\'s name: its range, its total and every day', plain(named.name), `שבוע ${named.from.slice(8, 10)}/${named.from.slice(5, 7)} - `
@@ -917,8 +1028,30 @@ await block('S6 the pulse: the week tab\'s own count per date, the sheet\'s atte
     const fresh = season(phone(), { first: '2026-10-25', seed: 9, advances: false });
     const recent = facts(fresh, today).pulse;
     check('a crew that began within the last four weeks: one average', recent.caption !== null
-        && recent.caption.endsWith('ב-4 השבועות האחרונים.') && !recent.caption.includes('שלפניהם'), String(recent.caption));
+        && recent.caption.endsWith('בארבעת השבועות האחרונים.') && !recent.caption.includes('שלפניהם'), String(recent.caption));
     same('and a crew with no day at all: no caption', facts(phone(), today).pulse.caption, null);
+
+    // A crew that stopped a month ago: the last four weeks hold no working day, the four before do.
+    // That is said as it is - never «בממוצע 0 עובדים ביום עבודה», an average of nobody over days
+    // that, by this screen's own rule, were not working days.
+    const stopped = phone({ today });
+    stopped.State.schedule.places = [{ id: 'p_1', name: 'אתר', active: true }];
+    stopped.State.schedule.workers = Array.from({ length: 11 }, (_, i) => ({ id: `w_${i + 1}`, name: `עובד ${i + 1}`, active: true,
+        dailyRate: 400, hourlyRate: 0 }));
+    between('2026-08-01', '2026-10-15').filter(date => dow(date) !== 6)
+        .forEach(date => stopped.State.schedule.workers.forEach(w => work(stopped, w.id, date, 'p_1')));
+    kept(stopped);
+    same('no working day in the last four weeks: said so, and the four before said apart',
+        facts(stopped, today).pulse.caption,
+        'בארבעת השבועות האחרונים לא היה יום עבודה. בארבעת השבועות שלפניהם: בממוצע 11 עובדים ביום עבודה.');
+    // One man at work: «עובד אחד», never «1 עובדים».
+    const alone = phone({ today });
+    alone.State.schedule.places = [{ id: 'p_1', name: 'אתר', active: true }];
+    alone.State.schedule.workers = [{ id: 'w_1', name: 'עובד', active: true, dailyRate: 400, hourlyRate: 0 }];
+    between('2026-09-20', today).filter(date => dow(date) !== 6).forEach(date => work(alone, 'w_1', date, 'p_1'));
+    kept(alone);
+    same('a crew of one: one man a working day, in the singular',
+        facts(alone, today).pulse.caption, 'בממוצע עובד אחד ביום עבודה בארבעת השבועות האחרונים, ו-1 בארבעת השבועות שלפניהם.');
 });
 
 // ================================================================== S7 the sites
@@ -1122,6 +1255,29 @@ await block('S8 the phase words: on planted lifecycles, the oracle\'s word on ev
         `בעלייה או בירידה: כמה עובדים היו ביום עבודה ב-${P.recent} ימי העבודה האחרונים, לעומת ${P.before} ימי העבודה שלפניהם. `
         + `חדש: אתר שהתחיל לעבוד ב-${P.recent} ימי העבודה האחרונים. שקט: אתר פעיל שלא עבד בו אף עובד ב-${P.quietDays} ימי העבודה האחרונים.`);
     same('and the history is the two windows together', P.history, P.recent + P.before);
+
+    // Drawn under the list ONLY when a word is there to be explained: five lines about words no
+    // site has are words to look for.
+    const notes = dev => {
+        frame(dev);
+        dev.run('openStatus()');
+        const out = JSON.parse(dev.run(`(function () { const out = [];
+            const walk = n => { if (n.tagName === 'P' && n.className === 'status-note') out.push(n.textContent); n.children.forEach(walk); };
+            walk(document.getElementById('statusBody')); return JSON.stringify(out); })()`));
+        dev.run('closeStatus()');
+        return out;
+    };
+    const note = d.run('STATUS_TEXT.phaseNote');
+    const worded = said.p_fall.filter(e => oracle('p_fall', e) === 'בירידה').pop();
+    d.setToday(days[worded]);
+    given('an evening on which a site has its word', facts(d, days[worded]).sites.some(site => site.phase),
+        `${days[worded]} ${j(facts(d, days[worded]).sites.map(site => site.phase))}`);
+    same('a word on the list: the sentence under it says what the words mean', notes(d).includes(note), true);
+    d.setToday(TODAY);
+    given('the season\'s last evening: every site steady, or quiet in the way that has no word', !facts(d, TODAY).sites.some(site => site.phase));
+    same('the same list on an evening with no word: no sentence about the words', notes(d).includes(note), false);
+    given('the young record\'s sites have no word today', !facts(young, young.ctx.todayStr()).sites.some(site => site.phase));
+    same('no word on any site: no sentence about the words', notes(young).includes(note), false);
 });
 
 // ================================================================== S9 this phone
@@ -1198,10 +1354,16 @@ await block('S10 the words: every one pinned, every borrowed one found where it 
         ['rima(3)', 'רימא 3'],
         ['nextPayday("יום חמישי", "26/11", false)', 'יום התשלום הבא: יום חמישי 26/11'],
         ['nextPayday("יום חמישי", "19/11", true)', 'יום התשלום הבא: היום, יום חמישי 19/11'],
-        ['worked(1)', 'עבדו בתקופה: 1'], ['worked(12)', 'עבדו בתקופה: 12'],
-        ['workedBoth(8, 4)', 'עבדו בתקופה: שבועי: 8 · דו־שבועי: 4'],
-        ['pulseCaption(11.5, 9)', 'בממוצע 11.5 עובדים ביום עבודה ב-4 השבועות האחרונים, ו-9 ב-4 השבועות שלפניהם.'],
-        ['pulseCaptionRecent(7)', 'בממוצע 7 עובדים ביום עבודה ב-4 השבועות האחרונים.'],
+        ['rides("כל העובדים משובצים")', 'הסעות: כל העובדים משובצים'], ['rides("בלי מושב: 3")', 'הסעות: בלי מושב: 3'],
+        ['worked(2, 0)', 'עבדו בתקופה: שבועי\u00a02'], ['worked(0, 12)', 'עבדו בתקופה: דו־שבועי\u00a012'],
+        ['worked(0, 1)', 'עבדו בתקופה: דו־שבועי\u00a01'],
+        ['worked(8, 4)', 'עבדו בתקופה: שבועי\u00a08 ·\u00a0דו־שבועי\u00a04'],
+        ['pulseCaption(11.5, 9)', 'בממוצע 11.5 עובדים ביום עבודה בארבעת השבועות האחרונים, ו-9 בארבעת השבועות שלפניהם.'],
+        ['pulseCaption(1, 1)', 'בממוצע עובד אחד ביום עבודה בארבעת השבועות האחרונים, ו-1 בארבעת השבועות שלפניהם.'],
+        ['pulseCaptionRecent(7)', 'בממוצע 7 עובדים ביום עבודה בארבעת השבועות האחרונים.'],
+        ['pulseCaptionRecent(1)', 'בממוצע עובד אחד ביום עבודה בארבעת השבועות האחרונים.'],
+        ['pulseCaptionQuiet(11)', 'בארבעת השבועות האחרונים לא היה יום עבודה. בארבעת השבועות שלפניהם: בממוצע 11 עובדים ביום עבודה.'],
+        ['pulseCaptionQuiet(1)', 'בארבעת השבועות האחרונים לא היה יום עבודה. בארבעת השבועות שלפניהם: בממוצע עובד אחד ביום עבודה.'],
         ['weekName("R", 1, "D")', 'שבוע R: יום נוכחות אחד · D'], ['weekName("R", 54, "D")', 'שבוע R: 54 ימי נוכחות · D'],
         ['siteName("X", 1, "W")', 'X: יום עובד־אתר אחד החודש · 8 השבועות האחרונים: W'],
         ['siteName("X", 14, "W")', 'X: 14 ימי עובד־אתר החודש · 8 השבועות האחרונים: W'],
@@ -1209,9 +1371,14 @@ await block('S10 the words: every one pinned, every borrowed one found where it 
     ];
     same('every template, word for word', made.map(([call]) => T(call)), made.map(([, words]) => words));
     same('and nothing in the block that is not pinned here', JSON.parse(d.run('JSON.stringify(Object.keys(STATUS_TEXT))')).sort(),
-        Object.keys(fixed).concat(['doorName', 'heroLabel', 'inSites', 'rima', 'nextPayday', 'worked', 'workedBoth', 'pulseCaption',
-            'pulseCaptionRecent', 'weekName', 'siteName', 'yosef']).sort());
-    check('no number before a singular adjective: the cycles are named, then counted', !/\d+ שבועי|\d+ דו־שבועי/.test(T('workedBoth(8, 4)')));
+        Object.keys(fixed).concat(['doorName', 'heroLabel', 'inSites', 'rima', 'rides', 'nextPayday', 'worked', 'pulseCaption',
+            'pulseCaptionRecent', 'pulseCaptionQuiet', 'weekName', 'siteName', 'yosef']).sort());
+    check('no number before a singular adjective: the cycles are named, then counted', !/\d+[\s\u00a0]+(שבועי|דו־שבועי)/.test(T('worked(8, 4)')));
+    same('and one colon in the line, never a colon after a cycle\'s word', T('worked(8, 4)').split(':').length - 1, 1);
+    check('a count is never put against a «4» of the period: the four weeks are in words',
+        !/\d+ ב-4|ב-4 השבועות/.test(T('pulseCaption(24, 9)') + T('pulseCaptionRecent(24)') + T('pulseCaptionQuiet(24)')));
+    check('and never «0 עובדים» or «1 עובדים»', ![T('pulseCaption(1, 0)'), T('pulseCaptionRecent(1)'), T('pulseCaptionQuiet(1)')]
+        .some(text => /(^|\s)[01] עובדים/.test(text)));
     const owner = {
         today: ['index.html', '<span>היום</span>'], openDay: ['js/ui/week.js', "'פתיחת היום לעריכה'"],
         rima: ['js/ui/day.js', "'רימא'"], reports: ['index.html', '<span>דוחות</span>'], inactive: ['js/ui/roster.js', "'לא פעיל'"],
@@ -1225,10 +1392,10 @@ await block('S10 the words: every one pinned, every borrowed one found where it 
         d.run('JOURNEY_TEXT.sendWorkers'), d.run('SEDER_TEXT.progress(3, 12)'), d.run('CLOSE_REMINDER_TEXT.line(4)'),
         d.run('CLOSE_REMINDER_TEXT.open'), d.run('OWES_TEXT.total'), d.run('OWES_TEXT.board'), d.run('OWES_TEXT.none'),
         d.run('OWES_REUSED.recorded'), d.run('OWES_TEXT.sum'), d.run('WEEKLY_CLOSE_TEXT.reading'), d.run('PAY_CYCLE_LABELS.weekly'),
-        d.run('PAY_CYCLE_LABELS.biweekly'), d.run('YOSEF_GEVES_TITLE'), d.run('HEBREW_DAY_LETTERS.join(" ")')],
+        d.run('PAY_CYCLE_LABELS.biweekly'), d.run('YOSEF_GEVES_TITLE'), d.run('HEBREW_DAY_LETTERS.join(" ")'), d.run('TRANSPORT_TEXT.title')],
     ['סידור ליום ראשון 22/11/2026', 'הודעה לכל עובד', 'נפתחו 3 מתוך 12', 'יש 4 עובדים שהחשבון שלהם עוד לא נסגר', 'לסגירת שבוע',
         'חוב פתוח של העובדים', 'מי חייב כסף', 'אף עובד לא חייב כסף כרגע.', 'מקדמות רשומות', 'סה״כ', 'מחשב את החשבונות…',
-        'שבועי', 'דו־שבועי', 'עובדי יוסף גבס', 'א׳ ב׳ ג׳ ד׳ ה׳ ו׳ ש׳']);
+        'שבועי', 'דו־שבועי', 'עובדי יוסף גבס', 'א׳ ב׳ ג׳ ד׳ ה׳ ו׳ ש׳', 'הסעות']);
     check('the borrowed sentences are taken from their owners, never typed again here', !/'מחשב את החשבונות…'|'אף עובד לא חייב כסף כרגע\.'|'מקדמות רשומות'|'לסגירת שבוע'|'מי חייב כסף'/.test(STATUS));
 
     const code = STATUS.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/[^'"`\n]*$/gm, '');
@@ -1248,7 +1415,10 @@ await block('S10 the words: every one pinned, every borrowed one found where it 
     check('and nothing of theirs is assigned', !/transportSettingsMemory\s*=[^=]|transportDays\s*\[[^\]]*\]\s*=[^=]/.test(code));
     // The hooks in the files this track touches.
     const app = source('js/app.js');
-    check('render() asks renderStatusIfOpen through typeof, after the finder\'s', /renderFindIfOpen\(\);\s*\n(\s*\/\/[^\n]*\n)*\s*if \(typeof renderStatusIfOpen === 'function'\) renderStatusIfOpen\(\);/.test(app));
+    check('render() asks renderStatusIfOpen through typeof - after the close reminder\'s, whose line it mirrors',
+        /closeReminderAfterRender\(\);\s*\n(\s*\/\/[^\n]*\n)*\s*if \(typeof renderStatusIfOpen === 'function'\) renderStatusIfOpen\(\);/.test(app)
+        && app.indexOf('renderStatusIfOpen();') > app.indexOf('closeReminderAfterRender();')
+        && app.indexOf('renderStatusIfOpen();') < app.indexOf('scheduleBarMeasure();\n}'));
     check('renderSyncChip ends by asking statusDoorSync', /chip\.hidden = label === '';\s*\n(\s*\/\/[^\n]*\n)*\s*if \(typeof statusDoorSync === 'function'\) statusDoorSync\(chip, label\);\s*\n\}/.test(app));
     check('Escape and the backdrop close it through closeStatus', /statusModal: \(\) => closeStatus\(\)/.test(source('js/ui/modal.js')));
     const page = source('index.html');

@@ -5,13 +5,16 @@
 // The screen the sync chip opens. Held here, on the seeded app of tests/screens.mjs (the
 // contract's criteria 12-21; the figures themselves are tests/statusscreen.test.mjs's):
 //
-//   B12 THE DOOR costs the strip nothing: at 320x568, 375x667 and 440x956, both schemes, the
-//       large display off and on, with the chip saying «שגיאת סנכרון», «מסונכרן», «38 ממתינים
-//       לשליחה» and with no chip at all, the strip is exactly as tall as the same page with the
-//       button taken off the chip (52px or less, 60 with the mode - but the longest chip at 320
-//       with the mode, which wraps that strip already); the same sideways and on a wide window;
-//       the door 44px both ways (52 with the mode), named «תמונת מצב · <the chip's word>»,
-//       worded where there is no chip; «הגדרות» whole on the glass.
+//   B12 THE DOOR costs the strip nothing: at 320x568, 375x667 and 440x956, both schemes, and at
+//       340, 360, 390 and 412 wide, the large display off and on, with the chip saying «שגיאת
+//       סנכרון», «מסונכרן», a count waiting to be sent of one to four digits («9», «38», «138»,
+//       «1234 ממתינים לשליחה») and with no chip at all, the strip is exactly as tall as the same
+//       page with the button taken off the chip - also where the strip already puts the chip on
+//       a line of its own - and the pill exactly where it was (52px or less, 60 with the mode, but
+//       where the base wraps); the same sideways and on wide windows, the mode off and on; the
+//       door 44px both ways (52 with the mode) and its pill all door, «הגדרות» all its own; named
+//       «תמונת מצב · <the chip's word>», worded where there is no chip; no chevron; «הגדרות»
+//       whole on the glass.
 //   B13 A TAP opens the dialog at its title; Escape, the backdrop and «סגור» close it and give
 //       the keyboard back to the door; Tab stays inside; midEdit() is true while it is open -
 //       the moment v205's automatic update waits for - and false once it is shut.
@@ -29,8 +32,10 @@
 //       the focus (⋯'s heading, the board's title), never on the door. The other tracks' openers,
 //       stood in for: «יום תשלום» once, in the task that shut this dialog; «לוח חודשי» once,
 //       with (null, null), in a later one.
-//   B17 A COMMIT under the open dialog draws it again where the reader was, and the board is
-//       read once, after the draws have stopped for a second and a half; the close count never.
+//   B17 A COMMIT under the open dialog draws it again where the reader was - the row he was
+//       looking at where it stood on the glass, before the money is read again and after - and
+//       the board is read once, after the draws have stopped for a second and a half; the close
+//       count never; the keyboard on «מי חייב כסף» waits in the money's place and is given back.
 //   B18 THE FLOORS on every phone, scheme and mode, and with the text doubled: the ruler of
 //       tests/screens.mjs, no sideways scroll, nothing cut, the last button reachable.
 //   B19 WHAT IT COSTS, the processor slowed four times: opened on a year's season, the dialog
@@ -41,7 +46,9 @@
 //   B20 No uncaught error anywhere.
 //   B21 NOTHING WRITTEN: the disk and the record byte for byte across opening, redrawing and
 //       every door - but the journey's, whose one byte is the journey's own key, the same as
-//       a press of «בניית סידור» in the dock on a twin page under the same clock.
+//       a press of «בניית סידור» in the dock on a twin page under the same clock; and with a
+//       journey building tomorrow on the day screen, no door to today, and every other door
+//       pressed leaves the disk and the journey's day where they were.
 //
 // STATUS_SHOTS=<dir> also writes pictures (asserts nothing). Chromium with emulated touch -
 // NOT a real phone.
@@ -70,11 +77,13 @@ const brief = (rows, say) => rows.slice(0, 5).map(say).join(' | ') + (rows.lengt
 const says = t => `${t.size}px w${t.weight} ${t.contrast}:1 «${t.words}» ${t.where}`;
 const LETTER = /[\p{L}\p{N}]/u;
 
-// The chip's four states, by the line it is read from (renderSyncChip, js/app.js).
+// The chip's states, by the line it is read from (renderSyncChip, js/app.js): a count waiting to
+// be sent of one to four digits - a day or two offline is three - the longest words it says.
+const waiting = n => [`${n} ממתינים לשליחה`, `מחובר. יש רישומים שעדיין נשלחים. (${n} ממתינים לשליחה)`];
 const CHIPS = [
     ['שגיאת סנכרון', 'שגיאת סנכרון - הנתונים שמורים במכשיר הזה. (38 ממתינים לשליחה)'],
     ['מסונכרן', 'מסונכרן בין המכשירים. · עודכן: 19:42'],
-    ['38 ממתינים לשליחה', 'מחובר. יש רישומים שעדיין נשלחים. (38 ממתינים לשליחה)'],
+    waiting(9), waiting(38), waiting(138), waiting(1234),
     ['', 'הנתונים נשמרים במכשיר הזה בלבד.']
 ];
 
@@ -90,20 +99,72 @@ const stripWith = (page, line) => page.evaluate(line => {
     const door = document.getElementById('statusDoor');
     const chip = document.getElementById('syncChip');
     const box = node => { const r = node.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }; };
-    const settings = box(document.getElementById('settingsBtn'));
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settings = box(settingsBtn);
+    const pillNode = chip.hidden ? door.querySelector('.status-door-words') : chip;
+    const pill = box(pillNode);
+    const at = (x, y) => document.elementFromPoint(x, y);
+    // The pill's own points - its centre and four corners, 2px in - are all the door's; and the
+    // door's reach, down the pill's centre line, on the glass.
+    const inner = [[pill.l + pill.w / 2, pill.t + pill.h / 2], [pill.l + 2, pill.t + 2], [pill.r - 2, pill.t + 2],
+        [pill.l + 2, pill.b - 2], [pill.r - 2, pill.b - 2]];
+    const pillIsDoor = inner.every(([x, y]) => { const hit = at(x, y); return Boolean(hit) && door.contains(hit); });
+    let reach = 0;
+    for (let y = Math.max(0, Math.floor(box(door).t)); y < Math.min(innerHeight, Math.ceil(box(door).b)); y += 1) {
+        const hit = at(pill.l + pill.w / 2, y);
+        if (hit && door.contains(hit)) reach += 1;
+    }
+    // «הגדרות» its own: its centre and corners, 2px in, are never the door's.
+    const settingsOwn = [[settings.l + settings.w / 2, settings.t + settings.h / 2], [settings.l + 2, settings.t + 2],
+        [settings.r - 2, settings.t + 2], [settings.l + 2, settings.b - 2], [settings.r - 2, settings.b - 2]]
+        .every(([x, y]) => { const hit = at(x, y); return Boolean(hit) && settingsBtn.contains(hit); });
     const out = { wrapped: bar(), door: box(door), name: door.getAttribute('aria-label'), chipShown: !chip.hidden,
         words: getComputedStyle(door.querySelector('.status-door-words')).display !== 'none',
-        chevron: getComputedStyle(door.querySelector('.status-door-chevron')).display !== 'none',
+        chevron: Boolean(door.querySelector('svg')), pill, pillIsDoor, reach, settingsOwn,
         settings, settingsWhole: settings.l >= -0.5 && settings.r <= innerWidth + 0.5 && settings.t >= -0.5 && settings.b <= innerHeight + 0.5,
         width: innerWidth, large: document.documentElement.classList.contains('display-large') };
     door.parentNode.insertBefore(chip, door);
     door.style.display = 'none';
     out.unwrapped = bar();
+    out.basePill = chip.hidden ? null : box(chip);
+    // The strip as v204 drew it puts the chip on a line of its own when the chip and «הגדרות» do
+    // not fit side by side: the chip's line is then above «הגדרות»'s.
+    out.alone = !chip.hidden && box(chip).b <= box(settingsBtn).t + 0.5;
     door.insertBefore(chip, door.firstChild);
     door.style.display = '';
     out.again = bar();
     return out;
 }, line);
+// The pill where v204 drew it, to the half pixel.
+const samePlace = (a, b) => !a || !b || (Math.abs(a.l - b.l) <= 0.5 && Math.abs(a.t - b.t) <= 0.5 && Math.abs(a.w - b.w) <= 0.5 && Math.abs(a.h - b.h) <= 0.5);
+// What one width, scheme and mode holds for every chip.
+function stripChecks(label, m, word, large, bound) {
+    const which = word || 'no chip';
+    same(`${label}, «${which}»: the strip is the height it is without the door`, m.wrapped, m.unwrapped);
+    if (bound && !m.alone) check(`${label}, «${which}»: ${large ? 60 : 52}px or less`, m.wrapped <= (large ? 60 : 52), String(m.wrapped));
+    same(`${label}, «${which}»: the door put back, the strip is what it was with it`, m.again, m.wrapped);
+    check(`${label}, «${which}»: the pill where it was drawn without the door`, samePlace(m.pill, m.basePill),
+        `${JSON.stringify(m.basePill)} -> ${JSON.stringify(m.pill)}`);
+    const floor = large ? 51.5 : 43.5;
+    check(`${label}, «${which}»: the door ${large ? 52 : 44}px both ways`, m.door.w >= floor && m.door.h >= floor, `${m.door.w}x${m.door.h}`);
+    check(`${label}, «${which}»: every point of the pill is the door's, and every point of «הגדרות» its own`, m.pillIsDoor && m.settingsOwn,
+        JSON.stringify({ pill: m.pillIsDoor, settings: m.settingsOwn }));
+    // Its reach down the pill's centre line: the whole floor where the chip shares a line with
+    // «הגדרות»; where the strip puts the chip on a line of its own, all the room the strip has
+    // above «הגדרות»'s line - the strip is not made taller for it (the price is said in
+    // features/status/handoff.md).
+    if (m.alone) {
+        console.log(`        ${label}, «${which}»: the chip on a line of its own - the door reaches ${m.reach}px down the pill (the strip has ${Math.round(m.settings.t)}px above «הגדרות»)`);
+        check(`${label}, «${which}»: on a line of its own, the door reaches from the top of the glass to «הגדרות»`,
+            m.reach >= Math.floor(m.settings.t) - 1, `${m.reach}px of ${Math.round(m.settings.t)}`);
+    } else {
+        check(`${label}, «${which}»: the door's reach down the pill, ${large ? 52 : 44}px`, m.reach >= floor, `${m.reach}px`);
+    }
+    same(`${label}, «${which}»: its name`, m.name, word ? `תמונת מצב · ${word}` : 'תמונת מצב');
+    same(`${label}, «${which}»: the chip, or the door's own words - one of them; no chevron`,
+        [m.chipShown, m.words, m.chevron], [Boolean(word), !word, false]);
+    check(`${label}, «${which}»: «הגדרות» whole on the glass`, m.settingsWhole, JSON.stringify(m.settings));
+}
 const stripBack = page => page.evaluate(() => {
     if (window.__statusNotice) { updateSyncNotice = window.__statusNotice; window.__statusNotice = null; }
     updateSyncNotice();
@@ -163,26 +224,7 @@ for (const [width, height] of PHONES) {
             keep(seen);
             suite(`B12 ${label}: the door costs the strip nothing`);
             given(`${label}: the mode is ${large ? 'on' : 'off'}`, await page.evaluate(() => document.documentElement.classList.contains('display-large')) === large);
-            for (const [word, line] of CHIPS) {
-                const m = await stripWith(page, line);
-                const which = word || 'no chip';
-                const wraps = large && width <= 320 && word === '38 ממתינים לשליחה';
-                if (!wraps) {
-                    same(`${label}, «${which}»: the strip is the height it is without the door`, m.wrapped, m.unwrapped);
-                    check(`${label}, «${which}»: ${large ? 60 : 52}px or less`, m.wrapped <= (large ? 60 : 52), String(m.wrapped));
-                } else {
-                    // The one case the strip wraps already (scout-ui (a)): said, not held.
-                    console.log(`        ${label}, «${which}»: the strip wraps already - ${m.unwrapped}px without the door, ${m.wrapped}px with it`);
-                }
-                same(`${label}, «${which}»: the door put back, the strip is what it was with it`, m.again, m.wrapped);
-                const floor = large ? 51.5 : 43.5;
-                check(`${label}, «${which}»: the door ${large ? 52 : 44}px both ways`, m.door.w >= floor && m.door.h >= floor,
-                    `${m.door.w}x${m.door.h}`);
-                same(`${label}, «${which}»: its name`, m.name, word ? `תמונת מצב · ${word}` : 'תמונת מצב');
-                same(`${label}, «${which}»: the chip, or the door's own words - one of them, and a chevron beside it`,
-                    [m.chipShown, m.words, m.chevron], [Boolean(word), !word, true]);
-                check(`${label}, «${which}»: «הגדרות» whole on the glass`, m.settingsWhole, JSON.stringify(m.settings));
-            }
+            for (const [word, line] of CHIPS) stripChecks(label, await stripWith(page, line), word, large, true);
             await stripBack(page);
 
             suite(`B18 ${label}: the floors of the open dialog`);
@@ -203,22 +245,21 @@ for (const [width, height] of PHONES) {
     }
 }
 
-// ============================================================ B12 sideways and wide
-for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
-    const label = `${width}x${height}`;
-    const { context, page, errors: seen } = await openApp(browser, server.url, { width, height, scheme: 'light' });
-    keep(seen);
-    suite(`B12 ${label}: the door costs the strip nothing, the tabs in it or under it`);
-    for (const [word, line] of CHIPS) {
-        const m = await stripWith(page, line);
-        const which = word || 'no chip';
-        same(`${label}, «${which}»: the strip is the height it is without the door`, m.wrapped, m.unwrapped);
-        check(`${label}, «${which}»: the door 44px both ways, named for the chip`, m.door.w >= 43.5 && m.door.h >= 43.5
-            && m.name === (word ? `תמונת מצב · ${word}` : 'תמונת מצב'), `${m.door.w}x${m.door.h} ${m.name}`);
-        check(`${label}, «${which}»: «הגדרות» whole on the glass`, m.settingsWhole, JSON.stringify(m.settings));
+// ============================================================ B12 the widths between, sideways and wide
+// The phones between the three (340-412 wide), where a long count put the chip on a line of its
+// own with the mode on; and sideways and wide windows, the tabs in the strip or under it - each
+// with the mode off and on.
+for (const [width, height] of [[340, 640], [360, 640], [390, 844], [412, 892], [667, 375], [736, 414], [768, 1024], [844, 390],
+    [960, 600], [1024, 768]]) {
+    for (const large of [false, true]) {
+        const label = `${width}x${height}${large ? ' large' : ''}`;
+        const { context, page, errors: seen } = await openApp(browser, server.url, { width, height, scheme: 'light', large, seeded: false });
+        keep(seen);
+        suite(`B12 ${label}: the door costs the strip nothing${width > 700 ? ', the tabs in it' : ''}`);
+        for (const [word, line] of CHIPS) stripChecks(label, await stripWith(page, line), word, large, width <= 700 && height > 500);
+        await stripBack(page);
+        await context.close();
     }
-    await stripBack(page);
-    await context.close();
 }
 
 // ============================================================ B13, B14, B16, B17, B21
@@ -307,6 +348,10 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
 
     suite('B17 a commit under the open dialog: drawn again where he was; the money read once the draws stop');
     await openRead(page);
+    // Where every keyed row and door of the dialog stands on the glass, by its key.
+    const rows = () => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#statusBody [data-status-key]')]
+        .map(node => [node.dataset.statusKey, Math.round(node.getBoundingClientRect().top * 10) / 10])));
+    // He reads the pulse: its third week at the top of the glass.
     await page.evaluate(() => {
         window.__moneyReads = 0;
         window.__closeReads = 0;
@@ -314,18 +359,40 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
         owesRead = function () { window.__moneyReads += 1; return real.apply(this, arguments); };
         const close = weeklyCloseRead;
         weeklyCloseRead = function () { window.__closeReads += 1; return close.apply(this, arguments); };
-        document.querySelector('#statusModal .modal-content').scrollTop = 900;
+        const content = document.querySelector('#statusModal .modal-content');
+        const row = document.querySelectorAll('#statusBody .status-week')[2];
+        content.scrollTop += row.getBoundingClientRect().top - content.getBoundingClientRect().top - 40;
     });
     const was = await page.evaluate(() => ({ hero: document.querySelector('.status-hero-n').textContent,
-        scroll: document.querySelector('#statusModal .modal-content').scrollTop }));
+        money: Math.round(document.getElementById('statusMoney').getBoundingClientRect().height) }));
+    const wasRows = await rows();
+    const looking = Object.keys(wasRows).filter(key => key.startsWith('week:') || key.startsWith('site:'));
+    const onGlass = (at, keys) => keys.filter(key => at[key] !== undefined && at[key] >= 0 && at[key] < 956).map(key => [key, at[key]]);
+    given('he is reading the weeks and the sites', onGlass(wasRows, looking).length >= 6, JSON.stringify(onGlass(wasRows, looking)));
     // נועם פרץ is not recorded today on the screens' record: he is put on רמת גן.
     await page.evaluate(() => State.commit(assignPlace(State.schedule, todayStr(), 'w11', 'actual', 'p3')));
     const now = await page.evaluate(() => ({ hero: document.querySelector('.status-hero-n').textContent,
-        scroll: document.querySelector('#statusModal .modal-content').scrollTop,
-        pending: Boolean(document.querySelector('#statusModal .status-pending')) }));
+        pending: Boolean(document.querySelector('#statusModal .status-pending')),
+        money: Math.round(document.getElementById('statusMoney').getBoundingClientRect().height) }));
     same('the commit is on the screen at once: one more man today', Number(now.hero), Number(was.hero) + 1);
-    same('where he was reading: the place kept', now.scroll, was.scroll);
     same('the money of the record before it is not shown as current', now.pending, true);
+    same('and its place keeps the height its lines had, so nothing under it moves', now.money, was.money);
+    same('every week and site he was looking at stands where it stood on the glass', onGlass(await rows(), looking), onGlass(wasRows, looking));
+    await page.waitForFunction(() => !document.querySelector('#statusModal .status-pending'), null, { timeout: 6000 });
+    await page.waitForTimeout(100);
+    same('the money read again: still where they stood', onGlass(await rows(), looking), onGlass(wasRows, looking));
+    // Another phone takes the one man of נתניה off today: today's section loses that site's line,
+    // above him - and what he is looking at does not move for it.
+    await page.evaluate(() => State.commit(clearWorkerDay(State.schedule, todayStr(), 'w04', 'actual')));
+    same('a site\'s line gone from today, above him: every row he was looking at where it stood',
+        onGlass(await rows(), looking), onGlass(wasRows, looking));
+    await page.waitForFunction(() => !document.querySelector('#statusModal .status-pending'), null, { timeout: 6000 });
+    await page.waitForTimeout(100);
+    same('and after the money is read again', onGlass(await rows(), looking), onGlass(wasRows, looking));
+    await page.evaluate(() => State.commit(assignPlace(State.schedule, todayStr(), 'w04', 'actual', 'p4')));
+    await page.waitForFunction(() => !document.querySelector('#statusModal .status-pending'), null, { timeout: 6000 });
+    await page.waitForTimeout(1800);
+    await page.evaluate(() => { window.__moneyReads = 0; });
     await page.waitForTimeout(500);
     await page.evaluate(() => State.commit(assignPlace(State.schedule, todayStr(), 'w12', 'actual', 'p3')));
     await page.waitForTimeout(500);
@@ -335,8 +402,29 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
     await page.waitForTimeout(1800);
     same('read once, after the draws stopped for a second and a half', await page.evaluate(() => window.__moneyReads), 1);
     same('and the close count never read under the open dialog', await page.evaluate(() => window.__closeReads), 0);
+    // The keyboard on «מי חייב כסף»: a commit takes that button away while the money waits. The
+    // keyboard waits in the money's place - inside the dialog, never on the page behind it, where
+    // the next Tab would throw it to the dialog's top - and is given the button back once drawn.
+    await page.evaluate(() => document.querySelector('#statusBody [data-status-key="go:board"]').focus({ preventScroll: true }));
+    await page.evaluate(() => State.commit(assignPlace(State.schedule, todayStr(), 'w14', 'actual', 'p3')));
+    const heldFocus = await page.evaluate(() => ({ id: document.activeElement.id, key: document.activeElement.dataset.statusKey || '',
+        inside: document.getElementById('statusModal').contains(document.activeElement),
+        pending: Boolean(document.querySelector('#statusModal .status-pending')) }));
+    same('while the money waits, the keyboard waits in its place, inside the dialog', heldFocus,
+        { id: 'statusMoney', key: '', inside: true, pending: true });
+    await page.waitForFunction(() => !document.querySelector('#statusModal .status-pending'), null, { timeout: 6000 });
+    await page.waitForTimeout(100);
+    same('and is on «מי חייב כסף» again once the board is drawn', await page.evaluate(() => document.activeElement.dataset.statusKey || document.activeElement.id),
+        'go:board');
+    await page.keyboard.press('Tab');
+    check('the next Tab goes on from there, not from the dialog\'s top', await page.evaluate(() => {
+        const keys = [...document.querySelectorAll('#statusBody button')];
+        const at = keys.indexOf(document.activeElement);
+        return at > keys.findIndex(node => node.dataset.statusKey === 'go:board');
+    }));
     await page.evaluate(() => { State.commit(clearWorkerDay(State.schedule, todayStr(), 'w11', 'actual'));
-        State.commit(clearWorkerDay(State.schedule, todayStr(), 'w12', 'actual')); State.commit(clearWorkerDay(State.schedule, todayStr(), 'w13', 'actual')); });
+        State.commit(clearWorkerDay(State.schedule, todayStr(), 'w12', 'actual')); State.commit(clearWorkerDay(State.schedule, todayStr(), 'w13', 'actual'));
+        State.commit(clearWorkerDay(State.schedule, todayStr(), 'w14', 'actual')); });
     await page.evaluate(() => closeStatus());
     const after17 = await page.evaluate(() => ({
         disk: JSON.stringify(Object.keys(localStorage).filter(key => key !== 'farkad:openBuilds').sort().map(key => [key, localStorage.getItem(key)])),
@@ -531,6 +619,66 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
     await two.context.close();
 }
 
+// ============================================================ B21 a journey building tomorrow, and every door
+// THE DAY SCREEN IS THE JOURNEY'S AT ITS FIRST STATION, its date the journey's: a door that put
+// today on it carried tomorrow's seder to today and wrote the journey's place to say so (the
+// review of 135bdb1). With the journey on, there is no door to today, and every other door
+// leaves the disk and the journey's day where they were.
+{
+    suite('B21 a journey building tomorrow on the day screen: no door to today, and no door moves it or writes a byte');
+    const { context, page, errors: seen } = await openApp(browser, server.url, { width: 375, height: 667, scheme: 'light' });
+    keep(seen);
+    tapsAtAPersonsPace(page);
+    const read = () => page.evaluate(() => JSON.stringify(Object.keys(localStorage).filter(key => key !== 'farkad:openBuilds').sort()
+        .map(key => [key, localStorage.getItem(key)])));
+    const journey = () => page.evaluate(() => [journeyStation(), journeyDate()]);
+    // He starts tomorrow's seder from the dock's own button, as he does.
+    await page.locator('#journeyDockBtn').tap();
+    await page.waitForTimeout(500);
+    const building = await journey();
+    given('the journey at its first station, on tomorrow', building[0] === 1 && building[1] === '2026-11-11', JSON.stringify(building));
+    await page.evaluate(() => closeReminderShow(4));
+    const disk = await read();
+    const record = await page.evaluate(() => JSON.stringify(State.schedule));
+    const offered = async () => {
+        if (!(await dialogOpen(page))) {
+            await page.locator('#statusDoor').tap();
+            await page.waitForFunction(() => statusIsOpen() && !document.querySelector('#statusModal .status-pending'));
+        }
+        return page.evaluate(() => [...document.querySelectorAll('#statusBody [data-status-key]')].map(node => node.dataset.statusKey));
+    };
+    const keys = await offered();
+    same('no «פתיחת היום לעריכה» while the journey builds another day; the journey\'s own door is there',
+        [keys.includes('go:today'), keys.includes('go:journey'), await page.evaluate(() => [...document.querySelectorAll('#statusBody button')]
+            .some(node => node.textContent.trim() === 'פתיחת היום לעריכה'))], [false, true, false]);
+    const week = keys.find(key => key.startsWith('week:'));
+    const site = keys.find(key => key.startsWith('site:'));
+    // «לסגירת שבוע» first: the reminder's line is up by its own function, and the first render
+    // after it (a door to a view) takes it down - the record's reminder was put away for the day.
+    for (const key of ['go:close', 'go:payday', 'go:board', week, site, 'go:cloud', 'go:backup']) {
+        await offered();
+        const node = page.locator(`#statusBody [data-status-key="${key}"]`);
+        await node.scrollIntoViewIfNeeded();
+        await node.tap();
+        await page.waitForTimeout(400);
+        same(`«${key}»: the journey on its day, its station; the disk and the record byte for byte`,
+            [await journey(), (await read()) === disk, (await page.evaluate(() => JSON.stringify(State.schedule))) === record],
+            [building, true, true]);
+        // Back from wherever the door went: the dialog it opened shut, ⋯ shut.
+        await page.evaluate(() => {
+            if (typeof weeklyCloseIsOpen === 'function' && weeklyCloseIsOpen()) closeWeeklyClose();
+            if (typeof siteCardIsOpen === 'function' && siteCardIsOpen()) closeSiteCard();
+            if (typeof settingsOpen !== 'undefined' && settingsOpen) closeSettings();
+        });
+        await page.waitForTimeout(200);
+    }
+    // And with the journey's day today itself, the door to today is there: it moves nothing.
+    await page.evaluate(() => { State.date = todayStr(); render(); });
+    same('the journey moved to today by the day\'s own header: the door to today is offered again', (await offered()).includes('go:today'), true);
+    await page.evaluate(() => closeStatus());
+    await context.close();
+}
+
 // ============================================================ B15 the ramp
 {
     suite('B15 the ramp: one hue, step by step, the step nearest the surface 3:1 on it and 1.25:1 between neighbours, in both schemes');
@@ -569,37 +717,39 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
 }
 
 // ============================================================ B18 with the text doubled
+// Every px font-size of every sheet, twice over (tests/mobile.test.mjs's cascade rewrite).
+const doubleText = page => page.evaluate(() => {
+    const out = [];
+    const walk = (rules, wrap) => {
+        for (const rule of rules) {
+            if (rule.type === 4 || rule.type === 12) {
+                const head = rule.type === 4 ? `@media ${rule.media.mediaText}` : `@supports ${rule.conditionText}`;
+                walk(rule.cssRules, text => wrap(`${head}{${text}}`));
+                continue;
+            }
+            if (rule.type !== 1 || !rule.style) continue;
+            const raw = rule.style.getPropertyValue('font-size');
+            if (!raw || !/^[\d.]+px$/.test(raw.trim())) continue;
+            wrap(`${rule.selectorText}{font-size:${parseFloat(raw) * 2}px !important;}`);
+        }
+    };
+    for (const sheet of document.styleSheets) {
+        let rules = null;
+        try { rules = sheet.cssRules; } catch (error) { rules = null; }
+        if (rules) walk(rules, text => out.push(text));
+    }
+    out.unshift('html{font-size:32px !important;}');
+    const style = document.createElement('style');
+    style.id = 'ax2-cascade';
+    style.textContent = out.join('\n');
+    document.head.appendChild(style);
+});
 {
     suite('B18 the text doubled: no sideways scroll, nothing cut, the last button reachable');
     for (const [width, height] of [[320, 568], [375, 667]]) {
         const { context, page, errors: seen } = await openApp(browser, server.url, { width, height, scheme: 'light' });
         keep(seen);
-        await page.evaluate(() => {
-            const out = [];
-            const walk = (rules, wrap) => {
-                for (const rule of rules) {
-                    if (rule.type === 4 || rule.type === 12) {
-                        const head = rule.type === 4 ? `@media ${rule.media.mediaText}` : `@supports ${rule.conditionText}`;
-                        walk(rule.cssRules, text => wrap(`${head}{${text}}`));
-                        continue;
-                    }
-                    if (rule.type !== 1 || !rule.style) continue;
-                    const raw = rule.style.getPropertyValue('font-size');
-                    if (!raw || !/^[\d.]+px$/.test(raw.trim())) continue;
-                    wrap(`${rule.selectorText}{font-size:${parseFloat(raw) * 2}px !important;}`);
-                }
-            };
-            for (const sheet of document.styleSheets) {
-                let rules = null;
-                try { rules = sheet.cssRules; } catch (error) { rules = null; }
-                if (rules) walk(rules, text => out.push(text));
-            }
-            out.unshift('html{font-size:32px !important;}');
-            const style = document.createElement('style');
-            style.id = 'ax2-cascade';
-            style.textContent = out.join('\n');
-            document.head.appendChild(style);
-        });
+        await doubleText(page);
         await openRead(page);
         const label = `${width}x${height}, text doubled`;
         const m = await page.evaluate(measureInPage, ['#statusModal']);
@@ -616,6 +766,102 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
             return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: innerHeight };
         });
         check(`${label}: the last button reachable`, last.top >= 0 && last.bottom <= last.height, JSON.stringify(last));
+        await context.close();
+    }
+}
+
+// ============================================================ B18 the pulse's day letters
+// The head of the pulse: a letter per day. With a Saturday among the twelve weeks there are seven
+// columns, and at 320 with «תצוגה גדולה» «ש׳» was wider than its column - the letters ran into
+// each other (the review of 135bdb1). A column too narrow for the geresh keeps the letter; one too
+// narrow for the letter shows none.
+{
+    suite('B18 the pulse\'s day letters: never one into the next - seven columns with the mode, and the text doubled');
+    for (const [width, height, large, doubled] of [[320, 568, true, false], [375, 667, true, false], [440, 956, true, false],
+        [320, 568, false, false], [320, 568, false, true], [375, 667, false, true]]) {
+        const label = `${width}x${height}${large ? ' large' : ''}${doubled ? ', text doubled' : ''}`;
+        const { context, page, errors: seen } = await openApp(browser, server.url, { width, height, scheme: 'light', large });
+        keep(seen);
+        // A Saturday among the twelve weeks with a day's work on it: the seventh column.
+        await page.evaluate(() => State.commit(assignPlace(State.schedule, '2026-10-31', 'w01', 'actual', 'p1')));
+        if (doubled) await doubleText(page);
+        await openRead(page);
+        const m = await page.evaluate(() => {
+            const cells = [...document.querySelectorAll('#statusBody .status-grid-head .status-grid-day')];
+            const shown = cells.map(cell => [...cell.children].filter(part => getComputedStyle(part).display !== 'none'
+                && getComputedStyle(part).visibility === 'visible'));
+            const box = parts => {
+                if (!parts.length) return null;
+                const range = document.createRange();
+                range.setStartBefore(parts[0]);
+                range.setEndAfter(parts[parts.length - 1]);
+                const r = range.getBoundingClientRect();
+                return { l: r.left, r: r.right };
+            };
+            const boxes = shown.map(box);
+            const gaps = [];
+            for (let i = 1; i < boxes.length; i += 1) {
+                if (boxes[i] && boxes[i - 1]) gaps.push(Math.round((boxes[i - 1].l - boxes[i].r) * 10) / 10);
+            }
+            return { cols: cells.length, cell: Math.round(cells[0].getBoundingClientRect().width * 10) / 10,
+                said: shown.map(parts => parts.map(part => part.textContent).join('')),
+                words: cells.map(cell => cell.textContent), gaps,
+                font: parseFloat(getComputedStyle(cells[0]).fontSize) };
+        });
+        console.log(`        ${label}: ${m.cols} columns of ${m.cell}px, ${m.font}px letters, drawn ${JSON.stringify(m.said)}, gaps ${m.gaps.join(', ')}px`);
+        same(`${label}: seven columns, each the day's own word (HEBREW_DAY_LETTERS)`, m.words, ['ו׳', 'ש׳', 'א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳']);
+        check(`${label}: no letter drawn into the next`, m.gaps.every(gap => gap >= 1), m.gaps.join(', '));
+        if (!doubled) {
+            same(`${label}: every column still says its day - the letter, with its mark where there is room`,
+                m.said.map(word => word.slice(0, 1)), ['ו', 'ש', 'א', 'ב', 'ג', 'ד', 'ה']);
+        }
+        await context.close();
+    }
+}
+
+// ============================================================ B18 a site's row: off the roster, and a long name
+{
+    suite('B18 a site\'s row: one outside the roster is not drawn as a button; a long name keeps its swatch');
+    for (const [width, height, large] of [[320, 568, true], [440, 956, false]]) {
+        const label = `${width}x${height}${large ? ' large' : ''}`;
+        const { context, page, errors: seen } = await openApp(browser, server.url, { width, height, scheme: 'dark', large });
+        keep(seen);
+        // In memory only, and put back: a day at a site the roster has not got (the record names
+        // it «אתר שאינו ברשימה 1»), and a long name on the first site of the roster.
+        await page.evaluate(() => {
+            window.__places = JSON.stringify(State.schedule.places);
+            State.schedule.places.push({ id: 'p9', name: 'זמני', active: true });
+            assignPlace(State.schedule, todayStr(), 'w12', 'actual', 'p9');
+            State.schedule.places = State.schedule.places.filter(place => place.id !== 'p9');
+            State.schedule.places[0].name = 'הרצליה פיתוח - מגדלי הים התיכון שלב ב׳ ומרכז המסחר';
+        });
+        await openRead(page);
+        const m = await page.evaluate(() => {
+            const content = document.querySelector('#statusModal .modal-content');
+            const unlisted = document.querySelector('#statusBody .status-site-unlisted');
+            const listed = document.querySelector('#statusBody button.status-site');
+            const look = node => { const cs = getComputedStyle(node); return { ground: cs.backgroundColor, border: cs.borderTopStyle }; };
+            const named = [...document.querySelectorAll('#statusBody button.status-site')]
+                .find(node => node.querySelector('.status-site-name').textContent.includes('מגדלי הים'));
+            const swatch = named.querySelector('.status-swatch').getBoundingClientRect();
+            const name = named.querySelector('.status-site-name');
+            const range = document.createRange();
+            range.selectNodeContents(name);
+            const first = range.getClientRects()[0];
+            unlisted.scrollIntoView({ block: 'center' });
+            const r = unlisted.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return { unlisted: look(unlisted), listed: look(listed), tag: unlisted.tagName, role: unlisted.getAttribute('role'),
+                hitButton: Boolean(hit && hit.closest('button')),
+                swatch: { top: swatch.top, bottom: swatch.bottom }, line: { top: first.top, bottom: first.bottom },
+                lines: [...range.getClientRects()].length, scroll: content.scrollTop };
+        });
+        same(`${label}: the site outside the roster is a plain row - no button under the finger, no ground of one`,
+            [m.tag, m.role, m.hitButton, m.unlisted.ground === m.listed.ground, m.unlisted.border], ['DIV', 'group', false, false, 'dashed']);
+        check(`${label}: a long name wraps beside its swatch - the swatch on its first line, never alone on a line of its own`,
+            m.lines > 1 && m.swatch.bottom > m.line.top && m.swatch.top < m.line.bottom, JSON.stringify({ swatch: m.swatch, line: m.line, lines: m.lines }));
+        await floors(page, `${label}, the long name and the site off the roster`, large, width);
+        await page.evaluate(() => { State.schedule.places = JSON.parse(window.__places); });
         await context.close();
     }
 }

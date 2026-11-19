@@ -1935,6 +1935,19 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
     font-size: 14px;
 }
 .status-grid-head { padding: 0 6px; color: var(--ink-2); font-weight: 700; text-align: center; }
+/* A day's column too narrow for its letter AND its geresh (seven columns on a 320px phone with
+   «תצוגה גדולה»: «ש׳» is wider than its column) keeps the letter alone - letters that ran into
+   each other were no letters at all. Measured in the column's own em, so it follows the mode and
+   the text's size; where container queries are not, the mark stays, as before. */
+.status-grid-day { container-type: inline-size; }
+@container (max-width: 1.3em) {
+    .status-day-mark { display: none; }
+}
+/* And a column too narrow even for the letter alone (the text doubled on a phone) shows none:
+   the day is in the row's name, read aloud, and letters drawn over each other say nothing. */
+@container (max-width: 0.85em) {
+    .status-day-letter { visibility: hidden; }
+}
 .status-week {
     width: 100%;
     min-height: 44px;
@@ -1978,8 +1991,16 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
     text-align: start;
 }
 .status-site:hover { filter: none; }
-.status-site-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
-.status-site-name { min-width: 0; font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+/* A site the record names and the roster has not got opens nothing (no card behind it), so it
+   is not drawn as one of the buttons above it: no ground, a dashed line round it. */
+.status-site-unlisted { background: transparent; border: 1px dashed var(--line); }
+/* On the name's first line: the swatch and the chips stand on its baseline, so a name that wraps
+   keeps them beside the line it starts on. */
+.status-site-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; min-width: 0; }
+/* The name takes the room left on its line and wraps INSIDE it, so its swatch stays beside its
+   first line - a long name used to drop below the swatch and leave it alone on a line; the
+   chips after it go to the next line when they do not fit. */
+.status-site-name { flex: 1 1 0; min-width: 8em; font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
 .status-site-off { color: var(--ink-2); font-size: 15px; font-weight: 700; }
 .status-phase { padding: 1px 10px; border-radius: 999px; font-size: 15px; font-weight: 800; }
 .status-phase-rising,
