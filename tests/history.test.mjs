@@ -338,6 +338,16 @@ const queryOf = (range, workerId, placeId) => ({ workerId, placeId, range: range
         });
     });
     same('on every day of 2026 and 2027, every key reads a range that ends at today or before it', late, []);
+    // THE READING IS PURE, read as tests/find.test.mjs reads findRead: from the reading's
+    // header to the facts' header, its code names no DOM, no storage, no State and no clock -
+    // today is handed in. (A date BUILT from numbers, `new Date(year, month, 1, 12)`, is the
+    // month arithmetic setMonthRange does, not a clock.)
+    const reading = HISTORY_JS.slice(HISTORY_JS.indexOf('// ================================================================== the reading'),
+        HISTORY_JS.indexOf('// ================================================================== the facts'))
+        .split('\n').filter(line => line.trim().indexOf('//') !== 0).map(line => line.replace(/\s\/\/ .*$/, '')).join('\n');
+    given('the reading\'s section is found', reading.indexOf('function historyRead(') !== -1 && reading.indexOf('function historyRange(') !== -1);
+    same('the reading is pure: no DOM, no storage, no State, no clock in it',
+        reading.match(/document|window|\bStore\b|localStorage|todayStr|\bState\b|Date\.now|new Date\(\)|performance/g) || [], []);
 
     // The two fields, opened after «השנה»: filled with the dates it READ.
     device.State.schedule.workers = [{ id: 'w_1', name: 'דוגמה', active: true }];
