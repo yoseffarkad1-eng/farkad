@@ -5,9 +5,9 @@
 - **Final code commit:** `a372a92` (fix round 1). `e9ce62b` is the repair of the review of
   2026-11-19 (the section «Fix round 1» below); `a372a92` adds two checks to `tests/payday.test.mjs`
   and nothing else (the look's place, finding 7). **Fix round 2 changed no code, no test and no
-  stamp** (the section «Fix round 2» below); its runs - the whole `npm test` chain one step at a
-  time, and this track's browser suite - are on `6aeacb2`, whose one change after `a372a92` is this
-  file. The round before fix round 1 ended at `73ca0e0`.
+  stamp** (the section «Fix round 2» below); its runs are the whole `npm test` chain one step at a
+  time on `6aeacb2` and this track's browser suite on `f72d724` - after `a372a92` the two change
+  only this file. The round before fix round 1 ended at `73ca0e0`.
 - **Final commit:** the one that updates this file for fix round 2 and nothing else - no file the
   app serves or a suite reads (every `features/` path a suite names is in a comment, and `sw.js`
   caches none) - so the results below are the final commit's.
@@ -141,7 +141,8 @@ Track `status` uses only `openPayday()` and `PAYDAY_TEXT.entry`, both unchanged.
 | `e9ce62b` | fix round 1: js/ui/payday.js, css/design.css, css/large.css, the two suites, tests/screens.mjs, tests/usual.test.mjs (a comment), tests/README.md |
 | `a372a92` | tests/payday.test.mjs: the look's place held in P11 (finding 7) |
 | `6aeacb2` | features/payday/handoff.md, updated for fix round 1 |
-| (this one) | features/payday/handoff.md, updated for fix round 2 - no code, no test, no stamp |
+| `f72d724` | features/payday/handoff.md, updated for fix round 2 - no code, no test, no stamp |
+| (this one) | features/payday/handoff.md: fix round 2's run of this track's browser suite |
 
 ## Files changed against the base (`git diff --stat 6ab193d a372a92`)
 
@@ -166,8 +167,8 @@ Track `status` uses only `openPayday()` and `PAYDAY_TEXT.entry`, both unchanged.
  17 files changed, 4708 insertions(+), 9 deletions(-)
 ```
 (Fix round 1 alone, `git diff --stat 73ca0e0 a372a92`: 9 files changed, 1665 insertions(+), 242 deletions(-).
-After `a372a92` only this file changed: in `6aeacb2` for fix round 1, and in the final commit for
-fix round 2.)
+After `a372a92` only this file changed: in `6aeacb2` for fix round 1, and in `f72d724` and the
+final commit for fix round 2.)
 
 One line each:
 - `js/ui/payday.js` (new) - the desk: the reading (`paydayFacts`), its memory, the dialog, the doors, every word.
@@ -399,8 +400,8 @@ and hide the other 106). The build round's outputs (on `73ca0e0` and `b030d53`) 
 file's history (`git show 96f8d88:features/payday/handoff.md`), and fix round 1's `npm test` (on
 `e9ce62b`: the same 109 steps, the same two reds) and its run of the three suites that read
 `a372a92`'s change in `git show 6aeacb2:features/payday/handoff.md`. Below: fix round 2's `npm test`
-and this track's browser suite, on `6aeacb2`; then fix round 1's other browser suites, on
-`e9ce62b`, whose served bytes `6aeacb2` carries unchanged.
+on `6aeacb2` and this track's browser suite on `f72d724`; then fix round 1's other browser suites,
+on `e9ce62b`, whose served bytes both carry unchanged.
 
 ### `npm test`, suite by suite, on `6aeacb2` (fix round 2; clean tree before and after)
 
@@ -543,13 +544,16 @@ after ONE commit moving the three stamps v204 -> v206:     build 69/69 exit 0 | 
 
 ### Browser suites
 
-**Fix round 2, on `6aeacb2`** - this track's suite, through the slot wrapper:
+**Fix round 2, on `f72d724`** (the commit before the final one; it changes nothing after
+`6aeacb2` but this file) - this track's suite, through the slot wrapper:
 
 ```
-payday.browser.mjs | queued for a browser slot when this commit was made (both slots held by
-                     another track's release gate and verification chain); the result follows
-                     in the next commit
+payday.browser.mjs | exit 0 | about 130s of its own (4517s with 73 minutes queued for a slot) | 1040/1040 checks passed
 ```
+
+Its measurements are fix round 1's again: the board under the row unmoved at 320, 375 and 440 with
+the mode off and at 375 and 440 with it on, 18px at 320 with the mode; where «סגירת שבוע» is not
+drawn, 12 × 62px and 12 × 66px, each equal to the row; tap to figures 25 ms (budget 1,500).
 
 **Fix round 1, on `e9ce62b`** - this track's suite, then the existing suites fix round 1 touches:
 `largetext.browser.mjs` walks `tests/screens.mjs` (two screens added, the closes repaired) and
@@ -598,8 +602,10 @@ this shared machine).
   run alone on the shared machine: season D (40 men, 139 advances, 236 closes, closed in order)
   **332 ms** (470, 332, 264); season B (40 men, 636 advances, nothing closed) **3,567 ms** (3,758,
   3,567, 3,518). The previous round measured 241-474 ms and 2,989-3,708 ms under the same load.
+  Fix round 2, on `6aeacb2` inside the chain (the machine at a load of 4 to 8): season D **236 ms**
+  (225, 236, 282), season B **2,633 ms** (2,835, 2,633, 2,566).
 - **Tap to figures** on the seeded crew (B13): **44 ms** (budget 1,500 ms); the placeholder and no
-  figure in the frame after the tap.
+  figure in the frame after the tap. Fix round 2, on `f72d724`: **25 ms**.
 - **Fix round 1:** at 320 with the mode the first card's «לתשלום» now stands at 449..498 on a glass
   that ends at 556 (it was 652..701); the Thursday desk at 375 is 4.4 screens tall (it was 7); with
   every font doubled no figure of the desk is drawn on two lines at any phone, the mode off or on.
@@ -626,8 +632,8 @@ the crew tests/screens.mjs seeds and the record with every check changed in memo
   closereminder, payslips, whatsnew, forms, polish, advancereset, overpaidfix and simple-advances
   (green); they were not run again in fix round 1, which changes no rule outside the desk's own
   block but its place in the two sheets. Fix round 2, which changed nothing: the npm test chain step
-  by step and this track's browser suite, on `6aeacb2`; no existing browser suite again (no served
-  byte moved after `e9ce62b`).
+  by step on `6aeacb2` and this track's browser suite on `f72d724`; no existing browser suite again
+  (no served byte moved after `e9ce62b`).
 - **Fix round 1 left two findings, or parts of them, to the owner** (13 and 14c in its table): the
   morning after payday, and the tense of «נוכה מהשכר» on a payday still ahead.
 - **The three build stamps, the «מה חדש» entry, docs/releases.md and CLAUDE.md** are the
