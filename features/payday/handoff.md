@@ -2,16 +2,87 @@
 
 - **Branch:** `feat-payday`, worktree `/home/user/farkad/.claude/worktrees/feat-payday`.
 - **Base:** `6ab193d68c960e4a56d947673c282b867acd258f` (origin/main when the track was cut).
-- **Final code commit:** `73ca0e0cf2216def2b93f12e4b9c4e25f37e6515`. The whole `npm test` chain ran
-  on it, suite by suite, from a clean tree (`git status --porcelain` empty, printed at the head of
-  the run). The browser suites ran on `b030d536579929dc7997a09ae54b3885e69eef53`, which serves the
-  same bytes (`73ca0e0` changes `tests/usual.test.mjs` only), and smoke again on `73ca0e0`.
-- **Final commit:** the one that adds this file and nothing else - no file the app serves or a
+- **Final code commit (fix round 1):** `a372a92`. `e9ce62b` is the repair of the review of
+  2026-11-19 (the section «Fix round 1» below) and the whole `npm test` chain and the browser suites
+  listed under «Test output» ran on it, one by one, from a clean tree; `a372a92` adds two checks to
+  `tests/payday.test.mjs` and nothing else (the look's place, finding 7), and `test:payday`,
+  `test:nonassertions` and `test:isolation` ran again on it. The round before ended at `73ca0e0`.
+- **Final commit:** the one that updates this file and nothing else - no file the app serves or a
   suite reads - so the results below are the final commit's.
 - **Contract:** `features/payday/contract.md`, REVISION 2 (2026-11-19). The track was built on
   revision 1, then reconciled with revision 2 in `682a253` and `b030d53` (below).
 - **Not pushed, no PR.** The three build stamps, `js/ui/whatsnew.js`, `docs/releases.md` and
   `CLAUDE.md` are untouched (the integrator's).
+
+## Fix round 1 - the review of 2026-11-19
+
+Triaged in the manner of `.claude/skills/triage`: every finding opened at its cited line and
+reproduced on this tree - the reviewer's probes copied into the scratchpad and pointed at this
+worktree (`payday-fix/probes`), or the fact read off the code where it is structural. **All 17
+CONFIRMED; none discarded.** Two parts are the owner's to rule on and are left, their defaults kept.
+Every repair has a check that ran RED on `96f8d88` (an archive of it, `payday-fix/before`) and
+GREEN on `e9ce62b`.
+
+| # | finding | sev | outcome | the check |
+|---|---|---|---|---|
+| 1 | the kept reading ignores a deduction chosen on «דוחות» after the first opening | P1 | **fixed** - the key a reading is kept under is `owesKey` AND the session's `REPORT_DEDUCTIONS` | P14 «opened again after the choice: the sheet's band…» (red: 4250/-600/3650 against the sheet's 4250/-200/4050), the chosen line, the choice taken back |
+| 2 | check a frozen into the kept reading | P2 | **fixed** - asked whenever the desk is drawn (`paydayLive`), never kept; `render()` draws the kept reading again when it changes; while the desk is open it watches the sync line (`#storageNotice`), which a status changes without a `render()` | P14 «a render() under the open desk…», «reopened while offline…», back in sync; B16 «the sync line changing under the open desk…» (red: a stayed) |
+| 3 | «כל הניכוי שהדוח מציע…» on a closed card, and beside a chosen deduction | P2 | **fixed** - said only when every man something comes off is an open account at the sheet's proposal; a closed man named closed (`closedOne`/`closedMany`, the sheet's «החשבון נסגר ולא ישתנה» with the name); the chosen line only of an open account | P15 (both closed; a choice), P17 (one closed, one open) |
+| 4 | «אין מה לסדר» while «לסגירה» lists men «סגירת שבוע» will not close | P2 | **fixed** - every held man no check names gets a check of his own (kind `held`), in «סגירת שבוע»'s sentence, with the door to what stops him (an earlier period: v195's «הצג את החשבון …»; no rate: the roster; over-settled: his advances; otherwise his account); `nothing` is never true while one is held | P16 (a) ראמז on 26/11, (b) זיאד on 18/11, his door pressed |
+| 5 | four guards survive mutation | P2 | **fixed** - four fixtures | P17 (a group nobody can price; a weekly man absent Mon-Wed; a man closed at 07:30), P15 (the chosen line on no other card); the review's four mutations each red now |
+| 6 | the count line on a group nobody can price | P3 | **fixed** - the sheet's «סה״כ» (`PAYDAY_REUSED.total`) | P17 (1), `bandsAgree` on that record |
+| 7 | the CSS block inside «סגירת שבוע»'s, in both sheets | P3 | **fixed** - both blocks moved after the whole of «סגירת שבוע»'s family (its dialog and «איפוס מקדמות»'s pieces); still the layer's last dashed block | P11 (`a372a92`): the desk's block holds no rule of that family and theirs none of the desk's, in both sheets (red on the archive: design `[true,true,false,false]`, large `[true,true,false]`); tests/usual.test.mjs (its pin unchanged, its comment corrected), tests/largetext.test.mjs |
+| 8 | three cards on one payday: the sentence twice, «לשתי הקבוצות» | P3 | **fixed** - once, under the last card of that date, `sameDay(n)` (replaces `bothGroups`, whose «הם» had nothing to refer to) | P18 three cards ending 26/11 |
+| 9 | `checks` never holds `forgotten` | P3 | **fixed** - h is the last entry of `checks`, as the contract's interface says; `facts.forgotten` is gone (nothing read it) | P18, P4 |
+| 10 | a money figure broken across lines at doubled text | P1 | **fixed** - a figure is one piece (`white-space: nowrap`), a label breaks between its words only, the two smaller figures share a line only at their natural width (`flex: 1 1 auto`), otherwise one under the other | B18 at 320, 375 and 440, the mode off and on: every figure (cards' and each man's) on one line, every label word whole, each count with its word |
+| 11 | after a commit under a scrolled desk, the dialog goes blank | P2 | **fixed** - the placeholder sticks to the top of the glass (`.payday-reading-held`); the keyboard waits on the title and goes back to its own control after the read | B17 «meanwhile «מחשב…» is on the glass» (red: at -188..-162 on a glass of 12..655), the keyboard checks |
+| 12 | Thursday morning: check d's fact 14 times, a red list 12 screens tall | P2 | **fixed** - «לסגירה» counts the men check d names in ONE line in check d's look (`heldToday`); no «אין עכשיו חשבונות לסגור» above held men; a red line a man only for the other reasons | P16 (c); B15 (red: the held sentence 13 times, a red list, «אין עכשיו…»); B12's Thursday desk at every phone, scheme and mode |
+| 13 | the morning after payday drops the period just ended | P3 | **LEFT - the owner's ruling.** The contract scopes the desk to the NEXT payday; «לסגירה» still counts that period's men and its door is «סגירת שבוע», which offers the period with every figure. Showing a passed payday's card is a design change (a second reading per group, new words) | - |
+| 14 | Hebrew: (a) «1 עובדים … אותם … להם»; (b) «הם» with no antecedent; (c) the past-tense «נוכה מהשכר» on a future payday; (d) «סה״כ לתשלום · 3» over «עובדים» | P3 | (a) **fixed** (`unpricedOne`); (b) **fixed** (`sameDay`); (d) **fixed** (the count and its word in one `nowrap` span, the text the sheet's character for character); (c) **LEFT - the owner's ruling**: it is the sheet's own column name, borrowed so that the desk reads as the sheet does | P4, P11, P18, B18 |
+| 15 | at 320 with the mode the first screen shows the lead and no «לתשלום» | P3 | **fixed** - the lead cut to its one sentence and drawn LAST; «so far» said once, under the cards | B12 «as it opens, the first card's «לתשלום» is on the glass», every phone, scheme and mode (red: 652..701 on a glass ending at 556) |
+| 16 | the keyboard falls to `<body>` after a re-read; the «מקדמות» door only shuts the desk; two «לפי עובד» of one name | P3 | **fixed** - the control found again by its key (`data-focus`); the door lands on «מקדמות»'s men, the search centred on the glass and the keyboard on the first man (never on the search: a phone's keyboard would cover the list); each fold named `לפי עובד · <cycle> · <dates>`, the open one ringed | B17, B15 «h: the men's list…», B16 fold names, B12 the ring |
+| 17 | `tests/screens.mjs` walks the desk only on Tuesday's owes record | P3 | **fixed in part** - 'every check' and 'a record nobody approved' added to the walk; the THURSDAY desk is measured in B12 on a page of its own at every phone, scheme and mode instead, because a period ends on a Thursday only (a boundary is a Friday) and the walk's clock is a Tuesday for every screen after it | tests/largetext.browser.mjs walks the two; B12 the Thursday desk and the unapproved desk to every floor |
+
+**Red before, green after - the runs** (logs in `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/payday-fix/`):
+- Node, this round's `tests/payday.test.mjs` on the archive of `96f8d88`: **215/259** - every check of
+  P14-P18 red (and the moved pins), `node-before.log`; on `e9ce62b`: **283/283**; on `a372a92`, with
+  the two placement checks of P11 (their logic run on the archive's sheets: red), **285/285**.
+- Browser, the new checks of B12 (at 320 with the mode), B15, B16 and B17 on the archive: all red,
+  `browser-before.log` - the first «לתשלום» at 652..701 on a glass ending at 556, the fold unmarked,
+  Thursday's «לסגירה» with no line, a red list and the held sentence 13 times, «מקדמות» landing nowhere,
+  the folds of one name, the sync line not followed, the placeholder at -188..-162 on a glass of
+  12..655, the keyboard on `<body>`.
+- Browser, B18 alone on the archive: **43/55**, `browser-before-b18.log` - «6400», «28040» and «-1500»
+  broken across lines at 320, «26540» at 320 with the mode, «28040» and «-1500» at 375, «מהשכר» broken
+  in its middle; on `e9ce62b` the whole suite **1040/1040**.
+
+**Found on the way, and repaired:** the `close` of this track's two screens in `tests/screens.mjs`
+ran an arrow in the page that named `owesRecordBack` - a function only the Node side has. It
+threw, the walk forgives a close that throws, and the owes record was never taken back for the
+screens after them. Each close now hands the page the function itself (`run(page, fn)`).
+(The same pattern stands in the base's own 'reports - «שים לב», opened' entry; not this track's,
+not touched.)
+
+**Mutations** (each put into `js/ui/payday.js` alone, `tests/payday.test.mjs` run, the file restored
+and compared byte for byte - `payday-fix/mutate.sh`):
+
+| mutation | result |
+|---|---|
+| `const priced = true;` (the review's survivor 1) | 279/283 - P17 (1) red |
+| check d without `attendanceDays > 0` (survivor 2) | 282/283 - P17 d red |
+| check d without the `frozenPeriodFor` filter (survivor 3) | 282/283 - P17 d red |
+| the chosen line whenever `REPORT_DEDUCTIONS` has any entry (survivor 4) | 282/283 - P15 «no other card» red |
+| the key without the chosen deductions | 280/283 - P14 red |
+| check a kept with the reading | 281/283 - P14 red |
+| the full-deduction line whenever something comes off | 281/283 - P15 red |
+| the held men never checked | 280/283 - P16 red |
+| the men check d names listed in «לסגירה» again | 280/283 - P16 (c) red |
+
+**Interface, changed (for the integrator; nothing outside this file reads it):** `paydayFacts().checks`
+now ends with `{ kind: 'forgotten' }` and may hold `{ kind: 'held', workerId, held }`; checks carry
+the men they name (`workerId` or `workers`; b also `from`/`to`); `close.held[]` carries `kind`, `from`,
+`to`; `close.say` is null when nobody can be closed and somebody is held; `facts.forgotten` is gone.
+Track `status` uses only `openPayday()` and `PAYDAY_TEXT.entry`, both unchanged.
 
 ## Commits (oldest first)
 
@@ -24,29 +95,34 @@
 | `682a253` | revision 2: the contract copy, js/ui/payday.js and the Node suite reconciled |
 | `b030d53` | revision 2 on the glass: the board's move measured, the doors' task, `midEdit()` |
 | `73ca0e0` | tests/usual.test.mjs: the design layer's block order names «יום תשלום»'s block last (the one existing pin moved; why below) |
-| (this one) | features/payday/handoff.md |
+| `96f8d88` | features/payday/handoff.md (the round reviewed) |
+| `e9ce62b` | fix round 1: js/ui/payday.js, css/design.css, css/large.css, the two suites, tests/screens.mjs, tests/usual.test.mjs (a comment), tests/README.md |
+| `a372a92` | tests/payday.test.mjs: the look's place held in P11 (finding 7) |
+| (this one) | features/payday/handoff.md, updated for fix round 1 |
 
-## Files changed against the base (`git diff --stat 6ab193d 73ca0e0`)
+## Files changed against the base (`git diff --stat 6ab193d a372a92`)
 
 ```
- css/design.css               |   59 +++
- css/large.css                |   34 ++
- features/payday/contract.md  |  374 ++++++++++++++
+ css/design.css               |   74 +++
+ css/large.css                |   37 ++
+ features/payday/contract.md  |  374 +++++++++++
+ features/payday/handoff.md   |  581 ++++++++++++++++
  index.html                   |   22 +
  js/app.js                    |    3 +
  js/ui/modal.js               |    2 +
  js/ui/owes.js                |    7 +-
- js/ui/payday.js              |  793 +++++++++++++++++++++++++++++
+ js/ui/payday.js              | 1041 +++++++++++++++++++++++++++++
  package.json                 |    6 +-
  sw.js                        |    1 +
  tests/README.md              |    4 +-
- tests/payday.browser.mjs     |  754 +++++++++++++++++++++++++++
- tests/payday.test.mjs        | 1160 ++++++++++++++++++++++++++++++++++++++++++
+ tests/payday.browser.mjs     |  930 ++++++++++++++++++++++++++
+ tests/payday.test.mjs        | 1506 ++++++++++++++++++++++++++++++++++++++++++
  tests/reports.speed.test.mjs |   44 +-
- tests/screens.mjs            |   24 +
- tests/usual.test.mjs         |    7 +-
- 16 files changed, 3285 insertions(+), 9 deletions(-)
+ tests/screens.mjs            |   77 +++
+ tests/usual.test.mjs         |    8 +-
+ 17 files changed, 4708 insertions(+), 9 deletions(-)
 ```
+(Fix round 1 alone, `git diff --stat 73ca0e0 a372a92`: 9 files changed, 1665 insertions(+), 242 deletions(-).)
 
 One line each:
 - `js/ui/payday.js` (new) - the desk: the reading (`paydayFacts`), its memory, the dialog, the doors, every word.
@@ -55,12 +131,12 @@ One line each:
 - `js/app.js` - one line in `render()`: `if (typeof renderPaydayIfOpen === 'function') renderPaydayIfOpen();`.
 - `index.html` - the frame `#paydayModal` (title `#paydayTitle` tabindex -1, body `#paydayBody`, «סגור» `#paydayClose`) after `#advanceResetModal`, and `<script src="js/ui/payday.js">` straight after advancereset.js. The `farkad-build` meta is untouched.
 - `sw.js` - `'./js/ui/payday.js'` in `SHELL` after advancereset.js. `VERSION` untouched.
-- `css/design.css` - ONE commented block inside `@media screen`, straight after the `.weekly-close-entry` rule: the half-width row, then the dialog. No colour of its own (the money ink, the warn/danger hints and the group marks are the sheet's tokens).
-- `css/large.css` - block 3: every size, weight and line-height of that block restated one for one with the original's importance, straight after the `.weekly-close-entry` restatement; block 4: at 320 with the mode the three figures stack (`@media (max-width: 359px)`).
+- `css/design.css` - ONE commented block inside `@media screen`, after the whole of «סגירת שבוע»'s block (its frame, its dialog and «איפוס מקדמות»'s pieces of it - fix round 1 moved it out of the middle of that block): the half-width row, then the dialog. No colour of its own (the money ink, the warn/danger hints, the accent ring and the group marks are the sheet's tokens).
+- `css/large.css` - block 3: every size, weight and line-height of that block restated one for one with the original's importance, after the «איפוס מקדמות» restatements (moved with it); block 4: at 320 with the mode the three figures stand one under the other (`@media (max-width: 359px)`).
 - `tests/payday.test.mjs`, `tests/payday.browser.mjs` (new) - the two suites.
-- `tests/screens.mjs` - two screens after 'advances - one closure': 'advances - «יום תשלום», read' and 'advances - «יום תשלום», the fold opened' (scope `#paydayModal`), opened by the row on «מקדמות» on `owesRecord`.
+- `tests/screens.mjs` - four screens after 'advances - one closure' (scope `#paydayModal`), opened by the row on «מקדמות»: 'read' and 'the fold opened' on `owesRecord`, and (fix round 1) 'every check' and 'a record nobody approved' on `paydayRecord` (in memory, taken back whole); each close hands the page the function that takes the record back.
 - `tests/reports.speed.test.mjs` - the two deliberate additions (below).
-- `tests/usual.test.mjs` - the order of the design layer's last blocks names «יום תשלום»'s fifth and last (below).
+- `tests/usual.test.mjs` - the order of the design layer's last blocks names «יום תשלום»'s fifth and last (below); fix round 1 corrected only the comment that said where the block stood.
 - `package.json` - `test:payday` (end of `npm test`), `test:payday-browser` (end of `test:all`).
 - `tests/README.md` - the two rows; the reports-speed row's v206 sentence.
 - `features/payday/contract.md` - revision 2 of the contract, copied in.
@@ -111,6 +187,9 @@ the payslips' own entry in «הפקת דוח» writes.
 | check d | men who worked in a period that ends today, not frozen (`frozenPeriodFor`), and `!weeklyCloseTodayRecorded(...)` - the men «סגירת שבוע» holds «נגמרת היום» (P4 holds the two sets equal) |
 | check e | `overpaymentWarning(row.carry)` |
 | check f | rows with `hoursUnpriced`, said by `HOURS_UNPRICED_NOTE` without its leading «* » |
+| check g, `held` (fix round 1) | each man of `weeklyCloseRead(...).men` with `held` that no check above names, said in `weeklyCloseHeldText(man)`, his door by `held.kind` |
+| a closed man on a card (fix round 1) | `row.carry.closed` - the sheet's «החשבון נסגר ולא ישתנה» with his name |
+| the full-deduction line (fix round 1) | every row with `moneyOf(row).netted < 0` an open account (`row.carry && !row.carry.closed`) with no `REPORT_DEDUCTIONS` entry |
 | the days recorded ahead | `entriesFor(schedule, date, id, 'actual')` for the dates after today inside the period |
 
 The one thing the file adds up is a COUNT of men a sentence names. Two groups paid on one date
@@ -118,33 +197,37 @@ are never added: two cards, and the sentence that says they are not.
 
 ## Every new string (PROPOSED - the owner has not read them; pinned word for word in tests/payday.test.mjs P11)
 
-`PAYDAY_TEXT`, js/ui/payday.js (20 entries):
+`PAYDAY_TEXT`, js/ui/payday.js (24 entries since fix round 1; every function said in P11):
 
 | key | words |
 |---|---|
 | entry | יום תשלום |
 | title | יום תשלום |
-| lead | כמה לשלם ביום התשלום הבא לפי מה שנרשם עד עכשיו, ומה כדאי לסדר לפני שסוגרים. המסך הזה רק מראה - שום דבר לא נרשם ממנו. |
+| lead | המסך הזה רק מראה - שום דבר לא נרשם ממנו. (fix round 1: cut to its one sentence and drawn last; it took six lines above the cards at 320 with the mode) |
 | next | יום התשלום הבא |
 | none | עוד אין רישומים בתקופה הנוכחית. |
 | heading | `${day} ${date} · ${cycle}` (e.g. «יום חמישי 19/11 · שבועי») |
 | today | «היום, » (before the heading of a card whose period ends today) |
-| soFar | לפי מה שנרשם עד עכשיו. ימים ומקדמות שעוד לא נרשמו - לא נכללים. |
+| soFar | לפי מה שנרשם עד עכשיו. ימים ומקדמות שעוד לא נרשמו - לא נכללים. (fix round 1: said once, under the cards) |
 | fullDeduction | הסכום לתשלום הוא אחרי כל הניכוי שהדוח מציע. ניכוי קטן יותר בסגירה - יותר לתשלום, עד הנצבר. |
 | ahead | `כולל ימים שכבר נרשמו מראש: ${dates}.` |
 | chosen | לחלק מהעובדים נבחר בדוח ניכוי אחר, והוא כלול כאן. «סגירת שבוע» מתחילה מהניכוי המלא. |
-| bothGroups | ביום הזה משלמים לשתי הקבוצות. לכל קבוצה הסכום שלה - הם לא מחוברים כאן. |
+| closedOne | `החשבון של ${name} נסגר ולא ישתנה.` (fix round 1: the sheet's «החשבון נסגר ולא ישתנה» with the name - P11 holds it to that sentence) |
+| closedMany | `החשבונות של ${count} עובדים נסגרו ולא ישתנו: ${names}.` (fix round 1) |
+| sameDay | for two: «ביום הזה משלמים לשתי הקבוצות. לכל קבוצה הסכום שלה - שני הסכומים לא מחוברים כאן.»; for more: `ביום הזה משלמים ל-${count} קבוצות. לכל קבוצה הסכום שלה - הסכומים לא מחוברים כאן.` (fix round 1: replaces bothGroups) |
 | before | לפני שסוגרים |
+| unpricedOne | `⚠️ עובד אחד בלי שכר יומי, ולכן הסכום חסר אותו: ${name}. הוסף לו שכר במסך "עובדים ואתרים".` (fix round 1: the sheet's sentence for many, said of one; two or more still borrow `MONTH_SUMMARY_TEXT.unpriced`) |
 | endsTodayOne | `התקופה של ${name} נגמרת היום, והיום עוד לא נרשם לו.` (revision 2: «סגירת שבוע»'s `heldEndsToday` with the name - P11 holds it to that sentence) |
 | endsTodayMany | `התקופות של ${count} עובדים נגמרות היום, והיום עוד לא נרשם להם: ${names}.` (revision 2: plural throughout) |
 | toToday | לרישום היום |
 | nothing | אין מה לסדר לפני הסגירה. |
 | forgotten | מקדמה שניתנה ולא נרשמה לא תנוכה. רושמים אותה לפני שסוגרים. |
 | toClose | לסגירה |
+| heldToday | «עובד אחד לא ייסגר עד שיירשם לו היום.» / `${count} עובדים לא ייסגרו עד שיירשם להם היום.` (fix round 1) |
 | after | אחרי הסגירה |
 
 BORROWED, each found in its owner's source by P11 (a word changed there and not here fails by
-name): `PAYDAY_REUSED` - «נצבר», «לתשלום», «סה״כ לתשלום», «עובד אחד», «עובדים», «לפי עובד», the
+name): `PAYDAY_REUSED` - «נצבר», «לתשלום», «סה״כ לתשלום», «סה״כ» (fix round 1: the band's first cell where nobody has a rate), «עובד אחד», «עובדים», «לפי עובד», the
 transition sentence «תקופת מעבר: הימים שנשארו מהמחזור הקודם, לפני המעבר לתשלום שבועי.» (js/ui/reports.js),
 «עובדים ואתרים», «מקדמות», «סגור» (index.html), «₪», «—» (reports.js); and the owners' constants
 read by name: `WEEKLY_CLOSE_TEXT.reading/.nobody/.stateHeld`, `weeklyCloseHeldText`,
@@ -186,6 +269,8 @@ the app's own writers; synthetic names):
   node for node as before.
 - P13 (revision 2) the transition sentence only on a stub weekly pay follows; a weekly man back to
   fortnightly on the fortnight's second Friday: a transition, not `toWeekly`, no sentence - drawn.
+- P14-P18 (fix round 1) - the table in «Fix round 1» above, check by check; and in P11 the look's
+  place in both sheets (`a372a92`). 285 checks in all now.
 
 Negative tests: every check is asserted silent on the clean crew and the "nothing to sort"
 sentence said there; the gate-shut and unapproved readings assert the absence of a, b, e and of
@@ -222,6 +307,11 @@ that record changed in memory only):
   ledgerWrites: false }` before the scripts load) at every phone, scheme and mode: «יום תשלום»
   alone, its words inside, the board's move measured and equal to the row, the desk opening from it.
 - B19 nothing threw.
+- Fix round 1, added inside the blocks above: B12 the first «לתשלום» on the glass as the desk opens,
+  the open fold ringed, the Thursday desk (today typed for nobody) and the desk on a record nobody
+  approved each to every floor; B15 Thursday's «לסגירה» and the «מקדמות» door's landing; B16 the
+  folds' names and check a following the sync line; B17 the placeholder on the glass and the
+  keyboard kept; B18 at 320, 375 and 440 with the mode off and on, every figure on one line.
 
 ## Expectations moved, and why
 
@@ -247,124 +337,134 @@ counted like every other way in. `tests/screens.mjs` gained the two screens the 
 d's two pinned sentences («החשבון של … נגמר…» → «התקופה של … נגמרת…», «התקופות של N עובדים
 נגמרות…») in P4 and P11, and check f's pinned sentence without its leading «* » in P4.
 
+**Fix round 1 (commit `e9ce62b`, the reasons in its message), in this track's own suites only:**
+P4 - check c for one man in the singular (`unpricedOne`), and h read from `checks`; P5 - «so far»
+no longer a line of each card, and the same-day sentence's new words; P11 - `PAYDAY_TEXT`'s new and
+changed entries (24, every function said), `PAYDAY_REUSED.total`, the lead drawn last; B18 widened
+to 375 and the mode. **No pinned expectation of an existing suite moved this round:**
+`tests/usual.test.mjs` - only the comment that said where the block stood; `tests/screens.mjs` -
+two screens added and this track's closes repaired (no expectation lives there).
+
 ## Test output (pasted; every line is that suite's own last count line, its exit code and its time)
 
-Run on this machine, shared with three other agents building at the same time; browser suites
-one at a time through the slot wrapper (`scratchpad/bt`), Node suites one by one in the chain's order.
+Run on this machine, shared with other agents building at the same time; browser suites one at a
+time through the slot wrapper (`scratchpad/bt`), Node suites one by one in the chain's order. The
+previous round's outputs (on `73ca0e0` and `b030d53`) are in this file's history
+(`git show 96f8d88:features/payday/handoff.md`); everything below is fix round 1's, on `e9ce62b`.
 
-### `npm test`, suite by suite, on the final code commit `73ca0e0` (clean tree)
+### `npm test`, suite by suite, on `e9ce62b` (clean tree)
 
 ```
-HEAD 73ca0e0cf2216def2b93f12e4b9c4e25f37e6515 status[0]
+HEAD e9ce62bb8e1ac6d7e724eb44e0ac4f787c10fdfd status[0]
 test:isolation | exit 0 | 0s | 18/18 checks passed
-test:blobs | exit 0 | 2s | 11/11 checks passed
-test:build | exit 1 | 1s | 67/69 checks passed
-test:poison | exit 0 | 1s | 37/37 checks passed
+test:blobs | exit 0 | 1s | 11/11 checks passed
+test:build | exit 1 | 2s | 67/69 checks passed
+test:poison | exit 0 | 0s | 37/37 checks passed
 test:merge | exit 0 | 0s | 28/28 checks passed
-test:contested | exit 0 | 15s | 73/73 checks passed
-test:held | exit 0 | 3s | 83/83 checks passed
+test:contested | exit 0 | 16s | 73/73 checks passed
+test:held | exit 0 | 5s | 83/83 checks passed
 test:snapshot-stale | exit 0 | 2s | 16/16 checks passed
 test:reports-rules | exit 0 | 3s | 26/26 checks passed
-test:finance | exit 0 | 7s | 57/57 checks passed
-test:weekly-range | exit 0 | 0s | 21/21 checks passed
+test:finance | exit 0 | 9s | 57/57 checks passed
+test:weekly-range | exit 0 | 1s | 21/21 checks passed
 test:finance-wording | exit 0 | 2s | 12/12 checks passed
-test:weekly-unpriced | exit 0 | 0s | 23/23 checks passed
-test:receipt | exit 0 | 1s | 28/28 checks passed
-test:data | exit 0 | 45s | 1970/1970 checks passed
-test:recovery | exit 0 | 1s | 82/82 checks passed
-test:adversarial | exit 0 | 5s | 116/116 checks passed
-test:probes | exit 0 | 8s | 35/35 checks passed
-test:capacity | exit 0 | 11s | 48/48 checks passed
+test:weekly-unpriced | exit 0 | 1s | 23/23 checks passed
+test:receipt | exit 0 | 2s | 28/28 checks passed
+test:data | exit 0 | 47s | 1970/1970 checks passed
+test:recovery | exit 0 | 2s | 82/82 checks passed
+test:adversarial | exit 0 | 6s | 116/116 checks passed
+test:probes | exit 0 | 7s | 35/35 checks passed
+test:capacity | exit 0 | 16s | 48/48 checks passed
 test:concurrency | exit 0 | 3s | 46/46 checks passed
-test:exports | exit 0 | 1s | 112/112 checks passed
+test:exports | exit 0 | 2s | 112/112 checks passed
 test:fence | exit 0 | 3s | 35/35 checks passed
-test:fence-ingress | exit 0 | 0s | 43/43 checks passed
+test:fence-ingress | exit 0 | 1s | 43/43 checks passed
 test:fence-legacy | exit 0 | 0s | 21/21 checks passed
 test:money-history | exit 0 | 0s | 9/9 checks passed
-test:money-units | exit 0 | 0s | 21/21 checks passed
-test:money-cloud | exit 0 | 2s | 17/17 checks passed
-test:money-display | exit 0 | 0s | 4/4 checks passed
+test:money-units | exit 0 | 1s | 21/21 checks passed
+test:money-cloud | exit 0 | 1s | 17/17 checks passed
+test:money-display | exit 0 | 1s | 4/4 checks passed
 test:snapshot-poison | exit 0 | 2s | 82/82 checks passed
-test:samefact | exit 0 | 5s | 37/37 checks passed
+test:samefact | exit 0 | 6s | 37/37 checks passed
 test:wording | exit 0 | 1s | 37/37 checks passed
-test:closure | exit 0 | 21s | 122/122 checks passed
+test:closure | exit 0 | 32s | 122/122 checks passed
 test:closure-echo | exit 0 | 1s | 79/79 checks passed
 test:correction | exit 0 | 0s | 33/33 checks passed
-test:quarantine | exit 0 | 2s | 82/82 checks passed
-test:approval | exit 0 | 6s | 72/72 checks passed
-test:repayment | exit 0 | 5s | 240/240 checks passed
+test:quarantine | exit 0 | 4s | 82/82 checks passed
+test:approval | exit 0 | 15s | 72/72 checks passed
+test:repayment | exit 0 | 13s | 240/240 checks passed
 test:ledger-ingress | exit 0 | 0s | 167/167 checks passed
-test:cas | exit 0 | 13s | 88/88 checks passed
-test:status | exit 0 | 7s | 37/37 checks passed
-test:money | exit 0 | 2s | 40/40 checks passed
+test:cas | exit 0 | 14s | 88/88 checks passed
+test:status | exit 0 | 9s | 37/37 checks passed
+test:money | exit 0 | 4s | 40/40 checks passed
 test:money-ingress | exit 0 | 10s | 206/206 checks passed
-test:method | exit 0 | 2s | 51/51 checks passed
+test:method | exit 0 | 3s | 51/51 checks passed
 test:restore | exit 0 | 1s | 51/51 checks passed
-test:upgrade | exit 0 | 1s | 48/48 checks passed
-test:vehicles | exit 0 | 2s | 86/86 checks passed
-test:xlsx | exit 0 | 2s | 104/104 checks passed
+test:upgrade | exit 0 | 2s | 48/48 checks passed
+test:vehicles | exit 0 | 3s | 86/86 checks passed
+test:xlsx | exit 0 | 4s | 104/104 checks passed
 test:nonassertions | exit 0 | 1s | 23/23 checks passed
-test:labels | exit 0 | 0s | 23/23 checks passed
+test:labels | exit 0 | 1s | 23/23 checks passed
 test:labelcache | exit 0 | 0s | 32/32 checks passed
-test:restore-ledger | exit 0 | 2s | 26/26 checks passed
+test:restore-ledger | exit 0 | 3s | 26/26 checks passed
 test:roster-upgrade | exit 0 | 7s | 55/55 checks passed
-test:roster-race | exit 0 | 6s | 63/63 checks passed
-test:exports-proof | exit 0 | 2s | 92/92 checks passed
-test:ledger-truth | exit 0 | 5s | 148/148 checks passed
+test:roster-race | exit 0 | 7s | 63/63 checks passed
+test:exports-proof | exit 0 | 4s | 92/92 checks passed
+test:ledger-truth | exit 0 | 9s | 148/148 checks passed
 test:races | exit 0 | 5s | 109/109 checks passed
-test:overlap-restore | exit 0 | 20s | 117/117 checks passed
+test:overlap-restore | exit 0 | 21s | 117/117 checks passed
 test:refute-roster | exit 0 | 10s | 24/24 checks passed
-test:refute-restore | exit 0 | 43s | 25/25 checks passed
-test:gate-integrity | exit 1 | 0s | 19/20 checks passed
-test:queuecost | exit 0 | 6s | 18/18 checks passed
-test:paycycle | exit 0 | 0s | 43/43 checks passed
+test:refute-restore | exit 0 | 45s | 25/25 checks passed
+test:gate-integrity | exit 1 | 1s | 19/20 checks passed
+test:queuecost | exit 0 | 10s | 18/18 checks passed
+test:paycycle | exit 0 | 1s | 43/43 checks passed
 test:paycycle-blockers | exit 0 | 3s | 17/17 checks passed
-test:paycycle-completion | exit 0 | 5s | 31/31 checks passed
-test:crew-controls | exit 0 | 1s | 46/46 checks passed
-test:simple-advances | exit 0 | 2s | 66/66 checks passed
-test:worker-deletion | exit 0 | 10s | 86/86 checks passed
+test:paycycle-completion | exit 0 | 6s | 31/31 checks passed
+test:crew-controls | exit 0 | 2s | 46/46 checks passed
+test:simple-advances | exit 0 | 1s | 66/66 checks passed
+test:worker-deletion | exit 0 | 11s | 86/86 checks passed
 test:calendar | exit 0 | 1s | 58/58 checks passed
 test:reminders | exit 0 | 0s | 48/48 checks passed
-test:move-late | exit 0 | 5s | 48/48 checks passed
+test:move-late | exit 0 | 6s | 48/48 checks passed
 test:codex-probes | exit 0 | 1s | 17/17 checks passed
 test:codex2-probes | exit 0 | 1s | 36/36 checks passed
-test:codex3-probes | exit 0 | 3s | 59/59 checks passed
-test:rima | exit 0 | 94s | 496/496 checks passed
-test:yosefgeves | exit 0 | 95s | 562/562 checks passed
+test:codex3-probes | exit 0 | 4s | 59/59 checks passed
+test:rima | exit 0 | 95s | 496/496 checks passed
+test:yosefgeves | exit 0 | 94s | 562/562 checks passed
 test:seder | exit 0 | 0s | 135/135 checks passed
-test:bars-stale | exit 0 | 0s | 60/60 checks passed
-test:transport | exit 0 | 1s | 566/566 checks passed
+test:bars-stale | exit 0 | 1s | 60/60 checks passed
+test:transport | exit 0 | 0s | 566/566 checks passed
 test:transport-share | exit 0 | 12s | 304/304 checks passed
-test:oracle | exit 0 | 52s | 121/121 checks passed
-test:overpayment | exit 0 | 6s | 105/105 checks passed
+test:oracle | exit 0 | 53s | 121/121 checks passed
+test:overpayment | exit 0 | 9s | 105/105 checks passed
 test:polish | exit 0 | 0s | 73/73 checks passed
-test:daycheck | exit 0 | 5s | 169/169 checks passed
+test:daycheck | exit 0 | 6s | 169/169 checks passed
 test:journey | exit 0 | 1s | 233/233 checks passed
-test:workercard | exit 0 | 24s | 180/180 checks passed
-test:monthsummary | exit 0 | 82s | 98/98 checks passed
-test:payslips | exit 0 | 26s | 202/202 checks passed
-test:find | exit 0 | 1s | 91/91 checks passed
-test:whatsnew | exit 0 | 0s | 160/160 checks passed
-test:account-view | exit 0 | 21s | 456/456 checks passed
+test:workercard | exit 0 | 29s | 180/180 checks passed
+test:monthsummary | exit 0 | 89s | 98/98 checks passed
+test:payslips | exit 0 | 34s | 202/202 checks passed
+test:find | exit 0 | 2s | 91/91 checks passed
+test:whatsnew | exit 0 | 1s | 160/160 checks passed
+test:account-view | exit 0 | 32s | 456/456 checks passed
 test:usual | exit 0 | 2s | 150/150 checks passed
 test:sitecard | exit 0 | 3s | 119/119 checks passed
-test:reportsclarity | exit 0 | 3s | 1119/1119 checks passed
-test:largetext | exit 0 | 1s | 107/107 checks passed
-test:reportnames | exit 0 | 11s | 36/36 checks passed
+test:reportsclarity | exit 0 | 4s | 1119/1119 checks passed
+test:largetext | exit 0 | 0s | 107/107 checks passed
+test:reportnames | exit 0 | 12s | 36/36 checks passed
 test:holiday | exit 0 | 0s | 109/109 checks passed
 test:undo-stale | exit 0 | 2s | 32/32 checks passed
 test:auditfix | exit 0 | 1s | 34/34 checks passed
-test:owes | exit 0 | 67s | 190/190 checks passed
-test:weeklyclose | exit 0 | 115s | 146/146 checks passed
-test:reports-speed | exit 0 | 248s | 167/167 checks passed
+test:owes | exit 0 | 61s | 190/190 checks passed
+test:weeklyclose | exit 0 | 109s | 146/146 checks passed
+test:reports-speed | exit 0 | 187s | 167/167 checks passed
 test:closeorder | exit 0 | 1s | 22/22 checks passed
-test:closuresize | exit 0 | 16s | 13/13 checks passed
-test:closerace | exit 0 | 38s | 29/29 checks passed
-test:advancereset | exit 0 | 90s | 77/77 checks passed
-test:overpaidfix | exit 0 | 0s | 85/85 checks passed
-test:xlsxlook | exit 0 | 15s | 293/293 checks passed
+test:closuresize | exit 0 | 11s | 13/13 checks passed
+test:closerace | exit 0 | 39s | 29/29 checks passed
+test:advancereset | exit 0 | 50s | 77/77 checks passed
+test:overpaidfix | exit 0 | 1s | 85/85 checks passed
+test:xlsxlook | exit 0 | 12s | 293/293 checks passed
 test:closereminder | exit 0 | 16s | 107/107 checks passed
-test:payday | exit 0 | 39s | 234/234 checks passed
+test:payday | exit 0 | 34s | 283/283 checks passed
 DONE
 ```
 
@@ -372,114 +472,97 @@ DONE
 
 ```
 test:build
-failed:
   the stamps were moved by the commit that moved the bytes :: and nothing in the shell has changed since  — 7 changed since 6ab193d6: css/design.css, css/large.css, index.html, js/app.js, js/ui/modal.js, js/ui/owes.js, js/ui/payday.js
   the stamps were moved by the commit that moved the bytes :: and neither has the worker that names the shelf  — sw.js
 
 test:gate-integrity
-failed:
-  the build stamps describe the bytes a phone would be handed :: no cached file has changed since the three stamps last moved  — 682a2539 «יום תשלום»: revision 2 of the contract, reconciled | 17452d10 «יום תשלום»: the payday desk (js/ui/payday.js), its row on «
+  the build stamps describe the bytes a phone would be handed :: no cached file has changed since the three stamps last moved  — e9ce62bb «יום תשלום»: fix round 1 - the review of 2026-11-19, every c | 682a2539 «יום תשלום»: revision 2 of the contract, reconciled | 17452d10 «יום תשלום»: the payday desk (js/ui/payday.js), its row on «
 ```
 
-The same chain ran first on `b030d53` and found one more red, which was NOT expected:
+### On `a372a92` (it adds two checks to `tests/payday.test.mjs` and nothing else; the suites that read that file)
 
 ```
-test:build | exit 1 | 1s | 67/69 checks passed
-test:gate-integrity | exit 1 | 0s | 19/20 checks passed
-test:usual | exit 1 | 1s | 149/150 checks passed
-failed:
-  the shell: on the page after the files it calls, in the offline shell, in one style block :: the last block of the screen layer but for the ones added since
+test:payday | exit 0 | 44s | 285/285 checks passed
+test:nonassertions | exit 0 | 1s | 23/23 checks passed
+test:isolation | exit 0 | 1s | 18/18 checks passed
 ```
+(Run with this file modified in the tree; no suite reads or serves it.)
 
-`tests/usual.test.mjs` pins the ORDER of css/design.css's blocks after the usual site's and
-requires nothing after the last; the suite has moved that list on purpose for every feature that
-added its block at the end (four times, each said in its comment). «יום תשלום»'s block stands where
-its contract puts it - straight after the `.weekly-close-entry` rule, the end of the layer - so
-`73ca0e0` names it fifth and last in the same words, the reason in its message. That commit
-changes `tests/usual.test.mjs` only (`git diff --stat b030d53 73ca0e0`: 1 file), and the whole
-chain above was then run again on it. **This is the one pinned expectation of an existing suite
-this track moved.**
+### Browser suites on `e9ce62b`
 
-### Browser suites (the ones the contract names, and this track's)
-
-On `b030d53` (clean tree); `b030d53` and `73ca0e0` serve the same bytes (the only difference is
-`tests/usual.test.mjs`, which no browser suite reads):
+This track's suite, then the existing suites fix round 1 touches: `largetext.browser.mjs` walks
+`tests/screens.mjs` (two screens added, the closes repaired) and measures every rule of
+`css/large.css`; `design.browser.mjs` reads the whole design layer (a block moved in it);
+`owes.browser.mjs` draws «מקדמות» with the row; `weeklyclose.browser.mjs` draws «סגירת שבוע», whose block
+the desk's no longer sits inside. (The chain of the last four started while this file was modified -
+`status[1]` - and this file is read or served by no suite.)
 
 ```
-HEAD b030d536579929dc7997a09ae54b3885e69eef53 status[0]
-payday.browser.mjs | exit 0 | 776s | 691/691 checks passed
-smoke.mjs | exit 143 | 126s | 
-mobile.test.mjs | exit 0 | 405s | 1397/1397 checks passed
-design.browser.mjs | exit 0 | 9s | 72/72 checks passed
-largetext.browser.mjs | exit 0 | 752s | 8335/8335 checks passed
-owes.browser.mjs | exit 0 | 63s | 589/589 checks passed
-weeklyclose.browser.mjs | exit 0 | 74s | 408/408 checks passed
-closereminder.browser.mjs | exit 0 | 47s | 106/106 checks passed
-payslips.browser.mjs | exit 0 | 18s | 132/132 checks passed
-whatsnew.browser.mjs | exit 0 | 78s | 251/251 checks passed
-DONE
-smoke.mjs (alone) | exit 0 | 495s | 1186/1186 checks passed
+payday.browser.mjs | exit 0 | 416s | 1040/1040 checks passed
+largetext.browser.mjs | exit 0 | 948s | 8569/8569 checks passed
+design.browser.mjs | exit 0 | 10s | 72/72 checks passed
+owes.browser.mjs | exit 0 | 66s | 589/589 checks passed
+weeklyclose.browser.mjs | exit 2 | 37s | SETUP FAILED: 375 light the result: something is on the page to measure
+weeklyclose.browser.mjs (again, alone) | exit 0 | 183s | 408/408 checks passed
 ```
 
-`smoke.mjs` was terminated the first time, 126 s in: exit 143 (SIGTERM), its browser gone under it
-(`page.waitForTimeout: Target page, context or browser has been closed`), 368 checks passed and none
-failed. What sent the signal was not established - the machine is shared with three other agents'
-suites. Re-run ALONE through the wrapper on `73ca0e0`: 1186/1186, exit 0 (the last line above).
-`payday.browser.mjs` also ran a second time on `73ca0e0`, with `--shots`: 691/691, exit 0.
+`weeklyclose.browser.mjs`'s first run went red at «the dialog is gone and «מקדמות» shows the close»
+(`["week","none"]`): that block taps «סגור» and then taps it again with `force: true` after the dialog
+has shut, so the second press lands on whatever is under it - here the week tab - and the app's
+double-tap guard swallows it only inside its few hundred milliseconds; under this machine's load the
+gap was longer. Nothing of this track is on that path (the desk is shut there, and its watch on the
+sync line exists only while it is open). Run again alone through the wrapper: 408/408, exit 0.
 
-Five more browser suites of `test:all` that draw «מקדמות» and so could see the new row, beyond the
-contract's list, one at a time through the wrapper on `73ca0e0` (clean tree):
-
-```
-HEAD 73ca0e0cf2216def2b93f12e4b9c4e25f37e6515 status[0]
-forms.browser.mjs | exit 0 | 297s | 32/32 checks passed
-polish.browser.mjs | exit 0 | 20s | 201/201 checks passed
-advancereset.browser.mjs | exit 0 | 59s | 259/259 checks passed
-overpaidfix.browser.mjs | exit 0 | 6s | 20/20 checks passed
-simple-advances.browser.mjs | exit 0 | 3s | 22/22 checks passed
-DONE
-```
+Not run this round: `smoke.mjs` and `mobile.test.mjs` (they never open the desk; they ran green on
+the previous round's bytes, and fix round 1 changes no rule outside the desk's own block but its
+place), and the rest of `test:all`, `test:release` and the emulator suites (the task forbids them on
+this shared machine).
 
 ## Measured
 
 - **The row on «מקדמות» where «סגירת שבוע» is drawn:** the board under it moves 0px at 320, 375
   and 440 with the mode off and at 375 and 440 with it on; 18px at 320 with the mode (both words
   wrap to two lines), both buttons 48px tall (52 with the mode), words inside. Base rectangles of
-  the board equal to the base commit's with the file taken away (B14).
+  the board equal to the base commit's with the file taken away (B14). Unchanged by fix round 1.
 - **Where «סגירת שבוע» is NOT drawn** (revision 2, criterion 12): «יום תשלום» alone at the board's
   full width, and the board moves down by that row and nothing more - **62px (the button 48 + the
   row's gap 14) with the mode off, 66px (52 + 14) with it on, at 320, 375 and 440, in both schemes,
-  on a record nobody approved and with the writer gate shut alike** (24 measurements, printed by the
-  suite). The contract's estimate was 52-60 (60-68 with the mode).
-- **The reading's cost** (Node, P8, the median of three each time; budgets 600 ms and 8,000 ms), as
-  printed by the three runs of this session - the machine shared with three other agents:
-  - season D (40 men, 139 advances, 236 closes, closed in order): median **241 ms** (the suite run alone
-    on the revision 2 code, before `682a253` was committed), **289 ms** (the chain on `b030d53`), **474 ms** (the chain on `73ca0e0`,
-    the heaviest load: 494, 474, 312);
-  - season B (40 men, 636 advances, nothing closed): median **2,989 ms**, **3,057 ms**, **3,708 ms**.
-- **Tap to figures** on the seeded crew (B13): **25-26 ms** (budget 1,500 ms); the placeholder and
-  no figure in the frame after the tap.
+  on a record nobody approved and with the writer gate shut alike** (24 measurements printed by the
+  run on `e9ce62b`: 12 × 62px, 12 × 66px).
+- **The reading's cost** (Node, P8, the median of three; budgets 600 ms and 8,000 ms), on `e9ce62b`
+  run alone on the shared machine: season D (40 men, 139 advances, 236 closes, closed in order)
+  **332 ms** (470, 332, 264); season B (40 men, 636 advances, nothing closed) **3,567 ms** (3,758,
+  3,567, 3,518). The previous round measured 241-474 ms and 2,989-3,708 ms under the same load.
+- **Tap to figures** on the seeded crew (B13): **44 ms** (budget 1,500 ms); the placeholder and no
+  figure in the frame after the tap.
+- **Fix round 1:** at 320 with the mode the first card's «לתשלום» now stands at 449..498 on a glass
+  that ends at 556 (it was 652..701); the Thursday desk at 375 is 4.4 screens tall (it was 7); with
+  every font doubled no figure of the desk is drawn on two lines at any phone, the mode off or on.
 
 ## Screenshots (synthetic names, JPEG)
 
-Left by `node tests/payday.browser.mjs --shots <dir>` on `73ca0e0` (that run: 691/691, exit 0),
+Left by `node tests/payday.browser.mjs --shots <dir>` on `e9ce62b` (that run: 1040/1040, exit 0),
 the crew tests/screens.mjs seeds and the record with every check changed in memory - synthetic names:
 
-- `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/payday-row-440x956-dark.jpg` - the row on «מקדמות»
-- `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/payday-desk-440x956-dark.jpg` - the desk as it opens
-- `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/payday-checks-440x956-dark.jpg` - «לפני שסוגרים» with every check
-- `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/payday-desk-320x568-dark-large.jpg`, `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/payday-desk-320x568-light-large.jpg` - the desk at 320x568 with «תצוגה גדולה»
-- `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/payday-checks-320x568-dark-large.jpg`, `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/payday-checks-320x568-light-large.jpg` - its checks there
+- `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/fix1/payday-row-440x956-dark.jpg` - the row on «מקדמות»
+- `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/fix1/payday-desk-440x956-dark.jpg` - the desk as it opens: the cards first, «so far» once under them
+- `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/fix1/payday-checks-440x956-dark.jpg` - «לפני שסוגרים» with every check (check c in the singular)
+- `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/fix1/payday-desk-320x568-dark-large.jpg`, `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/fix1/payday-desk-320x568-light-large.jpg` - the desk at 320x568 with «תצוגה גדולה»: the first «לתשלום» on the first screen
+- `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/fix1/payday-checks-320x568-dark-large.jpg`, `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/fix1/payday-checks-320x568-light-large.jpg` - its checks there
+- `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/fix1/payday-doubled-320x568.jpg`, `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-payday/fix1/payday-doubled-320x568-large.jpg` - every font doubled at 320, the mode off and on: each figure whole, one under the other
 
 ## NOT DONE, and why
 
 - **Not tried on a real phone.** Emulated touch in Chromium only; no iPhone, no far-sighted reader.
 - **`npm run test:all`, `npm run test:release` and the emulator suites were not run** - the task
-  forbids them on this shared machine. The npm test chain ran suite by suite, and the browser
-  suites the contract names ran one at a time through the slot wrapper, with five more that draw
-  «מקדמות» (forms, polish, advancereset, overpaidfix, simple-advances); the rest of `test:all`'s
-  browser suites (print, update, handover, the service-worker suites, week, reports and the others
-  that never open «מקדמות») did not run here.
+  forbids them on this shared machine. Fix round 1: the npm test chain ran suite by suite on
+  `e9ce62b`, and the browser suites its changes touch (this track's, largetext, design, owes,
+  weeklyclose) one at a time through the slot wrapper. The previous round also ran smoke, mobile,
+  closereminder, payslips, whatsnew, forms, polish, advancereset, overpaidfix and simple-advances
+  (green); they were not run again this round, which changes no rule outside the desk's own block
+  but its place in the two sheets.
+- **Fix round 1 left two findings, or parts of them, to the owner** (13 and 14c in its table): the
+  morning after payday, and the tense of «נוכה מהשכר» on a payday still ahead.
 - **The three build stamps, the «מה חדש» entry, docs/releases.md and CLAUDE.md** are the
   integrator's; texts for them are below. Until the stamps move, `tests/build.test.mjs` (its stamp
   check and the sw.js line) and `tests/gate.integrity.test.mjs` §4 are red - expected, the contract
@@ -516,10 +599,29 @@ the crew tests/screens.mjs seeds and the record with every check changed in memo
    whether it moved - the house rule (owes.js, closereminder.js, weeklyclose.js do the same) - and
    `PAYDAY_KEPT` holds one more record-sized string in memory.
 8. **Choices inside the contract's words, stated:** check d names the men who WORKED in a period that
-   ends today and is still open (P4 holds that set equal to the men «סגירת שבוע» holds «נגמרת היום»);
+   ends today and is still open (P4 holds that set equal to the men «סגירת שבוע» holds «נגמרת היום»,
+   and since fix round 1 P17 holds it on a man with no day and a man closed that morning);
    «סגירות שנרשמו» is offered only when a closure is on the record (`owesAnyClosure`); a band the
-   sheet cannot price says «—», never 0; the doors are data (`{ words, go, args }`) so that two
-   readings compare as JSON.
+   sheet cannot price says «—», never 0, and the sheet's «סה״כ» (P17); the doors are data
+   (`{ words, go, args }`) so that two readings compare as JSON.
+9. **Fix round 1: the desk watches the sync line while it is open** (`paydayWatch`: a
+   MutationObserver on `#storageNotice`, disconnected when the desk shuts), because a change of the
+   phone's link changes that line and calls no `render()`. Each change costs one `paydayKey()` (the
+   record serialised once) and draws again only when check a now says something else.
+10. **Fix round 1: the Thursday desk is measured in B12, not in the screens' walk.** A period ends on
+   a Thursday only (a pay-cycle boundary is a Friday) and the walk is a Tuesday for every screen;
+   moving its clock would move the day rollover and the close reminder under every screen after it
+   in `tests/largetext.browser.mjs`. B12 moves the clock of its own page and holds that desk to
+   every floor at every phone, scheme and mode.
+11. **The owner's two rulings, defaults kept (fix round 1, findings 13 and 14c):** the morning after
+   payday the desk shows the NEXT payday, and the period just ended is reached through «לסגירה»
+   («סגירת שבוע» offers it with every figure); and the deduction keeps the sheet's own column name
+   «נוכה מהשכר» on a payday still ahead.
+12. **A re-read under a stream of commits still waits for 1.5 s of quiet** (the close reminder's rule,
+   as the contract says). Since fix round 1 the placeholder stands on the glass the whole time; a
+   cap on the wait was considered and not added.
+13. **The «מקדמות» door puts the keyboard on the first man of the list, never on the search field**,
+   which would raise a phone's keyboard over the list it searches.
 
 ## For the integrator
 
@@ -550,13 +652,18 @@ the crew tests/screens.mjs seeds and the record with every check changed in memo
 > group with its payday's date and the three figures «דוחות» prints under that group (`payrollRowsOver`,
 > `payrollBandTotals`, `deductionColumnName`), each man's figure one tap away; «לפני שסוגרים» - what
 > will stop or distort the close, each finding an existing function's answer in its owner's words,
-> each with one button that only navigates; «לסגירה» - how many «סגירת שבוע» would close now and who
-> it holds and why, read by the desk itself; «אחרי הסגירה» - the payslips and the closes on record.
+> each with one button that only navigates - every man «סגירת שבוע» would hold among them, and
+> «may this phone close now» asked each time the desk is drawn; «לסגירה» - how many «סגירת שבוע»
+> would close now and who it holds and why, each reason said once, read by the desk itself; «אחרי
+> הסגירה» - the payslips and the closes on record. A figure is never broken across lines, whatever
+> the size of the letters; a deduction chosen on «דוחות» is in the desk's figures the moment it is
+> chosen.
 > It works no money out (the one thing it adds up is a count of men), writes nothing, closes nothing
 > and opens nothing by itself; a weekly payday is never added to a fortnightly one. It reads inside
 > the pay sheet's one reading (`reportReadOnce`) and «סגירת שבוע»'s memory (`weeklyCloseOnce`),
-> after the dialog has painted «מחשב את החשבונות…», kept under the record (`owesKey`); a record that
-> moves under it puts the placeholder over its figures at once and is read again when the draws stop.
+> after the dialog has painted «מחשב את החשבונות…», kept under the record (`owesKey`) and the
+> deductions chosen on the sheet; a record that moves under it puts the placeholder over its figures
+> at once - on the glass, wherever the dialog is scrolled to - and is read again when the draws stop.
 > Every word proposed and pinned (tests/payday.test.mjs). NOT tried on a real phone.
 
 **CLAUDE.md file-list lines (a draft):**
@@ -568,8 +675,10 @@ the crew tests/screens.mjs seeds and the record with every check changed in memo
                                close (each an existing function's finding, each with one door that only
                                navigates; a door to a view runs one task later), how many «סגירת שבוע» would
                                close now and who it holds (read here, never CLOSE_REMINDER_KEPT), the doors
-                               after; inside reportReadOnce and weeklyCloseOnce, kept under owesKey, read after
-                               paint; no money of its own, no key written; every Hebrew word in one block
+                               after; inside reportReadOnce and weeklyCloseOnce, kept under owesKey and the
+                               deductions chosen on «דוחות», read after paint; «may this phone close» asked at
+                               every drawing, never kept; every man «סגירת שבוע» holds named before the close;
+                               no money of its own, no key written; every Hebrew word in one block
     tests/payday.test.mjs      v206: the desk on devices - every card the band «דוחות» draws, each man's figure,
                                the count and the held men, every check and every door (and when it runs), a
                                week walked, the scopes, the gate, the cost, the gate shut, the disk byte for
