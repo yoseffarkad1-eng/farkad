@@ -892,12 +892,13 @@ function kindsPhone() {
     device.choose('range', 'custom');
     device.dates('2026-11-01', '2026-12-31');
     same('a custom range ending after today is read to today, the field written back and the line saying it',
-        [device.byId('historyTo').value, plain(device.byId('historyRangeNow').textContent).slice(-23), device.facts().to],
-        [TODAY, '01/11/2026\u00a0-\u00a010/11/2026', TODAY]);
-    // The line's dates are ONE word - no-break spaces round the dash, so a wrapping line breaks
-    // before the range and never inside it - while the text keeps dateRange's own spaces.
+        [device.byId('historyTo').value, plain(device.byId('historyRangeNow').textContent).slice(-24), device.facts().to],
+        [TODAY, '01/11/2026\u00a0-\u2060\u00a010/11/2026', TODAY]);
+    // The line's dates are ONE word - no-break spaces round the dash and a word joiner after it,
+    // so a wrapping line breaks before the range and never inside it - while the text keeps
+    // dateRange's own spaces.
     same('the line holds its range as one word; the text\'s range line is dateRange\'s own',
-        [/\d \- \d/.test(plain(device.byId('historyRangeNow').textContent)), plain(device.facts().now).endsWith('01/11/2026\u00a0-\u00a010/11/2026'),
+        [/\d \- \d/.test(plain(device.byId('historyRangeNow').textContent)), plain(device.facts().now).endsWith('01/11/2026\u00a0-\u2060\u00a010/11/2026'),
             plain(device.text()).split('\n')[1]],
         [false, true, '01/11/2026 - 10/11/2026']);
     device.run('closeHistory()');

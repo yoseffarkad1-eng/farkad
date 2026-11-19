@@ -269,9 +269,10 @@ try {
         suite('18. the choices: the list follows, the focus stays, the line says the choice whole');
         await throughTheDoor(page, 'w02');
         given('it is open on עלי חסן', await isOpen(page));
-        // Read as words: the isolates out, and the no-break spaces that hold the range as one word
-        // (historyRangeWhole) read as the spaces they are drawn as - criterion 25 holds them.
-        const line = () => page.evaluate(() => document.getElementById('historyRangeNow').textContent.replace(/[⁦-⁩]/g, '').replace(/\u00a0/g, ' '));
+        // Read as words: the isolates and the word joiner out, and the no-break spaces that hold the
+        // range as one word (historyRangeWhole) read as the spaces they are drawn as - criterion
+        // 25 holds them.
+        const line = () => page.evaluate(() => document.getElementById('historyRangeNow').textContent.replace(/[⁦-⁩\u2060]/g, '').replace(/\u00a0/g, ' '));
         same('the line under the three fields says the man, every site and the dates read', await line(),
             'עלי חסן · כל האתרים · 01/09/2026 - 10/11/2026');
         same('each label stands over its field', await page.evaluate(() => ['historyMan', 'historySite', 'historyRange'].map(id => {

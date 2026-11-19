@@ -382,12 +382,14 @@ function historyRead(schedule, query, today) {
 // The dates of the line under the choices as ONE word. A line that wraps inside the range lays
 // it out, right to left, as «… · - 01/11/2026» over «10/11/2026»: the two dates apart and the
 // dash beside the separator, a range that seems to start with a dash (measured at 440px with
-// «כל העובדים» and a site named «הרצליה - מגדל הים»). With no-break spaces round its dash the
-// line breaks BEFORE the range and the range goes down whole; one wider than the line itself
-// (twice the text at 320px) is still broken by the line's `overflow-wrap: anywhere`, never
-// cut. The text keeps dateRange's own spaces: a message is not laid out here.
+// «כל העובדים» and a site named «הרצליה - מגדל הים»). No-break spaces round its dash, and a
+// word joiner after the dash - a line may still break after a hyphen that a no-break space
+// follows (Unicode line breaking, LB12a; measured: 22 of 60 lines did) - so the line breaks
+// BEFORE the range and the range goes down whole; one wider than the line itself (twice the
+// text at 320px) is still broken by the line's `overflow-wrap: anywhere`, never cut. The text
+// keeps dateRange's own spaces: a message is not laid out here.
 function historyRangeWhole(range) {
-    return String(range).replace(' - ', '\u00a0-\u00a0');
+    return String(range).replace(' - ', '\u00a0-\u2060\u00a0');
 }
 
 function historyFacts() {
