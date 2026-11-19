@@ -53,10 +53,11 @@
 // NOTHING AFTER TODAY. Tomorrow's seder typed in the evening is a plan, not history: every
 // range is read up to today and says so in its dates.
 //
-// THE COST IS BOUNDED, BECAUSE A REDRAW PAYS FOR WHAT IS DRAWN. Every moved record redraws the
-// open dialog, so the screen never holds more than HISTORY_SHOWN_MAX rows (a chunk at a time),
-// the text is built only while its fold is open or at a door, and a redraw of a record that
-// did not move changes no node at all.
+// THE COST IS BOUNDED, BECAUSE A REDRAW PAYS ONLY FOR WHAT MOVED. Every moved record redraws
+// the open dialog, so the screen never holds more than HISTORY_SHOWN_MAX rows (a chunk at a
+// time), a day that did not move stays the node it was and only the moved ones are built
+// again (historyDrawList), the text is built only while its fold is open or at a door, and a
+// redraw of a record that did not move changes no node at all.
 
 // ================================================================== THE WORDS
 //
