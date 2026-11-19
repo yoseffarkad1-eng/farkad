@@ -408,9 +408,16 @@ other half does not read.
 `sw.js` serves everything cache-first, the document included, from THIS version's
 cache only. The install is all-or-nothing — a half-fetched shell throws and the old
 build keeps serving — and the old cache is deleted only in `activate`, which the
-browser does not run unless install succeeded. A new build is never swapped in on its
-own: it installs complete, waits, and is offered as a banner (`js/ui/offline.js`);
-the reload waits again if somebody is mid-typing (`midEdit`). The banner does not
+browser does not run unless install succeeded. A new build is never swapped in under
+somebody's hands: it installs complete, waits, and is offered as a banner (`js/ui/offline.js`);
+the reload waits again if somebody is mid-typing (`midEdit`). Since v205 it also takes itself at
+the next LAUNCH: on a page freshly loaded that nobody has touched, with `midEdit()` false and no
+other window of the app (asked of the worker, whose list holds every window - `other-windows` in
+`sw.js`), a cover (`#launchCover`) goes over the whole glass, eats every input, hides the page from
+assistive technology and moves no focus, the waiting worker is asked to take over, and the page
+reloads once that worker has handed over and is activated and `midEdit()` is still false - or, on
+any failure or 12 s, the cover comes down, the banner stays (an update that took the page over
+anyway stays offered), and nothing reloads by itself. A resumed app keeps the banner. The banner does not
 survive an iOS restart, so a waiting worker is re-offered on every return to the
 foreground, and settings carries a manual check for the phone the banner never
 reached. The document fetch has a 3-second deadline: on a site a stuck network loses

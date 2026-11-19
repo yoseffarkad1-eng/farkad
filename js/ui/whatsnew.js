@@ -73,6 +73,11 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    { build: 'v205', items: [
+        { title: 'עדכון לבד בפתיחה מחדש',
+            text: 'כשפותחים את האפליקציה מחדש וגרסה חדשה מחכה היא נכנסת לבד; אם האפליקציה רק חזרה מהרקע, הפס «גרסה חדשה זמינה» נשאר.',
+            where: 'הגדרות ← מכשיר ועזרה ← עדכון וגרסה', go: 'version' }
+    ] },
     { build: 'v204', items: [
         { title: 'בניית סידור במקום מהיום הקודם',
             text: 'בניית סידור נמצא עכשיו למטה ליד שליחה לוואטסאפ, ומהיום הקודם עבר ל«עוד ⋯» בתחתית הרשימה ולשלב הראשון של הסידור.',
