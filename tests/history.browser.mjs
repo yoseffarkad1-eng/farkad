@@ -126,11 +126,20 @@ function seedSeason() {
     return { days, bytes: JSON.stringify(State.schedule).length };
 }
 
-// Painted: the action, then the next frame, then the task after it.
+// Painted: the action, then the next frame, then the task after it - and what was drawn by
+// then, so that a number is never the time of nothing: the checks of criterion 24 hold each
+// step to the rows and the line it was meant to draw. `sync` is the action itself.
 const timed = (page, code) => page.evaluate(code => new Promise(resolve => {
     const began = performance.now();
     (0, eval)(code);
-    requestAnimationFrame(() => setTimeout(() => resolve(Math.round(performance.now() - began)), 0));
+    const sync = performance.now() - began;
+    requestAnimationFrame(() => setTimeout(() => {
+        const rows = [...document.querySelectorAll('#historyList .history-row')];
+        resolve({ ms: Math.round(performance.now() - began), sync: Math.round(sync), rows: rows.length,
+            first: rows.length ? rows[0].dataset.historyKey : '', open: document.getElementById('historyModal').style.display,
+            line: document.getElementById('historyRangeNow').textContent.replace(/[\u2066-\u2069]/g, ''),
+            labels: rows.slice(0, 40).map(row => row.getAttribute('aria-label').replace(/[\u2066-\u2069]/g, '')) });
+    }, 0));
 }), code);
 
 // Twice the text size, the way tests/mobile.test.mjs makes it (doubleEveryFontSize): every
@@ -623,7 +632,8 @@ try {
         await page.evaluate(() => historyMore());
         await pause(page, 400);
         const scrolled = await page.evaluate(() => { const scroll = document.getElementById('historyScroll'); scroll.scrollTop = 4000; return scroll.scrollTop; });
-        taken.commit = await timed(page, "State.commit(assignPlace(State.schedule, todayStr(), 'w_01', 'actual', 'p_4'))");
+        // A double at p_4: the seed never gives him one there, so the record certainly moves.
+        taken.commit = await timed(page, "State.commit(assignPlace(State.schedule, todayStr(), 'w_01', 'actual', 'p_4', 'double'))");
         await pause(page, 400);
         const keptAfterCommit = await page.evaluate(() => document.getElementById('historyScroll').scrollTop);
         taken.snapshot = await timed(page, `(() => { const raw = JSON.parse(JSON.stringify(State.schedule));
@@ -633,13 +643,26 @@ try {
         const keptAfterSnapshot = await page.evaluate(() => [document.getElementById('historyScroll').scrollTop,
             document.querySelectorAll('#historyList .history-row').length]);
         await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
-        console.log(`      at 4x: the door ${taken.tap} ms, «כל העובדים» ${taken.everyone} ms, «השנה» ${taken.year} ms, «הצג עוד» ${taken.more} ms, a commit under 600 days ${taken.commit} ms, an adopted snapshot ${taken.snapshot} ms`);
-        check('(a) a tap on «איפה עבד» paints the dialog on him inside 600 ms', taken.tap <= 600, `${taken.tap} ms`);
-        check('(b) «כל העובדים», then «השנה», each painted inside 600 ms', taken.everyone <= 600 && taken.year <= 600,
-            `${taken.everyone} / ${taken.year} ms`);
-        check('«הצג עוד» paints 200 more inside 300 ms', taken.more <= 300, `${taken.more} ms`);
-        check('a commit and an adopted snapshot under 600 days drawn, each painted inside 600 ms', taken.commit <= 600 && taken.snapshot <= 600,
-            `${taken.commit} / ${taken.snapshot} ms`);
+        const ms = Object.fromEntries(Object.entries(taken).map(([name, one]) => [name, one.ms]));
+        console.log(`      at 4x: the door ${ms.tap} ms, «כל העובדים» ${ms.everyone} ms, «השנה» ${ms.year} ms, «הצג עוד» ${ms.more} ms, a commit under 600 days ${ms.commit} ms, an adopted snapshot ${ms.snapshot} ms`);
+        console.log(`      of which the action itself: ${Object.entries(taken).map(([name, one]) => `${name} ${one.sync}`).join(', ')} ms`);
+        // EACH NUMBER IS THE TIME OF THE WORK IT NAMES: what was on the glass when it was taken.
+        const year = `01/01/${TODAY.slice(0, 4)}`;
+        same('each step drew what it is timed for: him, everyone, the year, 200 more, the commit\'s day, the snapshot\'s day', [
+            [taken.tap.open, taken.tap.first.endsWith(':w_05'), taken.tap.line.startsWith('דוגמה 5 · כל האתרים')],
+            [taken.everyone.rows, taken.everyone.labels.some(label => label.indexOf('דוגמה 5') === -1), taken.everyone.line.startsWith('כל העובדים · כל האתרים')],
+            [taken.year.rows, taken.year.line.indexOf(year) !== -1],
+            [taken.more.rows],
+            [taken.commit.rows, taken.commit.labels.some(label => label.indexOf('דוגמה 1 · ') !== -1 && label.indexOf('אתר 4') !== -1
+                && label.indexOf('יום כפול') !== -1)],
+            [taken.snapshot.rows, taken.snapshot.labels.some(label => label.indexOf('דוגמה 2 · ') !== -1 && label.endsWith('נעדר'))]
+        ], [['flex', true, true], [200, true, true], [200, true], [400], [600, true], [600, true]]);
+        check('(a) a tap on «איפה עבד» paints the dialog on him inside 600 ms', ms.tap <= 600, `${ms.tap} ms`);
+        check('(b) «כל העובדים», then «השנה», each painted inside 600 ms', ms.everyone <= 600 && ms.year <= 600,
+            `${ms.everyone} / ${ms.year} ms`);
+        check('«הצג עוד» paints 200 more inside 300 ms', ms.more <= 300, `${ms.more} ms`);
+        check('a commit and an adopted snapshot under 600 days drawn, each painted inside 600 ms', ms.commit <= 600 && ms.snapshot <= 600,
+            `${ms.commit} / ${ms.snapshot} ms`);
         same('with the place kept through both, and 600 days still drawn', [keptAfterCommit, keptAfterSnapshot], [scrolled, [scrolled, 600]]);
         await context.close();
     }
