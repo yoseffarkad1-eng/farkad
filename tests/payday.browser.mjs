@@ -20,9 +20,12 @@
 //   B14 A BUILD WITHOUT THE FILE: with paydayEntryButton set to undefined «מקדמות» is drawn
 //       rectangle for rectangle as the base commit draws it (git archive, served beside this
 //       tree), «סגירת שבוע» at full width.
-//   B15 EVERY DOOR, TAPPED, lands where it says; a dialog it opens is entered at its title.
+//   B15 EVERY DOOR, TAPPED, lands where it says; a dialog it opens is entered at its title;
+//       a door to a view runs a task after the desk shut and the keyboard is then where the
+//       target put it, never on a node of the shut desk (revision 2).
 //   B16 Escape, the backdrop and «סגור» close the desk and give the keyboard back to its
-//       button; Tab stays inside; «לפי עובד» unfolds and folds with the keyboard.
+//       button; Tab stays inside; «לפי עובד» unfolds and folds with the keyboard; midEdit()
+//       is true while it is open and false once it is shut (revision 2).
 //   B17 A COMMIT UNDER THE OPEN DESK: the placeholder over the figures at once, then the new
 //       figures once the draws have stopped; the dialog left where it was scrolled to.
 //   B18 THE FLOORS of the desk on every phone, scheme and mode, folded and unfolded (the
@@ -30,6 +33,10 @@
 //       mode; no two controls over each other, no words past a control, nothing cut, nothing
 //       out of reach, no sideways scroll; the title on the glass. And every font doubled at
 //       320 and 440: no sideways scroll, nothing off the side, and the last door reachable.
+//   B20 WHERE «סגירת שבוע» IS NOT DRAWN (revision 2): the writer gate shut (the test seam) and,
+//       in B12's pages, a record nobody approved (in memory) - «יום תשלום» alone at the
+//       board's full width, its words inside it, and the board's move MEASURED, printed, and
+//       equal to the row (the button plus its gap) at every phone, scheme and mode.
 //   B19 Nothing threw, on any page.
 //
 // With --shots <dir> it also leaves pictures (JPEG): the row and the desk at 440x956 dark,
@@ -208,6 +215,66 @@ const deskCardsInPage = () => [...document.querySelectorAll('#paydayBody .payday
         cell.querySelector('.payday-value').textContent])
 }));
 
+// WHERE «סגירת שבוע» IS NOT DRAWN (revision 2, criterion 12): the writer gate shut, or a record
+// nobody approved - weeklyCloseEntryButton() answers null and «יום תשלום» stands alone, at full
+// width, where the base drew nothing; the board under it moves down by that row. Runs in the
+// page: `how` 'unapproved' takes the approval off the record IN MEMORY first (nothing committed).
+function aloneRow(how) {
+    if (how === 'unapproved') {
+        const plan = planCarryMigration(State.schedule);
+        const held = State.schedule.ledger && State.schedule.ledger.migrations;
+        if (held && Object.prototype.hasOwnProperty.call(held, String(plan.id))) delete held[String(plan.id)];
+    }
+    ADVANCE_WORKER = null; OWES_PAGE = null;
+    render();
+    const take = () => {
+        const box = document.querySelector('#advancesView .owes');
+        const row = box.querySelector(':scope > .owes-actions');
+        const next = row ? row.nextElementSibling : box.firstElementChild;
+        const r = row ? row.getBoundingClientRect() : null;
+        return {
+            weekly: document.querySelector('#advancesView .weekly-close-entry') !== null,
+            buttons: row ? [...row.children].map(node => {
+                const q = node.getBoundingClientRect();
+                return { words: node.textContent, id: node.id, w: Math.round(q.width), h: Math.round(q.height) };
+            }) : [],
+            rowHeight: r ? Math.round(r.height * 10) / 10 : 0,
+            gap: row ? parseFloat(getComputedStyle(row).marginBottom) : 0,
+            boxWidth: Math.round(box.getBoundingClientRect().width),
+            next: next ? next.className : null,
+            nextTop: next ? next.getBoundingClientRect().top + window.scrollY : null
+        };
+    };
+    const drawn = take();
+    const was = paydayEntryButton;
+    paydayEntryButton = undefined;
+    render();
+    const without = take();
+    paydayEntryButton = was;
+    render();
+    return { gate: carryReportingEnabled(State.schedule), writes: ledgerWritesEnabled(), drawn, without };
+}
+const ALONE = [];
+async function holdAlone(label, page, read, large) {
+    const tall = large ? 52 : 48;
+    same(`${label}: «סגירת שבוע» is not drawn, and «יום תשלום» stands alone in the row`,
+        [read.drawn.weekly, read.drawn.buttons.map(one => one.words)], [false, ['יום תשלום']]);
+    const one = read.drawn.buttons[0] || { w: 0, h: 0 };
+    check(`${label}: at the board's full width, ${tall}px tall or more`, Math.abs(one.w - read.drawn.boxWidth) <= 1 && one.h >= tall,
+        JSON.stringify([one.w, one.h, read.drawn.boxWidth]));
+    const words = await measure(page, ['#advancesView .owes-actions']);
+    check(`${label}: its words inside it`, words.spills.length === 0 && words.cut.length === 0,
+        brief(words.spills.concat(words.cut), o => `${o.by} «${o.words}»`));
+    given(`${label}: the same board under the row and with no row at all (a build without the file)`,
+        read.drawn.next === read.without.next && read.without.buttons.length === 0 && read.without.weekly === false,
+        `${read.drawn.next} / ${read.without.next}`);
+    const moved = Math.round((read.drawn.nextTop - read.without.nextTop) * 10) / 10;
+    const row = Math.round((read.drawn.rowHeight + read.drawn.gap) * 10) / 10;
+    check(`${label}: the board moves down by that row and nothing more - ${moved}px (the button ${read.drawn.rowHeight}px + the gap ${read.drawn.gap}px)`,
+        Math.abs(moved - row) <= 1, `${moved} / ${row}`);
+    ALONE.push(`${label}: ${moved}px`);
+}
+
 // ================================================================== B12, B18: every phone, scheme and mode
 for (const [width, height] of PHONES) {
     for (const scheme of SCHEMES) {
@@ -256,6 +323,15 @@ for (const [width, height] of PHONES) {
             else same(`${label}: the board under the row does not move`, moved, 0);
             check(`${label}: without the file «סגירת שבוע» stands at the board's full width`, without.weeklyWidth === without.boardWidth,
                 `${without.weeklyWidth} / ${without.boardWidth}`);
+            await tapOn(page, '#advancesView .owes-actions .weekly-close-entry');
+            await page.waitForTimeout(200);
+            same(`${label}: «סגירת שבוע» still opens from the row, at its title`, await page.evaluate(() => {
+                const out = [document.getElementById('weeklyCloseModal').style.display, document.activeElement && document.activeElement.id];
+                closeWeeklyClose();
+                return out;
+            }), ['flex', 'weeklyCloseTitle']);
+            await page.waitForTimeout(100);
+            check(`${label}: and opening it wrote nothing`, (await disk(page)) === before);
 
             // ---- the desk, read
             await openDesk(page);
@@ -292,6 +368,12 @@ for (const [width, height] of PHONES) {
             }
             await page.keyboard.press('Escape');
             check(`${label}: reading, unfolding and closing the desk wrote nothing`, (await disk(page)) === before);
+
+            // ---- a record nobody approved, in memory: «סגירת שבוע» not drawn, the desk's button alone
+            const unapproved = await page.evaluate(aloneRow, 'unapproved');
+            given(`${label}: the record, its approval taken off in memory, is one nobody approved`, unapproved.gate === false && unapproved.writes === true);
+            await holdAlone(`${label}, a record nobody approved`, page, unapproved, large);
+            check(`${label}: and that wrote nothing either`, (await disk(page)) === before);
             if (SHOTS && width === 440 && scheme === 'dark' && !large) {
                 await page.reload({ waitUntil: 'load' });
                 await page.waitForFunction(() => typeof State !== 'undefined' && typeof render === 'function');
@@ -389,7 +471,9 @@ for (const [width, height] of PHONES) {
         workers: REPORT_WORKERS ? [...REPORT_WORKERS] : null, range: [REPORT_RANGE.from, REPORT_RANGE.to],
         advanceWorker: ADVANCE_WORKER, owesPage: OWES_PAGE, date: State.date,
         weekly: document.getElementById('weeklyCloseModal').style.display, slips: document.getElementById('payslipsModal').style.display,
-        focus: document.activeElement && document.activeElement.id
+        focus: document.activeElement && document.activeElement.id,
+        inDesk: document.getElementById('paydayModal').contains(document.activeElement),
+        onGroup: Boolean(document.activeElement) && document.activeElement === document.querySelector('#reportsView .report-payroll .report-group')
     }));
     const reset = () => page.evaluate(() => {
         if (typeof closeWeeklyClose === 'function') closeWeeklyClose();
@@ -447,6 +531,45 @@ for (const [width, height] of PHONES) {
     same('«💬 תלוש לכל עובד»: that list, on the period that ends today, entered at its title', pick(7, ['desk', 'slips', 'focus']),
         ['none', 'flex', 'payslipsTitle']);
     same('«סגירות שנרשמו»: that page of «מקדמות»', pick(8, ['view', 'owesPage']), ['advances', 'closures']);
+    // REVISION 2: the focus is where the target put it, never left on a node of the shut desk. The
+    // pay sheet focuses its group's heading (showOtherAccount) - a door run in the task of the press
+    // lost it to js/ui/modal.js, which gives the keyboard back to the desk's opener at that task's end.
+    same('b: the keyboard on the heading the pay sheet focused, not given back to the desk\'s button', pick(0, ['onGroup', 'inDesk']),
+        [true, false]);
+    same('no door left the keyboard on a node of the shut desk', landed.map(at => at.inDesk), doors.map(() => false));
+
+    // WHEN each door runs, recorded in the page: a door to a dialog opens it in the task of the
+    // press; a door to anything else has run nothing of its target when that task ends.
+    const timing = [];
+    for (let n = 0; n < doors.length; n += 1) {
+        await reset();
+        await page.waitForTimeout(150);
+        await openDesk(page);
+        timing.push(await page.evaluate(at => new Promise(resolve => {
+            const names = ['showView', 'owesShowAccount', 'showWorkerAdvances', 'owesOpenPage', 'openWeeklyClose', 'openPayslips'];
+            const calls = [];
+            const real = {};
+            names.forEach(name => { real[name] = window[name]; window[name] = function () { calls.push(name); return real[name].apply(this, arguments); }; });
+            document.querySelectorAll('#paydayBody .payday-door')[at].click();
+            const inTask = calls.slice();
+            const shut = document.getElementById('paydayModal').style.display;
+            setTimeout(() => {
+                names.forEach(name => { window[name] = real[name]; });
+                resolve({ inTask, after: calls.slice(), shut });
+            }, 60);
+        }), n));
+        await page.evaluate(kept => {
+            if (document.getElementById('payslipsModal').style.display === 'flex') closePayslips();
+            if (kept === null) localStorage.removeItem('farkadPayslipsProgress'); else localStorage.setItem('farkadPayslipsProgress', kept);
+        }, slipsKey);
+    }
+    const dialogDoors = ['לסגירת שבוע', '💬 תלוש לכל עובד'];
+    check('every door shut the desk in the task of the press', timing.every(one => one.shut === 'none'), JSON.stringify(timing.map(one => one.shut)));
+    same('a door to a view: nothing of its target in the task of the press', doors.filter(word => dialogDoors.indexOf(word) === -1)
+        .map(word => [word, timing[doors.indexOf(word)].inTask]), doors.filter(word => dialogDoors.indexOf(word) === -1).map(word => [word, []]));
+    given('and each of them ran in the task after', doors.every((word, n) => timing[n].after.length > 0), JSON.stringify(timing.map(one => one.after)));
+    same('a door to a dialog: its opener in the task of the press', dialogDoors.map(word => timing[doors.indexOf(word)].inTask),
+        [['openWeeklyClose'], ['openPayslips']]);
     await reset();
     check('no door wrote anything but the payslips\' own key (taken away again)', (await disk(page)) === before);
     await context.close();
@@ -460,9 +583,13 @@ for (const [width, height] of PHONES) {
     const shut = () => page.evaluate(() => ({ open: document.getElementById('paydayModal').style.display, focus: document.activeElement && document.activeElement.id }));
     await openDesk(page);
     same('opened: the focus on its title', await page.evaluate(() => document.activeElement.id), 'paydayTitle');
+    // Revision 2: an open desk is a moment somebody is in the middle of something - v205's
+    // automatic update waits on midEdit() (js/ui/offline.js) - and a shut one is not.
+    same('open: midEdit() is true', await page.evaluate(() => midEdit()), true);
     await page.keyboard.press('Escape');
     await page.waitForTimeout(100);
     same('Escape: shut, the keyboard back on «יום תשלום»', await shut(), { open: 'none', focus: 'paydayEntry' });
+    same('shut: midEdit() is false', await page.evaluate(() => midEdit()), false);
     await openDesk(page);
     await page.mouse.click(4, 4);
     await page.waitForTimeout(100);
@@ -584,6 +711,35 @@ for (const [width, height] of [[320, 568], [440, 956]]) {
     await page.keyboard.press('Escape');
     await context.close();
 }
+
+// ================================================================== B20 the writer gate shut
+//
+// The other way «סגירת שבוע» is not drawn: a build whose writer is shut (the one test seam,
+// FARKAD_FLAG_OVERRIDES, set before the scripts load). On every phone, scheme and mode the
+// desk's button alone, and the board's move measured - and the desk still opens from it.
+for (const [width, height] of PHONES) {
+    for (const scheme of SCHEMES) {
+        for (const large of [false, true]) {
+            const label = `${width}x${height} ${scheme}${large ? ', large display' : ''}, the writer gate shut`;
+            suite(`${label}: «יום תשלום» alone, and the board's move measured`);
+            const { context, page } = await phone(server.url, { width, height, scheme, large,
+                before: async browserContext => browserContext.addInitScript(() => { window.FARKAD_FLAG_OVERRIDES = { ledgerWrites: false }; }) });
+            await toAdvances(page);
+            const before = await disk(page);
+            const read = await page.evaluate(aloneRow, 'as it is');
+            given(`${label}: this build cannot write a close, on a record that is approved`, read.writes === false && read.gate === true);
+            await holdAlone(label, page, read, large);
+            await openDesk(page);
+            check(`${label}: the desk opens from it, at its title, on the glass`, await titleOnGlass(page));
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(100);
+            check(`${label}: the keyboard back on «יום תשלום», and nothing written`,
+                (await page.evaluate(() => document.activeElement && document.activeElement.id)) === 'paydayEntry' && (await disk(page)) === before);
+            await context.close();
+        }
+    }
+}
+console.log(`\n        (where «סגירת שבוע» is not drawn the board moves down by the desk's row:\n         ${ALONE.join('\n         ')})`);
 
 // ================================================================== B19
 {

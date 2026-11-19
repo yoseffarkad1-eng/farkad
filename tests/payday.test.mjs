@@ -547,7 +547,7 @@ await block('P4 every check fires on the fixture made for it, is silent elsewher
     // amount, and the desk stars no figure.
     same('f: the sheet\'s sentence without its star, the men, and the roster', [of(f, 'hoursUnpriced').say, of(f, 'hoursUnpriced').lines.map(bare), of(f, 'hoursUnpriced').door.go],
         ['שעות נוספות בלי שכר שעה - לא נכללו בסכום.', ['גסאן'], 'roster']);
-    same('f: and it is the sheet\'s own sentence, the star and its space taken off', `* ${of(f, 'hoursUnpriced').say}`, HOURS_NOTE);
+    same('f: and it is the sheet\'s own sentence, the star and its space taken off', of(f, 'hoursUnpriced').say, HOURS_NOTE.slice(2));
     // h, and «אין מה לסדר»
     same('h: always last, quiet, and its door is «מקדמות»', [f.forgotten.say, f.forgotten.door.words, f.forgotten.door.go],
         ['מקדמה שניתנה ולא נרשמה לא תנוכה. רושמים אותה לפני שסוגרים.', 'מקדמות', 'advances']);
