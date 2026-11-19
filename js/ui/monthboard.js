@@ -272,14 +272,23 @@ function monthBoardFacts(key, placeId) {
     const [year, number] = month.split('-').map(Number);
     const place = only === null ? null : { id: only, name: nameOf(only) };
     const recorded = rows.some(row => row.cells.some(cell => cell.absent || cell.lines.length > 0));
+    const thisMonth = month === monthSummaryKeyOf(today);
+    // THE COLUMN THE BOARD OPENS ON, on this month: today's - and on a Saturday nothing was
+    // recorded on, which is no column, the last day before it that is one, not the 1st: a
+    // Saturday is the day off on which a month gets read, and the 28th's reader would have
+    // had to swipe back through four weeks to reach where he was.
+    const anchor = !thisMonth ? null
+        : drawn.includes(today) ? today
+        : drawn.filter(date => date < today).pop() || drawn[0] || null;
     return {
         key: month,
         from: range.from,
         to: range.to,
         name: monthSummaryName(month),
         title: T.title(MONTH_SUMMARY_TEXT.months[number - 1], year, place ? isolate(place.name) : ''),
-        thisMonth: month === monthSummaryKeyOf(today),
+        thisMonth,
         today: drawn.includes(today) ? today : null,
+        anchor,
         place,
         sites,
         dates,
@@ -356,10 +365,14 @@ function monthBoardHeader(facts) {
     title.tabIndex = -1;
     head.appendChild(title);
 
+    // The month is said once, in the title above: an arrow keeps the focus after its step, and
+    // each arrow is DESCRIBED BY the title, so a screen reader landing back on the new arrow
+    // says the month it went to - the job «סיכום חודש»'s live month line does in its dialog.
     const steps = el('div', 'month-board-steps');
     const prev = button(MONTH_SUMMARY_TEXT.prev, 'btn-secondary btn-nav nav-back month-board-step', () => monthBoardStep(-1));
     prev.insertBefore(chevronIcon('back'), prev.firstChild);
     prev.dataset.monthBoard = 'prev';
+    prev.setAttribute('aria-describedby', 'monthBoardTitle');
     steps.appendChild(prev);
     // «החודש» only off this month: on it, the chip would be a button that does nothing.
     if (!facts.thisMonth) {
@@ -370,6 +383,7 @@ function monthBoardHeader(facts) {
     const next = button(MONTH_SUMMARY_TEXT.next, 'btn-secondary btn-nav nav-fwd month-board-step', () => monthBoardStep(1));
     next.appendChild(chevronIcon('fwd'));
     next.dataset.monthBoard = 'next';
+    next.setAttribute('aria-describedby', 'monthBoardTitle');
     steps.appendChild(next);
     head.appendChild(steps);
 
@@ -565,14 +579,15 @@ function monthBoardHeld(root) {
 }
 
 // The place put back - or, for a board that was not on screen a moment ago (the door, a new
-// month, a new site), the grid opened on today's column when the board is on this month and
-// on its first date otherwise.
+// month, a new site), the grid opened on today's column when the board is on this month (on
+// a Saturday that is no column, the day before it: facts.anchor) and on its first date
+// otherwise.
 function monthBoardPutBack(board, facts, held) {
     const scroller = board.querySelector('.month-board-scroll');
     const place = facts.place ? facts.place.id : null;
     const same = Boolean(held) && held.key === facts.key && held.place === place;
     if (scroller && typeof scroller.getBoundingClientRect === 'function') {
-        const th = facts.today ? scroller.querySelector(`th[data-date="${facts.today}"]`) : null;
+        const th = facts.anchor ? scroller.querySelector(`th[data-date="${facts.anchor}"]`) : null;
         if (same && held.left !== null) {
             scroller.scrollLeft = held.left;
         } else if (th) {

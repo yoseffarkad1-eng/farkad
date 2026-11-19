@@ -247,6 +247,12 @@ for (const [width, height] of PHONES) {
     await page.waitForTimeout(250);
     same('«חודש קודם»: October, the focus kept on the arrow, and «החודש» offered', [await title(), await focused(),
         await page.locator('[data-month-board="home"]').count()], ['לוח חודשי · אוקטובר 2026', 'prev', 1]);
+    same('the arrow it kept is described by the title: where the focus lands, the month it went to is said',
+        await page.evaluate(() => {
+            const arrow = document.activeElement;
+            const by = document.getElementById(arrow.getAttribute('aria-describedby') || '');
+            return [arrow.dataset.monthBoard, by ? by.textContent : null];
+        }), ['prev', 'לוח חודשי · אוקטובר 2026']);
     await page.locator('[data-month-board="home"]').tap();
     await page.waitForTimeout(250);
     same('«החודש»: back on November, the chip gone and the focus on the title', [await title(), await focused(),
@@ -277,6 +283,32 @@ for (const [width, height] of PHONES) {
     await page.waitForTimeout(300);
     same('«כל האתרים» puts every site back', await page.evaluate(() => [MONTH_BOARD_PLACE,
         [...document.querySelectorAll('.month-board-table tfoot tr')].map(tr => tr.dataset.kind)]), [null, ['men', 'rima', 'yosef']]);
+
+    // A Saturday nothing was recorded on is no column, and on one the board opens on the
+    // Friday before it - not on the 1st, four weeks of swiping away. todayStr() answers the
+    // 14th for ONE synchronous opening (no timer can run inside it), and the real clock is
+    // back, and the board drawn again by it, before anything else happens.
+    const saturday = await page.evaluate(() => {
+        const real = window.todayStr;
+        window.todayStr = () => '2026-11-14';
+        try {
+            openMonthBoard(null, null);
+            const box = document.querySelector('.month-board-scroll').getBoundingClientRect();
+            const names = document.querySelector('.month-board-corner').getBoundingClientRect();
+            const seen = date => {
+                const th = document.querySelector(`.month-board-table th[data-date="${date}"]`).getBoundingClientRect();
+                return th.left >= box.left - 1 && th.right <= names.left + 1;
+            };
+            return { column: document.querySelectorAll('.month-board-table th[data-date="2026-11-14"]').length,
+                friday: seen('2026-11-13'), first: seen('2026-11-01') };
+        } finally {
+            window.todayStr = real;
+        }
+    });
+    same('on a Saturday nothing was recorded on - no column - the board opens on the Friday before it, not on the 1st',
+        [saturday.column, saturday.friday, saturday.first], [0, true, false]);
+    await page.evaluate(() => { openMonthBoard(null, null); });
+    await page.waitForTimeout(250);
 
     // Print, with the sheet stood in for; the picture, with the share sheet stood in for.
     await page.evaluate(() => {

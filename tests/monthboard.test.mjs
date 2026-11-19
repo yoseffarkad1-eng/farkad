@@ -31,6 +31,9 @@
 //      reports asked a counted number of times.
 //  10. THE PICTURE'S READING is the facts it was drawn from, and the plan draws every row,
 //      every block and every legend swatch.
+//  11. THE MUTANTS: the suite run again on eleven copies of the board, each with one fault
+//      a careless edit could put in it, and red by a claim on every one - so none of the
+//      comparisons above is two things computed the same wrong way.
 //
 // Over a month written out by hand (every figure spelled here), and over seeded records:
 // both pay cycles, two sites in one day, doubles, extra hours with and without hours,
@@ -43,6 +46,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
+import { spawnSync } from 'node:child_process';
 import { makeDevice } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
@@ -50,7 +54,44 @@ process.env.TZ = 'Asia/Jerusalem';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const source = file => readFileSync(join(ROOT, file), 'utf8');
-const BOARD = source('js/ui/monthboard.js');
+// THE MUTANTS (section 11): each a line of js/ui/monthboard.js and what a careless edit
+// could turn it into. Run with MONTHBOARD_MUTANT=<name>, this suite loads the board with that
+// one line changed and holds the month written out by hand, one seed, the older closure and
+// the picture's reading against it - and must go red. A line no longer in the board stops
+// the run, so a mutant can never quietly test nothing.
+const MUTANTS = Object.freeze({
+    'an absence counted as a day of attendance':
+        ['if (!absent && lines.length > 0) total += 1;', 'if (absent || lines.length > 0) total += 1;'],
+    '«בלי עובדי רימא» read into the picture':
+        [".filter(tr => tr.dataset.kind !== 'own')", ".filter(tr => tr.dataset.kind !== 'none')"],
+    'the paper told every foot row leaves the phone':
+        ["foot.forEach(row => { row.paper = row.kind !== 'own'; });", 'foot.forEach(row => { row.paper = true; });'],
+    'every Saturday drawn as a column':
+        ['const dates = all.filter(date => !saturday(date)', 'const dates = all.filter(date => true'],
+    'two letters for every site, shared or not':
+        ['if (site.letters && shared.get(site.letters) > 1)', 'if (site.letters)'],
+    "the week's one letter where two sites share it":
+        ["line.initial = lettersOf.get(line.placeId) || '';", 'line.initial = siteInitial(line.name);'],
+    "a narrowed board keeping every site's blocks":
+        ['return only === null ? entries : entries.filter(entry => String(entry.placeId) === only);', 'return entries;'],
+    "a narrowed board drawing a man's absence":
+        ['const absent = only === null && isAbsent(schedule, date, worker.id, layer);', 'const absent = isAbsent(schedule, date, worker.id, layer);'],
+    'a man who worked and left dropped from his month':
+        ['? weekWorkers(all)', '? weekWorkers(all).filter(worker => worker.active !== false)'],
+    'יוסף גבס added into «סה"כ עובדים»':
+        ["foot.push({ kind: 'men', label: R.men, byDate: counts, total: sum(counts) });",
+            "foot.push({ kind: 'men', label: R.men, byDate: counts, total: sum(counts) + (yosefReport ? yosefReport.total : 0) });"],
+    "the billed row without Rima's men":
+        ['byDate: byDate(date => invoice.countAt(only, date)),', 'byDate: byDate(date => invoice.countAt(only, date) - rimaCount(schedule, date, only)),']
+});
+const BOARD_SOURCE = source('js/ui/monthboard.js');
+const MUTANT = process.env.MONTHBOARD_MUTANT || '';
+if (MUTANT) {
+    given(`the mutant «${MUTANT}» is one of this suite's, and its line is in the board exactly once`,
+        Boolean(MUTANTS[MUTANT]) && BOARD_SOURCE.split(MUTANTS[MUTANT][0]).length === 2, MUTANT);
+    console.log(`\nMUTANT: ${MUTANT}`);
+}
+const BOARD = MUTANT ? BOARD_SOURCE.replace(MUTANTS[MUTANT][0], () => MUTANTS[MUTANT][1]) : BOARD_SOURCE;
 const WEEK = source('js/ui/week.js');
 const REPORTS = source('js/ui/reports.js');
 const PRINTOUT = source('js/ui/printout.js');
@@ -684,6 +725,20 @@ function siteShape(device, row, date, place, letterOf) {
         facts.sites.map(site => site.id), ['p_1', 'p_2', 'p_3']);
     same('the week keeps its one letter (siteInitial is untouched)', ['הרצליה', 'הוד השרון'].map(name => device.call('siteInitial', name)), ['ה', 'ה']);
     same('neither the empty month nor today on it', [facts.empty, facts.today, facts.thisMonth], [false, null, false]);
+    // THE COLUMN IT OPENS ON (facts.anchor, which the board scrolls to): on this month,
+    // today's; on a Saturday that is no column, the day before it - never the 1st; on a 1st
+    // that is such a Saturday, the first day there is; and no column at all off this month.
+    const opensOn = (today, key = '2026-10') => {
+        device.setToday(today);
+        try { const read = device.facts(key); return [read.today, read.anchor]; } finally { device.setToday(TODAY); }
+    };
+    same('the column it opens on: a weekday, the Saturday worked and the Saturday of only Rima are today\'s own',
+        [opensOn('2026-10-06'), opensOn('2026-10-03'), opensOn('2026-10-10')],
+        [['2026-10-06', '2026-10-06'], ['2026-10-03', '2026-10-03'], ['2026-10-10', '2026-10-10']]);
+    same('a Saturday nothing was recorded on is no column: the Friday before it, the 16th and the 30th - not the 1st',
+        [opensOn('2026-10-17'), opensOn('2026-10-31')], [[null, '2026-10-16'], [null, '2026-10-30']]);
+    same('the 1st of August 2026, an empty Saturday: the first day there is, the 2nd', opensOn('2026-08-01', '2026-08'), [null, '2026-08-02']);
+    same('off this month, no column to open on', facts.anchor, null);
 
     suite('the month written out by hand: one site');
     const one = holdBoard(device, '2026-10', 'p_1', 'October, הרצליה');
@@ -724,7 +779,7 @@ function siteShape(device, row, date, place, letterOf) {
 }
 
 // ============================================================ 1-6 on seeded records
-for (const seed of [11, 23, 37]) {
+for (const seed of MUTANT ? [11] : [11, 23, 37]) {
     suite(`seed ${seed}: every board of four months, and every site of each`);
     const { device, left, before } = seededPhone(seed);
     for (const key of ['2026-09', '2026-10', '2026-11', '2026-12']) {
@@ -753,7 +808,7 @@ for (const seed of [11, 23, 37]) {
 }
 
 // ============================================================ 7. it writes nothing
-{
+if (!MUTANT) {
     suite('it writes nothing: every key on the disk, byte for byte');
     const device = handPhone();
     device.run('State.date = "2026-10-06";');
@@ -773,6 +828,10 @@ for (const seed of [11, 23, 37]) {
     press('next');
     same('«חודש הבא» steps to November and keeps its own focus', [device.run('MONTH_BOARD_KEY'),
         device.dom.activeElement.getAttribute('data-month-board')], ['2026-11', 'next']);
+    same('each arrow is described by the title, so the month it went to is said where the focus lands',
+        ['prev', 'next'].map(name => [device.dom.querySelector(`#weekView [data-month-board="${name}"]`).getAttribute('aria-describedby'),
+            device.dom.getElementById('monthBoardTitle').textContent]),
+        [['monthBoardTitle', 'לוח חודשי · נובמבר 2026'], ['monthBoardTitle', 'לוח חודשי · נובמבר 2026']]);
     same('on this month there is no «החודש»', device.dom.querySelectorAll('#weekView [data-month-board="home"]').length, 0);
     press('prev'); press('prev');
     same('«חודש קודם» twice: September, and «החודש» is back', [device.run('MONTH_BOARD_KEY'),
@@ -826,7 +885,7 @@ for (const seed of [11, 23, 37]) {
 }
 
 // ============================================================ 8. the words
-{
+if (!MUTANT) {
     suite('the words: every new one pinned, every borrowed one in its owner');
     const device = handPhone();
     const T = device.global('MONTH_BOARD_TEXT');
@@ -887,7 +946,7 @@ for (const seed of [11, 23, 37]) {
 }
 
 // ============================================================ the file's promises, read as text
-{
+if (!MUTANT) {
     suite('it reads, prices nothing, and is wired where the contract says');
     const code = BOARD.replace(/\/\/[^\n]*/g, '');
     const money = ['payrollReport', 'payrollRows', 'payrollBandTotals', 'workerAccountFor', 'moneyText', 'agora(', 'ratesForDay',
@@ -919,7 +978,7 @@ for (const seed of [11, 23, 37]) {
 }
 
 // ============================================================ one map of names per draw, and no week cell
-{
+if (!MUTANT) {
     suite('a draw: one whole-record map of site names, and renderWeekCell never called');
     const device = handPhone();
     device.run(`window.__whole = 0; window.__weekCells = 0;
@@ -982,7 +1041,7 @@ for (const seed of [11, 23, 37]) {
 }
 
 // ============================================================ 9. the cost
-{
+if (!MUTANT) {
     suite('the cost: a season\'s month, 40 men by 31 days');
     const device = withBoard(makeDevice({ deviceId: 'd_monthboard_season' }));
     const s = device.State.schedule;
@@ -1098,6 +1157,37 @@ for (const seed of [11, 23, 37]) {
     }
     const empty = drawBoard(device, '2026-12', null);
     same('a month with nobody on it has no picture to draw', [device.run('readMonthPrintout()'), empty.querySelectorAll('.month-board').length], [null, 1]);
+}
+
+// ============================================================ 11. the mutants
+//
+// A suite that holds the board equal to the reports could still be holding nothing: two
+// things computed the same wrong way, a comparison that never runs. So the suite is run
+// again, in a child process, on a copy of the board with ONE deliberate fault in it - each a
+// fault a careless edit could really make - and it must go red on every one BY A CLAIM: at
+// least one of its checks fails. A run that only crashed, or only stopped at a broken
+// precondition (SETUP FAILED, exit 2) with no claim failed before it, is not a catch; a run
+// whose claims failed and that a precondition then stopped is (the man dropped from his
+// month fails four claims, and then the hand-written month has fewer cells than it was
+// written with). The child holds the month written out by hand, one seed, the older closure
+// and the picture's reading; the words, the wiring, the spies and the cost read the file as
+// text, count or time, and are not run there.
+if (!MUTANT) {
+    suite('the mutants: one fault put in the board at a time, and this suite red on each');
+    const self = fileURLToPath(import.meta.url);
+    for (const [name, [from]] of Object.entries(MUTANTS)) {
+        given(`the mutant «${name}» finds its line in js/ui/monthboard.js exactly once`, BOARD_SOURCE.split(from).length === 2, from);
+        const run = spawnSync(process.execPath, [self], {
+            env: { ...process.env, MONTHBOARD_MUTANT: name }, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+        const out = String(run.stdout || '').split('\n');
+        const failed = out.filter(line => line.startsWith('**FAIL**'));
+        const passed = out.filter(line => line.startsWith('  PASS')).length;
+        const ran = out.some(line => line === `MUTANT: ${name}`);
+        check(`«${name}»: red - ${failed.length} of its checks fail${run.status === 2 ? ', then a precondition stops it' : ''}`,
+            ran && (run.status === 1 || run.status === 2) && failed.length > 0 && passed > 0,
+            failed.length ? failed[0].replace(/^\*\*FAIL\*\*\s+/, '').slice(0, 150)
+                : `exit ${run.status}: ${String(run.stderr || '').trim().slice(0, 200)}`);
+    }
 }
 
 report();
