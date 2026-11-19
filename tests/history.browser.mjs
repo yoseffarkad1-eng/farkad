@@ -269,7 +269,9 @@ try {
         suite('18. the choices: the list follows, the focus stays, the line says the choice whole');
         await throughTheDoor(page, 'w02');
         given('it is open on עלי חסן', await isOpen(page));
-        const line = () => page.evaluate(() => document.getElementById('historyRangeNow').textContent.replace(/[⁦-⁩]/g, ''));
+        // Read as words: the isolates out, and the no-break spaces that hold the range as one word
+        // (historyRangeWhole) read as the spaces they are drawn as - criterion 25 holds them.
+        const line = () => page.evaluate(() => document.getElementById('historyRangeNow').textContent.replace(/[⁦-⁩]/g, '').replace(/\u00a0/g, ' '));
         same('the line under the three fields says the man, every site and the dates read', await line(),
             'עלי חסן · כל האתרים · 01/09/2026 - 10/11/2026');
         same('each label stands over its field', await page.evaluate(() => ['historyMan', 'historySite', 'historyRange'].map(id => {
@@ -741,6 +743,22 @@ try {
                 return { ok: box.bottom <= Math.min(scroll.bottom, innerHeight) + 1 && box.top >= scroll.top - 1, what: node.id || node.dataset.historyKey || node.className };
             });
             check(`${tag} · ${name}: the last control can be brought onto the glass`, last.ok, JSON.stringify(last));
+            // THE RANGE IS ONE WORD: a line that wraps breaks before its dates, never between
+            // them - broken after the dash, a right-to-left line drew «… · - 01/11/2026» over
+            // «10/11/2026» (440px, everyone at «הרצליה - מגדל הים»). Not at doubled text at 320
+            // and 375, where the range alone is wider than the line and is broken anywhere.
+            if (!doubled) {
+                const dates = await page.evaluate(() => {
+                    const node = document.getElementById('historyRangeNow').firstChild;
+                    const at = [...node.textContent.matchAll(/\d\d\/\d\d\/\d{4}/g)].map(found => found.index);
+                    const top = start => { const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + 10);
+                        return Math.round(range.getBoundingClientRect().top); };
+                    const box = document.getElementById('historyRangeNow').getBoundingClientRect();
+                    return { tops: at.map(top), lines: Math.round(box.height / parseFloat(getComputedStyle(node.parentNode).lineHeight || 20)) };
+                });
+                check(`${tag} · ${name}: the line's two dates stand on one line`, dates.tops.length === 2 && Math.abs(dates.tops[0] - dates.tops[1]) <= 2,
+                    JSON.stringify(dates));
+            }
             if (name === 'everyone at p1, with Rima') {
                 same(`${tag}: p1 this month draws Rima's two lines and their note`, await page.evaluate(() =>
                     [...document.querySelectorAll('#historyTotals .history-pair')].map(pair => pair.dataset.figure)), ['billed', 'own', 'rima']);

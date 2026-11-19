@@ -379,6 +379,17 @@ function historyRead(schedule, query, today) {
 // What the screen and the text say, read once per draw: the reading of the record as it
 // stands, and the words for it. The one function here that reads State.
 
+// The dates of the line under the choices as ONE word. A line that wraps inside the range lays
+// it out, right to left, as «… · - 01/11/2026» over «10/11/2026»: the two dates apart and the
+// dash beside the separator, a range that seems to start with a dash (measured at 440px with
+// «כל העובדים» and a site named «הרצליה - מגדל הים»). With no-break spaces round its dash the
+// line breaks BEFORE the range and the range goes down whole; one wider than the line itself
+// (twice the text at 320px) is still broken by the line's `overflow-wrap: anywhere`, never
+// cut. The text keeps dateRange's own spaces: a message is not laid out here.
+function historyRangeWhole(range) {
+    return String(range).replace(' - ', '\u00a0-\u00a0');
+}
+
 function historyFacts() {
     const schedule = State.schedule;
     const today = todayStr();
@@ -424,7 +435,7 @@ function historyFacts() {
         who,
         where,
         rangeText,
-        now: HISTORY_TEXT.now(who, where, rangeText),
+        now: HISTORY_TEXT.now(who, where, historyRangeWhole(rangeText)),
         names,
         manOptions: listed(workers, R.allMen),
         siteOptions: listed(places, R.allSites)
