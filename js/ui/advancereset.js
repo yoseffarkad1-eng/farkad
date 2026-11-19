@@ -778,7 +778,7 @@ function advanceResetAfter(result, chosen) {
         return;
     }
     // «3 · נרשם», read off the record as it now is.
-    const board = owesRead(State.schedule, todayStr());
+    const board = typeof owesReadNow === 'function' ? owesReadNow() : owesRead(State.schedule, todayStr());
     ADVANCE_RESET.result = {
         key: `${result.at}|${result.by}`,
         closes: done.reduce((sum, man) => sum + man.periods.length, 0),
