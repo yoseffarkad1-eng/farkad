@@ -147,6 +147,9 @@ function monthBoardFacts(key, placeId) {
     const labels = placeLabelsIn(schedule);
     const nameOf = id => placeLabelFrom(labels, id);
     const all = monthBoardMonthDates(range);
+    // The invoice of the month, asked once: its sites are the filter's, and one site's
+    // billed row is its count.
+    const invoice = invoiceByDate(schedule, range.from, range.to);
 
     // THE COLUMNS. A Saturday is a column only when something was recorded on it: the week
     // never draws Saturday, and an honest month cannot drop a worked one. Every board: any
@@ -237,7 +240,6 @@ function monthBoardFacts(key, placeId) {
         // ONE SITE: the invoice's own three rows for it - his men, Rima's, and what is billed,
         // which is the first two added, cell by cell (tests/monthboard.test.mjs). The first two
         // only when Rima stood there this month: without her the billed row says it alone.
-        const invoice = invoiceByDate(schedule, range.from, range.to);
         const billedRow = invoice.places.find(row => String(row.placeId) === only);
         const rima = rimaReport(schedule, range.from, range.to, only);
         if (rima.total > 0) {
@@ -258,8 +260,7 @@ function monthBoardFacts(key, placeId) {
     // THE FILTER'S SITES: every site with a billed day in the month, in the invoice's order -
     // and the site chosen, if this month billed nothing there, so the box says what the board
     // shows instead of a site it is not.
-    const sites = invoiceByDate(schedule, range.from, range.to).places
-        .map(row => ({ id: String(row.placeId), name: nameOf(row.placeId) }));
+    const sites = invoice.places.map(row => ({ id: String(row.placeId), name: nameOf(row.placeId) }));
     if (only !== null && !sites.some(site => site.id === only)) sites.push({ id: only, name: nameOf(only) });
 
     const [year, number] = month.split('-').map(Number);
