@@ -84,10 +84,19 @@ let ADVANCE_ORDER_DRAFT = null;
 // above: another record goes to the real function every time, an append that can reach
 // this record forgets every answer, and the readers are put back in the same finally.
 //
-// tests/speed.test.mjs holds every way in byte for byte against v204's files (out of Git)
-// and counts what is asked.
+// AND BETWEEN READINGS OF A RECORD THAT DID NOT MOVE, those answers are kept
+// (REPORT_SHARED_KEPT) under a key that is the record (reportSharedKey: today,
+// the build's flags and the whole record as text - NOT the write tick, which a send's
+// queue, receipt and provenance writes move minutes after a write without moving the
+// record) and under the very readers they were worked out with (REPORT_SHARED_DEPENDS,
+// compared by identity: an answer of advanceOutstanding with no advanceHistory loaded is
+// another answer). One record's answers at a time; the next reading of the same schedule
+// object, the same key and the same readers starts from them, anything else drops them.
+// tests/speed.test.mjs holds every way in byte for byte against v204's files (out of Git),
+// cold and warm, and counts what is asked.
 let REPORT_ONCE = null;
 let REPORT_GATE_KEPT = null;
+let REPORT_SHARED_KEPT = null;
 
 function reportGateKey(schedule) {
     return [
@@ -140,14 +149,32 @@ const REPORT_SHARED_READERS = ['ledgerEntries', 'foldLedger', 'advanceHistory', 
 // v196's three, and every name js/model feature-detects (`typeof X === 'function'`) - because
 // the model's answer depends on which of them is loaded. advanceOutstanding reads the old
 // field when foldLedger or advanceHistory is absent; advanceWalk counts no overpayment with
-// no overpaidAdvances; frozenPeriodFor freezes nothing with no closedPeriods. An answer
-// worked out with every reader loaded is another answer from one worked out with one taken
-// away, so inside one reading an answer is shared only while each of these is as present as
-// it was when the reading opened. tests/speed.test.mjs fails the day the model
-// feature-detects a name that is not on this list.
+// no overpaidAdvances; frozenPeriodFor freezes nothing with no closedPeriods. An answer kept
+// with every reader loaded, handed to a reading with one taken away, was 2,000 where the
+// model says 3,000 (the critic's probe, 2026-11-19). So a kept answer is handed on only when
+// every one of these is the SAME function it was worked out with, and inside one reading
+// only while each is as present as it was when the reading opened. tests/speed.test.mjs
+// fails the day the model feature-detects a name that is not on this list.
 const REPORT_SHARED_DEPENDS = REPORT_SHARED_READERS.concat(['appendLedgerEntry', 'carryReportingEnabled',
     'payrollReport', 'closedPeriods', 'workerDaysReport', 'rimaCount', 'poisonedContainers',
     'planAdvanceCarry', 'overpaymentStaysCredit', 'ledgerContainerProblem', 'isPeriodFor']);
+
+// THE KEY THE KEPT ANSWERS ARE KEPT UNDER IS THE RECORD, and nothing that moves without it.
+//
+// Today, the build's flags and the whole record as text, compared and never hashed - owesKey's
+// rule. NOT the write tick (reportGateKey keeps it, for the gate): every answer kept here is a
+// function of the record's content, today, the flags and the readers present, and of nothing
+// else - js/model reads no Store, no clock and nothing of the sync (tests/speed.test.mjs pins
+// it) - while the tick moves with every queue, receipt and provenance write a send leaves
+// behind (js/store.js counts each of those keys), so on a synced phone a send landing minutes
+// after a write would make the next redraw a first reading again.
+function reportSharedKey(schedule) {
+    return [
+        String(typeof todayStr === 'function' ? todayStr() : ''),
+        typeof FARKAD_FLAGS === 'object' ? JSON.stringify(FARKAD_FLAGS) : '',
+        JSON.stringify(schedule)
+    ].join('|');
+}
 
 // The readers as they are on the page right now, by name, in REPORT_SHARED_DEPENDS's order.
 function reportSharedFound() {
@@ -174,10 +201,19 @@ function reportSharedApart(asked, schedule) {
 // The answers are kept per STATE of the record, the rule weeklyCloseOnce keeps (js/ui/
 // weeklyclose.js): the schedule object, its ledger map, its map of advances, and a count of
 // the appends that could reach it. An append that can - or one that throws - forgets every
-// answer; an append to a copy of its own (see reportSharedApart) forgets nothing. What is handed out is what the real function would
+// answer, and the reading then keeps nothing for later; an append to a copy of its own (see
+// reportSharedApart) forgets nothing. What is handed out is what the real function would
 // hand out, as a copy wherever a caller could change it: the lists sliced, the flat answers
 // copied, the fold shared as v196 shares a pay sheet - nothing writes into a fold
 // (currentAdvances, the one function that does, has no caller; pinned).
+//
+// Between readings (S3), at the FIRST question this reading asks of the seven, the key is
+// worked out (reportSharedKey) and a kept memo of THIS schedule object, this key and these
+// readers is adopted - anything else kept is dropped there and then. At the close, after
+// every reader is put back, the memo is kept again only if the key was worked out, nothing
+// could reach the record, something was asked, and the record still reads as it did. A key
+// that throws means nothing adopted and nothing kept. A reading that asks none of the seven
+// (the month's summary) works out no key at all.
 function reportShareLedger(schedule, found) {
     const page = typeof globalThis === 'object' && globalThis ? globalThis : {};
     const real = {};
@@ -197,11 +233,34 @@ function reportShareLedger(schedule, found) {
     };
     const liveMap = () => (schedule && schedule.ledger && schedule.ledger.advances) || null;
     const liveLegacy = () => (schedule && schedule.advances) || null;
+    const sameFound = list => Array.isArray(list) && list.length === found.length
+        && list.every((fn, at) => fn === found[at]);
     let moved = 0;
     let memo = null;
+    let keyed = false;
+    let key = null;
+    let adopted = null;
     const fresh = () => ({ held: liveMap(), legacy: liveLegacy(), moved, entries: null, fold: null, history: null,
         overpaid: new Map(), outstanding: new Map(), walks: new Map(), positions: new Map() });
+    const ensureKey = () => {
+        if (keyed) return;
+        keyed = true;
+        try { key = reportSharedKey(schedule); } catch (error) { key = null; }
+        const kept = REPORT_SHARED_KEPT;
+        if (!kept) return;
+        // Taken off the shelf either way: adopted, it is this reading's until the close puts
+        // it back; anything else it can no longer serve, and its memory is freed now.
+        REPORT_SHARED_KEPT = null;
+        if (kept.schedule !== schedule || key === null || kept.key !== key || !sameFound(kept.found)
+            || moved !== 0 || !kept.memo) return;
+        adopted = { memo: kept.memo, held: liveMap(), legacy: liveLegacy() };
+        memo = kept.memo;
+        memo.held = adopted.held;
+        memo.legacy = adopted.legacy;
+        memo.moved = moved;
+    };
     const now = () => {
+        ensureKey();
         if (!memo || memo.held !== liveMap() || memo.legacy !== liveLegacy() || memo.moved !== moved) memo = fresh();
         return memo;
     };
@@ -287,9 +346,20 @@ function reportShareLedger(schedule, found) {
         if (!slot.positions.has(at)) slot.positions.set(at, real.advancePositionInto(schedule, workerId, fromDate));
         return slot.positions.get(at);
     };
+    const anything = () => Boolean(memo) && Boolean(memo.entries || memo.fold || memo.history
+        || memo.overpaid.size || memo.outstanding.size || memo.walks.size || memo.positions.size);
     return {
         install() { Object.keys(wrap).forEach(name => { page[name] = wrap[name]; }); },
-        uninstall() { Object.keys(wrap).forEach(name => { page[name] = real[name]; }); }
+        uninstall() { Object.keys(wrap).forEach(name => { page[name] = real[name]; }); },
+        // After everything is put back: kept only when a key was worked out, nothing could
+        // reach the record, something was asked, and the record still reads as it did.
+        finish() {
+            if (!keyed || key === null || moved !== 0 || !anything()) return;
+            try {
+                if (reportSharedKey(schedule) !== key) return;
+                REPORT_SHARED_KEPT = { schedule, key, found, memo };
+            } catch (error) { /* nothing kept */ }
+        }
     };
 }
 
@@ -342,6 +412,7 @@ function reportReadOnce(read, self, args) {
             closedPeriods = real.closed;
         }
         REPORT_ONCE = outer;
+        if (shared) shared.finish();
     }
 }
 

@@ -1010,9 +1010,14 @@ function seeded(seed) {
     same('the first draw of «מקדמות»: one reading, no plan', [first.reads, first.plans], [1, 0]);
     same('a second draw of the same record: no reading, no plan, no pay sheet, no fold', cost(drawList), { plans: 0, reads: 0, sheets: 0, sheetsTwice: 0, closed: 0, closedTwice: 0 });
     device.run('var BOARD = [renderOwesInto, renderOwesWarningsInto];');
+    // v206: each of the two draws starts with nothing kept between readings (REPORT_SHARED_KEPT,
+    // js/ui/reports.js), so it is one draw against the other and not a first reading against
+    // one that finds the pay sheets of the first already kept.
+    device.run('REPORT_SHARED_KEPT = null');
     const sheetWith = cost(drawSheet);
     check('the row is at the head of «דוחות»', device.dom.getElementById('reportsView').querySelectorAll('.owes-warnings').length === 1);
     device.run('renderOwesInto = () => {}; renderOwesWarningsInto = () => {};');
+    device.run('REPORT_SHARED_KEPT = null');
     const sheetWithout = cost(drawSheet);
     device.run('renderOwesInto = BOARD[0]; renderOwesWarningsInto = BOARD[1];');
     same('«דוחות» with the row at its head asks exactly what «דוחות» asks without it: no reading, and not one question more',
