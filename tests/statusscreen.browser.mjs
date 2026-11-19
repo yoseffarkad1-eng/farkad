@@ -13,20 +13,31 @@
 //       the door 44px both ways (52 with the mode), named «תמונת מצב · <the chip's word>»,
 //       worded where there is no chip; «הגדרות» whole on the glass.
 //   B13 A TAP opens the dialog at its title; Escape, the backdrop and «סגור» close it and give
-//       the keyboard back to the door; Tab stays inside.
-//   B14 THE MONEY: a reading that is not kept is never in the first paint - «מחשב את
-//       החשבונות…» is, and no figure; its lines replace it; a kept one is in the first paint.
-//   B15 THE RAMP: the five --pulse colours, computed, step by step in lightness, the light end
-//       2:1 and more on a surface, in both schemes.
+//       the keyboard back to the door; Tab stays inside; midEdit() is true while it is open -
+//       the moment v205's automatic update waits for - and false once it is shut.
+//   B14 THE MONEY: with the board's reading stale the first paint says «מחשב את החשבונות…» and
+//       no figure of the board, and the board's own lines replace it; with it fresh the lines
+//       are in the first paint; the close line - the reminder's own, while its line is up - is
+//       in the first paint either way.
+//   B15 THE RAMP: the five --pulse colours, computed, strictly monotone in lightness, the step
+//       nearest the surface 3:1 and more on it (WCAG 1.4.11), each 1.25:1 and more from its
+//       neighbour, in both schemes - the values and their ratios printed.
 //   B16 EVERY DOOR lands where it says - today, the pay sheet (or «יום תשלום» where a build has
 //       it), «סגירת שבוע», «מי חייב כסף», a week, «לוח חודשי» where a build has it, a site's
-//       card, ⋯'s cloud and backup - a new dialog entered at its title.
-//   B17 A COMMIT under the open dialog draws it again where the reader was, and the money is
-//       read once, after the draws have stopped for a second and a half.
+//       card, ⋯'s cloud and backup. A door to a dialog ends on the new dialog's title; a door to
+//       anything else ends - after setTimeout(0) and the task after it - where the target put
+//       the focus (⋯'s heading, the board's title), never on the door. The other tracks' openers,
+//       stood in for: «יום תשלום» once, in the task that shut this dialog; «לוח חודשי» once,
+//       with (null, null), in a later one.
+//   B17 A COMMIT under the open dialog draws it again where the reader was, and the board is
+//       read once, after the draws have stopped for a second and a half; the close count never.
 //   B18 THE FLOORS on every phone, scheme and mode, and with the text doubled: the ruler of
 //       tests/screens.mjs, no sideways scroll, nothing cut, the last button reachable.
-//   B19 WHAT IT COSTS: opened on a season with the processor slowed four times, the dialog is
-//       painted - sections and the money's place - within 1.2 s.
+//   B19 WHAT IT COSTS, the processor slowed four times: opened on a year's season, the dialog
+//       painted - sections and the money's place - within 1.2 s; and on a season NOBODY closed
+//       (forty-one men, an advance every few weeks), after a write on the day screen, the door
+//       tapped: painted within 1.2 s of the tap, the board's lines within 4 s of that paint, ONE
+//       reading of the board and none of the close count.
 //   B20 No uncaught error anywhere.
 //   B21 NOTHING WRITTEN: the disk and the record byte for byte across opening, redrawing and
 //       every door - but the journey's, whose one byte is the journey's own key, the same as
@@ -175,12 +186,15 @@ for (const [width, height] of PHONES) {
             await stripBack(page);
 
             suite(`B18 ${label}: the floors of the open dialog`);
+            // The reminder's line up (its own function), so the close row is on the dialog too.
+            await page.evaluate(() => closeReminderShow(4));
             await openRead(page);
+            given(`${label}: the close row is on it`, await page.evaluate(() => Boolean(document.querySelector('#statusBody .status-money-close'))));
             await floors(page, label, large, width);
             if (SHOTS && ((width === 440 && scheme === 'dark' && !large) || (width === 320 && large))) {
                 await page.screenshot({ path: join(SHOTS, `status-${width}-${scheme}${large ? '-large' : ''}.jpg`), type: 'jpeg', quality: 80 });
             }
-            await page.evaluate(() => closeStatus());
+            await page.evaluate(() => { closeStatus(); closeReminderHide(); });
             await context.close();
         }
     }
@@ -219,6 +233,8 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
     await page.waitForFunction(() => statusIsOpen());
     same('a tap on the chip opens «תמונת מצב», entered at its title', [await dialogOpen(page), await focusId(page),
         await page.evaluate(() => document.getElementById('statusTitle').textContent)], [true, 'statusTitle', 'תמונת מצב']);
+    same('while it is open the app is mid-edit (midEdit, js/ui/offline.js): no update is put in under it',
+        await page.evaluate(() => [midEdit(), document.getElementById('statusModal').style.display]), [true, 'flex']);
     same('its first line is the sentence the chip was read from, whole', await page.evaluate(() => document.getElementById('statusSync').textContent),
         await page.evaluate(() => document.getElementById('storageNotice').textContent));
     let outside = 0;
@@ -229,6 +245,7 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
     same('fifty presses of Tab and Shift+Tab never leave the dialog', outside, 0);
     await page.keyboard.press('Escape');
     same('Escape closes it, and the keyboard is back on the door', [await dialogOpen(page), await focusId(page)], [false, 'statusDoor']);
+    same('and shut, the app is not mid-edit any more', await page.evaluate(() => midEdit()), false);
     await page.locator('#statusDoor').tap();
     await page.waitForFunction(() => statusIsOpen());
     await page.mouse.click(4, 480);
@@ -237,49 +254,63 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
     await page.waitForFunction(() => statusIsOpen());
     await page.locator('#statusClose').tap();
     same('«סגור» closes it, and the keyboard is back on the door', [await dialogOpen(page), await focusId(page)], [false, 'statusDoor']);
+    same('and the app is not mid-edit', await page.evaluate(() => midEdit()), false);
 
-    suite('B14 the money: never in the first paint unless it is kept; then the board\'s and the reminder\'s own lines');
-    const first = await page.evaluate(() => new Promise(done => {
-        STATUS_MONEY_KEPT = null; OWES_KEPT = null; CLOSE_REMINDER_KEPT = null;
+    suite('B14 the money: a stale reading never in the first paint, a fresh one in it; the close line mirrored in it either way');
+    // The reminder's line, put up by its own function with its own count (the reading behind a
+    // count is tests/closereminder.*'s) - this screen only mirrors it.
+    await page.evaluate(() => closeReminderShow(4));
+    const firstPaint = () => page.evaluate(() => new Promise(done => {
         openStatus();
         requestAnimationFrame(() => {
             const money = document.getElementById('statusMoney');
+            const close = document.querySelector('#statusBody .status-money-close');
             done({ text: money.textContent, busy: money.getAttribute('aria-busy'),
+                lines: [...money.querySelectorAll('p')].map(node => node.textContent),
+                close: close ? [[...close.querySelectorAll('p')].map(node => node.textContent), close.querySelector('button').textContent] : null,
                 sections: [...document.querySelectorAll('#statusBody > .status-sec')].map(node => node.className.replace('status-sec ', '')) });
         });
     }));
-    same('nothing kept: the first paint says «מחשב את החשבונות…» where the money will be, and no figure', [first.text, first.busy, /\d/.test(first.text)],
+    const closeLine = await page.evaluate(() => [[CLOSE_REMINDER_TEXT.line(4)], CLOSE_REMINDER_TEXT.open]);
+    await page.evaluate(() => { OWES_KEPT = null; });
+    const stale = await firstPaint();
+    same('stale: the first paint says «מחשב את החשבונות…» where the board will be, and no figure of it', [stale.text, stale.busy, /\d/.test(stale.text)],
         ['מחשב את החשבונות…', 'true', false]);
-    same('and every other section is there already', first.sections, ['status-today', 'status-next', 'status-money', 'status-pulse', 'status-sites', 'status-device']);
+    same('and every other section is there already', stale.sections, ['status-today', 'status-next', 'status-money', 'status-pulse', 'status-sites', 'status-device']);
+    same('the close line is in the first paint: the reminder\'s own sentence, byte for byte, and its button', stale.close, closeLine);
+    check('which is the sentence on the reminder\'s line', await page.evaluate(() => document.getElementById('closeReminderLine').textContent === CLOSE_REMINDER_TEXT.line(4)));
     await page.waitForFunction(() => !document.querySelector('#statusModal .status-pending'));
     const lines = await page.evaluate(() => {
-        const today = todayStr();
-        const count = closeReminderCount(weeklyCloseRead(State.schedule, today, new Date().toISOString()));
-        const read = owesRead(State.schedule, today);
+        const read = owesRead(State.schedule, todayStr());
         return { seen: [...document.querySelectorAll('#statusMoney p')].map(node => node.textContent),
-            want: [CLOSE_REMINDER_TEXT.line(count), `${OWES_TEXT.total}: ${owesMoney(read.total)}`, owesCountLine(read)] };
+            want: [`${OWES_TEXT.total}: ${owesMoney(read.total)}`, owesCountLine(read)] };
     });
-    same('then the lines: the reminder\'s own sentence and the board\'s own figures', lines.seen, lines.want);
+    same('then the board\'s own lines replace it', lines.seen, lines.want);
     await page.evaluate(() => closeStatus());
-    const again = await page.evaluate(() => new Promise(done => {
-        openStatus();
-        requestAnimationFrame(() => done([...document.querySelectorAll('#statusMoney p')].map(node => node.textContent)));
-    }));
-    same('kept: the lines are in the first paint', again, lines.want);
+    const fresh = await firstPaint();
+    same('fresh: the board\'s lines are in the first paint', [fresh.lines, fresh.busy], [lines.want, null]);
+    same('and the close line again', fresh.close, closeLine);
+    await page.evaluate(() => closeStatus());
+    await page.evaluate(() => closeReminderHide());
+    const down = await firstPaint();
+    same('the reminder\'s line down: no close line here', down.close, null);
     await page.evaluate(() => closeStatus());
     const opened = await page.evaluate(() => ({
         disk: JSON.stringify(Object.keys(localStorage).filter(key => key !== 'farkad:openBuilds').sort().map(key => [key, localStorage.getItem(key)])),
         record: JSON.stringify(State.schedule)
     }));
-    same('B21: opened four times, tabbed through, closed every way and read twice - the disk byte for byte', opened.disk, before.disk);
+    same('B21: opened six times, tabbed through, closed every way and read three times - the disk byte for byte', opened.disk, before.disk);
     same('B21: and the record', opened.record, before.record);
 
     suite('B17 a commit under the open dialog: drawn again where he was; the money read once the draws stop');
     await openRead(page);
     await page.evaluate(() => {
         window.__moneyReads = 0;
-        const real = weeklyCloseRead;
-        weeklyCloseRead = function () { window.__moneyReads += 1; return real.apply(this, arguments); };
+        window.__closeReads = 0;
+        const real = owesRead;
+        owesRead = function () { window.__moneyReads += 1; return real.apply(this, arguments); };
+        const close = weeklyCloseRead;
+        weeklyCloseRead = function () { window.__closeReads += 1; return close.apply(this, arguments); };
         document.querySelector('#statusModal .modal-content').scrollTop = 900;
     });
     const was = await page.evaluate(() => ({ hero: document.querySelector('.status-hero-n').textContent,
@@ -300,6 +331,7 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
     await page.waitForFunction(() => !document.querySelector('#statusModal .status-pending'), null, { timeout: 6000 });
     await page.waitForTimeout(1800);
     same('read once, after the draws stopped for a second and a half', await page.evaluate(() => window.__moneyReads), 1);
+    same('and the close count never read under the open dialog', await page.evaluate(() => window.__closeReads), 0);
     await page.evaluate(() => { State.commit(clearWorkerDay(State.schedule, todayStr(), 'w11', 'actual'));
         State.commit(clearWorkerDay(State.schedule, todayStr(), 'w12', 'actual')); State.commit(clearWorkerDay(State.schedule, todayStr(), 'w13', 'actual')); });
     await page.evaluate(() => closeStatus());
@@ -321,16 +353,31 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
         await page.waitForTimeout(250);
         return words;
     };
+    // A door pressed from inside the page, and where the focus is after setTimeout(0) and the
+    // task after it - the moment the contract names.
+    const pressed = key => page.evaluate(key => new Promise(done => {
+        const node = document.querySelector(`#statusBody [data-status-key="${key}"]`);
+        const words = node.textContent.trim();
+        node.click();
+        setTimeout(() => setTimeout(() => done({ words, focus: (document.activeElement && document.activeElement.id) || '',
+            open: statusIsOpen() }), 0), 0);
+    }), key);
+    const openNow = async () => { if (!(await dialogOpen(page))) await openRead(page); };
     await page.evaluate(() => { State.date = '2026-11-03'; render(); });
     same('«פתיחת היום לעריכה»: today on the day screen', [await door('go:today'), await page.evaluate(() => [currentView, State.date === todayStr(), statusIsOpen()])],
         ['פתיחת היום לעריכה', ['day', true, false]]);
     same('no «יום תשלום» on this build: «דוחות», the pay sheet', [await door('go:payday'), await page.evaluate(() => currentView)],
         ['דוחות', 'reports']);
-    same('«לסגירת שבוע»: the dialog, entered at its title', [await door('go:close'), await page.evaluate(() => weeklyCloseIsOpen()), await focusId(page)],
+    same('the reminder\'s line down: no close line, so no door to «סגירת שבוע» here', await page.evaluate(() => {
+        closeReminderHide(); openStatus(); const there = Boolean(document.querySelector('[data-status-key="go:close"]')); closeStatus(); return there;
+    }), false);
+    await page.evaluate(() => closeReminderShow(4));
+    same('its line up: «לסגירת שבוע», the dialog, entered at its title', [await door('go:close'), await page.evaluate(() => weeklyCloseIsOpen()), await focusId(page)],
         ['לסגירת שבוע', true, 'weeklyCloseTitle']);
     await page.evaluate(() => closeWeeklyClose());
     await page.waitForTimeout(150);
     same('and shut, the keyboard is back on the door', await focusId(page), 'statusDoor');
+    await page.evaluate(() => closeReminderHide());
     await page.evaluate(() => { ADVANCE_WORKER = 'w02'; });
     same('«מי חייב כסף»: «מקדמות» as it opens, no man\'s page', [await door('go:board'),
         await page.evaluate(() => [currentView, ADVANCE_WORKER, OWES_PAGE, Boolean(document.querySelector('#advancesView .owes'))])],
@@ -344,12 +391,20 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
         [true, site, 'siteCardTitle']);
     await page.evaluate(() => closeSiteCard());
     await page.waitForTimeout(150);
-    same('«ענן וסנכרון»: ⋯ at its first section', [await door('go:cloud'), await page.evaluate(() => [settingsOpen, document.activeElement.id])],
-        ['ענן וסנכרון', [true, 'settingsDaily']]);
+    // ⋯ is not a dialog: opened a task after this one shut, so the focus modal.js hands back to
+    // the door comes first and settingsJump's after it.
+    await openNow();
+    same('«ענן וסנכרון»: ⋯ at its first section; after the shut task and the one after it, the focus on its heading, not the door',
+        [await pressed('go:cloud'), await page.evaluate(() => settingsOpen)], [{ words: 'ענן וסנכרון', focus: 'settingsDaily', open: false }, true]);
+    await page.waitForTimeout(250);
+    same('and still there a moment later', await focusId(page), 'settingsDaily');
     await page.evaluate(() => closeSettings());
-    same('«גיבוי»: ⋯ at the backup, its row open', [await door('go:backup'),
-        await page.evaluate(() => [settingsOpen, document.getElementById('settingsFoldBackup').open, document.activeElement.id])],
-    ['גיבוי', [true, true, 'settingsBackups']]);
+    await openNow();
+    same('«גיבוי»: ⋯ at the backup, its row open, the focus on its heading, not the door',
+        [await pressed('go:backup'), await page.evaluate(() => [settingsOpen, document.getElementById('settingsFoldBackup').open])],
+        [{ words: 'גיבוי', focus: 'settingsBackups', open: false }, [true, true]]);
+    await page.waitForTimeout(250);
+    same('and still there a moment later', await focusId(page), 'settingsBackups');
     await page.evaluate(() => closeSettings());
     same('no «לוח חודשי» on this build: no door to it', await page.evaluate(() => { openStatus(); return Boolean(document.querySelector('[data-status-key="go:monthBoard"]')); }), false);
     await page.evaluate(() => closeStatus());
@@ -363,18 +418,76 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
     same('and the record', end.record, after17.record);
     await censusOnly(check, page, end.disk);
 
-    suite('B16 the other tracks\' doors, where a build has them: called once, with what they are owed');
+    suite('B16 the other tracks\' doors, stood in for: when they are called, with what, and where the focus ends');
     await page.evaluate(() => {
-        window.__payday = []; window.__board = [];
+        window.__payday = [];
+        window.__board = [];
+        // "The task that shut this dialog": true from closeStatus until the next task.
+        window.__shutTask = false;
+        window.__closeStatus = closeStatus;
+        closeStatus = function () {
+            window.__shutTask = true;
+            setTimeout(() => { window.__shutTask = false; }, 0);
+            return window.__closeStatus.apply(this, arguments);
+        };
+        // «יום תשלום» is a dialog: a .modal with its title.
         window.PAYDAY_TEXT = { entry: 'יום תשלום' };
-        window.openPayday = function () { window.__payday.push([...arguments]); return true; };
+        window.openPayday = function () {
+            window.__payday.push({ args: [...arguments], sameTask: window.__shutTask, statusOpen: statusIsOpen() });
+            let modal = document.getElementById('paydayStandIn');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.className = 'modal';
+                modal.id = 'paydayStandIn';
+                const content = document.createElement('div');
+                content.className = 'modal-content';
+                const title = document.createElement('h3');
+                title.id = 'paydayStandInTitle';
+                title.tabIndex = -1;
+                title.textContent = 'יום תשלום';
+                content.appendChild(title);
+                modal.appendChild(content);
+                document.body.appendChild(modal);
+            }
+            modal.style.display = 'flex';
+            return true;
+        };
+        // «לוח חודשי» is not: it gives the focus to a title of its own.
         window.MONTH_BOARD_TEXT = { door: 'לוח חודשי' };
-        window.openMonthBoard = function (key, placeId) { window.__board.push([key, placeId]); return true; };
+        window.openMonthBoard = function (key, placeId) {
+            window.__board.push({ args: [key, placeId], sameTask: window.__shutTask, statusOpen: statusIsOpen() });
+            let title = document.getElementById('monthBoardStandIn');
+            if (!title) {
+                title = document.createElement('h3');
+                title.id = 'monthBoardStandIn';
+                title.tabIndex = -1;
+                title.textContent = 'לוח חודשי';
+                document.body.appendChild(title);
+            }
+            title.focus({ preventScroll: true });
+            return true;
+        };
     });
-    same('«יום תשלום»: its own opener, once, after this dialog closed', [await door('go:payday'), await page.evaluate(() => [window.__payday, statusIsOpen()])],
-        ['יום תשלום', [[[]], false]]);
-    same('«לוח חודשי»: under the pulse; its own opener once, on this month and every site', [await door('go:monthBoard'),
-        await page.evaluate(() => [window.__board, statusIsOpen()])], ['לוח חודשי', [[[null, null]], false]]);
+    await openNow();
+    same('«יום תשלום»: its own opener, once, IN the task that shut this dialog; the new dialog\'s title focused',
+        [await pressed('go:payday'), await page.evaluate(() => window.__payday)],
+        [{ words: 'יום תשלום', focus: 'paydayStandInTitle', open: false }, [{ args: [], sameTask: true, statusOpen: false }]]);
+    // Shut as modal.js would shut a dialog it watches: the focus back where it was before.
+    await page.evaluate(() => {
+        document.getElementById('paydayStandIn').style.display = 'none';
+        if (focusBeforeModal && document.contains(focusBeforeModal)) focusBeforeModal.focus({ preventScroll: true });
+        focusBeforeModal = null;
+    });
+    await openNow();
+    same('«לוח חודשי»: under the pulse; its own opener, once, with (null, null), NOT in the task that shut this dialog; the focus on its title, never on the door',
+        [await pressed('go:monthBoard'), await page.evaluate(() => window.__board)],
+        [{ words: 'לוח חודשי', focus: 'monthBoardStandIn', open: false }, [{ args: [null, null], sameTask: false, statusOpen: false }]]);
+    await page.waitForTimeout(250);
+    same('and still there a moment later', await focusId(page), 'monthBoardStandIn');
+    await page.evaluate(() => {
+        closeStatus = window.__closeStatus;
+        ['paydayStandIn', 'monthBoardStandIn'].forEach(id => { const node = document.getElementById(id); if (node) node.remove(); });
+    });
     await page.evaluate(() => { delete window.openPayday; delete window.PAYDAY_TEXT; delete window.openMonthBoard; delete window.MONTH_BOARD_TEXT; });
     await context.close();
 }
@@ -417,7 +530,7 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
 
 // ============================================================ B15 the ramp
 {
-    suite('B15 the ramp: one hue, step by step, the light end 2:1 on a surface, in both schemes');
+    suite('B15 the ramp: one hue, step by step, the step nearest the surface 3:1 on it and 1.25:1 between neighbours, in both schemes');
     for (const scheme of SCHEMES) {
         const { context, page, errors: seen } = await openApp(browser, server.url, { width: 375, height: 667, scheme, seeded: false });
         keep(seen);
@@ -432,17 +545,22 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
                     .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
             };
             const steps = [1, 2, 3, 4, 5].map(n => hex(`--pulse-${n}`));
-            const surface = lum(hex('--surface'));
+            const ground = hex('--surface');
+            const surface = lum(ground);
             const l = steps.map(lum);
-            const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-            return { steps, l, surface, first: Math.round(ratio(l[0], surface) * 100) / 100 };
+            const ratio = (a, b) => Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100;
+            return { steps, l, ground, surface, onSurface: l.map(v => ratio(v, surface)),
+                neighbours: l.slice(1).map((v, i) => ratio(v, l[i])) };
         });
+        console.log(`        ${scheme}: ${ramp.steps.join(' ')} on ${ramp.ground} - ${ramp.onSurface.join(', ')}:1; neighbours ${ramp.neighbours.join(', ')}:1`);
         given(`${scheme}: five colours read`, ramp.l.every(v => v !== null), JSON.stringify(ramp.steps));
         const darker = ramp.l.every((v, i) => i === 0 || v < ramp.l[i - 1]);
         const brighter = ramp.l.every((v, i) => i === 0 || v > ramp.l[i - 1]);
         check(`${scheme}: few to many, each step further from the surface than the one before (${scheme === 'dark' ? 'brighter' : 'darker'})`,
             scheme === 'dark' ? brighter : darker, JSON.stringify(ramp.l.map(v => Math.round(v * 1000) / 1000)));
-        check(`${scheme}: the step nearest the surface still 2:1 on it`, ramp.first >= 2, String(ramp.first));
+        check(`${scheme}: the step nearest the surface 3:1 or more on it (WCAG 1.4.11): an empty day, the surface, is told from a slow one`,
+            ramp.onSurface[0] >= 3, String(ramp.onSurface[0]));
+        check(`${scheme}: each step 1.25:1 or more from its neighbour`, ramp.neighbours.every(r => r >= 1.25), ramp.neighbours.join(', '));
         await context.close();
     }
 }
@@ -545,7 +663,7 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
     const cdp = await context.newCDPSession(page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
     const opened = await page.evaluate(() => new Promise(done => {
-        STATUS_MONEY_KEPT = null; OWES_KEPT = null; CLOSE_REMINDER_KEPT = null;
+        OWES_KEPT = null;
         const began = performance.now();
         openStatus();
         requestAnimationFrame(() => done({ ms: Math.round(performance.now() - began),
@@ -560,6 +678,134 @@ for (const [width, height] of [[667, 375], [844, 390], [1024, 768]]) {
     await page.waitForFunction(() => !document.querySelector('#statusModal .status-pending'), null, { timeout: 30000 });
     check('and the money read after it', await page.evaluate(() => document.getElementById('statusMoney').textContent.length > 0));
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+    await context.close();
+}
+
+// ============================================================ B19 a write on the day screen, then the door, on a season nobody closed
+{
+    suite('B19 a season NOBODY closed, a write on the day screen, the door tapped at 4x: painted in 1.2 s, the board in 4 s more, read once');
+    const context = await browser.newContext({ viewport: { width: 375, height: 667 }, deviceScaleFactor: 2, isMobile: true,
+        hasTouch: true, serviceWorkers: 'block', timezoneId: 'Asia/Jerusalem', locale: 'he-IL' });
+    const page = await context.newPage();
+    const seen = [];
+    page.on('pageerror', error => seen.push(error.message));
+    keep(seen);
+    await page.goto(`${server.url}/index.html`);
+    await page.waitForFunction(() => typeof State === 'object' && State.schedule && typeof render === 'function');
+    // scout-api 7.2 "B", seeded in the page through the model's own writers with a seeded
+    // generator: forty-one men (sixteen weekly), six sites, every day but Saturday from the
+    // first of the year to today, an advance for every man every two to four weeks, no close.
+    const size = await page.evaluate(() => {
+        let a = 2026;
+        const rand = () => {
+            a = (a + 0x6D2B79F5) >>> 0;
+            let t = a;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        const today = todayStr();
+        const s = State.schedule;
+        s.places = Array.from({ length: 6 }, (_, i) => ({ id: 'p_' + (i + 1), name: 'אתר ' + (i + 1), active: i < 5 }));
+        s.workers = Array.from({ length: 41 }, (_, i) => Object.assign({ id: 'w_' + String(i + 1).padStart(2, '0'),
+            name: 'דוגמה ' + (i + 1), active: true, dailyRate: 380 + 20 * (i % 8), hourlyRate: 50 },
+        i < 16 ? { payCycles: '2026-01-02=weekly' } : {}));
+        const next = date => { const d = parseLocalDate(date); d.setDate(d.getDate() + 1); return toLocalDateStr(d); };
+        const first = today.slice(0, 4) + '-01-01';
+        for (let date = first; date <= today; date = next(date)) {
+            if (parseLocalDate(date).getDay() === 6) continue;
+            s.workers.forEach((worker, i) => {
+                if (rand() > 0.85) return;
+                if (rand() < 0.03) { markAbsent(s, date, worker.id, 'actual'); return; }
+                const home = 'p_' + (1 + (i % 5));
+                if (rand() < 0.04) assignPlace(s, date, worker.id, 'actual', home, 'double');
+                else assignPlace(s, date, worker.id, 'actual', home);
+            });
+            if (rand() < 0.45) setRimaCount(s, date, 'p_1', 1 + Math.floor(rand() * 4));
+            if (rand() < 0.3) setYosefGevesCount(s, date, 'p_2', 1 + Math.floor(rand() * 5));
+        }
+        let advances = 0;
+        s.workers.forEach(worker => {
+            const d = parseLocalDate(first);
+            d.setDate(d.getDate() + Math.floor(rand() * 20));
+            for (; toLocalDateStr(d) <= today; d.setDate(d.getDate() + 14 + Math.floor(rand() * 14))) {
+                const date = toLocalDateStr(d);
+                recordNewAdvance(s, worker.id, date, [200, 300, 500, 800, 1000][Math.floor(rand() * 5)], '', date + 'T07:00:00.000Z',
+                    syncDeviceId(), 'cash');
+                advances += 1;
+            }
+        });
+        State.save();
+        State.commit(recordCarryApproval(State.schedule, { id: carryMigrationId(), rows: [] }, new Date().toISOString(), syncDeviceId()));
+        render();
+        return { men: s.workers.length, days: Object.keys(s.days).length, advances, kib: Math.round(JSON.stringify(s).length / 1024) };
+    });
+    console.log(`        season B in the page: ${JSON.stringify(size)}`);
+    given('a season nobody closed: forty-one men, the year\'s days, an advance every few weeks', size.men === 41 && size.days >= 250
+        && size.advances >= 500, JSON.stringify(size));
+    // The reminder reads ITS count first, at full speed, as it does after a boot. On a season
+    // nobody closed every man has an earlier open period a debt ran through, so «סגירת שבוע»
+    // holds him and offers nobody (v198, D5): the line stays down, and this screen - which only
+    // mirrors it - has no close line either. Its reading is the reminder's, made before the
+    // measurement; nothing of it is this screen's.
+    await page.evaluate(() => closeReminderRefresh('boot'));
+    await page.waitForTimeout(2000);
+    const shown = await page.evaluate(() => closeReminderShown);
+    console.log(`        the reminder's own reading on that season: ${shown === null ? 'its line down (every man held)' : `its line up, ${shown}`}`);
+    // Every reading counted from here on, and the time of the open taken from inside the page.
+    await page.evaluate(() => {
+        window.__reads = { owes: 0, close: 0 };
+        const owes = owesRead;
+        owesRead = function () { window.__reads.owes += 1; return owes.apply(this, arguments); };
+        const close = weeklyCloseRead;
+        weeklyCloseRead = function () { window.__reads.close += 1; return close.apply(this, arguments); };
+        window.__open = null;
+        const open = openStatus;
+        openStatus = function () {
+            const t0 = performance.now();
+            const out = open.apply(this, arguments);
+            requestAnimationFrame(() => {
+                const node = document.getElementById('statusMoney');
+                window.__open = { t0, t1: performance.now(), t2: null, pending: Boolean(node.querySelector('.status-pending')),
+                    close: Boolean(document.querySelector('#statusBody .status-money-close')),
+                    sections: document.querySelectorAll('#statusBody > .status-sec').length,
+                    weeks: document.querySelectorAll('.status-week').length };
+                const read = () => {
+                    if (node.querySelector('.status-pending')) return false;
+                    window.__open.t2 = performance.now();
+                    return true;
+                };
+                if (!read()) new MutationObserver((list, watch) => { if (read()) watch.disconnect(); }).observe(node, { childList: true, subtree: true });
+            });
+            return out;
+        };
+    });
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    // A write ON THE DAY SCREEN: a man with nothing today put on a site, through State.
+    const wrote = await page.evaluate(() => {
+        const today = todayStr();
+        const free = State.schedule.workers.find(worker => entriesFor(State.schedule, today, worker.id, 'actual').length === 0
+            && !isAbsent(State.schedule, today, worker.id, 'actual'));
+        const before = JSON.stringify(State.schedule).length;
+        State.commit(assignPlace(State.schedule, today, free.id, 'actual', 'p_4'));
+        return { view: currentView, moved: JSON.stringify(State.schedule).length !== before, who: free.id };
+    });
+    given('the write was made on the day screen, and went in', wrote.view === 'day' && wrote.moved, JSON.stringify(wrote));
+    await page.locator('#statusDoor').tap();
+    await page.waitForFunction(() => window.__open && window.__open.t2 !== null, null, { timeout: 60000 });
+    await page.waitForTimeout(1000);
+    const open = await page.evaluate(() => Object.assign({}, window.__open, { reads: window.__reads, still: statusIsOpen() }));
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+    const painted = Math.round(open.t1 - open.t0);
+    const board = Math.round(open.t2 - open.t1);
+    console.log(`        at 4x: painted ${painted} ms after the tap, the board's lines ${board} ms after that paint; owesRead ${open.reads.owes}, weeklyCloseRead ${open.reads.close}`);
+    check('painted within 1.2 s of the tap', painted <= 1200, `${painted} ms`);
+    same('with six sections, twelve weeks, the close line exactly as the reminder\'s is, and the board\'s place waiting',
+        [open.sections, open.weeks, open.close, open.pending], [6, 12, Number.isInteger(shown) && shown > 0, true]);
+    check('the board\'s lines within 4 s of that paint', board <= 4000, `${board} ms`);
+    same('exactly ONE reading of the board, and NONE of the close count', [open.reads.owes, open.reads.close], [1, 0]);
+    check('and the dialog still open over it all', open.still === true);
     await context.close();
 }
 

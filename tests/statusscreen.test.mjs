@@ -1004,6 +1004,20 @@ await block('S7 the sites: which and in what order, the month so far, own + Rima
         [unlisted && unlisted.listed, unlisted && unlisted.name, facts(ghost, today).sites.slice(-1)[0].placeId],
         [false, 'אתר שאינו ברשימה 1', 'p_gone']);
     same('with its own count', unlisted.month, 2);
+    // Drawn: the archived site a button to its card, the unlisted one a plain row with the same
+    // words (openSiteCard says nothing for a place the roster has not got).
+    frame(ghost);
+    ghost.run('openStatus()');
+    const rows = JSON.parse(ghost.run(`JSON.stringify(document.getElementById('statusBody').querySelectorAll('.status-site')
+        .map(node => [node.dataset.placeId, node.tagName, node.getAttribute('role'), node.getAttribute('aria-label'),
+            node.querySelectorAll('BUTTON').length]))`));
+    const row = id => rows.find(one => one[0] === id) || [];
+    same('the archived site is drawn as a button, named by its words', row('p_6').slice(1, 3), ['BUTTON', null]);
+    same('the site outside the roster as a plain row - a group, named by the same words, no button in it',
+        row('p_gone').slice(1), ['DIV', 'group', ghost.call('statusSiteName', unlisted), 0]);
+    check('and its words say what it is', plain(ghost.call('statusSiteName', unlisted)).startsWith('אתר שאינו ברשימה 1: 2 ימי עובד־אתר החודש'),
+        ghost.call('statusSiteName', unlisted));
+    ghost.run('closeStatus()');
 
     // No site worked in eight weeks: the one sentence.
     const idle = season(phone(), { first: '2026-06-01', last: '2026-08-31', seed: 5, advances: false });
