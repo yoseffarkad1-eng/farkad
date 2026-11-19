@@ -170,7 +170,15 @@ function monthSummaryRound(value) {
 // One month's numbers, as plain data. Nothing compared, nothing worded. Called inside
 // monthSummaryScope, which is what puts the report's range back afterwards.
 function monthSummaryRead(key) {
-    const range = monthSummaryRange(key);
+    return monthSummaryReadRange(key, monthSummaryRange(key));
+}
+
+// The same numbers over any calendar span the caller names - the month above, or the
+// year «סיכום שנה» reads (js/ui/yearsummary.js), whose own line is these functions asked
+// over the whole year and never the twelve months added up. The body is the month's,
+// moved here unchanged: a range that is not somebody's whole period is read by the sheet
+// the plain way, a month and a year alike (wholeAccountRange, js/ui/reports.js).
+function monthSummaryReadRange(key, range) {
     const schedule = State.schedule;
     REPORT_RANGE.from = range.from;
     REPORT_RANGE.to = range.to;
@@ -474,6 +482,7 @@ function drawMonthSummary() {
     const month = document.getElementById('monthSummaryMonth');
     const field = document.getElementById('monthSummaryText');
     if (!body || !month || MONTH_SUMMARY_KEY === null) return;
+    if (typeof yearSummaryEntryLabel === 'function') yearSummaryEntryLabel(MONTH_SUMMARY_KEY);
     const T = MONTH_SUMMARY_TEXT;
     const R = MONTH_SUMMARY_REUSED;
     const facts = monthSummaryFacts(MONTH_SUMMARY_KEY);

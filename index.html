@@ -971,6 +971,10 @@
             <button type="button" class="btn-secondary" id="monthSummaryNext" onclick="monthSummaryStep(1)"></button>
         </div>
         <div id="monthSummaryBody"></div>
+        <!-- «סיכום שנה»'s door: shown and worded for the month's year by js/ui/yearsummary.js
+             (yearSummaryEntryLabel, asked by drawMonthSummary through typeof). A build without
+             that file leaves it hidden. -->
+        <div class="msum-year"><button type="button" class="btn-secondary" id="monthSummaryYear" onclick="typeof openYearSummaryFromMonth === 'function' && openYearSummaryFromMonth()" hidden></button></div>
         <div class="msum-fold">
             <button type="button" class="btn-secondary" id="monthSummaryFoldLabel" aria-expanded="false" aria-controls="monthSummaryText" onclick="monthSummaryToggleText()"></button>
             <textarea id="monthSummaryText" rows="12" readonly hidden></textarea>
@@ -980,6 +984,30 @@
             <button type="button" class="btn-secondary" id="monthSummaryCopy" onclick="monthSummaryCopy()"></button>
             <button type="button" class="btn-secondary" id="monthSummaryClose" onclick="closeMonthSummary()"></button>
             <span class="share-status" id="monthSummaryStatus" role="status" aria-live="polite"></span>
+        </div>
+    </div>
+</div>
+
+<!-- «סיכום שנה»: one calendar year on one screen - what was WORKED in it as recorded, never
+     what was paid - the months as rows, the men, the sites and «עובדי יוסף גבס» last, and the
+     accountant's workbook of the same. Entered from «סיכום חודש»'s own door. A READING: the
+     arrows change which year is read, a month's row opens «סיכום חודש» on that month, and the
+     export hands a file to the browser. Every word is set by js/ui/yearsummary.js from that
+     file's blocks; this is the frame, and the arrows and buttons are in it (not in the body)
+     so a redraw leaves the focus. -->
+<div class="modal" id="yearSummaryModal">
+    <div class="modal-content modal-wide">
+        <h3 id="yearSummaryTitle" tabindex="-1"></h3>
+        <div class="msum-nav ysum-nav">
+            <button type="button" class="btn-secondary" id="yearSummaryPrev" onclick="yearSummaryStep(-1)"></button>
+            <strong id="yearSummaryYear" class="msum-month" role="status" aria-live="polite"></strong>
+            <button type="button" class="btn-secondary" id="yearSummaryNext" onclick="yearSummaryStep(1)"></button>
+        </div>
+        <div id="yearSummaryBody"></div>
+        <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="yearSummaryExport" onclick="yearSummaryExport()"></button>
+            <button type="button" class="btn-secondary" id="yearSummaryClose" onclick="closeYearSummary()"></button>
+            <span class="share-status" id="yearSummaryStatus" role="status" aria-live="polite"></span>
         </div>
     </div>
 </div>
@@ -1187,6 +1215,11 @@
      constants) and share.js (the two doors its text leaves by). It runs nothing at load;
      reports.js asks for its entry by name, through typeof, when the menu is drawn. -->
 <script src="js/ui/monthsummary.js"></script>
+<!-- «סיכום שנה». After monthsummary.js (the month's own reading, its scope, its words and its
+     drawing helpers, all asked at run time), reports.js (the pay sheet's functions, constants
+     and the workbook's look) and share.js (downloadCsv). It runs nothing at load;
+     monthsummary.js asks for its door's words by name, through typeof, when it draws. -->
+<script src="js/ui/yearsummary.js"></script>
 <!-- «כרטיס אתר». After reports.js (its constants), workercard.js (the calendar's helpers and
      words), monthsummary.js (three of its words) and share.js (the two doors). It runs
      nothing at load; roster.js asks for its entry by name, through typeof, per site row. -->

@@ -160,6 +160,9 @@ function render() {
     if (typeof renderWorkerCardIfOpen === 'function') renderWorkerCardIfOpen();
     // And for the month's summary (js/ui/monthsummary.js), for the same reason.
     if (typeof renderMonthSummaryIfOpen === 'function') renderMonthSummaryIfOpen();
+    // And for the year's (js/ui/yearsummary.js) - read again, after the frame, only when the
+    // record moved under it.
+    if (typeof renderYearSummaryIfOpen === 'function') renderYearSummaryIfOpen();
     // And for a site's card (js/ui/sitecard.js): every count on it is read off this record.
     if (typeof renderSiteCardIfOpen === 'function') renderSiteCardIfOpen();
     // And for «תלוש לכל עובד» (js/ui/payslips.js): every row is a man's pay and a link that

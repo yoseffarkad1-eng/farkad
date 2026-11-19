@@ -42,6 +42,8 @@ const MODAL_CLOSERS = {
     transportReportModal: () => closeTransportReport(),
     // The month's summary (js/ui/monthsummary.js): closing it forgets which month it was.
     monthSummaryModal: () => closeMonthSummary(),
+    // The year's summary (js/ui/yearsummary.js): closing it forgets which year it was.
+    yearSummaryModal: () => closeYearSummary(),
     // The site's card (js/ui/sitecard.js): closing it forgets which site and which month.
     siteCardModal: () => closeSiteCard(),
     // «מה חדש» (js/ui/whatsnew.js): closing it, by any road, is having seen it.

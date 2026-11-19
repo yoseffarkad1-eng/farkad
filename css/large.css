@@ -790,6 +790,23 @@
 :root.display-large .msum-fold textarea { font-size: 20px; }
 :root.display-large #monthSummaryModal .modal-actions button { font-size: 21px; }
 :root.display-large #monthSummaryStatus { font-size: 20px; }
+:root.display-large .msum-year > button { font-size: 21px; font-weight: 650; }
+:root.display-large #yearSummaryModal .modal-content > h3 { line-height: 1.4; }
+:root.display-large .ysum-reading { font-size: 22px; font-weight: 600; }
+:root.display-large #yearSummaryBody .empty-hint { font-size: 22px; }
+:root.display-large .ysum-frame-line { font-size: 20px; line-height: 1.45; }
+:root.display-large .ysum-frame-lead { font-weight: 700; }
+:root.display-large .ysum-month-name { font-size: 22px; font-weight: 800; }
+:root.display-large .ysum-bar-label { font-size: 20px; font-weight: 600; }
+:root.display-large .ysum-bar-count { font-size: 25px; font-weight: 800; }
+:root.display-large .ysum-month-empty { font-size: 22px; font-weight: 800; }
+:root.display-large .ysum-pair-label { font-size: 20px; font-weight: 600; }
+:root.display-large .ysum-pair-value { font-size: 22px; font-weight: 800; }
+:root.display-large .ysum-man-name { font-size: 22px; font-weight: 700; }
+:root.display-large .ysum-inactive { font-size: 20px; font-weight: 700; }
+:root.display-large .ysum-span { font-size: 20px; font-weight: 600; }
+:root.display-large #yearSummaryModal .modal-actions button { font-size: 21px; }
+:root.display-large #yearSummaryStatus { font-size: 20px; }
 :root.display-large .report-output-actions .payslips-entry { font-size: 20px; }
 :root.display-large #payslipsModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
 :root.display-large .payslips-which button { font-size: 21px; }
@@ -1216,6 +1233,11 @@
 :root.display-large a.seder-one,
 :root.display-large a.seder-go,
 :root.display-large .journey-send-row a { min-height: 52px !important; min-width: 52px !important; }
+
+/* «סיכום שנה»'s PAIRS, label over value: two to a line at 104px leaves a 22px figure of
+   money no room on the 320px phone, so here a pair takes a line of its own until there is
+   room for two at 144px. */
+:root.display-large .ysum-pairs { grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)) !important; }
 
 /* ---- הסעות ---------------------------------------------------------------------------
    The picture holds as it is: a seat is a share of the car's width, so two larger names
