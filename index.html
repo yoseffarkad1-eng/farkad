@@ -970,11 +970,13 @@
             <strong id="monthSummaryMonth" class="msum-month" role="status" aria-live="polite"></strong>
             <button type="button" class="btn-secondary" id="monthSummaryNext" onclick="monthSummaryStep(1)"></button>
         </div>
-        <div id="monthSummaryBody"></div>
         <!-- «סיכום שנה»'s door: shown and worded for the month's year by js/ui/yearsummary.js
              (yearSummaryEntryLabel, asked by drawMonthSummary through typeof). A build without
-             that file leaves it hidden. -->
+             that file leaves it hidden. On the month's first screen, straight under its arrows -
+             one step out from the month - and not after the whole month, two to five screens
+             down, where nobody told the year was there found it (fix round 1). -->
         <div class="msum-year"><button type="button" class="btn-secondary" id="monthSummaryYear" onclick="typeof openYearSummaryFromMonth === 'function' && openYearSummaryFromMonth()" hidden></button></div>
+        <div id="monthSummaryBody"></div>
         <div class="msum-fold">
             <button type="button" class="btn-secondary" id="monthSummaryFoldLabel" aria-expanded="false" aria-controls="monthSummaryText" onclick="monthSummaryToggleText()"></button>
             <textarea id="monthSummaryText" rows="12" readonly hidden></textarea>

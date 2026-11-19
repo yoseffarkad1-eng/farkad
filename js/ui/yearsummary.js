@@ -42,9 +42,13 @@
 //
 // A REDRAW NEVER READS. render() asks this file after every commit and every snapshot adopted
 // from another phone, and the year costs about six of the month summary's readings: a record
-// that moved under the open year has its figures taken off the glass at once (none of them is
-// shown as current any more) and is read ONCE, after the draws have stopped for a moment - each
-// draw starts the wait again - with the reader's place kept (renderYearSummaryIfOpen).
+// that moved under the open year has its figures MARKED at once as being read again - dimmed,
+// busy, the export shut and «מחשב את השנה…» in the frame's own line under the thumb - so none of
+// them stands as current, and they stay where they are, so the reader is not thrown to the top
+// and can go on reading what was there; the year is read ONCE, after the draws have stopped for
+// a moment - each draw starts the wait again - and drawn where he is (renderYearSummaryIfOpen).
+// Before fix round 1 the figures were taken off: one snapshot from the foreman's phone emptied
+// the dialog to a screen's height, which put the reader back at its top for a second and a half.
 //
 // THE GATE COMES WITH THE FUNCTIONS. The whole reading is the pay sheet's one reading
 // (reportReadOnce) inside the month summary's own scope (monthSummaryScope), so the gate is
@@ -63,28 +67,46 @@ const YEAR_SUMMARY_TEXT = Object.freeze({
     // Painted the moment it opens, before a single figure is read.
     reading: 'מחשב את השנה…',
     empty: 'אין רישומים בשנה הזאת.',
-    // The frame, always first - on the screen and on the workbook's first sheet.
+    // The frame, always first - on the screen and on the workbook's first sheet. A pay period
+    // is «תקופת החשבון» on the reports' chip and in every sheet of the app, so it is «תקופת
+    // חשבון» here too (fix round 1: «תקופת תשלום» was a term no other screen uses).
     worked: 'נצבר לפי הרישום: כל יום עבודה בשנה, לפי השכר שנרשם ליום הזה. זה לא מה ששולם בפועל.',
-    split: 'תקופת תשלום שעוברת את 1 בינואר מתחלקת כאן לפי הימים: כל יום נספר בשנה שבה עבדו בו.',
+    split: 'תקופת חשבון שעוברת את 1 בינואר מתחלקת כאן לפי הימים: כל יום נספר בשנה שבה עבדו בו.',
     inProgress: 'השנה עוד לא נגמרה. המספרים הם של מה שנרשם עד עכשיו.',
     figures: 'השנה במספרים',
     // The year's «מקדמות»: what was HANDED OVER in it - never a deduction.
     handedOver: 'מקדמות שניתנו',
+    // Beside a man's «מקדמות שניתנו», the part of it a «תיקון-היפוך» of the advance itself took
+    // back - an advance typed as 1,500 for 150 and corrected by «תיקון טעות» - so the two can be
+    // read together; never subtracted here (advanceReversalsFor, 'given': the model's own sum).
+    handedOverReversed: 'מתוכן בוטלו בתיקון-היפוך',
     // Said only where a man the year leaves out of «נצבר» (one worked day with no daily rate) was
-    // priced, and worked, in some month - decided from the unpriced lists, never from a sum.
-    notSummed: 'עובד שאין לו שכר יומי אפילו ביום אחד לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.',
+    // priced, and worked, in some month - decided from the unpriced lists, never from a sum - and
+    // only under a «נצבר» that is a number. «אפילו יום עבודה אחד בלי» and not «אין לו ... אפילו
+    // ביום אחד», which reads as a man who never had a rate (fix round 1).
+    notSummed: 'עובד שיש לו אפילו יום עבודה אחד בלי שכר יומי לא נכלל בנצבר של כל השנה, ולכן הנצבר של השנה קטן מחיבור החודשים.',
     months: 'חודש אחר חודש',
     monthsHint: 'לחיצה על חודש פותחת את סיכום החודש.',
+    // His own men's worker-site days where the figure stands alone - a month's row and the
+    // «חודשים» column - in a year Rima has a count in: «בלי עובדי רימא» alone says without
+    // whom, and not of what.
+    ownDays: 'ימי עובד־אתר בלי עובדי רימא',
     men: 'העובדים בשנה',
     sites: 'האתרים בשנה',
     // The months a site was worked in: «מרץ», or «ינואר–נובמבר».
     span: (first, last) => (first === last ? first : `${first}–${last}`),
     export: '📊 יצוא השנה',
+    // From the press until the file is handed over: the first export of a session waits for the
+    // library, and a button that looked untouched was pressed twice and handed over two files.
+    exporting: 'מכין את הקובץ…',
     // The workbook's sheets after «סיכום», and the head of the months' first column.
     monthsSheet: 'חודשים',
     menSheet: 'עובדים',
     sitesSheet: 'אתרים',
-    monthColumn: 'חודש'
+    monthColumn: 'חודש',
+    // The head of the «עובדים» column that says who is switched off - so the name cell is the
+    // name and nothing else, as in the reports' file, and a lookup by name finds him.
+    stateColumn: 'מצב'
 });
 
 // The words this screen borrows that their owner builds inline, each beside the screen that
@@ -102,6 +124,9 @@ const YEAR_SUMMARY_REUSED = Object.freeze({
     payUnits: 'ימי שכר',                              // js/ui/reports.js, the sheet's column
     worker: 'עובד',                                   // js/ui/reports.js, the sheet's first column
     inactive: 'לא פעיל',                              // js/ui/day.js, a man switched off
+    active: 'פעיל',                                   // js/ui/roster.js, the crew row's switch
+    // A month's row that is not over: the first words of what «סיכום חודש» says on it.
+    monthInProgress: 'החודש עוד לא נגמר.',            // js/ui/monthsummary.js, MONTH_SUMMARY_TEXT.inProgress
     handedTitle: 'קובץ ה-Excel נמסר לשמירה',          // js/ui/reports.js, exportReports
     handed: ' נמסר לדפדפן — ',                        // js/ui/reports.js, exportReports
     files: 'פתח את "קבצים" וודא שהוא מופיע. ',        // js/ui/reports.js, exportReports
@@ -125,7 +150,8 @@ let YEAR_SUMMARY_YEAR = null;
 // The last reading, kept under the record itself (yearSummaryKey) so that a redraw of a record
 // that did not move reads nothing, and a kept figure is never another record's. Memory only.
 let YEAR_SUMMARY_KEPT = null;
-// What is on the screen now: { year, key } of the reading drawn, or null while it reads.
+// What is on the screen now: { year, key, empty } of the reading drawn, or null while it reads -
+// or while what is drawn is a reading of a record that has moved since, marked as such.
 let YEAR_SUMMARY_DRAWN = null;
 // Which reading is wanted. A reading that was asked for and then overtaken - an arrow pressed
 // again, the dialog shut - finds a newer turn and draws nothing.
@@ -135,9 +161,16 @@ let YEAR_SUMMARY_TURN = 0;
 // Each draw starts the wait again, so three commits in a row cost ONE reading, after the last.
 const YEAR_SUMMARY_QUIET_MS = 1500;
 let YEAR_SUMMARY_WAIT = null;
-// Where the reader was, and which month's row had the focus, when the record moved under the
-// year: given back once it has been read again. Memory only.
+// Where the reader is to be put once the year is drawn - the scroll and the month's row he
+// left from - when «סיכום חודש»'s door brings him back to the year he left by a month's row.
+// Memory only.
 let YEAR_SUMMARY_PLACE = null;
+// Where he was when a month's row took him out of the year, kept until the month's door brings
+// him back to that same year (or the year is shut by its own way). Memory only.
+let YEAR_SUMMARY_BACK = null;
+// True from a press of «יצוא השנה» until the file is handed over: a second press meanwhile is
+// nothing (the first export of a session waits for the library, and nothing on the glass said so).
+let YEAR_SUMMARY_EXPORTING = false;
 
 // ---------------------------------------------------------------- the calendar
 
@@ -177,6 +210,12 @@ function yearSummaryRead(year) {
     const roster = {};
     (schedule.workers || []).forEach(worker => { if (worker) roster[String(worker.id)] = worker; });
     const yearRows = payrollRows();
+    // «מקדמות שניתנו» is what was RECORDED as handed over (advancesTotal under moneyOf). Where the
+    // record may be read the new way - the very rule that shows «תיקון-היפוך» on the line - each
+    // man also carries what a תיקון-היפוך of an advance itself took back in the year: the model's
+    // own sum by the kind of the entry it corrects (advanceReversalsFor, 'given'). Said beside it,
+    // never taken off it here.
+    const reversals = line.reversed !== null && typeof advanceReversalsFor === 'function';
     const men = yearRows.map(row => {
         const money = moneyOf(row);
         const worker = roster[String(row.workerId)] || null;
@@ -191,7 +230,9 @@ function yearSummaryRead(year) {
             extraHours: monthSummaryRound(row.extraHours),
             gross: money.gross,
             // `|| 0`: nothing handed over is 0, not -0.
-            handedOver: -money.netted || 0
+            handedOver: -money.netted || 0,
+            handedOverReversed: reversals
+                ? advanceReversalsFor(schedule, row.workerId, range.from, range.to, 'given') : null
         };
     });
 
@@ -241,7 +282,10 @@ function yearSummaryRead(year) {
     return {
         year,
         range,
-        inProgress: !line.empty && today >= range.from && today < range.to,
+        // A year with records that has not ended - the one today is in, and one after it, which
+        // «סיכום חודש»'s arrows reach (tomorrow's seder on 31 December is 1 January's record).
+        // On its last day it reads whole, as December does on its own last day.
+        inProgress: !line.empty && today < range.to,
         empty: line.empty,
         line,
         months,
@@ -291,63 +335,72 @@ function yearSummaryFrameLines(facts) {
     return lines;
 }
 
+// THE MONEY FIRST, then the counts. The year exists for its «נצבר» - the frame's first sentence
+// is what that word means here - so it leads, with what was handed over beside it, each the
+// width of the dialog and larger (`lead`); the sentences that belong to «נצבר» come straight
+// after them, then the days. «עובדי יוסף גבס» is not among them at all: its count is its own
+// table at the end and its own last sheet, in no other list (v183) - it was said twice, as a
+// tile with its note here and again as that table (fix round 1).
 function yearSummaryTiles(facts) {
     const line = facts.line;
     const M = MONTH_SUMMARY_TEXT;
     const R = MONTH_SUMMARY_REUSED;
-    const count = (id, label, value) => ({ id, label, value, text: String(value), money: false });
-    const money = (id, label, value) => ({ id, label, value, text: monthSummaryMoney(value), money: true });
+    const count = (id, label, value) => ({ id, label, value, text: String(value), money: false, lead: false });
+    const money = (id, label, value) => ({ id, label, value, text: monthSummaryMoney(value), money: true, lead: true });
     const tiles = [
-        count('workingDays', M.workingDays, line.workingDays),
-        count('attendance', R.attendance, line.attendance),
-        count('men', M.men, line.men),
-        count('siteDays', R.siteDaysTotal, line.siteDays)
+        money('gross', R.gross, line.gross),
+        money('advances', YEAR_SUMMARY_TEXT.handedOver, line.advances)
     ];
-    // His own men's share of the billing count, said only when Rima has one - the month's rule.
-    if (line.ownSiteDays !== null) tiles.push(count('ownSiteDays', NO_RIMA_TITLE, line.ownSiteDays));
-    tiles.push(count('rima', RIMA_TOTAL, line.rima ? line.rima.total : 0));
-    tiles.push(money('gross', R.gross, line.gross));
-    tiles.push(money('advances', YEAR_SUMMARY_TEXT.handedOver, line.advances));
     // With the gate shut or the migration unapproved these two are null, and not shown
     // (tests/approval.test.mjs is the rule); open, only where there is one.
     if (line.repaid !== null && line.repaid !== 0) tiles.push(money('repaid', LEDGER_KIND_LABELS.repaid, line.repaid));
     if (line.reversed !== null && line.reversed !== 0) tiles.push(money('reversed', LEDGER_KIND_LABELS.reversed, line.reversed));
+    tiles.push(
+        count('workingDays', M.workingDays, line.workingDays),
+        count('attendance', R.attendance, line.attendance),
+        count('men', M.men, line.men),
+        count('siteDays', R.siteDaysTotal, line.siteDays));
+    // His own men's share of the billing count, said only when Rima has one - the month's rule.
+    if (line.ownSiteDays !== null) tiles.push(count('ownSiteDays', NO_RIMA_TITLE, line.ownSiteDays));
+    tiles.push(count('rima', RIMA_TOTAL, line.rima ? line.rima.total : 0));
     return tiles;
-}
-
-// «עובדי יוסף גבס», apart from every tile above and in none of them; null with no count.
-function yearSummaryApart(facts) {
-    if (!facts.line.yosef) return null;
-    return { id: 'yosef', label: YOSEF_GEVES_TOTAL, value: facts.line.yosef.total,
-        text: String(facts.line.yosef.total), note: YOSEF_GEVES_NOTE };
 }
 
 // The sentences that belong to «נצבר»: the men without a rate (the sheet's own), why the year is
 // smaller than its months (this file's, only where it is), and the hours with no hourly rate
-// (the sheet's own).
+// (the sheet's own). The second only under a «נצבר» that is a number: when every man who worked
+// has a day with no rate the year shows «—», and «smaller than its months» would be said of
+// nothing - the first sentence is the reason for that «—» (fix round 1).
 function yearSummaryNotes(facts) {
     const notes = [];
     if (facts.unpriced.length > 0) {
         notes.push({ id: 'unpriced', warn: true, text: MONTH_SUMMARY_TEXT.unpriced(facts.unpriced.length,
             facts.unpriced.map(name => isolate(name)).join(', ')) });
     }
-    if (facts.notSummed) notes.push({ id: 'notSummed', warn: false, text: YEAR_SUMMARY_TEXT.notSummed });
+    if (facts.notSummed && facts.line.gross !== null) {
+        notes.push({ id: 'notSummed', warn: false, text: YEAR_SUMMARY_TEXT.notSummed });
+    }
     if (facts.line.hoursUnpriced) notes.push({ id: 'hoursUnpriced', warn: true, text: MONTH_SUMMARY_REUSED.hoursUnpriced });
     return notes;
 }
 
-// What the months' bar counts: his own men's worker-site days - «בלי עובדי רימא» in a year
-// Rima has a count in, which is exactly the billing count in one that has none.
+// What the months' bar counts, named where it stands alone (a month's row, the «חודשים» column):
+// his own men's worker-site days - «ימי עובד־אתר בלי עובדי רימא» in a year Rima has a count in,
+// and the billing count itself, «ימי עובד־אתר», in one that has none.
 function yearSummaryOwnLabel(facts) {
-    return facts.line.rima !== null ? NO_RIMA_TITLE : SUMMARY_TEXT.siteDays;
+    return facts.line.rima !== null ? YEAR_SUMMARY_TEXT.ownDays : SUMMARY_TEXT.siteDays;
 }
 
 function yearSummaryMonthName(key) {
     return MONTH_SUMMARY_TEXT.months[Number(String(key).slice(5, 7)) - 1] || '';
 }
 
-// The twelve rows, each as «סיכום חודש» has its month.
+// The twelve rows, each as «סיכום חודש» has its month - and with what that month says beside its
+// figures: that it is not over yet (its own rule, today inside it), the men its «נצבר» leaves
+// out (its own sentence), and the corrections dated in it («תיקון-היפוך», its own line, where
+// the record may be read that way and there is one).
 function yearSummaryMonthRows(facts) {
+    const today = todayStr();
     return facts.months.map(month => ({
         key: month.key,
         name: yearSummaryMonthName(month.key),
@@ -355,7 +408,11 @@ function yearSummaryMonthRows(facts) {
         own: month.ownSiteDays !== null ? month.ownSiteDays : month.siteDays,
         men: month.men,
         gross: month.gross,
-        advances: month.advances
+        advances: month.advances,
+        reversed: month.reversed !== null && month.reversed !== 0 ? month.reversed : null,
+        inProgress: !month.empty && today >= month.range.from && today < month.range.to,
+        unpriced: month.empty || month.unpriced.length === 0 ? null
+            : MONTH_SUMMARY_TEXT.unpriced(month.unpriced.length, month.unpriced.map(name => isolate(name)).join(', '))
     }));
 }
 
@@ -376,28 +433,64 @@ function yearSummaryBody() {
 }
 
 // The frame's words for the year on screen, and its two arrows: the next one is not there on
-// the year today is in (nothing after it is recorded yet), and the export waits for a reading.
-function yearSummaryFrame(facts) {
+// the year today is in (nothing after it is recorded yet).
+function yearSummaryFrame() {
     const year = YEAR_SUMMARY_YEAR;
     const say = (id, text) => { const node = document.getElementById(id); if (node && node.textContent !== text) node.textContent = text; };
     say('yearSummaryTitle', YEAR_SUMMARY_TEXT.title(year));
     say('yearSummaryYear', String(year));
     const next = document.getElementById('yearSummaryNext');
     if (next) next.hidden = year >= yearSummaryThisYear();
-    const exported = document.getElementById('yearSummaryExport');
-    if (exported) exported.disabled = !facts || facts.empty;
 }
 
-// The range and one line: what is on the screen from the press until the figures are read.
+// The frame's one line of its own, in the foot that stays under the thumb (#yearSummaryStatus):
+// «מחשב את השנה…» while a moved record is read again, «מכין את הקובץ…» while the file is made.
+function yearSummarySay(text) {
+    const node = typeof document !== 'undefined' ? document.getElementById('yearSummaryStatus') : null;
+    if (node && node.textContent !== text) node.textContent = text;
+}
+
+// The line goes once what it said is over - and only that line, so the end of one never takes
+// down the other's.
+function yearSummaryUnsay(text) {
+    const node = typeof document !== 'undefined' ? document.getElementById('yearSummaryStatus') : null;
+    if (node && node.textContent === text) node.textContent = '';
+}
+
+// «יצוא השנה» can be pressed over a year that is read, holds something, is not being read again
+// and is not already being made into a file - and over nothing else.
+function yearSummaryExportState() {
+    const node = typeof document !== 'undefined' ? document.getElementById('yearSummaryExport') : null;
+    if (!node) return;
+    node.disabled = YEAR_SUMMARY_EXPORTING || !YEAR_SUMMARY_DRAWN || YEAR_SUMMARY_DRAWN.empty === true;
+}
+
+// The range and one line: what is on the screen from the press until the figures are read - on
+// opening, and on an arrow to another year. Nothing of another year, or of no year, to keep.
 function yearSummaryPaintReading() {
     const body = yearSummaryBody();
     if (!body) return;
     const range = yearSummaryRange(YEAR_SUMMARY_YEAR);
     clear(body);
+    body.classList.remove('ysum-stale');
     body.setAttribute('aria-busy', 'true');
     body.appendChild(el('p', 'msum-range', dateRange(formatFullDate(parseLocalDate(range.from)),
         formatFullDate(parseLocalDate(range.to)))));
     body.appendChild(el('p', 'ysum-reading', YEAR_SUMMARY_TEXT.reading));
+}
+
+// A RECORD THAT MOVED UNDER THE YEAR ON SCREEN: what is drawn stays drawn, exactly where it is -
+// the reader keeps his place and his row, and the page does not shrink under him - and is marked
+// at once as a reading being redone: dimmed (css/design.css), busy for a screen reader, the export
+// shut, and «מחשב את השנה…» in the frame's own line, which stays under the thumb wherever he is
+// in the year. None of it is shown as current; nothing of it is taken away.
+function yearSummaryMarkStale() {
+    const body = yearSummaryBody();
+    if (!body) return;
+    body.classList.add('ysum-stale');
+    body.setAttribute('aria-busy', 'true');
+    yearSummaryExportState();
+    yearSummarySay(YEAR_SUMMARY_TEXT.reading);
 }
 
 function yearSummaryPairs(pairs) {
@@ -411,6 +504,16 @@ function yearSummaryPairs(pairs) {
     return box;
 }
 
+function yearSummaryTileGrid(tiles, className) {
+    const grid = el('div', className);
+    tiles.forEach(item => {
+        const tile = monthSummaryPair(item.label, item.text, 'msum-pair msum-tile');
+        tile.setAttribute('data-figure', item.id);
+        grid.appendChild(tile);
+    });
+    return grid;
+}
+
 function drawYearSummary(facts) {
     const body = yearSummaryBody();
     if (!body || YEAR_SUMMARY_YEAR === null) return;
@@ -418,18 +521,22 @@ function drawYearSummary(facts) {
     const M = MONTH_SUMMARY_TEXT;
     const R = MONTH_SUMMARY_REUSED;
     const Y = YEAR_SUMMARY_REUSED;
-    // A month's row that had the focus has it again after a redraw - also when the record moved
-    // under it and the row went with the figures meanwhile (YEAR_SUMMARY_PLACE), as long as the
-    // focus has not been put somewhere else since.
+    // A month's row that had the focus has it again after a redraw. And when «סיכום חודש»'s door
+    // brought him back to the year he left by a month's row (YEAR_SUMMARY_PLACE), that row takes
+    // the focus from the heading it was given on the way in - unless he has put it somewhere else
+    // since.
     const active = typeof document !== 'undefined' ? document.activeElement : null;
     const inBody = Boolean(active && body.contains && body.contains(active));
-    const nowhere = !active || active === document.body;
+    const heading = typeof document !== 'undefined' ? document.getElementById('yearSummaryTitle') : null;
+    const free = !active || active === document.body || (heading && active === heading);
     const focused = inBody && active.getAttribute ? active.getAttribute('data-ysum-month')
-        : (nowhere && YEAR_SUMMARY_PLACE ? YEAR_SUMMARY_PLACE.month : null);
+        : (free && YEAR_SUMMARY_PLACE ? YEAR_SUMMARY_PLACE.month : null);
 
-    yearSummaryFrame(facts);
+    yearSummaryFrame();
     clear(body);
+    body.classList.remove('ysum-stale');
     body.setAttribute('aria-busy', 'false');
+    yearSummaryUnsay(T.reading);
     body.appendChild(el('p', 'msum-range', dateRange(formatFullDate(parseLocalDate(facts.range.from)),
         formatFullDate(parseLocalDate(facts.range.to)))));
     if (facts.empty) {
@@ -444,34 +551,23 @@ function drawYearSummary(facts) {
     });
     body.appendChild(frame);
 
-    // 2. The year in figures.
+    // 2. The year in figures: the money first and larger, «נצבר»'s own sentences straight under
+    // it, then the days.
     const figures = monthSummaryBlock(T.figures);
     figures.classList.add('ysum-figures');
-    const tiles = el('div', 'msum-tiles');
-    yearSummaryTiles(facts).forEach(item => {
-        const tile = monthSummaryPair(item.label, item.text, 'msum-pair msum-tile');
-        tile.setAttribute('data-figure', item.id);
-        tiles.appendChild(tile);
-    });
-    figures.appendChild(tiles);
-    // «נצבר»'s own sentences, straight under the figures; then «עובדי יוסף גבס», apart and last.
+    const tiles = yearSummaryTiles(facts);
+    figures.appendChild(yearSummaryTileGrid(tiles.filter(item => item.lead), 'msum-tiles ysum-lead'));
     yearSummaryNotes(facts).forEach(note => {
         figures.appendChild(el('p', note.warn ? 'hint hint-warn msum-warn' : 'msum-note ysum-notsummed', note.text));
     });
-    const apart = yearSummaryApart(facts);
-    if (apart) {
-        const box = el('div', 'ysum-apart');
-        const tile = monthSummaryPair(apart.label, apart.text, 'msum-pair msum-tile');
-        tile.setAttribute('data-figure', apart.id);
-        box.appendChild(tile);
-        box.appendChild(el('p', 'msum-note', apart.note));
-        figures.appendChild(box);
-    }
+    figures.appendChild(yearSummaryTileGrid(tiles.filter(item => !item.lead), 'msum-tiles ysum-counts'));
     body.appendChild(figures);
 
-    // 3. Month by month: each row one button into «סיכום חודש» on that month.
+    // 3. Month by month: each row one button into «סיכום חודש» on that month - and what a row
+    // does said BEFORE the first of them, not after the twelfth.
     const months = monthSummaryBlock(T.months);
     months.classList.add('ysum-months');
+    months.appendChild(el('p', 'msum-note ysum-months-hint', T.monthsHint));
     const rows = yearSummaryMonthRows(facts);
     const label = yearSummaryOwnLabel(facts);
     const most = rows.reduce((max, row) => (row.empty ? max : Math.max(max, row.own)), 0);
@@ -493,18 +589,25 @@ function drawYearSummary(facts) {
             fill.style.width = `${most > 0 && row.own > 0 ? Math.max(2, Math.round((row.own / most) * 100)) : 0}%`;
             track.appendChild(fill);
             go.appendChild(track);
-            go.appendChild(yearSummaryPairs([
+            const pairs = [
                 [M.men, String(row.men)],
                 [R.gross, monthSummaryMoney(row.gross)],
                 [T.handedOver, monthSummaryMoney(row.advances)]
-            ]));
+            ];
+            if (row.reversed !== null) pairs.push([LEDGER_KIND_LABELS.reversed, monthSummaryMoney(row.reversed)]);
+            go.appendChild(yearSummaryPairs(pairs));
+            // What «סיכום חודש» says beside the same figures, in its own words: a month not over
+            // yet, and the men its «נצבר» leaves out.
+            if (row.inProgress) go.appendChild(el('span', 'ysum-month-tag', Y.monthInProgress));
+            if (row.unpriced) go.appendChild(el('span', 'ysum-month-tag ysum-month-warn', row.unpriced));
         }
         months.appendChild(go);
     });
-    months.appendChild(el('p', 'msum-note', T.monthsHint));
     body.appendChild(months);
 
-    // 4. Every man's year, label over value - never a wide table.
+    // 4. Every man's year, label over value - never a wide table. A double day and an extra hour
+    // are said where he has one, as «סיכום חודש» says them; a «—» is never left without its
+    // reason, which follows the last man (the «עובדים» sheet's own note row, on the glass).
     if (facts.men.length > 0) {
         const men = monthSummaryBlock(T.men);
         men.classList.add('ysum-men');
@@ -514,20 +617,24 @@ function drawYearSummary(facts) {
             head.appendChild(el('span', 'ysum-man-name', man.name));
             if (!man.active) head.appendChild(el('span', 'ysum-inactive', Y.inactive));
             row.appendChild(head);
-            row.appendChild(yearSummaryPairs([
-                [R.attendance, String(man.attendanceDays)],
-                [Y.payUnits, String(man.payUnits)],
-                [R.doubles, String(man.doubleDays)],
-                [R.extraHours, String(man.extraHours)],
-                [R.gross, monthSummaryMoney(man.gross)],
-                [T.handedOver, monthSummaryMoney(man.handedOver)]
-            ]));
+            const pairs = [[R.attendance, String(man.attendanceDays)], [Y.payUnits, String(man.payUnits)]];
+            if (man.doubleDays > 0) pairs.push([R.doubles, String(man.doubleDays)]);
+            if (man.extraHours > 0) pairs.push([R.extraHours, String(man.extraHours)]);
+            pairs.push([R.gross, monthSummaryMoney(man.gross)], [T.handedOver, monthSummaryMoney(man.handedOver)]);
+            if (man.handedOverReversed) pairs.push([T.handedOverReversed, monthSummaryMoney(man.handedOverReversed)]);
+            row.appendChild(yearSummaryPairs(pairs));
             men.appendChild(row);
         });
+        const unknown = facts.men.filter(man => man.gross === null).map(man => man.name);
+        if (unknown.length > 0) {
+            men.appendChild(el('p', 'hint hint-warn msum-warn ysum-men-warn',
+                M.unpriced(unknown.length, unknown.map(name => isolate(name)).join(', '))));
+        }
         body.appendChild(men);
     }
 
-    // 5. Every site's year, then «עובדי יוסף גבס» in its own table, last.
+    // 5. Every site's year, then «עובדי יוסף גבס» in its own table, last. His own men's share and
+    // Rima's are said on a site Rima has a count on - on any other they are its total and a 0.
     const withRima = facts.line.rima !== null;
     if (facts.sites.length > 0) {
         const sites = monthSummaryBlock(T.sites);
@@ -539,7 +646,7 @@ function drawYearSummary(facts) {
             head.appendChild(el('span', 'ysum-span', yearSummarySpan(site)));
             row.appendChild(head);
             const pairs = [[R.siteDaysTotal, String(site.billed)]];
-            if (withRima) pairs.push([NO_RIMA_TITLE, String(site.own)], [RIMA_TITLE, String(site.rima)]);
+            if (withRima && site.rima > 0) pairs.push([NO_RIMA_TITLE, String(site.own)], [SUMMARY_TEXT.rimaCount, String(site.rima)]);
             row.appendChild(yearSummaryPairs(pairs));
             sites.appendChild(row);
         });
@@ -592,16 +699,20 @@ function yearSummaryLater(work) {
 }
 
 // Reads the year on screen - or takes the kept reading of this very record - and draws it, if
-// this is still the reading wanted; a reader the record moved under is given back his place.
+// this is still the reading wanted. The reader stays where he is across the redraw: the body is
+// emptied and filled again in one step, and that must not leave him at its top. One whom
+// «סיכום חודש»'s door brought back is put where he left the year (YEAR_SUMMARY_PLACE).
 function yearSummaryLoad(turn) {
     if (!yearSummaryIsOpen() || turn !== YEAR_SUMMARY_TURN) return;
     const year = YEAR_SUMMARY_YEAR;
     const modal = document.getElementById('yearSummaryModal');
     const content = modal ? modal.querySelector('.modal-content') : null;
+    const top = content ? content.scrollTop : 0;
     const now = yearSummaryFactsNow(year);
     drawYearSummary(now.facts);
-    YEAR_SUMMARY_DRAWN = { year, key: now.key };
-    if (YEAR_SUMMARY_PLACE && content) content.scrollTop = YEAR_SUMMARY_PLACE.top;
+    YEAR_SUMMARY_DRAWN = { year, key: now.key, empty: now.facts.empty === true };
+    yearSummaryExportState();
+    if (content) content.scrollTop = YEAR_SUMMARY_PLACE ? YEAR_SUMMARY_PLACE.top : top;
     YEAR_SUMMARY_PLACE = null;
 }
 
@@ -616,16 +727,19 @@ function yearSummaryReadSoon() {
 function yearSummaryStopWaiting() {
     if (YEAR_SUMMARY_WAIT !== null) clearTimeout(YEAR_SUMMARY_WAIT);
     YEAR_SUMMARY_WAIT = null;
-    YEAR_SUMMARY_PLACE = null;
 }
 
-function openYearSummary(year) {
+// `place`, when given, is where the reader is put once the year is drawn: { top, month } - the
+// way back through «סיכום חודש»'s door (openYearSummaryFromMonth). Without it, the top.
+function openYearSummary(year, place) {
     const modal = typeof document !== 'undefined' ? document.getElementById('yearSummaryModal') : null;
     if (!modal) return false;
     const asked = Number(year);
     YEAR_SUMMARY_YEAR = Number.isInteger(asked) && asked >= 1000 && asked <= 9999 ? asked : yearSummaryThisYear();
     YEAR_SUMMARY_DRAWN = null;
     yearSummaryStopWaiting();
+    YEAR_SUMMARY_PLACE = place && typeof place === 'object'
+        ? { top: Number(place.top) || 0, month: place.month ? String(place.month) : null } : null;
 
     const say = (id, text) => { const node = document.getElementById(id); if (node) node.textContent = text; };
     say('yearSummaryPrev', YEAR_SUMMARY_TEXT.prev);
@@ -633,7 +747,8 @@ function openYearSummary(year) {
     say('yearSummaryExport', YEAR_SUMMARY_TEXT.export);
     say('yearSummaryClose', MONTH_SUMMARY_REUSED.close);
     say('yearSummaryStatus', '');
-    yearSummaryFrame(null);
+    yearSummaryFrame();
+    yearSummaryExportState();
     yearSummaryPaintReading();
 
     modal.style.display = 'flex';
@@ -647,12 +762,15 @@ function openYearSummary(year) {
 // keeper of the focus (js/ui/modal.js) never sees a moment with no dialog open, so the focus it
 // kept - what opened the month - is still what closing the year gives back; and because it does
 // not see a NEW dialog either, the year's heading is given the focus here, by hand
-// (siteCardGoMan's rule, js/ui/sitecard.js).
+// (siteCardGoMan's rule, js/ui/sitecard.js). A reader who left this same year by a month's row
+// is put back where he was, on that row, once it is drawn - not at the top of twelve months.
 function openYearSummaryFromMonth() {
     if (typeof monthSummaryIsOpen !== 'function' || !monthSummaryIsOpen()) return;
     const year = Number(String(MONTH_SUMMARY_KEY).slice(0, 4));
+    const back = YEAR_SUMMARY_BACK && YEAR_SUMMARY_BACK.year === year ? YEAR_SUMMARY_BACK : null;
+    YEAR_SUMMARY_BACK = null;
     closeMonthSummary();
-    if (!openYearSummary(year)) return;
+    if (!openYearSummary(year, back)) return;
     const heading = document.getElementById('yearSummaryTitle');
     if (heading && heading.focus) heading.focus({ preventScroll: true });
 }
@@ -660,6 +778,8 @@ function openYearSummaryFromMonth() {
 function closeYearSummary() {
     YEAR_SUMMARY_YEAR = null;
     YEAR_SUMMARY_DRAWN = null;
+    YEAR_SUMMARY_BACK = null;
+    YEAR_SUMMARY_PLACE = null;
     yearSummaryStopWaiting();
     // Anything still on its way is for a dialog that is not there any more.
     YEAR_SUMMARY_TURN += 1;
@@ -667,7 +787,12 @@ function closeYearSummary() {
     if (modal) modal.style.display = 'none';
     // Its nodes go with it: a shut dialog has nothing on it to be found or read.
     const body = yearSummaryBody();
-    if (body) clear(body);
+    if (body) {
+        clear(body);
+        body.classList.remove('ysum-stale');
+        body.setAttribute('aria-busy', 'false');
+    }
+    yearSummaryUnsay(YEAR_SUMMARY_TEXT.reading);
     // The focus goes back to what had it (js/ui/modal.js) - what opened «סיכום חודש», the
     // reports' menu. A redraw of the reports screen while the dialogs were open replaced that
     // node, and then the focus would be left on nothing; the trigger there now takes it.
@@ -690,10 +815,12 @@ function yearSummaryStep(years) {
     if (by > 0 && YEAR_SUMMARY_YEAR >= yearSummaryThisYear()) return;
     YEAR_SUMMARY_YEAR += by;
     YEAR_SUMMARY_DRAWN = null;
+    YEAR_SUMMARY_PLACE = null;
     yearSummaryStopWaiting();
     const next = document.getElementById('yearSummaryNext');
     const hadNext = next && document.activeElement === next;
-    yearSummaryFrame(null);
+    yearSummaryFrame();
+    yearSummaryExportState();
     yearSummaryPaintReading();
     if (hadNext && next.hidden) {
         const back = document.getElementById('yearSummaryPrev');
@@ -706,10 +833,15 @@ function yearSummaryStep(years) {
 }
 
 // A month's row: the year shuts and «סיכום חודש» opens on that month - its heading focused by
-// hand, for the reason over openYearSummaryFromMonth.
+// hand, for the reason over openYearSummaryFromMonth. Where he was in the year is kept for the
+// way back through that dialog's door.
 function yearSummaryGoMonth(key) {
     if (!yearSummaryIsOpen() || typeof openMonthSummary !== 'function') return;
+    const modal = document.getElementById('yearSummaryModal');
+    const content = modal ? modal.querySelector('.modal-content') : null;
+    const back = { year: YEAR_SUMMARY_YEAR, top: content ? content.scrollTop : 0, month: String(key) };
     closeYearSummary();
+    YEAR_SUMMARY_BACK = back;
     openMonthSummary(key);
     const heading = document.getElementById('monthSummaryTitle');
     if (heading && heading.focus) heading.focus({ preventScroll: true });
@@ -717,26 +849,17 @@ function yearSummaryGoMonth(key) {
 
 // render() calls this (js/app.js) after every commit and every snapshot adopted from another
 // phone, and it NEVER READS. Shut, it returns here at once. Open on a record that has not moved,
-// nothing is drawn anew. Open on a record that moved: the figures go at once - «מחשב את השנה…»
-// in their place, so none of the old reading stands as if it were current - and the year is
-// read again ONCE, when the draws have stopped for YEAR_SUMMARY_QUIET_MS (each draw starts the
-// wait again), the place the reader had scrolled to and the month's row he was on given back.
+// nothing is drawn anew. Open on a record that moved: what is drawn is marked at once as being
+// read again (yearSummaryMarkStale) - none of it stands as current, and none of it is taken off,
+// so the reader is where he was - and the year is read again ONCE, when the draws have stopped
+// for YEAR_SUMMARY_QUIET_MS (each draw starts the wait again), and drawn where he is.
 function renderYearSummaryIfOpen() {
     if (!yearSummaryIsOpen()) return;
     if (YEAR_SUMMARY_WAIT === null) {
         // Nothing drawn yet: the reading on its way reads the record as it is when it runs.
         if (!YEAR_SUMMARY_DRAWN || YEAR_SUMMARY_DRAWN.key === yearSummaryKey()) return;
-        const modal = document.getElementById('yearSummaryModal');
-        const content = modal ? modal.querySelector('.modal-content') : null;
-        const body = yearSummaryBody();
-        const active = document.activeElement;
-        YEAR_SUMMARY_PLACE = {
-            top: content ? content.scrollTop : 0,
-            month: active && body && body.contains && body.contains(active) && active.getAttribute
-                ? active.getAttribute('data-ysum-month') : null
-        };
         YEAR_SUMMARY_DRAWN = null;
-        yearSummaryPaintReading();
+        yearSummaryMarkStale();
     } else {
         clearTimeout(YEAR_SUMMARY_WAIT);
     }
@@ -773,7 +896,9 @@ function yearSummarySheets(facts) {
     const said = text => `\u200F${text}\u200F`;
     const sheets = [];
 
-    // «סיכום»: the frame, when it was made, the figures, the sentences, and the list apart.
+    // «סיכום»: the frame, when it was made, the figures - the money first, as on the screen - and
+    // the sentences that belong to «נצבר» right under it. «עובדי יוסף גבס» is not on it: it is the
+    // last sheet's, and only its (v183).
     {
         const rows = [];
         const money = new Set();
@@ -789,36 +914,48 @@ function yearSummarySheets(facts) {
             if (tile.money && typeof tile.value === 'number') money.add(`${at}:1`);
             if (tile.id === 'gross') yearSummaryNotes(facts).forEach(note => add([said(note.text)]));
         });
-        const apart = yearSummaryApart(facts);
-        if (apart) {
-            add([]);
-            add([apart.label, apart.value]);
-            add([said(apart.note)]);
-        }
         sheets.push({ key: 'summary', name: SUMMARY_SHEET, rows,
             look: { money: (r, c) => money.has(`${r}:${c}`), cap: 40 }, table: false });
     }
 
-    // «חודשים»: January first, as the rows on the screen.
+    // «חודשים»: January first, as the rows on the screen. Where the record may be read the new
+    // way and a correction is dated in the year, each month's «תיקון-היפוך» beside its «מקדמות
+    // שניתנו», as «סיכום חודש» has it; and under the table, a month whose «נצבר» leaves a man out
+    // says so in «סיכום חודש»'s own sentence - the file is read without the screen.
     {
-        const rows = [[T.monthColumn, yearSummaryOwnLabel(facts), M.men, R.gross, T.handedOver]];
-        yearSummaryMonthRows(facts).forEach(row => {
-            rows.push(row.empty ? [row.name, '—', '—', '—', '—']
-                : [row.name, row.own, row.men, known(row.gross), row.advances]);
+        const reversals = facts.line.reversed !== null && facts.line.reversed !== 0;
+        const head = [T.monthColumn, yearSummaryOwnLabel(facts), M.men, R.gross, T.handedOver]
+            .concat(reversals ? [LEDGER_KIND_LABELS.reversed] : []);
+        const rows = [head];
+        const months = yearSummaryMonthRows(facts);
+        months.forEach(row => {
+            if (row.empty) { rows.push(head.map((cell, c) => (c === 0 ? row.name : '—'))); return; }
+            rows.push([row.name, row.own, row.men, known(row.gross), row.advances]
+                .concat(reversals ? [row.reversed !== null ? row.reversed : 0] : []));
         });
+        const last = rows.length - 1;
+        const marked = months.filter(row => row.unpriced);
+        if (marked.length > 0) {
+            rows.push([]);
+            marked.forEach(row => rows.push([row.name, said(row.unpriced)]));
+        }
         sheets.push({ key: 'months', name: T.monthsSheet, rows, table: true,
-            look: { money: (r, c) => r > 0 && (c === 3 || c === 4), filterTo: rows.length - 1 } });
+            look: { money: (r, c) => r > 0 && r <= last && (c === 3 || c === 4 || c === 5), filterTo: last } });
     }
 
-    // «עובדים»: every man in the roster's order; a man switched off says so beside his name -
-    // the name isolated, as in every sentence a name is set into, so that a name in Latin
-    // letters or ending in a digit keeps its place before the words, and the cell set right to
-    // left by its marks (`said`, above).
+    // «עובדים»: every man in the roster's order, the name cell his name and nothing else - as in
+    // the reports' file, so a filter, a sort or a lookup by name finds him - and, where somebody
+    // is switched off, a column of its own that says who («פעיל» / «לא פעיל», the crew row's own
+    // words). Beside «מקדמות שניתנו», where any man has one, what a תיקון-היפוך of an advance took
+    // back - the screen's own pair.
     {
-        const rows = [[Y.worker, R.attendance, Y.payUnits, R.doubles, R.extraHours, R.gross, T.handedOver]];
+        const reversals = facts.men.some(man => Boolean(man.handedOverReversed));
+        const switchedOff = facts.men.some(man => !man.active);
+        const rows = [[Y.worker, R.attendance, Y.payUnits, R.doubles, R.extraHours, R.gross, T.handedOver]
+            .concat(reversals ? [T.handedOverReversed] : [], switchedOff ? [T.stateColumn] : [])];
         facts.men.forEach(man => {
-            rows.push([man.active ? man.name : said(`${isolate(man.name)} · ${Y.inactive}`), man.attendanceDays, man.payUnits,
-                man.doubleDays, man.extraHours, known(man.gross), man.handedOver]);
+            rows.push([man.name, man.attendanceDays, man.payUnits, man.doubleDays, man.extraHours, known(man.gross), man.handedOver]
+                .concat(reversals ? [man.handedOverReversed || 0] : [], switchedOff ? [man.active ? Y.active : Y.inactive] : []));
         });
         const last = rows.length - 1;
         // No «—» stands without its reason: one row after the last man names every man whose wage
@@ -828,14 +965,15 @@ function yearSummarySheets(facts) {
             rows.push([said(MONTH_SUMMARY_TEXT.unpriced(unknown.length, unknown.map(name => isolate(name)).join(', ')))]);
         }
         sheets.push({ key: 'workers', name: T.menSheet, rows, table: true,
-            look: { money: (r, c) => r > 0 && r <= last && (c === 5 || c === 6), filterTo: last } });
+            look: { money: (r, c) => r > 0 && r <= last && (c === 5 || c === 6 || (reversals && c === 7)), filterTo: last } });
     }
 
-    // «אתרים»: the billing count per site, his men's share and Rima's where Rima has a count,
-    // and the months it was billed in.
+    // «אתרים»: the billing count per site, his men's share and Rima's where Rima has a count -
+    // Rima's under the overview's own word for it, «עובדי רימא» (SUMMARY_TEXT.rimaCount), and not
+    // under the title of the Rima table - and the months it was billed in.
     {
         const withRima = facts.line.rima !== null;
-        const head = [SUMMARY_TEXT.site, R.siteDaysTotal].concat(withRima ? [NO_RIMA_TITLE, RIMA_TITLE] : [], [T.monthsSheet]);
+        const head = [SUMMARY_TEXT.site, R.siteDaysTotal].concat(withRima ? [NO_RIMA_TITLE, SUMMARY_TEXT.rimaCount] : [], [T.monthsSheet]);
         const rows = [head];
         facts.sites.forEach(site => {
             rows.push([site.name, site.billed].concat(withRima ? [site.own, site.rima] : [], [yearSummarySpan(site)]));
@@ -896,7 +1034,7 @@ function yearSummaryFocusExport() {
 }
 
 async function yearSummaryExport() {
-    if (!yearSummaryIsOpen()) return;
+    if (!yearSummaryIsOpen() || YEAR_SUMMARY_EXPORTING) return;
     const year = YEAR_SUMMARY_YEAR;
     const facts = yearSummaryFactsNow(year).facts;
     if (!facts || facts.empty) return;
@@ -904,56 +1042,70 @@ async function yearSummaryExport() {
     const sheets = yearSummarySheets(facts);
     const name = yearSummaryFileName(year);
 
-    await loadXlsx();
-
-    // THE LIBRARY IS IN THE SHELL, so reaching here means this phone's build is incomplete -
-    // exportReports' own case and its own sentence. The same rows leave as CSV files, one per
-    // sheet, and what is said afterwards is what the browser took.
-    if (typeof XLSX === 'undefined') {
-        const handed = [];
-        const refused = [];
-        sheets.forEach(sheet => {
-            const file = `farkad-year-${sheet.key}_${year}.csv`;
-            (downloadCsv(sheet.rows, file) ? handed : refused).push(file);
-        });
-        const list = names => names.map(file => '\u2066' + file + '\u2069').join(', ');
-        if (refused.length > 0) {
-            Promise.resolve(askTell({
-                title: Y.refusedTitle,
-                message: Y.refused + list(refused) + '. '
-                    + (handed.length > 0 ? Y.refusedTook + list(handed) + '. ' : '')
-                    + Y.refusedRecord + Y.refusedAgain + Y.refusedWhere + '.'
-            })).then(yearSummaryFocusExport);
-            return;
-        }
-        Promise.resolve(askTell(Y.csv + Y.csvEnd)).then(yearSummaryFocusExport);
-        return;
-    }
-
+    // FROM THE PRESS UNTIL THE FILE IS HANDED OVER the button is shut and the frame's line says the
+    // file is being made: the first export of a session waits for the library, and a button that
+    // looked untouched was pressed again and handed the browser a second file.
+    YEAR_SUMMARY_EXPORTING = true;
+    yearSummaryExportState();
+    yearSummarySay(YEAR_SUMMARY_TEXT.exporting);
+    let after = null;
     try {
-        let wb;
-        try {
-            wb = yearSummaryWorkbook(XLSX, sheets, false);
-        } catch (lookError) {
-            console.error('Year workbook look failed; writing it plain:', lookError);
-            wb = yearSummaryWorkbook(XLSX, sheets, true);
+        await loadXlsx();
+
+        // THE LIBRARY IS IN THE SHELL, so reaching here means this phone's build is incomplete -
+        // exportReports' own case and its own sentence. The same rows leave as CSV files, one per
+        // sheet, and what is said afterwards is what the browser took.
+        if (typeof XLSX === 'undefined') {
+            const handed = [];
+            const refused = [];
+            sheets.forEach(sheet => {
+                const file = `farkad-year-${sheet.key}_${year}.csv`;
+                (downloadCsv(sheet.rows, file) ? handed : refused).push(file);
+            });
+            const list = names => names.map(file => '\u2066' + file + '\u2069').join(', ');
+            after = refused.length > 0
+                ? () => Promise.resolve(askTell({
+                    title: Y.refusedTitle,
+                    message: Y.refused + list(refused) + '. '
+                        + (handed.length > 0 ? Y.refusedTook + list(handed) + '. ' : '')
+                        + Y.refusedRecord + Y.refusedAgain + Y.refusedWhere + '.'
+                })).then(yearSummaryFocusExport)
+                : () => Promise.resolve(askTell(Y.csv + Y.csvEnd)).then(yearSummaryFocusExport);
+        } else {
+            try {
+                let wb;
+                try {
+                    wb = yearSummaryWorkbook(XLSX, sheets, false);
+                } catch (lookError) {
+                    console.error('Year workbook look failed; writing it plain:', lookError);
+                    wb = yearSummaryWorkbook(XLSX, sheets, true);
+                }
+                XLSX.writeFile(wb, name);
+                // HANDED TO THE BROWSER, never «נשמר»: the app cannot see the Files app (exportReports).
+                if (typeof askChoice === 'function') {
+                    after = () => Promise.resolve(askChoice({
+                        title: Y.handedTitle,
+                        message: '\u2066' + name + '\u2069' + Y.handed + Y.files + Y.direction + Y.directionEnd,
+                        choices: [EXPORT_CHOICE_DONE, EXPORT_CHOICE_AGAIN]
+                    })).then(answer => {
+                        if (answer === EXPORT_CHOICE_AGAIN) yearSummaryExport();
+                        else yearSummaryFocusExport();
+                    });
+                }
+            } catch (error) {
+                console.error('Year export failed:', error);
+                after = () => Promise.resolve(askTell({
+                    title: Y.failedTitle,
+                    message: Y.failed + '\u2066' + String((error && error.message) || error).slice(0, 160) + '\u2069'
+                })).then(yearSummaryFocusExport);
+            }
         }
-        XLSX.writeFile(wb, name);
-        // HANDED TO THE BROWSER, never «נשמר»: the app cannot see the Files app (exportReports).
-        if (typeof askChoice !== 'function') return;
-        Promise.resolve(askChoice({
-            title: Y.handedTitle,
-            message: '\u2066' + name + '\u2069' + Y.handed + Y.files + Y.direction + Y.directionEnd,
-            choices: [EXPORT_CHOICE_DONE, EXPORT_CHOICE_AGAIN]
-        })).then(answer => {
-            if (answer === EXPORT_CHOICE_AGAIN) yearSummaryExport();
-            else yearSummaryFocusExport();
-        });
-    } catch (error) {
-        console.error('Year export failed:', error);
-        Promise.resolve(askTell({
-            title: Y.failedTitle,
-            message: Y.failed + '\u2066' + String((error && error.message) || error).slice(0, 160) + '\u2069'
-        })).then(yearSummaryFocusExport);
+    } finally {
+        // Handed over (or refused, or failed): the button is the year's again, and the question
+        // that follows asks over a dialog whose export can be pressed - «שמירה חוזרת» presses it.
+        YEAR_SUMMARY_EXPORTING = false;
+        yearSummaryExportState();
+        yearSummaryUnsay(YEAR_SUMMARY_TEXT.exporting);
     }
+    if (after) after();
 }
