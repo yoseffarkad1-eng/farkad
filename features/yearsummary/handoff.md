@@ -4,12 +4,14 @@
 - **Base** `6ab193d68c960e4a56d947673c282b867acd258f` (origin/main, stamps v204).
 - **This is the handoff of FIX ROUND 1** - the adversarial review of `eef8c88` (seventeen findings),
   triaged and repaired. The app's code is final at `64429b1` (its fixes are `69df05b` and
-  `64429b1`), the tests at `5430b0f` (their own words only, since `64429b1`); the commit after it
-  adds this file only.
+  `64429b1`), the tests at `5430b0f` (their own words only, since `64429b1`); the two commits after
+  it change this file only.
 - **Where each run ran.** The `npm test` chain, suite by suite, and 9 browser suites ran
   on `64429b1` from a clean tree (`git status --short` empty when each began); on `5430b0f` the
-  suites that read every test file or the tree, and both of the year's suites, ran again. See
-  «Test output».
+  suites that read every test file or the tree, and the year's Node suite, ran again. The year's
+  BROWSER suite has NOT run on `5430b0f`: queued twice through the wrapper, it got no slot in 115
+  minutes and was stopped unrun. Its last run is `64429b1`'s, 223/223; its file has changed since
+  in a header comment and one `suite()` title, nothing a check reads. See «Test output».
 - **Contract** `features/yearsummary/contract.md`, revision 2 (re-read from disk for this round;
   identical to the program's copy). Where fix round 1 departs from it is listed under «done
   differently», items 6-9.
@@ -35,7 +37,8 @@ Commits on the branch, oldest first:
 - `d6fe21e` tests/yearsummary.browser.mjs, tests/README.md: the glass holds fix round 1
 - `64429b1` «סיכום שנה»: a tile is one column, and a figure's room is the dialog's
 - `5430b0f` tests/yearsummary.*: the suites' own words about a moved record, as fix round 1 made it
-- (next) features/yearsummary/handoff.md: fix round 1
+- `376911b` features/yearsummary/handoff.md: fix round 1
+- (next) features/yearsummary/handoff.md: the year's browser suite got no slot on 5430b0f, and says so
 
 
 ## Fix round 1 - the review of `eef8c88`, finding by finding
@@ -445,9 +448,9 @@ tests/print.test.mjs	exit 0	94/94 checks passed	29s
 done at 2026-11-19T19:01:03Z
 ```
 
-### On 5430b0f (the test files' own words corrected; no app file changed since 64429b1), run again
+### On 5430b0f (the test files' own words corrected; no app file changed since 64429b1), run again - all but the year's browser suite
 
-The year's browser suite on `5430b0f`: the first attempt waited forty minutes for one of the machine's two browser slots (four tracks building at once) and its timeout stopped it before the suite began - exit 124, not one line of output, so it is no result. It was queued again; its result, once it has run, is appended at the end of this section by a later commit. The suite's own output pasted below is its run on `64429b1`, whose app bytes are the final ones (`5430b0f` changed three comments and one suite title, in the test files only).
+The year's browser suite on `5430b0f`: the first attempt waited forty minutes for one of the machine's two browser slots (four tracks building at once) and its timeout stopped it before the suite began - exit 124, not one line of output, so it is no result. Queued again with room to wait, it had still not got a slot after seventy-five more minutes (one slot held by another track's release gate, the other by another track's verification queue, eleven runs waiting) and was stopped unrun, so this round returns WITHOUT a run of the year's browser suite on `5430b0f`. What stands for it: its run on `64429b1`, 223/223, pasted below under «tests/yearsummary.browser.mjs on 64429b1»; the app bytes are the same on both, and `5430b0f` changed in that file only its header comment and the title of suite 16 - no selector, no expectation, no timing (in `tests/yearsummary.test.mjs` only its header comment, and that suite ran again here, 239/239). The integrator runs it on the merged tree; it takes about a minute once it has a slot.
 
 ```
 on 5430b0fadb1d1b65157774922f144cdd225c069c status ''
@@ -668,6 +671,10 @@ Everything else in the contract is built and tested as written.
 - A sentence copied out of the workbook carries two invisible marks.
 
 ## For the integrator
+
+**First, a run this branch owes:** `tests/yearsummary.browser.mjs` has not run on the branch's final
+test files (`5430b0f`) - no browser slot in 115 minutes; its last run is `64429b1`'s, 223/223, on
+the same app bytes. Run it on the merged tree, through the wrapper (about a minute once it has a slot).
 
 **«מה חדש» (PROPOSED):**
 `{ title: 'סיכום שנה', text: 'השנה חודש אחר חודש, לפי עובד ולפי אתר, וקובץ Excel לרואה החשבון - לפי מה שנרשם, לא מה ששולם.', where: 'דוחות ← הפקת דוח ← סיכום חודש ← סיכום שנת …', go: 'reportsMenu' }`
