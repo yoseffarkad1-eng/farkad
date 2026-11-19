@@ -164,7 +164,10 @@ async function phone(width, height, scheme, options = {}) {
         still();
         document.addEventListener('DOMContentLoaded', still);
     });
-    await page.clock.setFixedTime(`${TODAY}T10:00:00`);
+    // The season is timed, and under Playwright's fixed fake time the page's own clocks are not
+    // a measure of anything (performance.now() came back shorter for the whole than for a part
+    // of it): that page runs on the real clock, its «today» pinned by todayStr like every other.
+    if (!options.realClock) await page.clock.setFixedTime(`${TODAY}T10:00:00`);
     await page.goto(server.url);
     await page.waitForFunction(() => typeof openYearSummary === 'function' && typeof State === 'object');
     await page.evaluate(options.season ? seedSeason : seedYear, TODAY);
@@ -549,7 +552,7 @@ try {
     // ------------------------------------------------------------ 18. the budget
     {
         suite('the budget: a season read at 4x CPU, the frame first, and the workbook handed over');
-        const season = await phone(440, 956, 'dark', { season: true });
+        const season = await phone(440, 956, 'dark', { season: true, realClock: true });
         given('a season: 40 men over the year', await season.evaluate(() => State.schedule.workers.length === 40
             && Object.keys(State.schedule.days).length > 250), await season.evaluate(() => Object.keys(State.schedule.days).length));
         const cdp = await season.context().newCDPSession(season);
@@ -581,17 +584,22 @@ try {
             };
         });
         await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+        const pressed = Date.now();
         await season.locator('#monthSummaryYear').click();
         await season.waitForFunction(() => document.querySelector('#yearSummaryBody .msum-tile') !== null, null, { timeout: 30000 });
+        const outside = Date.now() - pressed;
         const took = await season.evaluate(() => ({ ms: performance.now() - window.__tapped, first: window.__firstRead,
             read: window.__readMs, men: document.querySelectorAll('#yearSummaryBody .ysum-man').length }));
+        given('the page\'s clock is a clock: the whole is not shorter than its part', took.ms >= took.read,
+            `${took.ms.toFixed(0)} < ${took.read.toFixed(0)}`);
         await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
         console.log(`  the season's year on the glass ${took.ms.toFixed(0)} ms after the tap, at 4x CPU (the reading itself`
-            + ` ${took.read.toFixed(0)} ms; ${took.men} men drawn; budget 3000)`);
+            + ` ${took.read.toFixed(0)} ms; ${outside} ms seen from outside the page; ${took.men} men drawn; budget 3000)`);
         given('the year that was timed is the season\'s: forty men drawn', took.men === 40, String(took.men));
         check('the frame painted «מחשב את השנה…» and nothing was read before it', took.first && took.first.frames >= 1
             && took.first.reading && took.first.tiles === 0, JSON.stringify(took.first));
-        check('a season\'s year on the glass within 3 s of the tap, at 4x CPU', took.ms <= 3000, `${took.ms.toFixed(0)} ms`);
+        check('a season\'s year on the glass within 3 s of the tap, at 4x CPU', took.ms <= 3000 && outside <= 3000,
+            `${took.ms.toFixed(0)} ms, ${outside} ms from outside`);
 
         await season.evaluate(() => loadXlsx());
         await season.evaluate(() => {
