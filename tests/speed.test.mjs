@@ -380,7 +380,8 @@ const COUNT_WAYS = (device, men) => waysOf(device, men, { ranges: [RANGE_NAMES[0
             same(`${name}: it asks none of the seven - and so asks exactly what v204 asks, and works out no key`,
                 [c.keys, c.calls.slice().sort()], [0, was.calls.slice().sort()]);
         }
-        printed.push(`${name}: ledgerEntries ${realCalls(was, ['ledgerEntries']).length} -> ${of('ledgerEntries').length}, foldLedger ${realCalls(was, ['foldLedger']).length} -> ${of('foldLedger').length}, advanceWalk ${realCalls(was, ['advanceWalk']).length} -> ${of('advanceWalk').length}, advanceOutstanding ${realCalls(was, ['advanceOutstanding']).length} -> ${of('advanceOutstanding').length}, payrollReport ${realCalls(was, ['payrollReport']).length} -> ${of('payrollReport').length}, keys ${c.keys}`);
+        // Every function the rules above count, v204's real calls beside this build's (the report's table).
+        printed.push(`${name}: ${SEVEN.concat(['payrollReport']).map(fn => `${fn} ${realCalls(was, [fn]).length} -> ${of(fn).length}`).join(', ')}, keys ${c.keys}`);
     });
     same(`${ways.length} ways in on the medium season, each read cold: every rule of the count`, wrong, []);
     printed.forEach(line => console.log(`        v204 -> this build: ${line}`));
