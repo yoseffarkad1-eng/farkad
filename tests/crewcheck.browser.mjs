@@ -53,6 +53,7 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const errors = [];
 const dialogs = [];
 const GUARD = 700;          // DOUBLE_TAP_GUARD_MS, js/ui/day.js
+const WALK_BOUNCE = 300;    // WALK_BOUNCE_MS, js/ui/sheet.js
 const NOW = '2026-11-19T18:30:00+02:00';    // a Thursday evening in Israel
 const FSI = '⁨';
 const PDI = '⁩';
@@ -303,8 +304,11 @@ async function tapEntry(page) {
 
 const main = await phone(440, 956, 'dark');
 const page = main.page;
-const diskBefore = await disk(page);
-await censusOnly(check, page, diskBefore);
+// The disk as the session found it. The doors' own baseline (diskBefore) is taken below, after
+// the worker's form has been opened once by the app's own road - see «the form's own probe».
+const diskFresh = await disk(page);
+await censusOnly(check, page, diskFresh);
+let diskBefore = diskFresh;
 const recordBefore = await record(page);
 const switches = () => page.evaluate(() => JSON.stringify(State.schedule.workers.map(w => [w.id, w.active])));
 const switchesBefore = await switches();
@@ -363,6 +367,34 @@ const switchesBefore = await switches();
     await page.mouse.click(4, 4);
     await pause(page);
     same('and so does the backdrop, like every dialog of the app', [await isOpen(page), await focusId(page)], [false, 'crewCheckEntry']);
+    same('opened, read, tabbed through and shut four times: not a byte of the disk moved', await disk(page), diskFresh);
+}
+
+{
+    // THE FORM'S OWN PROBE. The worker's form - by any road - asks, the first time it opens in
+    // a session, whether this phone can record where a man was made (canRecordProvenance,
+    // js/sync/sync.js): one optional key, farkad:prov:probe, and the write tick that every
+    // write moves. That is the form's, not the dialog's; so the form is opened here once the
+    // app's own way - his row's «עוד ⋯», «עריכת פרטים», «ביטול» - the keys it moves are named,
+    // and the doors below are held against the disk as that leaves it.
+    suite('11. the worker\'s form writes its own once-a-session probe, by the app\'s own road');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator('#workerList .roster-row[data-worker-id="w_01"] .crew-edit').tap();
+    await pause(page, 400);
+    await page.locator('#askChoices').getByRole('button', { name: 'עריכת פרטים', exact: true }).tap();
+    await pause(page, 400);
+    same('his form opened by «עוד ⋯» ← «עריכת פרטים»', await page.evaluate(() => [document.getElementById('workerFormModal').style.display,
+        document.getElementById('workerFormName').value]), ['flex', 'דוגמה אחת']);
+    await page.locator('#workerFormModal button[onclick="closeWorkerForm()"]').tap();
+    await pause(page, 400);
+    const opened = await disk(page);
+    const moved = (() => { const a = JSON.parse(diskFresh); const b = JSON.parse(opened);
+        return [...new Set(Object.keys(a).concat(Object.keys(b)))].filter(key => a[key] !== b[key])
+            .map(key => key.replace(/^farkad:writeTick:tab:.*$/, 'farkad:writeTick:tab:*')).sort(); })();
+    same('the only keys it moved are its provenance probe and the write tick', moved,
+        ['farkad:prov:probe', 'farkad:writeTick', 'farkad:writeTick:tab:*']);
+    same('and the record is the record', await record(page), recordBefore);
+    diskBefore = opened;
 }
 
 {
@@ -380,8 +412,15 @@ const switchesBefore = await switches();
 // ================================================================== 12. every door
 
 const chip = (kind, id, site) => page.locator(`#crewCheckList [data-crewcheck-focus="${kind}:${site ? 'p' : 'w'}:${id}"]`);
+// The dialog opened the way its button opens it - the button has the keyboard first, as a tap
+// leaves it - so the focus the app gives back is the button's.
 async function openFresh() {
-    await page.evaluate(() => { if (crewCheckIsOpen()) closeCrewCheck(); window.scrollTo(0, 0); openCrewCheck(); });
+    await page.evaluate(() => {
+        if (crewCheckIsOpen()) closeCrewCheck();
+        window.scrollTo(0, 0);
+        document.getElementById('crewCheckEntry').focus({ preventScroll: true });
+        openCrewCheck();
+    });
     await pause(page, 120);
 }
 // Where a row landed: on the glass between the top bar and the tab bar, marked, and what has
@@ -481,6 +520,8 @@ const landing = (rowSelector, key, id) => page.evaluate(([rowSelector, key, id])
     same('and he is landed on', [at && at.onGlass, at && at.marked, at && at.focus], [true, true, 'btn-secondary worker-card-open']);
 
     suite('12. a man gone from the record when his chip is pressed: nothing opens');
+    // The mark the landing above put on his row lasts 2.5 s; it is let go first.
+    await page.waitForTimeout(2600);
     await openFresh();
     await page.evaluate(() => { window.__gone = State.schedule.workers.find(w => w.id === 'w_12');
         State.schedule.workers = State.schedule.workers.filter(w => w.id !== 'w_12'); window.scrollTo(0, 0); });
@@ -506,7 +547,8 @@ const landing = (rowSelector, key, id) => page.evaluate(([rowSelector, key, id])
 // pointerdowns is what counts, and a pair it saw outside [gap - 60, gap + 40] (or, inside the
 // hold, at GUARD - 5 or later) is VOID: whatever it did is undone and it is made again, so a
 // machine that delayed the second finger past the hold is never taken for the app letting it
-// through. The driver's own latency is about 20 ms, so the second tap is aimed 25 ms early.
+// through. A slow trial (350 ms and later) must also be seen at least 10 ms past WALK_BOUNCE_MS,
+// so the page's own rule for a bounce (js/ui/sheet.js) is never what held it - only the hold.
 // Each attempt carries its own baseline: `before` is the disk as that attempt began.
 const activeFlags = () => page.evaluate(() => JSON.stringify(State.schedule.workers.map(w => [w.id, w.active])));
 async function undoAttempt(flags) {
@@ -534,14 +576,15 @@ async function twoTaps(chipLocator, target, gap) {
         await page.touchscreen.tap(at.x, at.y);
         const point = typeof target === 'function' ? await target(at) : (target || at);
         if (!point) return { missing: true };
-        const wait = started + gap - 25 - Date.now();
+        const wait = started + gap - Date.now();
         if (wait > 0) await page.waitForTimeout(wait);
         const under = await page.evaluate(({ x, y }) => { const node = document.elementFromPoint(x, y);
             const hit = node && node.closest('button'); return hit ? `${hit.className}|${hit.textContent.trim().slice(0, 20)}` : (node ? node.id || node.className : null); }, point);
         await page.touchscreen.tap(point.x, point.y);
         await pause(page, 250);
         const seen = await page.evaluate(() => { const d = window.__downs; return d.length > 1 ? Math.round(d[d.length - 1] - d[d.length - 2]) : null; });
-        const inside = gap < GUARD ? seen !== null && seen >= gap - 60 && seen <= Math.min(gap + 40, GUARD - 5)
+        const floor = gap >= 350 ? Math.max(gap - 60, WALK_BOUNCE + 10) : gap - 60;
+        const inside = gap < GUARD ? seen !== null && seen >= floor && seen <= Math.min(gap + 40, GUARD - 5)
             : seen !== null && seen >= GUARD + 20 && seen <= gap + 100;
         if (inside) return { under, seen, before, attempts: attempt + 1 };
         await undoAttempt(flags);
@@ -584,6 +627,8 @@ const saveOnGlass = () => page.evaluate(() => {
 
 {
     suite('13. a double tap on a door is one tap: the second press is the page\'s to spend');
+    same('the two windows these trials are timed against are the app\'s own', await page.evaluate(() => [DOUBLE_TAP_GUARD_MS, WALK_BOUNCE_MS]),
+        [GUARD, WALK_BOUNCE]);
     for (const [kind, id] of [['idle', 'w_08'], ['noRate', 'w_02']]) {
         const done = await twoTaps(chip(kind, id), null, 120);
         check(`${kind}: the two presses were a double tap`, !done.failed && done.seen < 300, JSON.stringify({ seen: done.seen, under: done.under }));
