@@ -10,9 +10,11 @@
 //
 // THE RULE. The owner asked (2026-11-19) for the update to come with no press. It comes at the
 // next launch only: a fresh page, a build waiting, nothing pressed or typed since the page
-// loaded, midEdit() false - then a cover over the glass, skip-waiting to that worker, and a reload
-// once THAT worker has taken over and is activated; 12 s without that and the cover comes down,
-// the banner offers it, and the page never reloads by itself after. Everything else is v204's.
+// loaded, midEdit() false, and no other window of the app (asked of the worker) - then a cover
+// over the glass, skip-waiting to that worker, and a reload once THAT worker has taken over and
+// is activated and nothing came up under the cover; any failure, or 12 s, and the cover comes
+// down, the banner offers it, and the page never reloads by itself after. Everything else is
+// v204's. The third review of v205 (on bdaed5e) is the last block of sections, each red there.
 // Two candidates that reloaded a page in use (684c0f2, 81ca7a3) were stopped by review; the last
 // sections hold that none of what they did is left: a leaving or a return reloads nothing.
 
@@ -26,7 +28,7 @@ const RealDate = Date;
 
 // ================================================================== a phone, in a context
 
-function device({ controlledAtLoad = true, waitingAtLoad = true } = {}) {
+function device({ controlledAtLoad = true, waitingAtLoad = true, others = 0, answers = true, channels = true } = {}) {
     let clock = new RealDate(2026, 10, 19, 10, 0).getTime();
     let serial = 0;
     const timers = [];
@@ -56,11 +58,12 @@ function device({ controlledAtLoad = true, waitingAtLoad = true } = {}) {
         const listeners = {};
         const made = Object.assign({
             id, tagName: 'DIV', value: '', style: { display: '' }, children: [], attrs: {}, dataset: {},
-            textContent: '', hidden: false, blurred: 0,
+            textContent: '', hidden: false, blurred: 0, isConnected: true,
             classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c) },
             appendChild(child) { this.children.push(child); return child; },
             setAttribute(name, value) { this.attrs[name] = String(value); },
             getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; },
+            removeAttribute(name) { delete this.attrs[name]; },
             addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
             blur() { this.blurred += 1; if (document.activeElement === this) document.activeElement = null; },
             dispatch(type, event) { [...(listeners[type] || [])].forEach(fn => fn(event)); },
@@ -71,15 +74,27 @@ function device({ controlledAtLoad = true, waitingAtLoad = true } = {}) {
     };
     const banner = node('updateBanner', { style: { display: 'none' } });
     const cover = node('launchCover', { hidden: true });
+    const dayView = node('dayView');
+    const script = node(null, { tagName: 'SCRIPT' });
+    const body = node('body', { children: [dayView, banner, cover, script] });
     const panels = ['settingsPanel', 'transportPanel', 'journeyPanel', 'reorderPanel', 'dayDrawer'].map(id => node(id));
     const modals = [];
 
     const posted = [];
+    // The worker's answer to the launch's question, as sw.js gives it: on the port the page
+    // opened, a moment later. `others` other windows; no answer at all when `answers` is false.
+    const answer = { others, answers };
     const worker = (name, state) => {
         const listeners = {};
         return {
             name, state,
-            postMessage(message) { posted.push({ t: clock, to: name, message }); },
+            postMessage(message, ports) {
+                posted.push({ t: clock, to: name, message });
+                if (message && message.type === 'other-windows' && ports && ports[0] && answer.answers) {
+                    const port = ports[0];
+                    Promise.resolve().then(() => port.postMessage({ type: 'other-windows', others: answer.others }));
+                }
+            },
             addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
             removeEventListener(type, fn) { listeners[type] = (listeners[type] || []).filter(f => f !== fn); },
             become(next) { this.state = next; [...(listeners.statechange || [])].forEach(fn => fn({})); }
@@ -106,6 +121,7 @@ function device({ controlledAtLoad = true, waitingAtLoad = true } = {}) {
         visibilityState: 'visible',
         hidden: false,
         activeElement: null,
+        body,
         addEventListener: (type, fn) => on(bags.document, type, fn),
         getElementById: id => byId.get(id) || null,
         querySelectorAll: selector => (selector === '.modal' ? modals : [])
@@ -129,9 +145,20 @@ function device({ controlledAtLoad = true, waitingAtLoad = true } = {}) {
         clear: n => { n.children = []; },
         el: (tag, cls, text) => ({ tag, text }),
         button: (label, cls, fn) => ({ label, onclick: fn }),
-        askTell: () => {},
+        askTell: text => { told.push(text); },
         settingsSendTo: () => {}
     };
+    const told = [];
+    if (channels) {
+        ctx.MessageChannel = class {
+            constructor() {
+                const one = { onmessage: null };
+                const two = { postMessage: data => { if (typeof one.onmessage === 'function') one.onmessage({ data }); } };
+                this.port1 = one;
+                this.port2 = two;
+            }
+        };
+    }
     vm.createContext(ctx);
     vm.runInContext(OFFLINE, ctx);
 
@@ -153,6 +180,7 @@ function device({ controlledAtLoad = true, waitingAtLoad = true } = {}) {
         fire(bags.container, 'controllerchange');
     };
     const asked = () => posted.filter(p => p.message === 'skip-waiting');
+    const questions = () => posted.filter(p => p.message && p.message.type === 'other-windows');
     const openModal = () => { const m = node('dialog' + modals.length, { style: { display: 'flex' } }); modals.push(m); return m; };
     const covered = () => cover.hidden === false;
     const bannerUp = () => banner.style.display === '';
@@ -161,8 +189,9 @@ function device({ controlledAtLoad = true, waitingAtLoad = true } = {}) {
         if (b) b.onclick();
         return Boolean(b);
     };
-    return { ctx, tick, bags, fire, hide, show, press, key, handover, asked, posted, reloads, banner, cover, panels,
-        modals, openModal, node, registration, container, old, fresh, document, covered, bannerUp, pressBanner, session, event };
+    return { ctx, tick, bags, fire, hide, show, press, key, handover, asked, questions, posted, reloads, banner, cover, panels,
+        modals, openModal, node, registration, container, old, fresh, worker, document, covered, bannerUp, pressBanner, session,
+        event, dayView, script, answer, told };
 }
 
 const flush = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
@@ -200,6 +229,7 @@ async function launched(options = {}, before = null) {
     check('nothing waiting at the start: no cover', !f.covered());
     f.registration.waiting = f.fresh;
     f.tick(1500);
+    await flush();                                       // the worker's answer to the question
     check('the waiting build found at the re-check: the cover', f.covered() && f.asked().length === 1);
 }
 
@@ -362,6 +392,135 @@ async function launched(options = {}, before = null) {
     leaveAndCome(quiet);
     check('a build that arrived while the page was in use: a leaving and a return ask nothing, reload nothing - the banner offers it',
         quiet.asked().length === 0 && quiet.reloads.length === 0 && quiet.bannerUp());
+}
+
+// ================================================================== the third review (bdaed5e)
+{
+    suite('P1 (third review): a launch with another window of the app open takes nothing - the banner, as in v204');
+
+    const d = await launched({ others: 1 });
+    same('the worker was asked whether this is the only window, once', d.questions().length, 1);
+    same('another window answered: nothing asked of the waiting build', d.asked().length, 0);
+    check('the cover came down, and the banner offers the update', !d.covered() && d.bannerUp());
+    d.tick(60000);
+    same('a minute on, nothing reloaded', d.reloads.length, 0);
+    // The other window presses «רענן עכשיו» later: this window catches up by law 7, v204's way.
+    d.handover('activated');
+    d.tick(500);
+    same('a press in the other window later catches this one up, as in v204', d.reloads.length, 1);
+
+    const quiet = await launched({ answers: false });
+    check('no answer from the worker: the cover is up while it waits', quiet.covered());
+    quiet.tick(1000);
+    check('a second and no answer: the cover down, the banner, nothing asked', !quiet.covered() && quiet.bannerUp() && quiet.asked().length === 0);
+
+    const none = await launched({ channels: false });
+    check('no way to ask (no MessageChannel): the banner, nothing asked', !none.covered() && none.bannerUp() && none.asked().length === 0);
+
+    const alone = await launched({ others: 0 });
+    check('the only window: the build asked to take over, the cover still up', alone.covered() && alone.asked().length === 1);
+}
+
+{
+    suite('P2 (third review): the build made redundant under the cover ends the launch at once, and the banner\'s press reaches the newer one');
+
+    const d = await launched();
+    given('the launch asked the waiting build', d.asked().length === 1);
+    d.tick(2000);
+    // A newer build installs under the cover: the one asked becomes redundant.
+    const newer = d.worker('newer', 'installed');
+    d.registration.waiting = newer;
+    d.fresh.become('redundant');
+    check('the cover comes down at once, not at 12 s', !d.covered());
+    check('the banner offers the update', d.bannerUp());
+    same('nothing reloaded', d.reloads.length, 0);
+    check('pressed: skip-waiting goes to the newer build, not the redundant one',
+        d.pressBanner('רענן עכשיו') && d.asked().map(p => p.to).join() === 'new,newer', d.asked().map(p => p.to).join());
+
+    // The same through the press itself: a worker in hand that is redundant is not posted to.
+    const e = await launched({}, e => e.press());
+    given('a touched launch: the banner over the waiting build', e.bannerUp());
+    const later = e.worker('later', 'installed');
+    e.registration.waiting = later;
+    e.fresh.become('redundant');
+    e.pressBanner('רענן עכשיו');
+    same('the press goes to the build really waiting', e.asked().map(p => p.to), ['later']);
+}
+
+{
+    suite('P3-a (third review): a dialog raised under the cover is never reloaded away - the cover comes down instead');
+
+    const d = await launched();
+    d.tick(3000);
+    d.openModal();                                       // e.g. a lost close told, under the cover
+    d.handover('activating');
+    d.fresh.become('activated');
+    same('handed over and activated with a dialog up: no reload', d.reloads.length, 0);
+    check('the cover is down so the dialog is seen', !d.covered());
+    check('and the update stays offered: updateWaiting() and the banner', d.ctx.updateWaiting() && d.bannerUp());
+    d.modals[0].style.display = 'none';
+    check('once he has read it, a press reloads', d.pressBanner('רענן עכשיו') && d.reloads.length === 1);
+
+    const e = await launched();
+    e.handover('activated');
+    same('with no dialog, the launch reloads as before', e.reloads.length, 1);
+}
+
+{
+    suite('P3-b (third review): a handover after the give-up keeps the update offered, and a press made long before it still reloads');
+
+    const d = await launched();
+    d.tick(12100);
+    given('the launch gave up at 12 s', !d.covered() && d.bannerUp());
+    d.handover('activating');
+    d.fresh.become('activated');
+    same('the late handover and activation reload nothing by themselves', d.reloads.length, 0);
+    check('updateWaiting() still says an update is there', d.ctx.updateWaiting());
+    d.pressBanner('אחר כך');
+    d.hide();
+    d.show();
+    check('«אחר כך», then a return: the banner offers it again', d.bannerUp());
+    d.ctx.checkForUpdate();
+    await flush();
+    d.tick(1300);
+    await flush();
+    same('«בדוק עדכון» reloads, rather than call this build current', [d.reloads.length, d.told], [1, []]);
+
+    const e = await launched();
+    e.tick(12100);
+    e.pressBanner('אחר כך');
+    e.show();
+    check('a return before the handover still offers the waiting build', e.bannerUp());
+    e.pressBanner('רענן עכשיו');
+    e.tick(5000);                                        // the handover comes 5 s after the press
+    e.handover('activated');
+    e.tick(500);
+    same('a press made more than 4 s before the handover still reloads', e.reloads.length, 1);
+}
+
+{
+    suite('P3-d (third review): under the cover a click or typing dispatched on a control is stopped, and the page is hidden from assistive technology');
+
+    const d = await launched({ answers: false });       // the cover up, the question pending
+    given('covered', d.covered());
+    const click = d.event();
+    d.fire(d.bags.window, 'click', click);
+    check('a click dispatched on a control (as assistive technology does) is stopped on the window', click.prevented > 0 && click.stopped > 0);
+    const typed = d.event();
+    d.fire(d.bags.window, 'beforeinput', typed);
+    const input = d.event();
+    d.fire(d.bags.window, 'input', input);
+    check('and so are typed characters', typed.prevented > 0 && typed.stopped > 0 && input.stopped > 0);
+    same('the page under the cover is hidden from assistive technology, the cover itself is not',
+        [d.dayView.getAttribute('aria-hidden'), d.banner.getAttribute('aria-hidden'), d.cover.getAttribute('aria-hidden'), d.script.getAttribute('aria-hidden')],
+        ['true', 'true', null, null]);
+    d.dayView.setAttribute('aria-hidden', 'true');      // (it was put there by the cover)
+    d.tick(1000);
+    check('the cover down: the page back for assistive technology, clicks are his again',
+        !d.covered() && d.dayView.getAttribute('aria-hidden') === null && d.banner.getAttribute('aria-hidden') === null);
+    const after = d.event();
+    d.fire(d.bags.window, 'click', after);
+    same('a click after the cover is not stopped', after.prevented + after.stopped, 0);
 }
 
 report();

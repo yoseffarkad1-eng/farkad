@@ -70,7 +70,9 @@ for (const item of await deployedFrom(ROOT)) {
 // so a deploy that moved only one of them would be testing the crash banner instead.
 const BUILDS = {
     old: { app: 'v79', cache: 'farkad-v79' },
-    new: { app: 'v79-deploy-test', cache: 'farkad-v79-deploy-test' }
+    new: { app: 'v79-deploy-test', cache: 'farkad-v79-deploy-test' },
+    // v205: a build newer than `new`, put on the server while `new` waits (the third review's P2).
+    newer: { app: 'v79-deploy-test2', cache: 'farkad-v79-deploy-test2' }
 };
 
 async function deploy(build) {
@@ -583,29 +585,40 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
 // else. Two candidates that reloaded a page already in use (684c0f2, 81ca7a3) were stopped by
 // review; the last suites below hold that nothing of that is left.
 
-{
-    suite('v205: a fresh, untouched launch with a build waiting takes it under a cover, and the cover eats a tap and a key');
-
+// A phone with ONE window of the app, on the old build, in use, and the new build installed
+// and offered - the shape every launch below starts from (a launch with another window open is
+// refused, the third review's P1). `seed` runs on the page first; `deployed` is the build put
+// on the server after the offer (to have a newer one waiting behind it).
+async function onePhoneWithUpdate({ seed = null, holdSkip = false } = {}) {
     await deploy(BUILDS.old);
-    const first = await newPage();
-    await first.goto(`${BASE}/index.html`, { waitUntil: 'load' });
-    await controlled(first);
-    await first.reload({ waitUntil: 'load' });
-    await controlled(first);
-    await seedRima(first, 3);
-    const seeded = await rimaState(first);
-    given('a Rima count of 3 on today\'s record and on the disk', seeded.record === 3 && seeded.disk === 3, JSON.stringify(seeded));
-    await first.waitForTimeout(2000);
-    await first.keyboard.press('Shift');                 // the window open beside it is in use
+    const page = await newPage();
+    await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(page);
+    await page.reload({ waitUntil: 'load' });
+    await controlled(page);
+    if (seed) await seed(page);
+    await page.waitForTimeout(2000);
+    await page.keyboard.press('Shift');
+    if (holdSkip) await holdSkipWaiting(true);
     await deploy(BUILDS.new);
-    await first.evaluate(() => navigator.serviceWorker.getRegistration().then(registration => registration.update()));
-    given('the new build is installed and waiting',
-        await first.waitForSelector('#updateBanner:visible', { timeout: 25000 }).then(() => true, () => false));
+    await page.evaluate(() => navigator.serviceWorker.getRegistration().then(registration => registration.update()));
+    const offered = await page.waitForSelector('#updateBanner:visible', { timeout: 25000 }).then(() => true, () => false);
+    // The worker settles (the earlier reload's own work done) before the launch is made.
+    await page.waitForTimeout(3000);
+    return { page, offered };
+}
 
-    // The launch: the app opened again, and nobody has touched it.
-    const launch = await first.context().newPage();
-    launch.on('dialog', d => d.accept());
-    await launch.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+{
+    suite('v205: a launch of the only window - a reload nobody has touched - takes the waiting build under a cover, in a few seconds, and the cover eats a tap and a key');
+
+    const { page: launch, offered } = await onePhoneWithUpdate({ seed: page => seedRima(page, 3) });
+    given('the new build is installed and waiting', offered);
+    const seeded = await rimaState(launch);
+    given('a Rima count of 3 on today\'s record and on the disk', seeded.record === 3 && seeded.disk === 3, JSON.stringify(seeded));
+
+    // The launch: the app opened again - a reload - and nobody touches it.
+    const t0 = Date.now();
+    await launch.reload({ waitUntil: 'load' });
     const covered = await launch.waitForSelector('#launchCover:visible', { timeout: 10000 }).then(() => true, () => false);
     check('a cover goes over the glass at once', covered);
     if (covered) {
@@ -630,8 +643,12 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
             || (String(after.focused).indexOf('rima-input') === -1 && after.box === '3'), JSON.stringify(after));
     }
     const landed = await launch.waitForFunction(expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,
-        BUILDS.new.app, { timeout: 25000, polling: 200 }).then(() => true, () => false);
-    check('the launch hands over and reloads onto the new build', landed);
+        BUILDS.new.app, { timeout: 25000, polling: 100 }).then(() => Date.now() - t0, () => null);
+    check('the launch hands over and reloads onto the new build', landed !== null);
+    // The third review's P3-c: the cover was up about 8.5 s, 6 s of it sw.js's forget grace held
+    // inside the navigation's own lifetime; out of it, the handover comes in about 2.5 s.
+    check('in a few seconds - not the 8.5 s the forget grace held it to', landed !== null && landed <= 6000, `${landed} ms`);
+    console.log(`  (measured: the reload launch landed on the new build ${landed} ms after the reload)`);
     await controlled(launch);
     await launch.waitForTimeout(800);
     const built = await buildOnScreen(launch);
@@ -640,11 +657,7 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
     const rima = await rimaState(launch);
     same('the Rima count still 3 on the record and on the disk, the box reading 3, and nothing new queued for it',
         [rima.record, rima.disk, rima.box, rima.pending], [3, 3, '3', seeded.pending]);
-    // Law 7, as in v204: the window open beside it, idle, catches up at once.
-    const caught = await first.waitForFunction(expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,
-        BUILDS.new.app, { timeout: 15000, polling: 250 }).then(() => true, () => false);
-    check('and the other window, idle, caught up by itself, as in v204', caught);
-    await first.context().close();
+    await launch.context().close();
 }
 
 {
@@ -688,23 +701,9 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
 {
     suite('v205: a handover that never comes takes the cover down at 12 s, leaves the banner, and reloads nothing');
 
-    await deploy(BUILDS.old);
-    const first = await newPage();
-    await first.goto(`${BASE}/index.html`, { waitUntil: 'load' });
-    await controlled(first);
-    await first.reload({ waitUntil: 'load' });
-    await controlled(first);
-    await first.waitForTimeout(2000);
-    await first.keyboard.press('Shift');
-    await holdSkipWaiting(true);
-    await deploy(BUILDS.new);
-    await first.evaluate(() => navigator.serviceWorker.getRegistration().then(registration => registration.update()));
-    given('the new build is installed and waiting, deaf to skip-waiting',
-        await first.waitForSelector('#updateBanner:visible', { timeout: 25000 }).then(() => true, () => false));
-
-    const launch = await first.context().newPage();
-    launch.on('dialog', d => d.accept());
-    await launch.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    const { page: launch, offered } = await onePhoneWithUpdate({ holdSkip: true });
+    given('the new build is installed and waiting, deaf to skip-waiting', offered);
+    await launch.reload({ waitUntil: 'load' });
     const covered = await launch.waitForSelector('#launchCover:visible', { timeout: 10000 }).then(() => true, () => false);
     check('the untouched launch puts the cover up', covered);
     const upAt = Date.now();
@@ -716,8 +715,142 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
     await launch.waitForTimeout(5000);
     check('five seconds more: the same window, the old build - nothing reloaded it',
         (await launch.evaluate(() => window.__thisWindow === 'not reloaded' && APP_VERSION).catch(() => null)) === BUILDS.old.app);
-    await first.context().close();
+    await launch.context().close();
     await holdSkipWaiting(false);
+}
+
+// ---------------------------------------------------------------- the third review (bdaed5e)
+{
+    suite('v205, P1 of the third review: a launch with another window open takes nothing - that window keeps the advance being typed in it');
+
+    // Window A: on «מקדמות», «+ מקדמה חדשה», 500 typed, the focus on the empty note box -
+    // midEdit() is false there. The build waits. Window B is opened and nobody touches it.
+    await deploy(BUILDS.old);
+    const a = await newPage();
+    await a.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(a);
+    await a.reload({ waitUntil: 'load' });
+    await controlled(a);
+    await a.evaluate(() => {
+        State.schedule.workers = [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400 }];
+        State.schedule.places = [{ id: 'p_01', name: 'אתר צפון', active: true }];
+        State.commitRoster();
+        render();
+    });
+    await a.waitForTimeout(1500);
+    await a.keyboard.press('Shift');
+    await deploy(BUILDS.new);
+    await a.evaluate(() => navigator.serviceWorker.getRegistration().then(registration => registration.update()));
+    given('the new build is offered in A', await a.waitForSelector('#updateBanner:visible', { timeout: 25000 }).then(() => true, () => false));
+    await a.evaluate(() => { showView('advances'); showWorkerAdvances('w_01'); });
+    await a.waitForTimeout(300);
+    await a.getByRole('button', { name: '+ מקדמה חדשה' }).click();
+    await a.waitForTimeout(200);
+    await a.locator('.advance-form input').nth(0).fill('500');
+    await a.locator('.advance-form input').nth(2).click();
+    given('A: 500 typed, the focus on the empty note, midEdit() false',
+        (await a.evaluate(() => [document.querySelector('.advance-form input').value, midEdit()])).join() === '500,false');
+    await a.evaluate(() => { window.__thisWindow = 'A, not reloaded'; });
+    await a.waitForTimeout(3000);
+
+    const b = await a.context().newPage();
+    b.on('dialog', d => d.accept());
+    await b.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    const offeredInB = await b.waitForSelector('#updateBanner:visible', { timeout: 10000 }).then(() => true, () => false);
+    check('B, the second window, offers the update with the banner, as v204 did', offeredInB);
+    check('and no cover stands over it', (await b.locator('#launchCover').isVisible()) === false);
+    await b.waitForTimeout(6000);
+    same('A is the same window, on the old build, on «מקדמות» with the form open and its 500',
+        await a.evaluate(() => [window.__thisWindow, APP_VERSION, currentView, (document.querySelector('.advance-form input') || {}).value])
+            .catch(e => String(e)), ['A, not reloaded', BUILDS.old.app, 'advances', '500']);
+    same('and B too was not reloaded: the old build', await b.evaluate(() => APP_VERSION).catch(() => null), BUILDS.old.app);
+
+    // B closed, A - open, untouched since - is still counted: a window opened now takes nothing.
+    // (A window FROZEN in the background is counted the same way - it is on the browser's own
+    // list - but this harness cannot freeze one: measured, Page.setWebLifecycleState on a
+    // visible headless page is accepted and does nothing, its timers kept running.)
+    await b.close();
+    const c = await a.context().newPage();
+    c.on('dialog', d => d.accept());
+    await c.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    check('B closed, a window opened untouched still counts A, and offers the banner instead of taking the update',
+        await c.waitForSelector('#updateBanner:visible', { timeout: 10000 }).then(() => true, () => false));
+    await c.waitForTimeout(3000);
+    same('A is the same window with its 500, and C took nothing',
+        [await a.evaluate(() => [window.__thisWindow, (document.querySelector('.advance-form input') || {}).value]).catch(e => String(e)),
+            await c.evaluate(() => APP_VERSION).catch(() => null)],
+        [['A, not reloaded', '500'], BUILDS.old.app]);
+    await a.context().close();
+}
+
+{
+    suite('v205, P2 of the third review: a newer build installed under the cover ends the launch at once, and «רענן עכשיו» then reaches it');
+
+    const { page, offered } = await onePhoneWithUpdate();
+    given('the new build is waiting', offered);
+    await deploy(BUILDS.newer);                          // and a newer one is on the server
+    const t0 = Date.now();
+    await page.reload({ waitUntil: 'load' });
+    const covered = await page.waitForSelector('#launchCover:visible', { timeout: 10000 }).then(() => true, () => false);
+    given('the launch put the cover up', covered);
+    // The check the navigation makes by itself, asked again here so the newer build is surely
+    // installed under the cover: the build the launch asked becomes redundant.
+    await page.evaluate(() => navigator.serviceWorker.getRegistration().then(registration => registration.update())).catch(() => {});
+    const down = await page.waitForSelector('#launchCover', { state: 'hidden', timeout: 15000 }).then(() => Date.now() - t0, () => null);
+    check('the cover comes down as soon as the build it asked is redundant - well before 12 s', down !== null && down < 9000, `${down} ms`);
+    check('the banner offers the update', await page.locator('#updateBanner').isVisible().catch(() => false));
+    const [moved] = await Promise.all([
+        page.waitForNavigation({ timeout: 25000 }).then(() => true, () => false),
+        page.locator('#updateBanner button', { hasText: 'רענן עכשיו' }).click().catch(() => {})
+    ]);
+    check('a press of «רענן עכשיו» does something', moved);
+    const on = await page.waitForFunction(expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,
+        BUILDS.newer.app, { timeout: 25000, polling: 200 }).then(() => true, () => false);
+    check('and lands on the NEWER build', on, await page.evaluate(() => APP_VERSION).catch(() => '(unread)'));
+    await page.context().close();
+}
+
+{
+    suite('v205, P3-d of the third review: under the cover a click dispatched on a control (as assistive technology does) writes nothing, and the page is hidden from it');
+
+    const { page, offered } = await onePhoneWithUpdate({ seed: page => page.evaluate(() => {
+        State.schedule.workers = [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400 }, { id: 'w_02', name: 'משה', active: true, dailyRate: 400 }];
+        State.schedule.places = [{ id: 'p_01', name: 'אתר צפון', active: true }];
+        State.commitRoster();
+        State.commit(assignPlace(State.schedule, todayStr(), 'w_01', 'actual', 'p_01'));
+        State.commit(assignPlace(State.schedule, todayStr(), 'w_02', 'actual', 'p_01'));
+        showView('day');
+        if (typeof setDayMode === 'function') setDayMode('sites');
+        render();
+    }) });
+    given('the new build is waiting', offered);
+    const placed = page => page.evaluate(() => {
+        const disk = JSON.parse(localStorage.getItem('scheduleData:v2') || '{}');
+        const day = ((disk.days || {})[todayStr()] || {}).actual || {};
+        return { record: entriesFor(State.schedule, todayStr(), 'w_01', 'actual').map(entry => entry.placeId),
+            disk: ((day.w_01 || {}).entries || []).map(entry => entry.placeId) };
+    });
+    given('דוד is on אתר צפון, on the record and the disk', JSON.stringify(await placed(page)) === JSON.stringify({ record: ['p_01'], disk: ['p_01'] }));
+    await page.reload({ waitUntil: 'load' });
+    given('the launch put the cover up', await page.waitForSelector('#launchCover:visible', { timeout: 10000 }).then(() => true, () => false));
+    const under = await page.evaluate(() => {
+        const hidden = document.getElementById('dayView').closest('[aria-hidden="true"]') !== null
+            || document.getElementById('dayView').getAttribute('aria-hidden') === 'true';
+        const remove = document.querySelector('[aria-label^="הסר את"]');
+        if (remove) remove.click();                      // what VoiceOver's or TalkBack's activation dispatches
+        return { hidden, found: Boolean(remove), coverHidden: document.getElementById('launchCover').getAttribute('aria-hidden') };
+    }).catch(e => ({ error: String(e) }));
+    check('the day under the cover is hidden from assistive technology, the cover is not', under.hidden === true && under.coverHidden === null, JSON.stringify(under));
+    check('a remove button was there to be activated', under.found === true);
+    const right = await placed(page).catch(() => null);
+    same('its click wrote nothing: דוד still on אתר צפון, on the record and the disk', right === null ? null : right, { record: ['p_01'], disk: ['p_01'] });
+    const landed = await page.waitForFunction(expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,
+        BUILDS.new.app, { timeout: 25000, polling: 200 }).then(() => true, () => false);
+    check('the launch went on to the new build', landed);
+    await controlled(page);
+    await page.waitForTimeout(500);
+    same('and after it, דוד is still on אתר צפון', await placed(page), { record: ['p_01'], disk: ['p_01'] });
+    await page.context().close();
 }
 
 {
