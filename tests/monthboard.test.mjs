@@ -904,15 +904,81 @@ for (const seed of [11, 23, 37]) {
         && scripts.indexOf('js/ui/monthboard.js') > scripts.indexOf('js/ui/workercard.js') && scripts.indexOf('js/ui/monthboard.js') < scripts.indexOf('js/app.js'));
     const sw = source('sw.js');
     check('sw.js keeps it in the shell, after find.js', sw.includes("'./js/ui/find.js',\n    './js/ui/monthboard.js',"));
+    const branch = "if (weekPhoneMode === 'month' && typeof renderMonthBoard === 'function' && State.schedule.workers.length > 0) {\n        renderMonthBoard(root);\n        return;\n    }";
+    const draw = WEEK.slice(WEEK.indexOf('function renderWeek() {'));
     check('week.js asks for the door and the board through typeof, and nothing else of it',
         WEEK.includes("if (typeof monthBoardDoor === 'function') corner.appendChild(monthBoardDoor());")
-        && WEEK.includes("if (weekPhoneMode === 'month' && typeof renderMonthBoard === 'function') { renderMonthBoard(root); return; }")
-        && !/MONTH_BOARD_/.test(WEEK));
+        && WEEK.includes(branch) && !/MONTH_BOARD_/.test(WEEK));
+    check('and the board\'s branch stands before the week clears its section: the board reads where the reader was first',
+        draw.indexOf(branch) > 0 && draw.indexOf(branch) < draw.indexOf('clear(root);'));
     check('printout.js dispatches the kind \'month\' in two lines and names nothing else of it',
         PRINTOUT.includes("kind === 'month' ? (typeof readMonthPrintout === 'function' ? readMonthPrintout() : null)")
         && PRINTOUT.includes("kind === 'month' ? planMonthPrintout(spec, probe, family)")
         && (PRINTOUT.match(/Month/g) || []).length === 3);
     check('nothing in the board runs at load: no top-level call', !/^[A-Za-z_$][\w$]*\(/m.test(BOARD));
+}
+
+// ============================================================ one map of names per draw, and no week cell
+{
+    suite('a draw: one whole-record map of site names, and renderWeekCell never called');
+    const device = handPhone();
+    device.run(`window.__whole = 0; window.__weekCells = 0;
+        const realLabels = placeLabelsIn;
+        placeLabelsIn = function (schedule, from, to) { if (from === undefined) __whole += 1; return realLabels.apply(this, arguments); };
+        const realCell = renderWeekCell;
+        renderWeekCell = function () { __weekCells += 1; return realCell.apply(this, arguments); };`);
+    const draws = [['2026-10', null], ['2026-10', 'p_1'], ['2026-10', 'p_2'], ['2026-11', null], ['2026-12', null]];
+    const counted = draws.map(([key, place]) => {
+        device.run('__whole = 0; __weekCells = 0;');
+        drawBoard(device, key, place);
+        return [key, place, device.run('__whole'), device.run('__weekCells')];
+    });
+    same('every draw builds the names\' map over the whole record once - the map the week\'s cell uses - and calls the week\'s cell never',
+        counted, draws.map(([key, place]) => [key, place, 1, 0]));
+    device.run('__weekCells = 0;');
+    device.run('renderWeekCell(State.worker("w_1"), "2026-10-01")');
+    same('(and the spy does count the week\'s cell when it is called)', device.run('__weekCells'), 1);
+}
+
+// ============================================================ 3's one exception: an older closure
+//
+// A closure an older build wrote carries no periodTo, and frozenPeriodFor matches it to ANY
+// range that starts on its first day (js/model/schema.js) - so on a month whose first day is
+// that Friday, payrollReport answers the closure's frozen counts for the whole month. The
+// board follows the live record. May 2026 opens on a Friday.
+{
+    suite('the one exception: a month opening on a closed week recorded with no periodTo');
+    const device = withBoard(makeDevice({ deviceId: 'd_monthboard_legacy' }));
+    const s = device.State.schedule;
+    s.places = [{ id: 'p_1', name: 'הרצליה', active: true }];
+    s.workers = [
+        { id: 'w_1', name: 'אבי שבועי', active: true, dailyRate: 400, hourlyRate: 50, payCycles: '2026-04-03=weekly' },
+        { id: 'w_2', name: 'בני דו שבועי', active: true, dailyRate: 400, hourlyRate: 50 }
+    ];
+    ['2026-05-01', '2026-05-03', '2026-05-04', '2026-05-05'].forEach(date => device.call('assignPlace', s, date, 'w_1', 'actual', 'p_1'));
+    ['2026-05-04', '2026-05-11', '2026-05-12'].forEach(date => device.call('assignPlace', s, date, 'w_2', 'actual', 'p_1'));
+    // His week, closed by an older build on the 8th: four days, and no periodTo.
+    s.ledger = s.ledger || {};
+    s.ledger.advances = s.ledger.advances || {};
+    s.ledger.advances.l_legacy_close = { id: 'l_legacy_close', kind: 'closed', workerId: 'w_1', periodFrom: '2026-05-01',
+        at: '2026-05-08T09:00:00.000Z', by: 'd_older_build', gross: 1600,
+        basis: { attendanceDays: 4, payUnits: 4, normalDays: 4, doubleDays: 0, extraHours: 0, siteVisits: 4, absent: 0 } };
+    // Then a day of that week put right: he also worked the 6th.
+    device.call('assignPlace', s, '2026-05-06', 'w_1', 'actual', 'p_1');
+    given('May 2026 opens on a Friday', weekday('2026-05-01') === 5);
+    const facts = device.facts('2026-05');
+    const pay = payroll(device, '2026-05');
+    const board = id => facts.rows.find(row => row.workerId === id);
+    const filled = id => board(id).cells.filter(cell => cell.lines.length > 0).length;
+    same('payrollReport answers the closure\'s frozen four for the whole month', pay.find(one => one.id === 'w_1').days, 4);
+    same('the board answers the live record: five, his filled cells', [board('w_1').total, filled('w_1')], [5, 5]);
+    same('and the two differ by exactly the day put right', board('w_1').total - pay.find(one => one.id === 'w_1').days, 1);
+    same('the man with no such closure is payrollReport\'s exactly', [board('w_2').total, filled('w_2')], [pay.find(one => one.id === 'w_2').days, 3]);
+    // The same closure as this build writes it - with its periodTo - is frozen for its own week
+    // and no other, and the month is the live record on both.
+    s.ledger.advances.l_legacy_close.periodTo = '2026-05-07';
+    same('with its periodTo the closure freezes its own week only, and the month agrees with the board',
+        payroll(device, '2026-05').find(one => one.id === 'w_1').days, device.facts('2026-05').rows.find(row => row.workerId === 'w_1').total);
 }
 
 // ============================================================ 9. the cost
@@ -988,10 +1054,16 @@ for (const seed of [11, 23, 37]) {
         same(`${label}: each block's colour is the one the screen painted it`,
             spec.rows.flatMap(row => row.cells.flatMap(cell => cell.lines.map(line => line.color))),
             facts.rows.flatMap(row => row.cells.flatMap(cell => cell.lines.map(line => device.call('siteColorVar', line.placeId)))));
-        // NOT «בלי עובדי רימא»: the owner's table, screen and workbook only (v167).
-        same(`${label}: the foot rows - every one but the site's own men`, spec.foot.map(row => [row.kind, row.label, row.counts, row.total]),
-            facts.foot.filter(row => row.kind !== 'own').map(row => [row.kind, row.label,
+        // NOT «בלי עובדי רימא»: the owner's figure, screen and workbook only (v167).
+        same(`${label}: every foot row says whether it leaves the phone - all but the site's own men`,
+            facts.foot.map(row => [row.kind, row.paper]), facts.foot.map(row => [row.kind, row.kind !== 'own']));
+        same(`${label}: the foot rows read off the board are the ones that leave it`, spec.foot.map(row => [row.kind, row.label, row.counts, row.total]),
+            facts.foot.filter(row => row.paper).map(row => [row.kind, row.label,
                 facts.dates.map(day => (row.byDate[day.date] > 0 ? String(row.byDate[day.date]) : '')), String(row.total)]));
+        same(`${label}: no «בלי עובדי רימא» row and no second worker-site-day line in the picture`,
+            [spec.foot.filter(row => row.label === device.global('NO_RIMA_TITLE')).length,
+                spec.foot.filter(row => row.label === device.global('NO_RIMA_TOTAL')).length],
+            [0, place === null ? 0 : 1]);
         same(`${label}: the legend`, spec.legend.map(site => [site.placeId, site.letters, site.mark, site.name]),
             facts.legend.map(site => [site.placeId, site.letters, site.mark, site.name]));
         same(`${label}: the notes - the marks, then each count's`, spec.notes,

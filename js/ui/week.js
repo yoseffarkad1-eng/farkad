@@ -54,6 +54,13 @@ function renderWeek() {
     const root = document.getElementById('weekView');
     if (!root) return;
 
+    // «לוח חודשי» (js/ui/monthboard.js): the board in place of the week's header, its phone panel
+    // and its table, on every width - drawn by its own function, which reads where the reader was
+    // before it clears. A build without the file has no door, so never this mode.
+    if (weekPhoneMode === 'month' && typeof renderMonthBoard === 'function' && State.schedule.workers.length > 0) {
+        renderMonthBoard(root);
+        return;
+    }
     clear(root);
     root.classList.toggle('week-phone-grid', weekPhoneMode === 'grid');
     // NO CREW AT ALL: there is no week to step through, print or share, in this week or
@@ -66,9 +73,6 @@ function renderWeek() {
             () => { showView('roster'); showAddWorkerModal(); }));
         return;
     }
-    // «לוח חודשי»: the board in place of the week's header, its phone panel and its table,
-    // on every width. A build without the file has no door, so never this mode.
-    if (weekPhoneMode === 'month' && typeof renderMonthBoard === 'function') { renderMonthBoard(root); return; }
     const shown = weekDates().filter(date => parseLocalDate(date).getDay() !== 6);
     root.appendChild(renderWeekHeader(weekWorkers(shown).length === 0));
 

@@ -4961,14 +4961,16 @@ body.day-tight .topbar { margin-bottom: 2px; }
    width of the sheet with the names a sixth of it, every cell its site's colour with the
    board's letters in white - paper does not read css/design.css, so the letter is written
    here - the doubled day's dot, the extra hours' plus and an absence's dash, then the legend
-   and the notes. Its own controls, the door in the week's corner and the site's own men
-   («בלי עובדי רימא», screen only since v167: the paper is what the client is handed) are not
-   on it. A long crew runs to a second page with the dates repeated; a man is never cut
-   across two. The week's paper is untouched (tests/week-print.browser.mjs). */
+   and the notes. Its own controls and the door in the week's corner are not on it, and
+   neither is the site's own men's row («בלי עובדי רימא»): the owner's figure, screen and
+   workbook only (v167) because paper is what gets handed on - hidden by its kind, with
+   .report-norima's own `!important`. A small crew is one page; a larger one runs on to the
+   next with the dates' header repeated, and no man is cut across two (tests/monthboard.
+   browser.mjs counts the pages). The week's paper is untouched (tests/week-print.browser.mjs). */
 .month-print-title { display: none; }
 @media print {
     .month-board-door { display: none !important; }
-    #weekView .month-board-head, #weekView .month-board-foot-own { display: none !important; }
+    #weekView .month-board-head, .month-board tr[data-kind="own"] { display: none !important; }
     #weekView .month-print-title { display: block; font-size: 15pt; margin: 0 0 3mm; color: #000; }
     #weekView .month-board-scroll { overflow: visible; padding-bottom: 0; margin-inline: 0; }
     #weekView .month-board-strip::after { display: none; }
@@ -4981,10 +4983,12 @@ body.day-tight .topbar { margin-bottom: 2px; }
     #weekView .month-board-table tr { break-inside: avoid; }
     #weekView .month-board-table tfoot td { background: #eee; font-size: 7.5pt; font-weight: 700; }
     #weekView .month-board-table .month-board-saturday, #weekView .month-board .col-rest { background: #eee; opacity: 1; }
-    #weekView .month-board-day, #weekView .month-board-who { display: block; width: auto; min-width: 0; min-height: 0; padding: 0; margin: 0; border: 0; background: none; color: #000; font: inherit; text-align: inherit; white-space: normal; }
-    #weekView .month-board-day { font-size: 7pt; line-height: 1.15; }
+    #weekView .month-board-who { display: block; width: auto; min-width: 0; min-height: 0; padding: 0; margin: 0; border: 0; background: none; color: #000; font: inherit; font-size: 8pt; font-weight: 600; text-align: inherit; white-space: normal; overflow-wrap: anywhere; }
+    /* A date's button is no box on paper, only its words. The dates' row is repeated at the
+       top of every page, and Chrome painted the repeated row's buttons as nothing - measured:
+       the second page of a 40-man month had its corner and «נוכחות» and blank dates. */
+    #weekView .month-board-day { display: contents; color: #000; font-size: 7pt; line-height: 1.15; }
     #weekView .month-board-day > span { display: block; }
-    #weekView .month-board-who { font-size: 8pt; font-weight: 600; overflow-wrap: anywhere; }
     #weekView .month-board-who-name { display: inline; overflow: visible; }
     #weekView .month-board-badge { display: inline; margin: 0 2pt 0 0; font-size: 6.5pt; }
     #weekView .month-board .week-cell .cell-line { display: flex; align-items: center; justify-content: center; gap: 1pt; width: auto; max-width: 100%; height: 9pt; min-height: 0; padding: 0 1pt; margin: .5pt auto; border-radius: 2pt; white-space: nowrap; }

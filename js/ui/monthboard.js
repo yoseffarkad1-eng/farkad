@@ -2,10 +2,12 @@
 //
 // The week tab shows one week of the crew, a man's card one man's month, «סיכום חודש» counts
 // a month - and nothing showed THE CREW'S MONTH: who worked where on every day of it. That is
-// the attendance sheet a client, an accountant or a man who disputes his days asks for at the
-// month's end. Narrowed to one site it is the client's appendix to the invoice: the men who
-// stood on his site, Rima's count and the billed worker-site days, day by day - the numbers
-// «לפי אתר» bills, cell for cell.
+// the owner's and the accountant's attendance sheet: the one read at the month's end, and the
+// one a man's dispute about his days is settled with. Narrowed to one site it is who worked
+// there, day by day, with the site's counts at its foot - the numbers «לפי אתר» counts, cell
+// for cell. IT NAMES EVERY MAN, so it is not paper for a client: the app's client paper names
+// nobody (css/app.css, body.client-scoped), and whether a client is shown the crew's names is
+// the owner's to decide.
 //
 // A THIRD MODE OF THE WEEK TAB, NOT A DIALOG. Paper never shows a dialog (css/app.css hides
 // everything but the screen's own section in print), and the A4 landscape page and the
@@ -85,13 +87,10 @@ const MONTH_BOARD_REUSED = Object.freeze({
 // ---------------------------------------------------------------- memory
 //
 // Which month is on the board, as 'YYYY-MM', and which site it is narrowed to (null: every
-// site). Memory only, like the week's own mode: nothing about them is kept anywhere.
+// site). Memory only, like the week's own mode: nothing about them is kept anywhere, and an
+// update's reload lands on the week's grid.
 let MONTH_BOARD_KEY = null;
 let MONTH_BOARD_PLACE = null;
-// Where the reader had pushed the grid to, for the board on screen - so a redraw (a record
-// adopted from another phone, a commit) leaves the days where they were. Cleared at the
-// door, so the board opens on today's column again.
-let MONTH_BOARD_SCROLL = null;
 
 // ---------------------------------------------------------------- the reading
 
@@ -256,6 +255,13 @@ function monthBoardFacts(key, placeId) {
             notes.push({ kind: 'yosef', text: YOSEF_GEVES_NOTE });
         }
     }
+
+    // WHAT LEAVES THE PHONE. «בלי עובדי רימא» is the owner's figure, on the screen and in the
+    // workbook only - his ruling (v167, «شاشة وإكسل بس»): paper and the picture are what gets
+    // handed on, and css/app.css keeps .report-norima off the reports' paper the same way. So
+    // the 'own' row is the one row the paper and the picture never carry: css/app.css hides it
+    // by its kind, and readMonthPrintout leaves it out by its kind.
+    foot.forEach(row => { row.paper = row.kind !== 'own'; });
 
     // THE FILTER'S SITES: every site with a billed day in the month, in the invoice's order -
     // and the site chosen, if this month billed nothing there, so the box says what the board
@@ -528,44 +534,86 @@ function drawMonthBoard(facts) {
     return board;
 }
 
-// The grid opens with today's column on the glass when the board is on this month, and a
-// redraw of the same board keeps the place the reader had pushed it to.
-function monthBoardScrollTo(board, facts) {
-    const scroller = board.querySelector ? board.querySelector('.month-board-scroll') : null;
-    if (!scroller || typeof scroller.getBoundingClientRect !== 'function') return;
+// WHERE THE READER WAS, read off the board on screen before it is cleared. render() rebuilds
+// #weekView on every commit and on every record adopted from another phone, and a board that
+// went back to its first column and the top of the page under a man reading the 23rd would
+// have moved under his finger for nothing he did: the grid's sideways place, the page's
+// place and the control the keyboard was on are put back after the redraw.
+function monthBoardHeld(root) {
+    const board = root && root.querySelector ? root.querySelector('.month-board') : null;
+    if (!board) return null;
+    const scroller = board.querySelector('.month-board-scroll');
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    let focus = null;
+    if (active && active !== board && board.contains(active)) {
+        const row = active.closest('tr[data-worker-id]');
+        const cell = active.closest('td.week-cell[data-date]');
+        const date = active.closest('th[data-date]');
+        if (active.dataset && active.dataset.monthBoard) focus = { control: active.dataset.monthBoard };
+        else if (active.id) focus = { id: active.id };
+        else if (cell && row) focus = { worker: row.dataset.workerId, date: cell.dataset.date };
+        else if (date) focus = { date: date.dataset.date };
+        else if (row) focus = { worker: row.dataset.workerId };
+    }
+    return {
+        key: board.dataset.key,
+        place: board.dataset.place || null,
+        left: scroller ? scroller.scrollLeft : null,
+        top: typeof window !== 'undefined' && typeof window.scrollY === 'number' ? window.scrollY : null,
+        focus
+    };
+}
+
+// The place put back - or, for a board that was not on screen a moment ago (the door, a new
+// month, a new site), the grid opened on today's column when the board is on this month and
+// on its first date otherwise.
+function monthBoardPutBack(board, facts, held) {
+    const scroller = board.querySelector('.month-board-scroll');
     const place = facts.place ? facts.place.id : null;
-    const kept = MONTH_BOARD_SCROLL && MONTH_BOARD_SCROLL.key === facts.key && MONTH_BOARD_SCROLL.place === place
-        ? MONTH_BOARD_SCROLL.left : null;
-    if (kept !== null) {
-        scroller.scrollLeft = kept;
-    } else if (facts.today) {
-        const th = scroller.querySelector(`th[data-date="${facts.today}"]`);
-        const corner = scroller.querySelector('.month-board-corner');
-        if (th) {
+    const same = Boolean(held) && held.key === facts.key && held.place === place;
+    if (scroller && typeof scroller.getBoundingClientRect === 'function') {
+        const th = facts.today ? scroller.querySelector(`th[data-date="${facts.today}"]`) : null;
+        if (same && held.left !== null) {
+            scroller.scrollLeft = held.left;
+        } else if (th) {
             // The days are read in what the pinned names leave of the box: on the left of
             // them in a right-to-left page, on the right in the other.
+            const corner = scroller.querySelector('.month-board-corner');
             const box = scroller.getBoundingClientRect();
             const names = corner ? corner.getBoundingClientRect().width : 0;
             const rtl = getComputedStyle(scroller).direction === 'rtl';
             const middle = rtl ? (box.left + box.right - names) / 2 : (box.left + names + box.right) / 2;
             const column = th.getBoundingClientRect();
             scroller.scrollLeft += (column.left + column.width / 2) - middle;
+        } else {
+            scroller.scrollLeft = 0;
         }
     }
-    MONTH_BOARD_SCROLL = { key: facts.key, place, left: scroller.scrollLeft };
-    scroller.addEventListener('scroll', () => {
-        MONTH_BOARD_SCROLL = { key: facts.key, place, left: scroller.scrollLeft };
-    }, { passive: true });
+    if (held && held.top !== null && typeof window.scrollTo === 'function' && Math.abs(window.scrollY - held.top) > 0.5) {
+        window.scrollTo(window.scrollX, held.top);
+    }
+    if (!held || !held.focus) return;
+    const want = held.focus;
+    const node = want.control ? board.querySelector(`[data-month-board="${want.control}"]`)
+        : want.id ? document.getElementById(want.id)
+        : want.worker && want.date ? board.querySelector(`tr[data-worker-id="${want.worker}"] td.week-cell[data-date="${want.date}"]`)
+        : want.date ? board.querySelector(`th[data-date="${want.date}"] .month-board-day`)
+        : board.querySelector(`tr[data-worker-id="${want.worker}"] .month-board-who`);
+    if (node && typeof node.focus === 'function' && board.contains(node)) node.focus({ preventScroll: true });
 }
 
 // js/ui/week.js calls this, in the month mode, in place of the week's header, its phone
-// panel and its table - on every width. The week's mode is what says the board is on.
+// panel and its table - on every width; the week's mode is what says the board is on. It
+// clears the week's section itself, after reading where the reader was.
 function renderMonthBoard(root) {
     if (!monthBoardIsKey(MONTH_BOARD_KEY)) MONTH_BOARD_KEY = monthSummaryKeyOf(todayStr());
+    const held = monthBoardHeld(root);
+    clear(root);
+    root.classList.toggle('week-phone-grid', false);
     const facts = monthBoardFacts(MONTH_BOARD_KEY, MONTH_BOARD_PLACE);
     const board = drawMonthBoard(facts);
     root.appendChild(board);
-    monthBoardScrollTo(board, facts);
+    monthBoardPutBack(board, facts, held);
     return board;
 }
 
@@ -588,21 +636,26 @@ function monthBoardFromWeek() {
     const today = todayStr();
     MONTH_BOARD_KEY = monthSummaryKeyOf(dates.includes(today) ? today : dates[0]);
     MONTH_BOARD_PLACE = null;
-    MONTH_BOARD_SCROLL = null;
     setWeekPhoneMode('month');
     monthBoardToTop();
 }
 
 // For «מה חדש» and the other readings: the week tab on the board of `key` ('YYYY-MM', null
-// for this month), narrowed to `placeId` (null for every site), entered at its title. The
-// caller closes its own dialog first. False when there was no board to show (no crew, or a
-// reorder draft that has to be answered before the tab may change).
+// for this month), narrowed to `placeId` (null for every site), entered at its title. False
+// when there was no board to show (no crew, or a reorder draft that has to be answered
+// before the tab may change).
+//
+// THE CALLER SHUTS ITS OWN DIALOG FIRST AND CALLS THIS ONE TASK LATER (setTimeout(go, 0), the
+// rule whatsNewGo keeps in js/ui/whatsnew.js). The board is not a .modal, and js/ui/modal.js
+// gives the focus back to the shut dialog's opener at the microtask checkpoint after the block
+// that shut it - which, in the same task as this call, would take it off the board's title.
+// It does not defer by itself: the door in the week's corner calls straight through, and must
+// focus at once.
 function openMonthBoard(key, placeId) {
     showView('week');
     if (typeof currentView !== 'undefined' && currentView !== 'week') return false;
     MONTH_BOARD_KEY = monthBoardIsKey(key) ? key : monthSummaryKeyOf(todayStr());
     MONTH_BOARD_PLACE = placeId === null || placeId === undefined || placeId === '' ? null : String(placeId);
-    MONTH_BOARD_SCROLL = null;
     setWeekPhoneMode('month');
     monthBoardToTop();
     return Boolean(document.getElementById('monthBoardTitle'));
@@ -703,11 +756,12 @@ function readMonthPrintout() {
         })),
         total: text(tr.querySelector('.month-board-total'))
     }));
-    // NOT the site's own men («בלי עובדי רימא»): the owner's own table, screen and workbook
-    // only since v167 («شاشة وإكسل بس») - the paper and the picture are what the client is
-    // handed, and css/app.css keeps that row off the paper by the same name.
+    // NOT the site's own men («בלי עובדי רימא»): the owner's figure, screen and workbook only
+    // since v167 («شاشة وإكسل بس») - the paper and the picture are what gets handed on. Left out
+    // by its KIND, as readReportPrintout leaves .report-norima out by name; css/app.css keeps it
+    // off the paper by the same kind.
     const foot = [...table.querySelectorAll('tfoot tr')]
-        .filter(tr => !tr.classList.contains('month-board-foot-own'))
+        .filter(tr => tr.dataset.kind !== 'own')
         .map(tr => ({
             kind: tr.dataset.kind,
             label: text(tr.querySelector('.month-board-foot-label')),
