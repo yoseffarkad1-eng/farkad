@@ -1040,6 +1040,12 @@
     </div>
 </div>
 
+<!-- v205: the launch's cover (js/ui/offline.js, launchCover). Shown only while a build that
+     was waiting takes itself at a fresh launch, before anybody has touched the app: over the
+     whole glass, one line, every touch and key eaten, no focus moved. Its words are set by the
+     script; hidden the rest of the time. -->
+<div class="launch-cover" id="launchCover" role="status" aria-live="polite" hidden></div>
+
 <!-- The boot sentinel. FIRST, before a single line of the application, and deliberately
      tiny. (Since v191 two scripts load in the head, before it: js/store.js and
      js/ui/display.js. Their failures are heard by the ear beside them and said here.)

@@ -4907,9 +4907,34 @@ body.day-tight .topbar { margin-bottom: 2px; }
     body.frame-lowered .reorder-panel,
     body.frame-lowered .drawer-backdrop,
     body.frame-lowered .drawer-wrap,
-    body.frame-lowered .push-reminder-pending { translate: 0 var(--frame-drop, 0px); }
+    body.frame-lowered .push-reminder-pending,
+    body.frame-lowered .launch-cover { translate: 0 var(--frame-drop, 0px); }
     body.frame-lowered #dayView .day-header { translate: 0 var(--header-drop, 0px); }
 }
+
+/* v205: the launch's cover (js/ui/offline.js, launchCover). A build that was waiting takes
+   itself at a fresh launch, before anybody has touched the app: this goes over the whole glass
+   at once, above every other layer, with one line on it, and every touch and key lands on it.
+   Fixed, so it is on the frame's list above as well. Its words are 20px and heavy on the
+   page's own ground and ink - 7:1 in both schemes; css/large.css says them again. */
+.launch-cover {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.4;
+    text-align: center;
+    touch-action: none;
+}
+.launch-cover[hidden] { display: none; }
 
 /* A vehicle may serve several sites; each choice remains a full touch target. */
 .vehicle-option { display:flex; align-items:center; gap:12px; min-block-size:44px; padding:8px; text-align:start; }
