@@ -57,6 +57,17 @@ const MONTH_BOARD_TEXT = Object.freeze({
     // A man's name button, as a screen reader names it: his name and his month's attendance.
     // «ימי נוכחות» and «יום נוכחות אחד» are the statement's own (js/ui/reports.js).
     rowName: (name, total) => total === 1 ? `${name} · יום נוכחות אחד` : `${name} · ${total} ימי נוכחות`,
+    // The same on a board narrowed to one site, where the number is his days AT THAT SITE -
+    // not his attendance, which counts every site. «נוכחות» is the pay sheet's word for his
+    // whole month, and the paper a man's dispute about his days is settled with may not use
+    // one word for two counts (the review of v206).
+    rowNameAtSite: (name, total) => total === 1 ? `${name} · יום אחד באתר` : `${name} · ${total} ימים באתר`,
+    // The last column's head on a board narrowed to one site - on the screen, on paper and in
+    // the picture, which read it off the board. On every board it is the pay sheet's «נוכחות».
+    siteTotal: 'ימים באתר',
+    // After the title on paper and in the picture of a month that is not over: the day they
+    // were made, so the days after it read as not yet, not as nobody. `date` comes isolated.
+    asOf: date => `נכון ל־${date}`,
     // The picture's file, as the share sheet shows it: the door's two words and the month.
     file: key => `farkad-לוח-חודשי-${key}.png`
 });
@@ -117,6 +128,50 @@ function monthBoardMonthDates(range) {
 function monthBoardLetters(name, count) {
     const found = String(name || '').match(/[\p{L}\p{N}]/gu) || [];
     return found.slice(0, count).join('');
+}
+
+// EVERY SITE OF THE BOARD ITS OWN LETTERS, written onto the legend's entries in place.
+//   1. siteInitial's one letter;
+//   2. where two sites share it, the first two letters of each (above);
+//   3. where two STILL read alike - the app's own way of naming a site, «city - project»,
+//      gives «תל אביב - רוטשילד» and «תל אביב - דיזנגוף» both «תל» - each its first letter
+//      and the first one where its name parts from the other's: «תר», «תד». A pair already
+//      on the board is passed over for the next letter of the name, and a name that never
+//      parts from the other's (the same site entered twice) is numbered, in the legend's order.
+// Two sites with one mark would be one site on black-and-white paper (the review of v206).
+function monthBoardLegendLetters(legend) {
+    const alike = () => {
+        const count = new Map();
+        legend.forEach(site => count.set(site.letters, (count.get(site.letters) || 0) + 1));
+        return legend.filter(site => site.letters && count.get(site.letters) > 1);
+    };
+    alike().forEach(site => { site.letters = monthBoardLetters(site.name, 2); });
+    const still = alike();
+    if (still.length === 0) return;
+    const chars = site => String(site.name || '').match(/[\p{L}\p{N}]/gu) || [];
+    const common = (a, b) => { let n = 0; while (n < a.length && n < b.length && a[n] === b[n]) n += 1; return n; };
+    const taken = new Set(legend.filter(site => !still.includes(site)).map(site => site.letters));
+    const chosen = new Map();
+    still.forEach(site => {
+        const own = chars(site);
+        const rivals = still.filter(other => other !== site && other.letters === site.letters);
+        let letters = '';
+        for (let at = Math.max(1, ...rivals.map(other => common(own, chars(other)))); at < own.length && !letters; at += 1) {
+            if (!taken.has(own[0] + own[at])) letters = own[0] + own[at];
+        }
+        // A name that ends where the other's goes on («הרצליה», «הרצליה פיתוח») keeps its two
+        // letters, and the other is the one that moves.
+        letters = letters || site.letters;
+        taken.add(letters);
+        chosen.set(site, letters);
+    });
+    chosen.forEach((letters, site) => { site.letters = letters; });
+    const counted = new Map();
+    alike().forEach(site => {
+        const n = (counted.get(site.letters) || 0) + 1;
+        counted.set(site.letters, n);
+        site.letters = `${site.letters}${n}`;
+    });
 }
 
 // A man's entries on a date as the board draws them: the week cell's rule (nothing when he
@@ -197,15 +252,12 @@ function monthBoardFacts(key, placeId) {
 
     // THE LEGEND: the sites drawn on the board, in the order every surface draws them (the
     // roster's, then a site the roster has not got). Two of them sharing a first letter are
-    // both given two letters, here and everywhere the letter is drawn.
+    // both given two letters, here and everywhere the letter is drawn - and two that still
+    // read alike, the letters where their names part (monthBoardLegendLetters).
     const legend = [...labels.keys()].filter(id => used.has(id))
         .concat([...used.keys()].filter(id => !labels.has(id)))
         .map(id => ({ placeId: id, name: nameOf(id), mark: siteMark(id), letters: siteInitial(nameOf(id)) }));
-    const shared = new Map();
-    legend.forEach(site => shared.set(site.letters, (shared.get(site.letters) || 0) + 1));
-    legend.forEach(site => {
-        if (site.letters && shared.get(site.letters) > 1) site.letters = monthBoardLetters(site.name, 2);
-    });
+    monthBoardLegendLetters(legend);
     const lettersOf = new Map(legend.map(site => [site.placeId, site.letters]));
     rows.forEach(row => row.cells.forEach(cell => cell.lines.forEach(line => {
         line.initial = lettersOf.get(line.placeId) || '';
@@ -273,6 +325,11 @@ function monthBoardFacts(key, placeId) {
     const place = only === null ? null : { id: only, name: nameOf(only) };
     const recorded = rows.some(row => row.cells.some(cell => cell.absent || cell.lines.length > 0));
     const thisMonth = month === monthSummaryKeyOf(today);
+    const title = T.title(MONTH_SUMMARY_TEXT.months[number - 1], year, place ? isolate(place.name) : '');
+    // A month that is not over goes on paper and into the picture with the day they were
+    // made: tomorrow's men are already on the record the evening before, and the days after
+    // it are not yet - not days nobody worked. A month that is over says only its name.
+    const asOf = range.to >= today ? today : null;
     // THE COLUMN THE BOARD OPENS ON, on this month: today's - and on a Saturday nothing was
     // recorded on, which is no column, the last day before it that is one, not the 1st: a
     // Saturday is the day off on which a month gets read, and the 28th's reader would have
@@ -285,7 +342,11 @@ function monthBoardFacts(key, placeId) {
         from: range.from,
         to: range.to,
         name: monthSummaryName(month),
-        title: T.title(MONTH_SUMMARY_TEXT.months[number - 1], year, place ? isolate(place.name) : ''),
+        title,
+        asOf,
+        paperTitle: asOf ? `${title} · ${T.asOf(isolateLtr(formatFullDate(parseLocalDate(asOf))))}` : title,
+        // The last column: his «נוכחות» on every board; on one site's, his days there.
+        totalHead: only === null ? R.attendance : T.siteTotal,
         thisMonth,
         today: drawn.includes(today) ? today : null,
         anchor,
@@ -368,24 +429,30 @@ function monthBoardHeader(facts) {
     // The month is said once, in the title above: an arrow keeps the focus after its step, and
     // each arrow is DESCRIBED BY the title, so a screen reader landing back on the new arrow
     // says the month it went to - the job «סיכום חודש»'s live month line does in its dialog.
+    // THE TWO ARROWS ARE THE ROW, on every month: nothing is ever drawn between them, so the
+    // second «חודש קודם» lands where the first one did.
     const steps = el('div', 'month-board-steps');
     const prev = button(MONTH_SUMMARY_TEXT.prev, 'btn-secondary btn-nav nav-back month-board-step', () => monthBoardStep(-1));
     prev.insertBefore(chevronIcon('back'), prev.firstChild);
     prev.dataset.monthBoard = 'prev';
     prev.setAttribute('aria-describedby', 'monthBoardTitle');
     steps.appendChild(prev);
-    // «החודש» only off this month: on it, the chip would be a button that does nothing.
-    if (!facts.thisMonth) {
-        const home = button(R.thisMonth, 'btn-secondary month-board-home', monthBoardHome);
-        home.dataset.monthBoard = 'home';
-        steps.appendChild(home);
-    }
     const next = button(MONTH_SUMMARY_TEXT.next, 'btn-secondary btn-nav nav-fwd month-board-step', () => monthBoardStep(1));
     next.appendChild(chevronIcon('fwd'));
     next.dataset.monthBoard = 'next';
     next.setAttribute('aria-describedby', 'monthBoardTitle');
     steps.appendChild(next);
     head.appendChild(steps);
+    // «החודש» on a row of its own UNDER the arrows, and only off this month - on it, the chip
+    // would be a button that does nothing. Drawn between the arrows it took the inner third of
+    // each the moment the board left this month, and a second «חודש קודם» at a person's pace
+    // landed on it and went back to this month (the review of v206). The worker card's own
+    // «חזרה לחודש הנוכחי» stands the same way (js/ui/workercard.js).
+    if (!facts.thisMonth) {
+        const home = button(R.thisMonth, 'btn-secondary month-board-home', monthBoardHome);
+        home.dataset.monthBoard = 'home';
+        head.appendChild(home);
+    }
 
     // The filter: a native list, the phone's own picker - one finger, no drawn menu.
     const filter = el('label', 'month-board-filter');
@@ -445,7 +512,7 @@ function monthBoardTable(facts) {
         th.appendChild(go);
         headRow.appendChild(th);
     });
-    headRow.appendChild(el('th', 'month-board-total-head', R.attendance));
+    headRow.appendChild(el('th', 'month-board-total-head', facts.totalHead));
     head.appendChild(headRow);
     table.appendChild(head);
 
@@ -455,9 +522,12 @@ function monthBoardTable(facts) {
         tr.dataset.workerId = row.workerId;
         const name = el('td', 'month-board-name');
         // His name opens his card - the month as a calendar, his days, his money: the board
-        // counts, the card explains.
+        // counts, the card explains. Its spoken name is the button's whole name (a label
+        // replaces what a button holds), so it says what the button shows: his name, «לא
+        // פעיל» when he is not, and the number in the last column under that column's word.
+        const said = row.active ? isolate(row.name) : `${isolate(row.name)} · ${R.inactive}`;
         const who = button('', 'month-board-who', () => monthBoardOpenCard(row.workerId),
-            MONTH_BOARD_TEXT.rowName(isolate(row.name), row.total));
+            facts.place ? MONTH_BOARD_TEXT.rowNameAtSite(said, row.total) : MONTH_BOARD_TEXT.rowName(said, row.total));
         who.title = row.name;
         who.appendChild(el('span', 'month-board-who-name', row.name));
         // Said plainly, the week's reason: a name in a month he worked and a name on the
@@ -515,8 +585,9 @@ function drawMonthBoard(facts) {
     if (facts.place) board.dataset.place = facts.place.id;
     board.setAttribute('aria-labelledby', 'monthBoardTitle');
     board.appendChild(monthBoardHeader(facts));
-    // Paper's heading (css/app.css shows it there and nowhere else); the screen's is above.
-    board.appendChild(el('h1', 'month-print-title', facts.title));
+    // Paper's heading (css/app.css shows it there and nowhere else), which the picture reads
+    // too; the screen's is above. A month that is not over says the day it was made.
+    board.appendChild(el('h1', 'month-print-title', facts.paperTitle));
 
     if (facts.empty) {
         board.appendChild(emptyHint(MONTH_SUMMARY_TEXT.empty));
@@ -600,6 +671,7 @@ function monthBoardPutBack(board, facts, held) {
             const middle = rtl ? (box.left + box.right - names) / 2 : (box.left + names + box.right) / 2;
             const column = th.getBoundingClientRect();
             scroller.scrollLeft += (column.left + column.width / 2) - middle;
+            monthBoardWholeAtNames(scroller, rtl);
         } else {
             scroller.scrollLeft = 0;
         }
@@ -615,6 +687,25 @@ function monthBoardPutBack(board, facts, held) {
         : want.date ? board.querySelector(`th[data-date="${want.date}"] .month-board-day`)
         : board.querySelector(`tr[data-worker-id="${want.worker}"] .month-board-who`);
     if (node && typeof node.focus === 'function' && board.contains(node)) node.focus({ preventScroll: true });
+}
+
+// NO DAY HALF UNDER THE NAMES. Centred on today, the grid could leave a column standing half
+// under the pinned names - and at the foot its count then read as the end of the label
+// beside it: «סה"כ עובדים1», «רישום לרימא3» (the review of v206). The grid is moved by less
+// than half a column, whichever way is shorter, so the column at the names' edge is either
+// all on the glass or all under the names. Only at an opening: a place kept across a
+// redraw is the reader's own and is put back exactly.
+function monthBoardWholeAtNames(scroller, rtl) {
+    const corner = scroller.querySelector('.month-board-corner');
+    if (!corner) return;
+    const names = corner.getBoundingClientRect();
+    const edge = rtl ? names.left : names.right;
+    const cut = [...scroller.querySelectorAll('thead th[data-date]')].map(th => th.getBoundingClientRect())
+        .find(column => column.left < edge - 0.5 && column.right > edge + 0.5);
+    if (!cut) return;
+    const toRight = cut.right - edge;
+    const toLeft = cut.left - edge;
+    scroller.scrollLeft += Math.abs(toRight) <= Math.abs(toLeft) ? toRight : toLeft;
 }
 
 // js/ui/week.js calls this, in the month mode, in place of the week's header, its phone
@@ -644,12 +735,15 @@ function monthBoardDoor() {
     return door;
 }
 
-// From the week on screen: this month when the week holds today, else the month of the
-// week's Friday - the board opens on the month he was looking at.
+// From the week on screen: this month when the week holds today, else the month MOST of the
+// week is in - the month of its fourth day of seven, its Monday - so the board opens on the
+// month he was looking at. A week from Friday the 30th of October to Thursday the 5th of
+// November is a November week (five of its six working days), and the month of its Friday
+// opened a board without any of them (the review of v206).
 function monthBoardFromWeek() {
     const dates = weekDates();
     const today = todayStr();
-    MONTH_BOARD_KEY = monthSummaryKeyOf(dates.includes(today) ? today : dates[0]);
+    MONTH_BOARD_KEY = monthSummaryKeyOf(dates.includes(today) ? today : dates[Math.floor(dates.length / 2)]);
     MONTH_BOARD_PLACE = null;
     setWeekPhoneMode('month');
     monthBoardToTop();
@@ -721,8 +815,19 @@ function monthBoardOpenDay(date) {
     showView('day');
 }
 
+// His card ON THE BOARD'S MONTH. The card opens on the month today is in - its calendar and
+// «ימים בכל אתר» - and a man's dispute about October is read on October: off this month the
+// card is put on the board's month, the place its own «חודש קודם» would put it, and drawn
+// again (the review of v206). The month is the card's own memory (WORKER_CARD_MONTH,
+// js/ui/workercard.js), forgotten when it shuts; nothing is written.
 function monthBoardOpenCard(workerId) {
-    if (typeof openWorkerCard === 'function') openWorkerCard(workerId);
+    if (typeof openWorkerCard !== 'function') return;
+    openWorkerCard(workerId);
+    const key = MONTH_BOARD_KEY;
+    if (!monthBoardIsKey(key) || key === monthSummaryKeyOf(todayStr())) return;
+    if (typeof WORKER_CARD_MONTH === 'undefined' || typeof renderWorkerCardIfOpen !== 'function') return;
+    WORKER_CARD_MONTH = key;
+    renderWorkerCardIfOpen();
 }
 
 function monthBoardPrint() {

@@ -780,9 +780,14 @@ input, select, textarea { border-radius: 12px; }
    3px of the cell's padding above and below, so a 44px button stands in it and the row is no
    taller (62.8px and 52 with «תצוגה גדולה»). It reaches 2px into that padding at each edge -
    measured, a 44px block plus the padding made the row 51px, 0.6 taller than the days beside
-   it - and is drawn 44px all the same. At 320 its two words take two lines («לוח» /
-   «חודשי»), each whole. The corner's own words stay in the document for paper and are not
-   drawn beside it.
+   it - and is drawn 44px all the same. Wider than a phone (a phone on its side, a tablet) the
+   cell's padding is 6px, and the door reaches all of it: with the phone's 2px the row was
+   53px against the days' 49.9 (the review of v206). At 320 its two words take two lines
+   («לוח» / «חודשי»), each whole; at twice the text size a word too wide for the corner breaks
+   inside the door rather than run out of it over the first day.
+   The corner's own words stay in the document - for paper, and for a screen reader, which
+   names the names' column by them: they are clipped to a pixel beside the door, not removed
+   (removed, the column was announced as «לוח חודשי» - the review of v206).
 
    THE CELL IS THE WEEK'S CELL. The board's cells carry the week cell's classes, so on a phone
    the block above and css/large.css's copy of it draw them exactly as they draw the week's;
@@ -802,16 +807,26 @@ input, select, textarea { border-radius: 12px; }
     width: 100%;
     min-width: 44px;
     min-height: 44px;
-    margin: -2px 0;
+    margin: -6px 0;
     padding: 4px 3px;
     font-size: 14px;
     font-weight: 700;
     line-height: 1.2;
     text-align: center;
     white-space: normal;
-    overflow-wrap: normal;
+    overflow-wrap: anywhere;
 }
-#weekView .week-table .corner .month-board-door + .name-clip { display: none; }
+@media (max-width: 700px) {
+    #weekView .week-table .corner .month-board-door { margin: -2px 0; }
+}
+#weekView .week-table .corner .month-board-door + .name-clip {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
 .month-board { --month-board-name-w: var(--week-name-w, 160px); }
 .month-board-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 /* Each row of the head may be narrower than its widest word: a site list's longest name at
@@ -826,11 +841,18 @@ input, select, textarea { border-radius: 12px; }
 .month-board-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 .month-board-steps, .month-board-out { display: flex; flex: 1 1 100%; gap: 8px; }
 .month-board-steps > button, .month-board-out > button { flex: 1 1 0; min-width: 0; justify-content: center; font-size: 16px; white-space: normal; }
+/* «החודש», off this month only: a row of its own under the two arrows, which keep half of
+   their row each whatever month is on the board (js/ui/monthboard.js says why). */
+.month-board-home { flex: 1 1 100%; justify-content: center; font-size: 16px; white-space: normal; }
 .month-board-filter { display: flex; flex: 1 1 100%; align-items: center; gap: 10px; color: var(--ink); font-size: 16px; font-weight: 700; }
 .month-board-filter select { flex: 1 1 auto; min-width: 0; min-height: 44px; }
 .month-board-table { border-collapse: collapse; width: max-content; min-width: 100%; }
 .month-board-table th, .month-board-table td { border: 1px solid var(--line-soft); padding: 2px 1px; text-align: center; vertical-align: middle; }
 .month-board-table thead th { background: var(--surface); color: var(--ink-2); }
+/* The names' column ends in a line of its own, drawn on its cells so it stays where they
+   stay while the days move under them: without it a day standing half under the names, and
+   at the foot its count beside a label, read as one word - «סה"כ עובדים1» (the review of
+   v206). The page is right to left, so the names' inner edge is their left one. */
 .month-board-corner, .month-board-name, .month-board-foot-label {
     position: sticky;
     inset-inline-start: 0;
@@ -839,8 +861,11 @@ input, select, textarea { border-radius: 12px; }
     min-width: var(--month-board-name-w);
     max-width: var(--month-board-name-w);
     text-align: start;
+    box-shadow: inset 2px 0 0 var(--line);
 }
-.month-board-table thead .month-board-corner { z-index: 3; padding: 4px 6px; font-size: 14px; font-weight: 600; line-height: 1.25; }
+/* At twice the text size «עובדים» is wider than the corner: it breaks inside it rather than
+   run over the first day's letter. */
+.month-board-table thead .month-board-corner { z-index: 3; padding: 4px 6px; font-size: 14px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
 .month-board-name { padding: 2px 4px; background: var(--paper); }
 .month-board-date { width: 48px; min-width: 48px; padding: 0; }
 .month-board-table thead .month-board-saturday { background: var(--surface-2); }

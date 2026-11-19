@@ -31,9 +31,13 @@
 //      reports asked a counted number of times.
 //  10. THE PICTURE'S READING is the facts it was drawn from, and the plan draws every row,
 //      every block and every legend swatch.
-//  11. THE MUTANTS: the suite run again on eleven copies of the board, each with one fault
+//  11. THE MUTANTS: the suite run again on nineteen copies of the board, each with one fault
 //      a careless edit could put in it, and red by a claim on every one - so none of the
-//      comparisons above is two things computed the same wrong way.
+//      comparisons above is two things computed the same wrong way. Eight of them are what
+//      the review of v206 found (the door keeping a site, the filter naming a site the
+//      invoice's way, the card on the wrong month, a week across two months, two sites
+//      that read alike, one site's days called «נוכחות», a man not active said to be one,
+//      the paper of a month not over without its date); their checks run in the children.
 //
 // Over a month written out by hand (every figure spelled here), and over seeded records:
 // both pay cycles, two sites in one day, doubles, extra hours with and without hours,
@@ -64,12 +68,17 @@ const MUTANTS = Object.freeze({
         ['if (!absent && lines.length > 0) total += 1;', 'if (absent || lines.length > 0) total += 1;'],
     '«בלי עובדי רימא» read into the picture':
         [".filter(tr => tr.dataset.kind !== 'own')", ".filter(tr => tr.dataset.kind !== 'none')"],
-    'the paper told every foot row leaves the phone':
+    // The facts' `paper` flag is the interface's answer to another screen that reads the
+    // facts; the paper and the picture themselves leave the row out by its KIND (the
+    // contract's rule), so this mutant is a lie told to that reader - not a row on paper,
+    // which the two above and the PDF hold (the review of v206 named the difference).
+    'the facts telling their readers every foot row may leave the phone':
         ["foot.forEach(row => { row.paper = row.kind !== 'own'; });", 'foot.forEach(row => { row.paper = true; });'],
     'every Saturday drawn as a column':
         ['const dates = all.filter(date => !saturday(date)', 'const dates = all.filter(date => true'],
     'two letters for every site, shared or not':
-        ['if (site.letters && shared.get(site.letters) > 1)', 'if (site.letters)'],
+        ['alike().forEach(site => { site.letters = monthBoardLetters(site.name, 2); });',
+            'legend.forEach(site => { site.letters = monthBoardLetters(site.name, 2); });'],
     "the week's one letter where two sites share it":
         ["line.initial = lettersOf.get(line.placeId) || '';", 'line.initial = siteInitial(line.name);'],
     "a narrowed board keeping every site's blocks":
@@ -82,7 +91,24 @@ const MUTANTS = Object.freeze({
         ["foot.push({ kind: 'men', label: R.men, byDate: counts, total: sum(counts) });",
             "foot.push({ kind: 'men', label: R.men, byDate: counts, total: sum(counts) + (yosefReport ? yosefReport.total : 0) });"],
     "the billed row without Rima's men":
-        ['byDate: byDate(date => invoice.countAt(only, date)),', 'byDate: byDate(date => invoice.countAt(only, date) - rimaCount(schedule, date, only)),']
+        ['byDate: byDate(date => invoice.countAt(only, date)),', 'byDate: byDate(date => invoice.countAt(only, date) - rimaCount(schedule, date, only)),'],
+    // The review of v206, each fault it found put back by itself.
+    'the door keeping the site chosen before it':
+        ["    MONTH_BOARD_PLACE = null;\n    setWeekPhoneMode('month');", "    setWeekPhoneMode('month');"],
+    "the filter naming a site the invoice's way, not the board's":
+        ['name: nameOf(row.placeId) }));', 'name: row.name }));'],
+    "a name opening his card on this month whatever month the board is on":
+        ['WORKER_CARD_MONTH = key;', 'WORKER_CARD_MONTH = null;'],
+    "a week across two months opening its Friday's":
+        ['dates[Math.floor(dates.length / 2)]', 'dates[0]'],
+    'two sites that read alike in two letters left alike':
+        ['    const still = alike();', '    const still = [];'],
+    "one site's days called «נוכחות»":
+        ['totalHead: only === null ? R.attendance : T.siteTotal,', 'totalHead: R.attendance,'],
+    'a man who is not active said to be one who is':
+        ["const said = row.active ? isolate(row.name) : `${isolate(row.name)} · ${R.inactive}`;", 'const said = isolate(row.name);'],
+    'the paper of a month not over without the day it was made':
+        ['paperTitle: asOf ?', 'paperTitle: false ?']
 });
 const BOARD_SOURCE = source('js/ui/monthboard.js');
 const MUTANT = process.env.MONTHBOARD_MUTANT || '';
@@ -322,12 +348,16 @@ function withBoard(device) {
     device.chosen = 0;
     device.ctx.__views = device.views;
     device.ctx.__cards = device.cards;
-    // showView as js/app.js has it for the week: the grid, the week of the day on screen.
+    // showView as js/app.js has it for the week: the grid, the week of the day on screen. The
+    // card as js/ui/workercard.js has it, as far as the board reaches it: opening puts it on
+    // the month today is in (WORKER_CARD_MONTH null), and a redraw draws whatever month it is on.
     device.run(`showView = function (view) {
         __views.push(view);
         if (view === 'week') { weekPhoneMode = 'grid'; weekPhoneDate = null; setWeekFromDate(State.date); renderWeek(); }
     };
-    openWorkerCard = function (id) { __cards.push(String(id)); };`);
+    var WORKER_CARD_MONTH = null;
+    openWorkerCard = function (id) { WORKER_CARD_MONTH = null; __cards.push(String(id)); };
+    renderWorkerCardIfOpen = function () { __cards.push('drawn on ' + WORKER_CARD_MONTH); };`);
     device.ctx.dayChosenByHand = () => { device.chosen += 1; };
     device.setToday(TODAY);
     device.run(`State.date = ${JSON.stringify(TODAY)};`);
@@ -854,7 +884,10 @@ if (!MUTANT) {
     device.dom.getElementById('monthBoardPlace').dispatch('change');
     const name = device.dom.querySelector('#weekView tbody tr[data-worker-id="w_2"] .month-board-who');
     name.click();
-    same('a name opens that man\'s card, and nothing else', [device.cards, device.views.slice(-1)], [['w_2'], ['week']]);
+    // The board is on October, not this month: the card opens and is put on October (the
+    // review of v206 - it opened on the month today is in).
+    same('a name opens that man\'s card, put on the board\'s month, and nothing else', [device.cards, device.views.slice(-1)],
+        [['w_2', 'drawn on 2026-10'], ['week']]);
     same('the name button is named by his name and his month', name.getAttribute('aria-label'), `${iso('בני טסט')} · 3 ימי נוכחות`);
     const cellNode = device.dom.querySelector('#weekView tbody tr[data-worker-id="w_1"] td.week-cell[data-date="2026-10-05"]');
     const block = cellNode.querySelector('.cell-line');
@@ -897,7 +930,15 @@ if (!MUTANT) {
     same('a name button, one day and many', [T.rowName(iso('אבי'), 1), T.rowName(iso('אבי'), 0), T.rowName(iso('אבי'), 12)],
         [`${iso('אבי')} · יום נוכחות אחד`, `${iso('אבי')} · 0 ימי נוכחות`, `${iso('אבי')} · 12 ימי נוכחות`]);
     same('the picture\'s file', T.file('2026-11'), 'farkad-לוח-חודשי-2026-11.png');
-    same('the new words are exactly these five', Object.keys(T).sort(), ['door', 'file', 'filter', 'rowName', 'title']);
+    // The review of v206: one site's last column is his days THERE, under a word of its own,
+    // and so is his name's spoken number; paper and the picture of a month not over carry
+    // the day they were made.
+    same('one site\'s last column, and a name button there, one day and many',
+        [T.siteTotal, T.rowNameAtSite(iso('אבי'), 1), T.rowNameAtSite(iso('אבי'), 0), T.rowNameAtSite(iso('אבי'), 4)],
+        ['ימים באתר', `${iso('אבי')} · יום אחד באתר`, `${iso('אבי')} · 0 ימים באתר`, `${iso('אבי')} · 4 ימים באתר`]);
+    same('the day paper and the picture were made', T.asOf('⁦10/11/2026⁩'), 'נכון ל־⁦10/11/2026⁩');
+    same('the new words are exactly these eight', Object.keys(T).sort(),
+        ['asOf', 'door', 'file', 'filter', 'rowName', 'rowNameAtSite', 'siteTotal', 'title']);
     check('the block is frozen', Object.isFrozen(T) && Object.isFrozen(R));
     check('«יום נוכחות אחד» and «ימי נוכחות» are the statement\'s own', REPORTS.includes("countedIn(summary.attendanceDays, 'יום נוכחות אחד', 'ימי נוכחות')"));
 
@@ -1040,6 +1081,175 @@ if (!MUTANT) {
         payroll(device, '2026-05').find(one => one.id === 'w_1').days, device.facts('2026-05').rows.find(row => row.workerId === 'w_1').total);
 }
 
+// ============================================================ the review of v206, held
+//
+// What the review of the board found and this build repaired, each held here and run in the
+// mutants' children too - every one of them is also a mutant above, so the check is seen to
+// catch what it is for.
+{
+    suite('the review of v206: the door, the card, the arrows, a man\'s spoken name, the last column\'s word, the paper\'s date');
+    const device = handPhone();
+    const s = device.State.schedule;
+    // Two days in November, this month, so its board has men to tap.
+    device.call('assignPlace', s, '2026-11-02', 'w_1', 'actual', 'p_1');
+    device.call('assignPlace', s, '2026-11-03', 'w_2', 'actual', 'p_2');
+    device.State.save({ silent: true });
+    const title = () => device.dom.getElementById('monthBoardTitle').textContent;
+
+    // THE DOOR OPENS EVERY SITE, whatever the board was narrowed to before it was left.
+    device.run('showView("week"); setWeekFromDate("2026-10-06");');
+    device.dom.getElementById('monthBoardDoor').click();
+    const select = device.dom.getElementById('monthBoardPlace');
+    select.value = 'p_1';
+    select.dispatch('change');
+    given('the board was narrowed to הרצליה', device.run('MONTH_BOARD_PLACE') === 'p_1', String(device.run('MONTH_BOARD_PLACE')));
+    device.dom.querySelector('#weekView [data-month-board="back"]').click();
+    given('and left for the week\'s grid', device.run('weekPhoneMode') === 'grid' && Boolean(device.dom.getElementById('monthBoardDoor')));
+    device.dom.getElementById('monthBoardDoor').click();
+    same('the door, after a site was chosen and the board left, opens it on every site again',
+        [device.run('MONTH_BOARD_PLACE'), title()], [null, 'לוח חודשי · אוקטובר 2026']);
+
+    // THE MONTH MOST OF THE WEEK ON SCREEN IS IN. Today, the 10th, is in none of the first three.
+    const fromWeek = date => {
+        device.run(`showView("week"); setWeekFromDate(${JSON.stringify(date)}); renderWeek();`);
+        device.dom.getElementById('monthBoardDoor').click();
+        return [device.run('weekDates()[0]'), device.run('MONTH_BOARD_KEY')];
+    };
+    same('a week of Friday the 30th of October to Thursday the 5th of November opens November - five of its six working days',
+        fromWeek('2026-11-03'), ['2026-10-30', '2026-11']);
+    same('a week of Friday the 27th of November to Thursday the 3rd of December opens November - four of its seven days',
+        fromWeek('2026-12-02'), ['2026-11-27', '2026-11']);
+    same('a week inside one month opens that month', fromWeek('2026-10-14'), ['2026-10-09', '2026-10']);
+    same('and the week that holds today opens this month', fromWeek(TODAY), ['2026-11-06', '2026-11']);
+
+    // A NAME OPENS HIS CARD ON THE BOARD'S MONTH.
+    device.cards.length = 0;
+    device.run('openMonthBoard("2026-10", null);');
+    device.dom.querySelector('#weekView tbody tr[data-worker-id="w_2"] .month-board-who').click();
+    same('a name on October\'s board opens his card and puts it on October - its calendar, his days - drawn again',
+        [device.cards.slice(), device.run('WORKER_CARD_MONTH')], [['w_2', 'drawn on 2026-10'], '2026-10']);
+    device.cards.length = 0;
+    device.run('openMonthBoard(null, null);');
+    device.dom.querySelector('#weekView tbody tr[data-worker-id="w_1"] .month-board-who').click();
+    same('a name on this month\'s board opens his card as it opens by itself, on this month, and draws it once',
+        [device.cards.slice(), device.run('WORKER_CARD_MONTH')], [['w_1'], null]);
+
+    // «החודש» UNDER THE ARROWS, never between them.
+    const steps = () => device.dom.querySelector('#weekView .month-board-steps');
+    const arrows = () => steps().children.map(control => control.dataset.monthBoard);
+    same('on this month the arrows\' row is the two arrows, and there is no «החודש»',
+        [arrows(), device.dom.querySelectorAll('#weekView [data-month-board="home"]').length], [['prev', 'next'], 0]);
+    device.dom.querySelector('#weekView [data-month-board="prev"]').click();
+    const home = device.dom.querySelector('#weekView [data-month-board="home"]');
+    const head = steps().parentNode;
+    same('off it, still the two arrows and nothing between them - «החודש» a row of its own, straight under them',
+        [arrows(), home ? home.parentNode === head : false, home ? head.children.indexOf(home) - head.children.indexOf(steps()) : null],
+        [['prev', 'next'], true, 1]);
+
+    // A MAN'S SPOKEN NAME SAYS WHAT HIS BUTTON SHOWS, AND THE LAST COLUMN'S WORD WHAT IT COUNTS.
+    const spoken = id => device.dom.querySelector(`#weekView tbody tr[data-worker-id="${id}"] .month-board-who`).getAttribute('aria-label');
+    const last = () => device.dom.querySelector('#weekView .month-board-total-head').textContent;
+    device.run('openMonthBoard("2026-10", null);');
+    same('every site: the last column is «נוכחות», and a man who is not active is said to be one, as his button shows him',
+        [last(), spoken('w_1'), spoken('w_3')],
+        ['נוכחות', `${iso('אבי טסט')} · 3 ימי נוכחות`, `${iso('גיל טסט')} · לא פעיל · 2 ימי נוכחות`]);
+    device.run('openMonthBoard("2026-10", "p_1");');
+    same('one site: the last column is «ימים באתר», and his number is said as his days there, not as his attendance',
+        [last(), spoken('w_1'), spoken('w_2')], ['ימים באתר', `${iso('אבי טסט')} · 3 ימים באתר`, `${iso('בני טסט')} · 2 ימים באתר`]);
+    device.run('openMonthBoard("2026-10", "p_2");');
+    same('one day at the site, said as one', spoken('w_1'), `${iso('אבי טסט')} · יום אחד באתר`);
+    device.run('openMonthBoard("2026-10", "p_3");');
+    same('one site, and a man who is not active there', spoken('w_3'), `${iso('גיל טסט')} · לא פעיל · 2 ימים באתר`);
+    same('paper and the picture read the last column\'s word off the board', JSON.parse(device.run('JSON.stringify(readMonthPrintout())')).totalLabel,
+        'ימים באתר');
+
+    // THE DAY PAPER AND THE PICTURE WERE MADE, on a month that is not over.
+    const paper = () => device.dom.querySelector('#weekView .month-print-title').textContent;
+    device.run('openMonthBoard(null, null);');
+    same('this month\'s paper says the day it was made, after its title', paper(), 'לוח חודשי · נובמבר 2026 · נכון ל־⁦10/11/2026⁩');
+    same('and so does its picture, which reads it off the board', plain(JSON.parse(device.run('JSON.stringify(readMonthPrintout())')).title),
+        'לוח חודשי · נובמבר 2026 · נכון ל־10/11/2026');
+    same('the screen\'s own title does not: on the glass, today is marked in its column', title(), 'לוח חודשי · נובמבר 2026');
+    device.run('openMonthBoard(null, "p_1");');
+    same('one site of this month: the site, then the day', paper(), `לוח חודשי · נובמבר 2026 · ${iso('הרצליה')} · נכון ל־⁦10/11/2026⁩`);
+    device.run('openMonthBoard("2026-10", null);');
+    same('a month that is over says only its name, on paper too', paper(), 'לוח חודשי · אוקטובר 2026');
+}
+
+// ============================================================ one name for a site the roster has not got
+{
+    suite('the review of v206: the filter names a site as the board does - two sites the roster has not got');
+    const device = withBoard(makeDevice({ deviceId: 'd_monthboard_unlisted' }));
+    const s = device.State.schedule;
+    s.places = [{ id: 'p_1', name: 'הרצליה', active: true }];
+    s.workers = [
+        { id: 'w_1', name: 'אבי טסט', active: true, dailyRate: 400, hourlyRate: 50 },
+        { id: 'w_2', name: 'בני טסט', active: true, dailyRate: 400, hourlyRate: 50 }
+    ];
+    device.State.save({ silent: true });
+    // Days that name sites the roster has not got, applied as an arriving edit is applied:
+    // one in September only, two in October - so October's two are 2 and 3 over the whole
+    // record (the week cell's map, and the board's) and 1 and 2 over October alone (the
+    // invoice's own map).
+    const land = (date, worker, placeId) => device.call('applyJournalEntry', s, `days.${date}.actual.${worker}`,
+        { entries: [{ placeId }], rates: { daily: 400, hourly: 50 } });
+    land('2026-09-14', 'w_1', 'p_97');
+    land('2026-10-05', 'w_1', 'p_98');
+    land('2026-10-06', 'w_2', 'p_99');
+    device.call('assignPlace', s, '2026-10-07', 'w_1', 'actual', 'p_1');
+    device.State.save({ silent: true });
+    const invoiceNames = JSON.parse(device.run(`JSON.stringify(invoiceByDate(State.schedule, '2026-10-01', '2026-10-31').places
+        .map(row => [String(row.placeId), row.name]))`));
+    given('the invoice numbers October\'s two over October alone - so the two maps really differ here',
+        JSON.stringify(invoiceNames) === JSON.stringify([['p_1', 'הרצליה'], ['p_98', 'אתר שאינו ברשימה 1'], ['p_99', 'אתר שאינו ברשימה 2']]),
+        JSON.stringify(invoiceNames));
+    const facts = device.facts('2026-10');
+    same('the board names them over the whole record, as the week\'s cell does, and gives each its own mark',
+        facts.legend.map(site => [site.placeId, site.name, site.letters]),
+        [['p_1', 'הרצליה', 'ה'], ['p_98', 'אתר שאינו ברשימה 2', 'א2'], ['p_99', 'אתר שאינו ברשימה 3', 'א3']]);
+    same('the filter names each as the legend does - one site, one name, on one board', facts.sites.map(site => [site.id, site.name]),
+        facts.legend.map(site => [site.placeId, site.name]));
+    const root = drawBoard(device, '2026-10', null);
+    same('the list on the screen, the same', root.querySelector('#monthBoardPlace').children.slice(1).map(option => [option.value, option.textContent]),
+        facts.legend.map(site => [site.placeId, site.name]));
+    same('and every cell of theirs names them the same', root.querySelectorAll('tbody .cell-line')
+        .map(line => [line.dataset.place, line.querySelector('.site-name').textContent]),
+    [['p_98', 'אתר שאינו ברשימה 2'], ['p_1', 'הרצליה'], ['p_99', 'אתר שאינו ברשימה 3']]);
+}
+
+// ============================================================ the letters where two letters are not enough
+{
+    suite('the review of v206: sites that still read alike in two letters take the letters where their names part');
+    const device = withBoard(makeDevice({ deviceId: 'd_monthboard_letters' }));
+    const letters = names => JSON.parse(device.run(`(function () {
+        const legend = ${JSON.stringify(names)}.map(name => ({ name, letters: siteInitial(name) }));
+        monthBoardLegendLetters(legend);
+        return JSON.stringify(legend.map(site => site.letters));
+    })()`));
+    same('one letter where no other site of the board shares it', letters(['הרצליה', 'נתניה', 'רמת גן']), ['ה', 'נ', 'ר']);
+    same('two where two share it - and two letters that differ are where it ends', letters(['הרצליה', 'הוד השרון', 'נתניה']), ['הר', 'הו', 'נ']);
+    same('one city and its projects: the first letter, and the letter where each name parts from the others\'',
+        letters(['תל אביב - רוטשילד', 'תל אביב - דיזנגוף', 'תל מונד', 'נתניה']), ['תר', 'תד', 'תמ', 'נ']);
+    same('a name that ends where the other goes on keeps its two letters, and the other takes its next one',
+        letters(['הרצליה', 'הרצליה פיתוח']), ['הר', 'הפ']);
+    same('letters another site of the board already has are passed over for the next letter of the name',
+        letters(['תל אביב - רוטשילד', 'תל אביב - דיזנגוף', 'תדהר']), ['תר', 'תי', 'תד']);
+    same('the sites the roster has not got, told apart by their numbers', letters(['אתר שאינו ברשימה 2', 'אתר שאינו ברשימה 3']), ['א2', 'א3']);
+    same('one site entered twice under one name: numbered, in the legend\'s order', letters(['רמת גן', 'רמת גן']), ['רמ1', 'רמ2']);
+    same('siteInitial is untouched: the week keeps its one letter', ['תל אביב - רוטשילד', 'תל אביב - דיזנגוף'].map(name => device.call('siteInitial', name)),
+        ['ת', 'ת']);
+    const s = device.State.schedule;
+    s.places = [{ id: 'p_1', name: 'תל אביב - רוטשילד', active: true }, { id: 'p_2', name: 'תל אביב - דיזנגוף', active: true }];
+    s.workers = [{ id: 'w_1', name: 'אבי טסט', active: true, dailyRate: 400, hourlyRate: 50 },
+        { id: 'w_2', name: 'בני טסט', active: true, dailyRate: 400, hourlyRate: 50 }];
+    device.call('assignPlace', s, '2026-10-05', 'w_1', 'actual', 'p_1');
+    device.call('assignPlace', s, '2026-10-05', 'w_2', 'actual', 'p_2');
+    device.State.save({ silent: true });
+    same('on a board: the legend', device.facts('2026-10').legend.map(site => [site.placeId, site.letters]), [['p_1', 'תר'], ['p_2', 'תד']]);
+    same('and every cell, which paper and the picture read', drawBoard(device, '2026-10', null).querySelectorAll('tbody .cell-line')
+        .map(line => [line.dataset.place, line.dataset.initial]), [['p_1', 'תר'], ['p_2', 'תד']]);
+}
+
 // ============================================================ 9. the cost
 if (!MUTANT) {
     suite('the cost: a season\'s month, 40 men by 31 days');
@@ -1102,7 +1312,9 @@ if (!MUTANT) {
         drawBoard(device, '2026-10', place);
         const spec = JSON.parse(device.run('JSON.stringify(readMonthPrintout())'));
         const label = place === null ? 'every site' : place;
-        same(`${label}: the title and the file`, [spec.title, spec.name], [plain(facts.title).replace(/\s+/g, ' '), 'farkad-לוח-חודשי-2026-10.png']);
+        same(`${label}: the title - paper's, which says no date for a month that is over - and the file`, [plain(spec.title), spec.name],
+            [plain(facts.paperTitle).replace(/\s+/g, ' '), 'farkad-לוח-חודשי-2026-10.png']);
+        same(`${label}: the last column's word`, spec.totalLabel, place === null ? 'נוכחות' : 'ימים באתר');
         same(`${label}: the dates, their letters and their days`, spec.days.map(day => [day.date, day.letter, day.day, day.saturday]),
             facts.dates.map(day => [day.date, device.global('HEBREW_DAY_LETTERS')[weekday(day.date)], day.date.slice(8), day.saturday]));
         same(`${label}: every man, his badge and his total`, spec.rows.map(row => [row.workerId, row.name, row.badge, row.total]),

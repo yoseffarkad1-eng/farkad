@@ -705,6 +705,7 @@
 :root.display-large .month-board-title { font-size: 22px; font-weight: 800; line-height: 1.4; }
 :root.display-large .month-board-steps > button,
 :root.display-large .month-board-out > button { font-size: 20px; }
+:root.display-large .month-board-home { font-size: 20px; }
 :root.display-large .month-board-filter { font-size: 20px; font-weight: 700; }
 :root.display-large .month-board-table thead .month-board-corner { font-size: 18px; font-weight: 600; line-height: 1.4; }
 :root.display-large .month-board-day { font-size: 18px; font-weight: 600; line-height: 1.4; }

@@ -155,6 +155,16 @@ for (const [width, height] of PHONES) {
             const opened = await page.evaluate(() => ({ title: document.getElementById('monthBoardTitle') ? document.getElementById('monthBoardTitle').textContent : null,
                 focus: document.activeElement ? document.activeElement.id : null }));
             same(`${label}: a tap opens the board on this month, entered at its title`, opened, { title: 'לוח חודשי · נובמבר 2026', focus: 'monthBoardTitle' });
+            // Opened on today's column, with no day standing half under the pinned names: at
+            // the foot its count read as the end of the label beside it, «סה"כ עובדים1» (the
+            // review of v206).
+            same(`${label}: no day stands half under the names as it opens - nor its count beside a label of the foot`,
+                await page.evaluate(() => {
+                    const names = document.querySelector('.month-board-corner').getBoundingClientRect();
+                    return [...document.querySelectorAll('.month-board-table thead th[data-date]')].map(th => th.getBoundingClientRect())
+                        .filter(r => r.left < names.left - 0.5 && r.right > names.left + 0.5)
+                        .map(r => `${Math.round(r.left)}..${Math.round(r.right)} across ${Math.round(names.left)}`);
+                }), []);
             holdFloors(`${label}, every site`, await boardFloors(page), large);
             await page.evaluate(() => openMonthBoard(null, 'p1'));
             await page.waitForTimeout(300);
@@ -170,10 +180,55 @@ for (const [width, height] of PHONES) {
     }
 }
 
+// ============================================================ 1b. the door on a phone on its side, and wider
+//
+// Wider than 700px the week's cells keep 6px of padding, not the phone's 3: the door reached
+// only 2px into it and the header row was 53px against 49.9 without it (the review of v206).
+// tests/mobile.test.mjs's landscape phones, and a desktop.
+for (const [width, height] of [[568, 320], [667, 375], [844, 390], [932, 430], [1280, 800]]) {
+    for (const large of [false, true]) {
+        const label = `${width}x${height} light${large ? ', large display' : ''}`;
+        suite(`${label}: the door in the week's corner, wider than a phone held upright`);
+        const { context, page } = await phone(width, height, 'light', large);
+        const door = await gridDoor(page);
+        given(`${label}: the door is in the grid's corner`, Boolean(door.door) && door.corner, JSON.stringify(door));
+        const floor = large ? 52 : 44;
+        check(`${label}: the door is ${floor}px or more both ways`, door.door[0] >= floor - 0.5 && door.door[1] >= floor - 0.5, JSON.stringify(door.door));
+        same(`${label}: its words, whole and inside it`, [door.words, door.inside], [DOOR, true]);
+        check(`${label}: and the header row is no taller than without it`, door.head <= door.bare + 0.01, `${door.head} / ${door.bare}`);
+        await context.close();
+    }
+}
+
 // ============================================================ 2. the grid with the door
 {
     suite('375x667: the week grid is the grid of before, plus the door - and its picture is the same');
     const { context, page } = await phone(375, 667, 'light');
+    // THE NAMES' COLUMN IS STILL CALLED «עובדים / ימים» by a screen reader: the corner's words
+    // stay in the document beside the door, clipped to a pixel - removed, the column was
+    // announced as «לוח חודשי» (the review of v206).
+    const cdp = await page.context().newCDPSession(page);
+    const corner = async () => {
+        const { nodes } = await cdp.send('Accessibility.getFullAXTree');
+        const byId = new Map(nodes.map(node => [node.nodeId, node]));
+        const first = nodes.find(node => node.role && node.role.value === 'columnheader' && !node.ignored);
+        const inside = [];
+        const walk = id => (byId.get(id) && byId.get(id).childIds || []).forEach(child => { if (byId.has(child)) { inside.push(byId.get(child)); walk(child); } });
+        if (first) walk(first.nodeId);
+        return { name: first && first.name ? first.name.value : null,
+            buttons: inside.filter(node => node.role && node.role.value === 'button' && !node.ignored).map(node => node.name && node.name.value) };
+    };
+    await page.evaluate(() => { State.date = todayStr(); showView('week'); setWeekPhoneMode('grid'); });
+    await page.waitForTimeout(300);
+    const spoken = await corner();
+    await page.evaluate(() => { window.__door = monthBoardDoor; window.monthBoardDoor = undefined; render(); });
+    await page.waitForTimeout(300);
+    const spokenBare = await corner();
+    await page.evaluate(() => { window.monthBoardDoor = window.__door; render(); });
+    await page.waitForTimeout(300);
+    given('without the door, the names\' column is «עובדים / ימים»', spokenBare.name === 'עובדים / ימים', JSON.stringify(spokenBare));
+    check('with the door it is still named by «עובדים / ימים», and the door is a button inside it', String(spoken.name).includes('עובדים / ימים')
+        && spoken.buttons.length === 1 && spoken.buttons[0] === DOOR, JSON.stringify(spoken));
     const read = await page.evaluate(async () => {
         const wait = ms => new Promise(done => setTimeout(done, ms));
         State.date = todayStr(); showView('week'); setWeekPhoneMode('grid');
@@ -265,6 +320,35 @@ for (const [width, height] of PHONES) {
     same('«חודש הבא»: December, nobody on it - the month summary\'s sentence, its header, no grid and nothing to print',
         [december.title, december.empty, december.grid, december.out], ['לוח חודשי · דצמבר 2026', december.said, 0, 0]);
     await page.locator('[data-month-board="home"]').tap();
+    await page.waitForTimeout(400);
+    // TWO STEPS AT A PERSON'S PACE, THE THUMB WHERE IT WAS. The arrows stand still when the
+    // board leaves this month: «החודש» drawn between them took the inner third of each, and a
+    // second «חודש קודם» landed on it and went back to this month (the review of v206).
+    const arrowsAt = () => page.evaluate(() => ['prev', 'next'].map(name => {
+        const r = document.querySelector(`[data-month-board="${name}"]`).getBoundingClientRect();
+        return [r.left, r.top, r.width, r.height].map(n => Math.round(n * 10) / 10);
+    }));
+    const onThisMonth = await arrowsAt();
+    const twice = async (which, share) => {
+        const [left, top, w, h] = (await arrowsAt())[which === 'prev' ? 0 : 1];
+        await page.touchscreen.tap(left + w * share, top + h / 2);
+        await page.waitForTimeout(450);
+        await page.touchscreen.tap(left + w * share, top + h / 2);
+        await page.waitForTimeout(350);
+        return title();
+    };
+    // In a right-to-left row «חודש קודם» is the right one, and its side toward the other its left.
+    // Each pair starts on this month and the board is put back there by openMonthBoard, not by
+    // «החודש»: a pair that went wrong may have left the board where there is no «החודש».
+    same('«חודש קודם» twice at a person\'s pace, on the side of it toward «חודש הבא»: two months back, September',
+        await twice('prev', 0.15), 'לוח חודשי · ספטמבר 2026');
+    await page.evaluate(() => openMonthBoard('2026-10', null));
+    await page.waitForTimeout(300);
+    same('off this month the two arrows stand exactly where they stood on it', await arrowsAt(), onThisMonth);
+    await page.evaluate(() => openMonthBoard(null, null));
+    await page.waitForTimeout(400);
+    same('«חודש הבא» twice the same way: two months on, January', await twice('next', 0.85), 'לוח חודשי · ינואר 2027');
+    await page.evaluate(() => openMonthBoard(null, null));
     await page.waitForTimeout(250);
     await page.locator('#monthBoardPlace').selectOption('p1');
     await page.waitForTimeout(300);
@@ -309,6 +393,12 @@ for (const [width, height] of PHONES) {
         [saturday.column, saturday.friday, saturday.first], [0, true, false]);
     await page.evaluate(() => { openMonthBoard(null, null); });
     await page.waitForTimeout(250);
+    // A month not over goes on paper and into the picture with the day they were made - the
+    // days after it are not yet, not nobody's (the review of v206); the screen marks today.
+    same('this month\'s paper and picture say the day they were made; the screen\'s title does not', await page.evaluate(() => [
+        readMonthPrintout().title.replace(/[⁦-⁩]/g, ''), document.getElementById('monthBoardTitle').textContent,
+        getComputedStyle(document.querySelector('.month-print-title')).display]),
+    ['לוח חודשי · נובמבר 2026 · נכון ל־10/11/2026', 'לוח חודשי · נובמבר 2026', 'none']);
 
     // Print, with the sheet stood in for; the picture, with the share sheet stood in for.
     await page.evaluate(() => {
@@ -365,6 +455,20 @@ for (const [width, height] of PHONES) {
         document.getElementById('workerCardModal').style.display, document.activeElement.classList.contains('month-board-who'),
         document.activeElement.closest('tr') ? document.activeElement.closest('tr').dataset.workerId : null, weekPhoneMode]),
     ['none', true, 'w02', 'month']);
+    // HIS CARD ON THE BOARD'S MONTH: a man's dispute about October is read on October - the
+    // card opened on the month today is in (the review of v206).
+    await page.evaluate(() => openMonthBoard('2026-10', null));
+    await page.waitForTimeout(300);
+    await page.locator('.month-board-table tbody tr[data-worker-id="w02"] .month-board-who').tap();
+    await page.waitForTimeout(400);
+    same('a name on October\'s board opens his card on October, entered at its title', await page.evaluate(() => [
+        WORKER_CARD_MONTH, (document.querySelector('#workerCardBody .wcard-cal-label') || {}).textContent || null, document.activeElement.id]),
+    ['2026-10', 'אוקטובר 2026', 'workerCardTitle']);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    same('Escape: the card shut and its month forgotten, the focus back on his name on October\'s board', await page.evaluate(() => [
+        document.getElementById('workerCardModal').style.display, WORKER_CARD_MONTH, document.activeElement.classList.contains('month-board-who'),
+        MONTH_BOARD_KEY]), ['none', null, true, '2026-10']);
     await page.locator('[data-month-board="back"]').tap();
     await page.waitForTimeout(300);
     same('«חזרה לטבלת השבוע»: the week\'s grid, the focus on the door', await page.evaluate(() => [weekPhoneMode,
@@ -494,6 +598,23 @@ for (const [width, height] of [[320, 568], [375, 667]]) {
         await new Promise(done => setTimeout(done, 300));
         return document.documentElement.scrollWidth;
     });
+    // THE DOOR AT TWICE THE SIZE, on the week's own grid: «חודשי» is wider than the corner,
+    // and breaks inside the door rather than run out of it over the first day (the review of
+    // v206 measured it 15px past the door's edge at 320).
+    const door = await page.evaluate(measure => {
+        const node = document.getElementById('monthBoardDoor');
+        const box = node.getBoundingClientRect();
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const out = [...range.getClientRects()].filter(r => r.width > 0)
+            .filter(r => r.left < box.left - 1 || r.right > box.right + 1 || r.top < box.top - 1 || r.bottom > box.bottom + 1)
+            .map(r => `${Math.round(r.left)}..${Math.round(r.right)} in ${Math.round(box.left)}..${Math.round(box.right)}`);
+        const read = (0, eval)(`(${measure})`)(['#weekView .week-table thead']);
+        return { size: parseFloat(getComputedStyle(node).fontSize), out,
+            ruler: read.spills.concat(read.overlaps).filter(one => /monthBoardDoor/.test(one.where)).map(one => `${one.by} ${one.where}`) };
+    }, measureInPage.toString());
+    check(`${width}: on the week's grid the door's words stay inside it at twice the size (${door.size}px)`,
+        door.size >= 27 && door.out.length === 0 && door.ruler.length === 0, JSON.stringify(door));
     await page.evaluate(() => openMonthBoard(null, null));
     await page.waitForTimeout(400);
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -507,6 +628,26 @@ for (const [width, height] of [[320, 568], [375, 667]]) {
             .map(node => `${node.tagName.toLowerCase()}.${String(node.className).split(' ')[0]} ${Math.round(node.getBoundingClientRect().left)}..${Math.round(node.getBoundingClientRect().right)}`);
     });
     same(`${width}: nothing of the board reaches past the phone's edges (the grid scrolls in its own box)`, past.slice(0, 4), []);
+    // No word of the grid runs out of its own cell: at twice the size «עובדים» ran 28px out of
+    // the corner over the first day's letter (the review of v206) - and the ruler's own check
+    // reads only a control's words.
+    const outOfCell = await page.evaluate(() => {
+        const out = [];
+        document.querySelectorAll('#weekView .month-board-table th, #weekView .month-board-table td').forEach(cell => {
+            const box = cell.getBoundingClientRect();
+            const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+            for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+                if (!text.textContent.trim()) continue;
+                const range = document.createRange();
+                range.selectNodeContents(text);
+                [...range.getClientRects()].filter(r => r.width > 0 && r.height > 0)
+                    .filter(r => r.left < box.left - 1 || r.right > box.right + 1)
+                    .forEach(r => out.push(`${cell.className.split(' ')[0]} «${text.textContent.trim().slice(0, 12)}» ${Math.round(r.left)}..${Math.round(r.right)} in ${Math.round(box.left)}..${Math.round(box.right)}`));
+            }
+        });
+        return out;
+    });
+    same(`${width}: no word of the grid runs out of its own cell - the corner's over the first day, a label's, a name's`, outOfCell.slice(0, 4), []);
     check(`${width}: and the board makes the page no wider than the week's grid does (${floors.page[0]} / ${gridWidth})`,
         floors.page[0] <= gridWidth && await page.evaluate(() => window.scrollX) === 0, `${floors.page[0]} / ${gridWidth}`);
     const small = floors.read.targets.filter(t => t.w < 43.5 || t.h < 43.5);
@@ -569,6 +710,13 @@ function season(men) {
     };
     // The header read off the paper itself: each date column is its day's letter and its day.
     const columnsOf = text => [...new Set([...text.matchAll(/׳([א-ת])(\d{2})|([א-ת])׳(\d{2})/g)].map(m => `${m[1] || m[3]}${m[2] || m[4]}`))];
+    // The title as the page's own first line - what is drawn first, the h1, and everything on
+    // its line: not any place on the sheet a word happens to be (the legend names every site,
+    // and the review of v206 found a title check satisfied by it).
+    const titleLine = run => {
+        const first = run.pdf.pages[0] && run.pdf.pages[0].texts[0];
+        return first ? run.pdf.pages[0].texts.filter(t => Math.abs(t.y - first.y) < 2).map(t => t.text).join('') : '';
+    };
     const count = (text, words) => text.split(words).length - 1;
     const pages = {};
     for (const men of [12, 25, 40]) {
@@ -584,6 +732,8 @@ function season(men) {
         if (men === 40) {
             check('the title is on it: «לוח חודשי · אוקטובר 2026»', onPaper(run.text, 'לוח חודשי') && onPaper(run.text, 'אוקטובר') && run.text.includes('2026'),
                 run.text.slice(0, 80));
+            check('it is the page\'s first line, which names no site - and carries no date: October is over', onPaper(titleLine(run), 'לוח חודשי')
+                && onPaper(titleLine(run), 'אוקטובר') && !titleLine(run).includes('Alpha') && !onPaper(titleLine(run), 'נכון ל'), titleLine(run));
             same('the date columns on the paper: every weekday, and of the five Saturdays only the 3rd (worked) and the 10th (only Rima)',
                 columnsOf(run.text).filter(c => c.startsWith('ש')), ['ש03', 'ש10']);
             same('and the paper has every column the board has', columnsOf(run.text).length, run.want.dates.length);
@@ -596,7 +746,8 @@ function season(men) {
     check('a larger one runs on to further pages as it needs them, never fewer for more men', pages[25] >= pages[12] && pages[40] >= pages[25],
         JSON.stringify(pages));
     const one = await printed(40, 'p_1');
-    check('one site: its name in the title', onPaper(one.text, 'לוח חודשי') && one.text.includes('Alpha'), one.text.slice(0, 80));
+    check('one site: its name in the title - the page\'s first line itself, not the legend under the grid',
+        onPaper(titleLine(one), 'לוח חודשי') && titleLine(one).includes('Alpha'), titleLine(one));
     same('one site: every man who stood there is on it, once', one.want.names.filter(name => count(one.text, name) !== 1), []);
     check('one site: «רישום לרימא» and «סה״כ ימי עובד־אתר» are on the paper, «בלי עובדי רימא» is not',
         onPaper(one.text, 'רישום לרימא') && onPaper(one.text, 'ימי עובד') && !onPaper(one.text, 'בלי עובדי רימא'));
