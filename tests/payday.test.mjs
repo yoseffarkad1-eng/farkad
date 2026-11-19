@@ -1064,6 +1064,27 @@ await block('P11 every proposed word pinned, every borrowed word in its owner, a
     check('and in the offline shell, after advancereset.js', /'\.\/js\/ui\/advancereset\.js',\s*'\.\/js\/ui\/payday\.js',/.test(source('sw.js')));
     check('Escape closes it through its own function', /paydayModal: \(\) => closePayday\(\)/.test(source('js/ui/modal.js')));
     check('render() asks it, through typeof', /if \(typeof renderPaydayIfOpen === 'function'\) renderPaydayIfOpen\(\);/.test(source('js/app.js')));
+    // Fix round 1: THE LOOK IS A BLOCK OF ITS OWN, after the whole of «סגירת שבוע»'s (its dialog and
+    // «איפוס מקדמות»'s pieces of it), in both sheets - it was put straight after «סגירת שבוע»'s first
+    // rule, and that block's dialog rules then stood under the desk's heading.
+    const blockAfter = (css, heading) => {
+        const from = css.indexOf(heading);
+        const next = css.slice(from + heading.length).search(/\n\/\*/);
+        return from === -1 ? '' : css.slice(from, next === -1 ? css.length : from + heading.length + next);
+    };
+    const family = /weekly-close|weeklyClose|advance-reset|advanceReset/;
+    const design = source('css/design.css');
+    const large = source('css/large.css');
+    const deskLook = blockAfter(design, '/* ---- «יום תשלום» (js/ui/payday.js)');
+    const weeklyLook = design.slice(design.indexOf('/* ---- «סגירת שבוע» (js/ui/weeklyclose.js)'), design.indexOf('/* ---- «יום תשלום» (js/ui/payday.js)'));
+    const deskLarge = blockAfter(large, '/* «יום תשלום» (js/ui/payday.js), one rule for one rule');
+    same('css/design.css: «יום תשלום»\'s block holds no rule of «סגירת שבוע»\'s, and «סגירת שבוע»\'s none of the desk\'s',
+        [deskLook.length > 1000, family.test(deskLook.replace(/\/\*[\s\S]*?\*\//g, '')), /payday/.test(weeklyLook), weeklyLook.indexOf('#weeklyCloseModal .modal-content') !== -1],
+        [true, false, false, true]);
+    same('css/large.css: the desk\'s restatements, after «סגירת שבוע»\'s, hold none of them',
+        [deskLarge.length > 1000, family.test(deskLarge.replace(/\/\*[\s\S]*?\*\//g, '')),
+            large.indexOf(':root.display-large .advance-reset-closures { font-size') < large.indexOf('/* «יום תשלום» (js/ui/payday.js), one rule for one rule')],
+        [true, false, true]);
 
     // The screen, drawn: its sections in their order, under their words.
     d.call('openPayday');
