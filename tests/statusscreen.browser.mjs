@@ -766,7 +766,7 @@ const doubleText = page => page.evaluate(() => {
         await stripBack(page);
         const apart = (a, b) => a.r <= b.l + 0.5 || b.r <= a.l + 0.5 || a.b <= b.t + 0.5 || b.b <= a.t + 0.5;
         check(`${label}: the door's own words inside the strip, top to bottom, and clear of «הגדרות»`,
-            strip.wordsShown !== false && words.text.t >= words.bar.t - 0.5 && words.text.b <= words.bar.b + 0.5 && apart(words.text, words.settings),
+            strip.words === true && words.text.t >= words.bar.t - 0.5 && words.text.b <= words.bar.b + 0.5 && apart(words.text, words.settings),
             JSON.stringify(words));
         await openRead(page);
         const m = await page.evaluate(measureInPage, ['#statusModal']);
