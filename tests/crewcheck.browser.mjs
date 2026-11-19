@@ -80,7 +80,8 @@ const CREW = [
     ['w_15', 'דוגמה 15', 440, 0, '0520000115'], ['w_16', 'דוגמה 16', 450, 0, '0520000116'],
     ['w_17', 'דוגמה 17', 460, 0, '0520000117'], ['w_18', 'דוגמה 18', 470, 0, '0520000118'],
     ['w_19', HOSTILE, 0, 0, '0520000119'],                       // a name written as markup, with no rate
-    ['w_20', 'דוגמה כבויה', 0, 0, '1234', false]                 // switched off: on no line
+    ['w_20', 'דוגמה כבויה', 0, 0, '1234', false],                // switched off: on no line
+    ['w_21', 'דוגמה שכר שנמחק', 400, 0, '0520000121']            // his days stamped at 400, then his rate cleared
 ];
 const SITES = [['p_1', 'אתר צפון'], ['p_2', 'אתר דרום'], ['p_3', 'אתר ישן'], ['p_4', 'אתר חדש']];
 
@@ -89,13 +90,15 @@ function seedInPage([crew, sites, days]) {
     S.workers = crew.map(([id, name, dailyRate, hourlyRate, phone, active]) =>
         ({ id, name, active: active !== false, dailyRate, hourlyRate, phone, idNumber: '' }));
     S.places = sites.map(([id, name]) => ({ id, name, active: true }));
-    const working = ['w_01', 'w_02', 'w_03', 'w_04', 'w_05', 'w_06', 'w_07', 'w_09', 'w_10', 'w_13', 'w_14', 'w_15', 'w_16', 'w_17', 'w_18', 'w_19'];
+    const working = ['w_01', 'w_02', 'w_03', 'w_04', 'w_05', 'w_06', 'w_07', 'w_09', 'w_10', 'w_13', 'w_14', 'w_15', 'w_16', 'w_17', 'w_18', 'w_19', 'w_21'];
     days.forEach((date, at) => {
         working.forEach((id, i) => assignPlace(S, date, id, 'actual', i % 2 ? 'p_2' : 'p_1'));
         if (at < 10) assignPlace(S, date, 'w_08', 'actual', 'p_1');
         if (at < 6) assignPlace(S, date, 'w_20', 'actual', 'p_3');
         if (at >= days.length - 3) assignPlace(S, date, 'w_11', 'actual', 'p_2');
     });
+    // Cleared in the form after his days were stamped: the sheet still prices them at 400.
+    S.workers.find(w => w.id === 'w_21').dailyRate = 0;
     State.save();
     State.date = todayStr();
     showView('roster');
@@ -324,11 +327,20 @@ const switchesBefore = await switches();
     const read = await reading(page);
     same('its title, the line under it, the lead and its one button',
         [read.title, read.context, read.lead, read.close],
-        ['בדיקת הצוות', 'יום חמישי 19/11/2026 · עובדים פעילים: 19 · אתרים פעילים: 4',
+        ['בדיקת הצוות', 'יום חמישי 19/11/2026 · עובדים פעילים: 20 · אתרים פעילים: 4',
             'הבדיקה רק מראה מה כדאי לבדוק. היא לא משנה ולא שומרת דבר.', 'סגור']);
     same('the list, line by line, is the flat list drawn', read.list, await expected(page));
-    same('every kind, in the order the contract gives them', read.list.flatMap(group => (group.findings || []).map(f => f.kind)),
-        ['noRate', 'badPhone', 'sharedPhone', 'sameName', 'idle', 'idleSites', 'otherPhone', 'noPhone', 'zeroStamped', 'never', 'neverSites']);
+    same('every kind, in the order the contract gives them - «בלי שכר יומי» twice, as what the men\'s days carry tells them apart',
+        read.list.flatMap(group => (group.findings || []).map(f => f.kind)),
+        ['noRate', 'noRate', 'badPhone', 'sharedPhone', 'sameName', 'idle', 'idleSites', 'otherPhone', 'noPhone', 'zeroStamped', 'never', 'neverSites']);
+    same('«בלי שכר יומי»: the men none of whose days is priced, then the man whose days at 400 still are - told of the days from now on',
+        read.list[0].findings.filter(f => f.kind === 'noRate').map(f => [f.say, f.chips.map(c => c[0])]),
+        [['בלי שכר יומי - ימי העבודה שלהם לא יחושבו בשכר:', ['דוגמה בלי שכר', 'דוגמה לפי שעה', HOSTILE]],
+            ['בלי שכר יומי - ימי עבודה שיירשמו לו מעכשיו לא יחושבו בשכר:', ['דוגמה שכר שנמחק']]]);
+    same('and the pay sheet prices his days at their stamp all the same', await page.evaluate(() => {
+        const row = payrollReport(State.schedule, '2026-11-01', '2026-11-19').find(r => r.workerId === 'w_21');
+        return row.amount > 0 && row.amount % 400 === 0;
+    }), true);
     same('the idle man and his note, as the dialog says them', read.list[0].findings.find(f => f.kind === 'idle'),
         { kind: 'idle', say: 'לא עבד ב-25 ימי העבודה האחרונים (מאז 22/10), ועדיין פעיל:',
             chips: [[`${named('דוגמה רחוקה')} · 04/10`, `${named('דוגמה רחוקה')} · 04/10 - הצג את ${named('דוגמה רחוקה')} ברשימת העובדים`, true]],
@@ -624,6 +636,19 @@ const saveOnGlass = () => page.evaluate(() => {
     const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
     return hit === save ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null;
 });
+// The centre of a control, if a press there is a press on it - or null. Where the door left it
+// (the crew screen's), or brought into the form's view first the way «שמור» is (`scroll`).
+const onGlass = (selector, scroll) => page.evaluate(([selector, scroll]) => {
+    const node = document.querySelector(selector);
+    if (!node) return null;
+    if (scroll) node.scrollIntoView({ block: 'center' });
+    const b = node.getBoundingClientRect();
+    if (b.width === 0 || b.height === 0) return null;
+    const x = b.left + b.width / 2; const y = b.top + b.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    return hit && (hit === node || node.contains(hit)) ? { x, y } : null;
+}, [selector, Boolean(scroll)]);
+const openModals = () => page.evaluate(() => [...document.querySelectorAll('.modal')].filter(m => m.style.display === 'flex').map(m => m.id));
 
 {
     suite('13. a double tap on a door is one tap: the second press is the page\'s to spend');
@@ -648,6 +673,19 @@ const saveOnGlass = () => page.evaluate(() => {
         trials.push(['site', 'a man\'s «פעיל» on the glass', gap, () => twoTaps(chip('idleSites', 'p_3', true), async () => { await pause(page, 60); return switchOnGlass('other', ''); }, gap)]);
         trials.push(['form', 'the chip\'s own point', gap, () => twoTaps(chip('noRate', 'w_02'), null, gap)]);
         trials.push(['form', 'the form\'s «שמור»', gap, () => twoTaps(chip('noRate', 'w_02'), async () => { await pause(page, 30); return saveOnGlass(); }, gap)]);
+        // FIX ROUND 1 (the review's last finding): the hold covered the writes alone, so after the
+        // last site's door a slow second touch on «בדיקת הצוות» - at the foot, right under that
+        // site - opened the check again, and on «כרטיס אתר» opened the card: the door seemed not
+        // to work. Every control of the crew screen is held now, and of the form every button and
+        // fold - «עוד פרטים» shut by the touch hid the number the door had opened it for.
+        trials.push(['site', '«בדיקת הצוות», under the last site', gap, () => twoTaps(chip('neverSites', 'p_4', true),
+            async () => { await pause(page, 60); return onGlass('#crewCheckEntry'); }, gap)]);
+        trials.push(['site', 'its row\'s «כרטיס אתר»', gap, () => twoTaps(chip('neverSites', 'p_4', true),
+            async () => { await pause(page, 60); return onGlass('#placeList .roster-row[data-place-id="p_4"] .site-card-open'); }, gap)]);
+        trials.push(['form', 'the fold «עוד פרטים» the number is in', gap, () => twoTaps(chip('badPhone', 'w_03'),
+            async () => { await pause(page, 30); return onGlass('#workerFormMore > summary', true); }, gap)]);
+        trials.push(['form', 'the form\'s «ביטול»', gap, () => twoTaps(chip('badPhone', 'w_03'),
+            async () => { await pause(page, 30); return onGlass('#workerFormModal button[onclick="closeWorkerForm()"]', true); }, gap)]);
     }
     for (const [door, where, gap, make] of trials) {
         const done = await make();
@@ -657,8 +695,12 @@ const saveOnGlass = () => page.evaluate(() => {
         seenGaps.push(`${door}/${gap}:${done.seen}`);
         if (where.includes('«פעיל»')) check(`${name}: what was under the finger was a switch`, /worker-active-toggle/.test(done.under || ''), String(done.under));
         if (where.includes('«שמור»')) check(`${name}: what was under the finger was «שמור»`, /שמור/.test(done.under || ''), String(done.under));
+        if (where.includes('«בדיקת הצוות»')) check(`${name}: what was under the finger was the check's own button`, /crewcheck-entry/.test(done.under || ''), String(done.under));
+        if (where.includes('«כרטיס אתר»')) check(`${name}: what was under the finger was the card's button`, /site-card-open/.test(done.under || ''), String(done.under));
+        if (where.includes('«ביטול»')) check(`${name}: what was under the finger was «ביטול»`, /ביטול/.test(done.under || ''), String(done.under));
         same(`${name}: no switch turned and no byte moved`, [await switches(), await disk(page)], [switchesBefore, done.before]);
-        if (door === 'form') same(`${name}: the form is still open`, await page.evaluate(() => document.getElementById('workerFormModal').style.display), 'flex');
+        same(`${name}: nothing opened but what the door opened`, await openModals(), door === 'form' ? ['workerFormModal'] : []);
+        if (where.includes('«עוד פרטים»')) check(`${name}: the fold is still open, the number in it`, await page.evaluate(() => document.getElementById('workerFormMore').open));
         await settle();
     }
     console.log(`  (the gaps the page saw: ${seenGaps.join(' ')})`);
@@ -787,7 +829,56 @@ suite('15. tests/screens.mjs walks the dialog twice, straight after the crew\'s 
 }
 const words = t => `${t.size}px/${t.weight} ${t.contrast} «${t.words}» ${t.where}`;
 const seenKinds = new Set();
+const seenNoRate = new Set();
 let seenNote = false;
+// FIX ROUND 1 (the review's fourth and eighth findings): what a line break may not cut, measured
+// character by character on the glass - every typed number (an LTR isolate, LRI…PDI) in a chip
+// or a sentence, and each «label: n» of the line under the title. Answers the pieces drawn on
+// more than one line, each as the lines it was drawn on.
+const brokenOnGlass = target => target.evaluate(() => {
+    const modal = document.getElementById('crewCheckModal');
+    const range = document.createRange();
+    const lineOf = node => {
+        const chars = [];
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+        for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+            for (let i = 0; i < t.nodeValue.length; i += 1) {
+                range.setStart(t, i); range.setEnd(t, i + 1);
+                const r = [...range.getClientRects()].find(x => x.width > 0);
+                chars.push({ c: t.nodeValue[i], top: r ? r.top : null, h: r ? r.height : 0 });
+            }
+        }
+        return chars;
+    };
+    const broken = (chars, from, to) => {
+        const drawn = chars.slice(from, to).filter(x => x.top !== null);
+        if (drawn.length === 0) return null;
+        const rows = [];
+        drawn.forEach(x => { const row = rows.find(r => Math.abs(r.top - x.top) < Math.max(4, x.h / 2));
+            if (row) row.text += x.c; else rows.push({ top: x.top, text: x.c }); });
+        return rows.length > 1 ? rows.map(r => r.text) : null;
+    };
+    const out = [];
+    [...modal.querySelectorAll('.daycheck-say, .daycheck-go, .daycheck-plain')].forEach(node => {
+        const chars = lineOf(node);
+        const text = chars.map(x => x.c).join('');
+        for (let at = text.indexOf('\u2066'); at !== -1; at = text.indexOf('\u2066', at + 1)) {
+            const end = text.indexOf('\u2069', at);
+            const lines = broken(chars, at + 1, end === -1 ? text.length : end);
+            if (lines) out.push({ what: 'number', lines });
+        }
+    });
+    const context = document.getElementById('crewCheckContext');
+    const chars = lineOf(context);
+    const text = chars.map(x => x.c).join('');
+    let from = 0;
+    text.split(' · ').forEach(part => {
+        const lines = broken(chars, from, from + part.length);
+        if (lines) out.push({ what: 'context', lines });
+        from += part.length + 3;
+    });
+    return out;
+});
 for (const [width, height] of PHONES) for (const scheme of SCHEMES) for (const large of [false, true]) {
     const label = `${width}x${height} ${scheme}${large ? ' large' : ''}`;
     suite(`15. the floors, ${label}: both entries`);
@@ -799,9 +890,13 @@ for (const [width, height] of PHONES) for (const scheme of SCHEMES) for (const l
         const live = read.texts.filter(t => !t.off);
         given(`${name}: there is something on it to measure`, live.length > 10, String(live.length));
         const kinds = await p.evaluate(() => ({ kinds: [...document.querySelectorAll('#crewCheckList .daycheck-finding')].map(node => node.dataset.kind),
-            note: document.querySelectorAll('#crewCheckList .crewcheck-note').length }));
+            note: document.querySelectorAll('#crewCheckList .crewcheck-note').length,
+            noRate: [...document.querySelectorAll('#crewCheckList .daycheck-finding[data-kind="noRate"] .daycheck-say')].map(node => node.textContent) }));
         kinds.kinds.forEach(kind => seenKinds.add(kind));
+        kinds.noRate.forEach(say => seenNoRate.add(say));
         if (kinds.note > 0) seenNote = true;
+        const broken = await brokenOnGlass(p);
+        same(`${name}: no typed number is broken across lines, and no «label: n» under the title`, broken, []);
         const small = live.filter(t => t.size < (large ? 18 : 14));
         check(`${name}: no letter under ${large ? 18 : 14}px`, small.length === 0, brief(small, words));
         if (large) {
@@ -844,6 +939,8 @@ for (const [width, height] of PHONES) for (const scheme of SCHEMES) for (const l
 same('between the two entries every kind of line and the quiet note is on the glass, measured',
     [[...seenKinds].sort(), seenNote], [['badPhone', 'idle', 'idleSites', 'never', 'neverSites', 'noPhone', 'noRate', 'otherPhone', 'sameName',
         'sharedPhone', 'zeroStamped'], true]);
+same('and both sentences of «בלי שכר יומי» among them', [...seenNoRate].sort(),
+    ['בלי שכר יומי - ימי העבודה שלו לא יחושבו בשכר:', 'בלי שכר יומי - ימי עבודה שיירשמו לו מעכשיו לא יחושבו בשכר:'].sort());
 
 // Twice the text size, the way tests/mobile.test.mjs makes it: every font-size of the cascade
 // doubled, so a redraw keeps it.

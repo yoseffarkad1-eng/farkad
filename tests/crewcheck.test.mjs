@@ -188,7 +188,10 @@ function seedFrom(fn, today) {
 
 // The 'with findings' state tests/screens.mjs draws, made the same way on the same seed: the
 // model's own writers, in memory (contract.md, Existing suites touched). w02's rate goes
-// first, so the day added for him is stamped with it.
+// first, so the day added for him is stamped with it - and the seed has already stamped his
+// fifteen days at 410, so he is the man whose rate was cleared after his days were priced.
+// w13, the second «וליד זועבי», never worked and has no rate either (fix round 1): the
+// other words of «בלי שכר יומי», and a namesake named on three lines.
 const ADDED = ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16',
     '2026-10-18', '2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22'];
 function withFindings(d) {
@@ -201,6 +204,7 @@ function withFindings(d) {
         w('w05').phone = w('w01').phone;
         w('w04').phone = '+970 59-123-4567';
         w('w13').name = w('w12').name;
+        w('w13').dailyRate = 0;
         S.places.push({ id: 'p6', name: 'חדרה - בית הספר', active: true }, { id: 'p7', name: 'כפר סבא - מרכז', active: true });
         added.forEach((date, i) => {
             if (i === 0) assignPlace(S, date, 'w14', 'actual', 'p6');
@@ -553,6 +557,55 @@ suite('1. no daily rate, every way it is written - and an hourly rate alone');
         ids(readOn(d, T).check.noRate), ['w_zero', 'w_empty', 'w_text', 'w_none', 'w_minus', 'w_hourly']);
 }
 
+// FIX ROUND 1 (the review's first finding): «ימי העבודה שלו לא יחושבו בשכר» was said of a man
+// whose rate was cleared AFTER his days were stamped at it - and the pay sheet prices those days
+// at their stamp (ratesForDay; iron law 2). The words are now true of every man they name: the
+// men none of whose recorded days carries a daily rate keep them; a man with days the sheet
+// still prices is told what is true of him - the days recorded from now on. Each claim is asked
+// of payrollReport itself, a day at a time and on a copy with a day added: no arithmetic here.
+suite('1. no daily rate: the words true of what his recorded days carry - all of them unpriced, or only the days from now on');
+{
+    const d = device(T);
+    const CLEARED = { id: 'w_cleared', name: 'שכר שנמחק', dailyRate: 400, hourlyRate: 0, phone: '0520000031' };
+    const NEVER = { id: 'w_never_rate', name: 'בלי שכר מעולם', dailyRate: 0, hourlyRate: 0, phone: '0520000032' };
+    const HOURLY = { id: 'w_hourly', name: 'שעתי בלבד', dailyRate: 0, hourlyRate: 50, phone: '0520000033' };
+    const NEW = { id: 'w_new', name: 'חדש בלי ימים', dailyRate: 0, hourlyRate: 0, phone: '0520000034' };
+    const MIXED = { id: 'w_mixed', name: 'שכר שנמחק ושוב עבד', dailyRate: 400, hourlyRate: 0, phone: '0520000035' };
+    build(d, {
+        workers: [BASE, CLEARED, NEVER, HOURLY, NEW, MIXED], places: [{ id: 'p_1', name: 'אתר אחד' }],
+        work: baseWork().concat(W40.slice(30, 35).map(date => [date, CLEARED.id, 'p_1']), W40.slice(35, 38).map(date => [date, NEVER.id, 'p_1']),
+            W40.slice(37).map(date => [date, HOURLY.id, 'p_1']), W40.slice(30, 33).map(date => [date, MIXED.id, 'p_1']))
+    });
+    // The rates cleared in the form (saveWorkerForm writes Number('') || 0); the mixed man then
+    // works two more days with no rate at all - days with no stamp, priced by the roster's 0.
+    d.run(`State.schedule.workers.find(w => w.id === 'w_cleared').dailyRate = 0;
+        State.schedule.workers.find(w => w.id === 'w_mixed').dailyRate = 0;
+        ${JSON.stringify(W40.slice(38))}.forEach(date => assignPlace(State.schedule, date, 'w_mixed', 'actual', 'p_1'));`);
+    const S = d.State.schedule;
+    const pay = (schedule, from, to, id) => d.call('payrollReport', schedule, from, to).find(row => row.workerId === id).amount;
+    same('the cleared man\'s five days are priced at their stamp, his rate cleared or not', pay(S, W40[30], W40[34], CLEARED.id), 2000);
+    const findings = findingsOn(d, T).filter(f => f.kind === 'noRate');
+    same('two lines, each naming the men it is true of: none of their days priced, and the men with days still priced',
+        findings.map(f => [f.say, f.chips.map(chip => chip.workerId)]), [
+            ['בלי שכר יומי - ימי העבודה שלהם לא יחושבו בשכר:', [NEVER.id, HOURLY.id, NEW.id]],
+            ['בלי שכר יומי - ימי עבודה שיירשמו להם מעכשיו לא יחושבו בשכר:', [CLEARED.id, MIXED.id]]]);
+    same('the reading says how many of each man\'s recorded days the sheet still prices', readOn(d, T).check.noRate.map(x => [x.id, x.priced]),
+        [[CLEARED.id, 5], [NEVER.id, 0], [HOURLY.id, 0], [NEW.id, 0], [MIXED.id, 3]]);
+    const recorded = id => Object.keys(S.days).sort().filter(date => d.call('dayCheckHasSite', S, date, id, 'actual'));
+    check('the first line: every recorded day of each man it names, priced alone, has no amount',
+        [NEVER.id, HOURLY.id].every(id => recorded(id).length > 0 && recorded(id).every(date => pay(S, date, date, id) === null)));
+    check('the second: each man it names has a recorded day the sheet prices - the first line would be false of him',
+        [CLEARED.id, MIXED.id].every(id => recorded(id).some(date => pay(S, date, date, id) > 0)));
+    // A day recorded from now on, on a copy, by the model's own writer.
+    const copy = JSON.parse(JSON.stringify(S));
+    [CLEARED, NEVER, HOURLY, NEW, MIXED].forEach(man => d.call('assignPlace', copy, TOMORROW, man.id, 'actual', 'p_1'));
+    same('and of every man on either line, a day recorded from now on has no amount', [CLEARED, NEVER, HOURLY, NEW, MIXED]
+        .map(man => pay(copy, TOMORROW, TOMORROW, man.id)), [null, null, null, null, null]);
+    const fromNow = d.global('CREW_CHECK_TEXT').noRateFromNow;
+    same('one man alone is said in the singular', typeof fromNow === 'function' ? fromNow(1) : '(no such words)',
+        'בלי שכר יומי - ימי עבודה שיירשמו לו מעכשיו לא יחושבו בשכר:');
+}
+
 suite('1. the evening read as of itself: a key after it changes nothing, and without it tomorrow counts');
 {
     const d = device(T);
@@ -613,6 +666,35 @@ suite('1. days stamped with no daily rate: named under «לידיעה» with how
     check('while the no-rate man, whose days had no stamp, has none', !ids(read.info.zeroStamped).includes('w_n'));
 }
 
+// FIX ROUND 1 (the review's fifth finding): the line said only that those days stay without an
+// amount, while the pay sheet leaves the WHOLE account period that holds one without a total -
+// the days at the rate typed since included (payrollReport: one unpriced day, and the row's
+// amount is null). The words now say the period, as the sheet's own «בלי שכר יומי - הנצבר לא
+// חושב» says it; asked of payrollReport over periodRangeFor, never worked out here.
+suite('1. days stamped with no daily rate: the account period that holds them has no accrued, the days at the new rate in it too');
+{
+    const d = device(T);
+    const H = { id: 'w_h', name: 'שעתי ואחר כך יומי', dailyRate: 0, hourlyRate: 60, phone: '0520000041' };
+    build(d, { workers: [BASE, H], places: [{ id: 'p_1', name: 'אתר אחד' }], work: baseWork().concat(W40.slice(34, 37).map(date => [date, H.id, 'p_1'])) });
+    // His daily rate typed through the check's own door, then two more days in the same period.
+    d.run(`State.schedule.workers.find(w => w.id === 'w_h').dailyRate = 500;
+        ${JSON.stringify(W40.slice(37, 39))}.forEach(date => assignPlace(State.schedule, date, 'w_h', 'actual', 'p_1'));`);
+    const S = d.State.schedule;
+    const worker = S.workers.find(w => w.id === H.id);
+    const period = d.call('periodRangeFor', worker, W40[34]);
+    given('the five days are in one account period of his', W40.slice(34, 39).every(date => date >= period.from && date <= period.to),
+        JSON.stringify(period));
+    const pay = (from, to) => d.call('payrollReport', S, from, to).find(row => row.workerId === H.id).amount;
+    same('the two days at the rate typed are priced, read alone', pay(W40[37], W40[38]), 1000);
+    same('and his account period has no total at all', pay(period.from, period.to), null);
+    const line = findingsOn(d, T).find(f => f.kind === 'zeroStamped');
+    same('the line names him, with his three days', line.chips.map(chip => chip.text), [`${named(H.name)} · 3 ימים`]);
+    same('and says what the sheet does: the account period that holds them has no accrued, even after a rate is typed', line.say,
+        'ימים שנרשמו לו בלי שכר יומי - בתקופת החשבון שלהם הנצבר לא יחושב, גם אחרי שיוזן שכר:');
+    check('the sheet\'s own words for that period are the ones it borrows: «הנצבר לא חושב»',
+        source('js/ui/reports.js').includes("const NO_DAILY_RATE_NOTE = 'בלי שכר יומי - הנצבר לא חושב';") && line.say.includes('הנצבר לא יחושב'));
+}
+
 // ================================================================== 2. the phone family
 //
 // tests/seder.test.mjs's own spellings (its usable list and its unusable one), the three of
@@ -627,9 +709,18 @@ const PHONES = [
     ['0528841930 / 0541234567', 'bad'], ['972-3-1234567', 'bad'], ['528841930', 'bad'], ['٠٥٢٨', 'bad'],
     ['8841930', 'bad'], ['52884193', 'bad'], ['5288419301', 'bad'], ['5551234', 'bad'], ['528841930 / 541234567', 'bad'],
     ['۰۵۲۸', 'bad'], ['+972 3-1234567', 'bad'], ['00972 3 1234567', 'bad'], ['+05288419', 'bad'], ['O528841930', 'bad'],
+    // FIX ROUND 1: two numbers in one field are two numbers WHICHEVER IS FIRST - a man with two
+    // SIMs, his West Bank number typed before his Israeli one. The seder refuses the field, and
+    // deleting one of the two mends it: counted, like the Israeli number first. A field is
+    // another country's only while it holds ONE number: no second '+', and no more digits after
+    // its prefix than E.164 lets a whole international number have (15, its country included).
+    ['+970 59-123-4567 / 052-884-1930', 'bad'], ['052-884-1930 / +970 59-123-4567', 'bad'], ['+970591234567 0528841930', 'bad'],
+    ['00970 59 123 4567, 052 884 1930', 'bad'], ['+970 59-123-4567 / +970 56-765-4321', 'bad'], ['+49 1512 3456 789012', 'bad'],
     // another country's, as typed: «לידיעה»
     ['+970 59-123-4567', 'other'], ['+1 212 555 0100', 'other'], ['00970599123456', 'other'], ['+44 7700 900123', 'other'],
     ['(+970) 59-123-4567', 'other'],
+    // the longest one number can be: 15 digits after the plus
+    ['+49 1512 3456 78901', 'other'],
     // THE KNOWN MISS, pinned as it is: a mobile without its 0 behind a doubled zero reads as
     // +52. It errs the safe way - under «לידיעה», where the seder's row still says «אין מספר
     // טלפון תקין» - and never puts a foreign number in the counted tier.
@@ -672,6 +763,21 @@ suite('2. the phone family: every spelling on exactly the line the contract give
         PHONES.filter(row => row[1] === kind).length >= 2));
 }
 
+suite('2. a man with two numbers in his field, another country\'s first, working tomorrow: counted, and the calm line does not stand');
+{
+    const d = device(T);
+    build(d, { workers: [BASE, { id: 'w_two', name: 'שני כרטיסים', phone: '+970 59-123-4567 / 052-884-1930' }],
+        places: [{ id: 'p_1', name: 'אתר אחד' }], work: baseWork().concat([[T, 'w_two', 'p_1'], [TOMORROW, 'w_two', 'p_1']]) });
+    const crew = d.call('sederCrew', d.State.schedule, TOMORROW, 'actual').filter(row => row.workerId === 'w_two').map(row => row.number);
+    same('the seder cannot open his message tomorrow', crew, ['']);
+    const flat = findingsOn(d, T);
+    same('so he is under «כדאי לבדוק», on the line of numbers that will not open, the field as he typed it',
+        flat.filter(f => f.chips.some(chip => chip.workerId === 'w_two')).map(f => [f.tier, f.kind, f.chips.map(chip => chip.text)]),
+        [['check', 'badPhone', [`${named('שני כרטיסים')} · ${numbered('+970 59-123-4567 / 052-884-1930')}`]]]);
+    // The calm line stands exactly when no finding is of the counted tier (section 4 holds the drawing to that).
+    check('and the calm line does not stand: there is something to check', flat.some(f => f.tier === 'check'));
+}
+
 // ================================================================== 3. the agreements
 //
 // THE DIALOG SAYS WHAT THE ROW AND THE SEDER ALREADY SAY, NEVER SOMETHING ELSE. Asked of the
@@ -682,7 +788,13 @@ suite('2. the phone family: every spelling on exactly the line the contract give
 //   - on exactly one of the three phone lines exactly when the seder refuses his number - and
 //     so every active man on today's or tomorrow's seder list with no number is on one;
 //   - his stamped days named exactly when the pay sheet, asked on a copy of the record with
-//     his rate set to 1, leaves a day of his unpriced (never by arithmetic of its own);
+//     his rate set to 1, leaves a day of his unpriced (never by arithmetic of its own) - and
+//     (fix round 1) the account period holding each such day, asked the same way, has no
+//     accrued at all, as the line now says;
+//   - (fix round 1) «בלי שכר יומי» TRUE OF EVERY MAN IT NAMES, asked of the pay sheet a day at a
+//     time: «ימי העבודה שלו לא יחושבו בשכר» only of a man none of whose recorded days the sheet
+//     prices, «ימי עבודה שיירשמו לו מעכשיו…» of a man with a day it does price - and of every
+//     man on either, a day recorded from now on (on a copy, by the model's writer) has no amount;
 //   - the calendar the day check's, date for date.
 const AGREE = String.raw`(function (S, today, read) {
     const bad = [];
@@ -692,6 +804,17 @@ const AGREE = String.raw`(function (S, today, read) {
     const lines = w => (read.check.badPhone.some(m => m.id === w.id) ? 1 : 0) + (read.info.otherPhone.some(m => m.id === w.id) ? 1 : 0)
         + (/[0-9٠-٩۰-۹]/.test(String(w.phone === undefined || w.phone === null ? '' : w.phone)) ? 0 : 1);
     const zero = new Set(read.info.zeroStamped.map(m => m.id));
+    const keys = Object.keys(S.days).filter(isRealDate).sort();
+    const recorded = id => keys.filter(date => dayCheckHasSite(S, date, id, 'actual'));
+    const amountOf = (schedule, from, to, id) => { const r = payrollReport(schedule, from, to).find(x => x.workerId === id); return r ? r.amount : undefined; };
+    // The noRate lines as drawn, each man to the words he is named under.
+    const said = new Map();
+    crewCheckFindings(read, today).filter(f => f.kind === 'noRate').forEach(f => f.chips.forEach(c => {
+        said.set(c.workerId, f.say === CREW_CHECK_TEXT.noRate(f.chips.length) ? 'all' : 'later');
+    }));
+    const last = keys.length ? keys[keys.length - 1] : today;
+    const after = toLocalDateStr(new Date(parseLocalDate(last > today ? last : today).getFullYear(), parseLocalDate(last > today ? last : today).getMonth(),
+        parseLocalDate(last > today ? last : today).getDate() + 1));
     const held = State.schedule;
     State.schedule = S;
     try {
@@ -706,6 +829,25 @@ const AGREE = String.raw`(function (S, today, read) {
             const row = payrollReport(copy, '0000-01-01', '9999-12-31').find(r => r.workerId === w.id);
             const unpriced = Boolean(row) && row.attendanceDays > 0 && row.amount === null;
             if (zero.has(w.id) !== unpriced) bad.push('zeroStamped ' + w.id);
+            if (zero.has(w.id)) {
+                const mended = copy.workers.find(x => x.id === w.id);
+                recorded(w.id).filter(date => { const r = ratesForDay(S, date, w.id, w); return r.stamped && r.daily <= 0; }).forEach(date => {
+                    const period = periodRangeFor(mended, date);
+                    if (amountOf(copy, period.from, period.to, w.id) !== null) bad.push('zeroStamped period ' + w.id + ' ' + date);
+                });
+            }
+            const noRate = (Number(w.dailyRate) || 0) <= 0;
+            if (noRate !== said.has(w.id)) bad.push('noRate named ' + w.id);
+            if (said.get(w.id) === 'all' && recorded(w.id).some(date => amountOf(S, date, date, w.id) !== null)) bad.push('noRate all ' + w.id);
+            if (said.get(w.id) === 'later' && !recorded(w.id).some(date => amountOf(S, date, date, w.id) > 0)) bad.push('noRate later ' + w.id);
+            if (noRate) {
+                const plus = JSON.parse(JSON.stringify(S));
+                const place = (plus.places || []).find(p => p && p.active !== false);
+                if (place) {
+                    assignPlace(plus, after, w.id, 'actual', place.id);
+                    if (amountOf(plus, after, after, w.id) !== null) bad.push('noRate from now on ' + w.id);
+                }
+            }
         });
     } finally {
         State.schedule = held;
@@ -869,38 +1011,48 @@ function drawInto(d, today) {
     return { count, box, said: drawn(box) };
 }
 
+// MOVED ON PURPOSE (fix round 1, the review of 68c7ab7): עלי חסן's days are stamped at 410 by
+// the seed and priced at it, so «ימי העבודה שלו לא יחושבו בשכר» was false of him - he is now
+// told of the days from now on, and the other words are said of וליד זועבי (2), who has no
+// rate and never worked; a namesake carries his number on every line he is on, «(1)» and
+// «(2)», and the «שם כפול» line says what the number is; «עובדים פעילים…» has its subject;
+// another country's number is one the APP will not open; the stamped day's line names the
+// account period the sheet leaves without a total.
 const WITH_FINDINGS = (() => {
     const go = name => `עריכת הפרטים של ${named(name)}`;
     const row = name => `הצג את ${named(name)} ברשימת העובדים`;
     const site = name => `הצג את ${named(name)} ברשימת האתרים`;
     const more = (text, door) => `${text} - ${door}`;
     const man = (text, aria, door, workerId, field) => Object.assign({ text, aria, door, workerId }, field ? { field } : {});
+    const twin = n => `${named('וליד זועבי')} (${n})`;
     return [
         { kind: 'noRate', tier: 'check', say: 'בלי שכר יומי - ימי העבודה שלו לא יחושבו בשכר:', note: null,
+            chips: [man(twin(2), more(twin(2), go('וליד זועבי')), 'form', 'w13', 'daily')] },
+        { kind: 'noRate', tier: 'check', say: 'בלי שכר יומי - ימי עבודה שיירשמו לו מעכשיו לא יחושבו בשכר:', note: null,
             chips: [man('עלי חסן', go('עלי חסן'), 'form', 'w02', 'daily')] },
         { kind: 'badPhone', tier: 'check', say: 'אין מספר טלפון תקין - המספר שנרשם לו לא ייפתח בוואטסאפ:', note: null,
             chips: [man(`${named('מוחמד אבו ראס חוסיין')} · ${numbered('03-5551234')}`,
                 more(`${named('מוחמד אבו ראס חוסיין')} · ${numbered('03-5551234')}`, go('מוחמד אבו ראס חוסיין')), 'form', 'w03', 'phone')] },
         { kind: 'sharedPhone', tier: 'check', say: `מספר משותף - ${numbered('0520000010')} רשום אצל 2 עובדים פעילים:`, note: null,
             chips: [man('דוד כהן', go('דוד כהן'), 'form', 'w01', 'phone'), man('אחמד נסאר', go('אחמד נסאר'), 'form', 'w05', 'phone')] },
-        { kind: 'sameName', tier: 'check', say: `שם כפול - 2 עובדים פעילים בשם ${named('וליד זועבי')}:`, note: null,
-            chips: [man(`${named('וליד זועבי')} · 1`, more(`${named('וליד זועבי')} · 1`, go('וליד זועבי')), 'form', 'w12', 'name'),
-                man(`${named('וליד זועבי')} · 2`, more(`${named('וליד זועבי')} · 2`, go('וליד זועבי')), 'form', 'w13', 'name')] },
+        { kind: 'sameName', tier: 'check', say: `שם כפול - 2 עובדים פעילים בשם ${named('וליד זועבי')}, ממוספרים לפי הסדר ברשימת העובדים:`, note: null,
+            chips: [man(twin(1), more(twin(1), go('וליד זועבי')), 'form', 'w12', 'name'),
+                man(twin(2), more(twin(2), go('וליד זועבי')), 'form', 'w13', 'name')] },
         { kind: 'idle', tier: 'check', say: 'לא עבד ב-25 ימי העבודה האחרונים (מאז 12/10), ועדיין פעיל:',
             note: 'אם מכבים עובד בכפתור «פעיל»: הימים שכבר נרשמו יישמרו, והעובד לא יופיע ברשימה היומית.',
             chips: [man(`${named('ראמי חורי')} · 11/10`, more(`${named('ראמי חורי')} · 11/10`, row('ראמי חורי')), 'row', 'w14')] },
         { kind: 'idleSites', tier: 'check', say: 'אתר שלא נרשמה בו עבודה ב-25 ימי העבודה האחרונים (מאז 12/10), ועדיין פעיל:', note: null,
             chips: [{ text: `${named('חדרה - בית הספר')} · 11/10`, aria: more(`${named('חדרה - בית הספר')} · 11/10`, site('חדרה - בית הספר')),
                 door: 'site', placeId: 'p6' }] },
-        { kind: 'otherPhone', tier: 'info', say: 'מספר שאינו נייד ישראלי - אי אפשר לפתוח לו הודעה בוואטסאפ:', note: null,
+        { kind: 'otherPhone', tier: 'info', say: 'מספר שאינו נייד ישראלי - האפליקציה לא תפתח לו הודעה בוואטסאפ:', note: null,
             chips: [man(`${named('יוסי מזרחי')} · ${numbered('+970 59-123-4567')}`,
                 more(`${named('יוסי מזרחי')} · ${numbered('+970 59-123-4567')}`, go('יוסי מזרחי')), 'form', 'w04', 'phone')] },
         { kind: 'noPhone', tier: 'info', say: 'בלי טלפון - אי אפשר לפתוח להם הודעה בוואטסאפ:', note: null,
             chips: [man('חאלד סלאמה', go('חאלד סלאמה'), 'form', 'w10', 'phone'), man('נועם פרץ', go('נועם פרץ'), 'form', 'w11', 'phone')] },
-        { kind: 'zeroStamped', tier: 'info', say: 'ימים שנרשמו לו בלי שכר יומי יישארו בלי סכום גם אחרי שיוזן שכר:', note: null,
+        { kind: 'zeroStamped', tier: 'info', say: 'ימים שנרשמו לו בלי שכר יומי - בתקופת החשבון שלהם הנצבר לא יחושב, גם אחרי שיוזן שכר:', note: null,
             chips: [man(`${named('עלי חסן')} · יום אחד`, more(`${named('עלי חסן')} · יום אחד`, row('עלי חסן')), 'row', 'w02')] },
-        { kind: 'never', tier: 'info', say: 'פעילים בלי אף יום עבודה רשום:', note: null,
-            chips: [man('וליד זועבי', row('וליד זועבי'), 'row', 'w12'), man('וליד זועבי', row('וליד זועבי'), 'row', 'w13')] },
+        { kind: 'never', tier: 'info', say: 'עובדים פעילים בלי אף יום עבודה רשום:', note: null,
+            chips: [man(twin(1), more(twin(1), row('וליד זועבי')), 'row', 'w12'), man(twin(2), more(twin(2), row('וליד זועבי')), 'row', 'w13')] },
         { kind: 'neverSites', tier: 'info', say: 'אתר פעיל בלי אף יום עבודה רשום:', note: null,
             chips: [{ text: 'כפר סבא - מרכז', aria: site('כפר סבא - מרכז'), door: 'site', placeId: 'p7' }] }
     ];
@@ -965,6 +1117,81 @@ suite('4. drawn, the list is the flat list: groups in order, each finding its se
     delete d.ctx.currentView;
 }
 
+// FIX ROUND 1 (the review's fourth and eighth findings): a typed number was broken at its
+// hyphen on the glass («… · 03-» / «5551234»), and the line under the title inside «label: n».
+// In Chromium that is held by tests/crewcheck.browser.mjs; here, what the drawing is made of:
+// every number - an LTR isolate, in a chip or in a sentence - is ONE inline block of its own
+// (.crewcheck-whole.crewcheck-number, css/design.css), and the line under the title is three
+// such blocks, the day and the two counts, with the separators between them. The words read
+// back are the same words, character for character.
+suite('4. a number, and each part of the line under the title, is drawn as one block that goes to the next line whole');
+{
+    const { d } = seeded.withFindings;
+    d.ctx.currentView = 'roster';
+    const { box } = drawInto(d, SCREENS_TODAY);
+    const whole = node => node.className === 'crewcheck-whole crewcheck-number';
+    const findings = box.children.filter(node => node.tagName === 'SECTION').flatMap(group => group.children.slice(1));
+    const of = kind => findings.find(node => node.dataset.kind === kind);
+    const blocks = node => node.children.filter(whole).map(child => child.textContent);
+    same('the badPhone chip: the name as text, the number one block of its own',
+        of('badPhone').children[1].children.map(chip => [chip.textContent, blocks(chip)]),
+        [[`${named('מוחמד אבו ראס חוסיין')} · ${numbered('03-5551234')}`, [numbered('03-5551234')]]]);
+    same('another country\'s number the same', of('otherPhone').children[1].children.map(chip => blocks(chip)), [[numbered('+970 59-123-4567')]]);
+    const say = of('sharedPhone').children[0];
+    same('and the shared number inside its sentence, the words after it where they were',
+        [say.textContent, blocks(say)], [`מספר משותף - ${numbered('0520000010')} רשום אצל 2 עובדים פעילים:`, [numbered('0520000010')]]);
+    check('a chip or a sentence with no number is not cut into blocks', of('idle').children[1].children.every(chip => blocks(chip).length === 0)
+        && blocks(of('noRate').children[0]).length === 0);
+    // The frame's line under the title, drawn by the dialog itself.
+    d.run('openCrewCheck()');
+    const context = d.dom.getElementById('crewCheckContext');
+    same('the line under the title reads as it did', context.textContent, 'יום שלישי 10/11/2026 · עובדים פעילים: 14 · אתרים פעילים: 7');
+    same('and is three blocks - the day, the men, the sites - with « · » between them',
+        context.children.map(node => [node.className || null, node.textContent]),
+        [['crewcheck-whole', 'יום שלישי 10/11/2026'], [null, ' · '], ['crewcheck-whole', 'עובדים פעילים: 14'], [null, ' · '],
+            ['crewcheck-whole', 'אתרים פעילים: 7']]);
+    d.run('closeCrewCheck()');
+    delete d.ctx.currentView;
+}
+
+// FIX ROUND 1 (the review's sixth finding): two men with one name were told apart only on the
+// «שם כפול» line - two identical buttons, with identical labels, on «עובדים פעילים בלי אף יום
+// עבודה רשום», and «בלי שכר יומי» named «וליד זועבי» with no way to know which. Now a name held
+// by two or more active men carries his number among them, in the crew list's order, on EVERY
+// line he is on - in the words and in the label read aloud - and the «שם כפול» line says what
+// the number is.
+suite('4. namesakes: one number each, the same on every line, and no two chips of one line alike');
+{
+    const { d } = seeded.withFindings;
+    const flat = findingsOn(d, SCREENS_TODAY);
+    const lines = flat.filter(f => f.chips.some(chip => chip.workerId === 'w13')).map(f => [f.kind, f.chips.find(chip => chip.workerId === 'w13').text]);
+    same('the second «וליד זועבי» is «(2)» on all three of his lines', lines,
+        [['noRate', `${named('וליד זועבי')} (2)`], ['sameName', `${named('וליד זועבי')} (2)`], ['never', `${named('וליד זועבי')} (2)`]]);
+    check('and the «שם כפול» line says what the number is', flat.find(f => f.kind === 'sameName').say.endsWith(', ממוספרים לפי הסדר ברשימת העובדים:'));
+    // Every seed, the 'with findings' state, and three namesakes, one of them switched off.
+    const e = device(T);
+    build(e, { workers: [BASE, { id: 'w_a', name: 'שם משותף', dailyRate: 0 }, { id: 'w_b', name: 'שם משותף', phone: '1234' },
+        { id: 'w_c', name: 'שם משותף', active: false }, { id: 'w_d', name: 'שם משותף' }], places: [{ id: 'p_1', name: 'אתר אחד' }],
+    work: baseWork().concat([[T, 'w_b', 'p_1']]) });
+    const three = findingsOn(e, T);
+    same('three namesakes and one switched off: the active ones are (1), (2), (3) in the crew\'s order, wherever they are named',
+        three.flatMap(f => f.chips.filter(chip => /^w_[a-d]$/.test(chip.workerId)).map(chip => [f.kind, chip.workerId, chip.text])), [
+            ['noRate', 'w_a', `${named('שם משותף')} (1)`],
+            ['badPhone', 'w_b', `${named('שם משותף')} (2) · ${numbered('1234')}`],
+            ['sameName', 'w_a', `${named('שם משותף')} (1)`], ['sameName', 'w_b', `${named('שם משותף')} (2)`], ['sameName', 'w_d', `${named('שם משותף')} (3)`],
+            ['never', 'w_a', `${named('שם משותף')} (1)`], ['never', 'w_d', `${named('שם משותף')} (3)`]]);
+    same('read aloud, each is told apart the same way', three.find(f => f.kind === 'never').chips.map(chip => chip.aria),
+        [`${named('שם משותף')} (1) - הצג את ${named('שם משותף')} ברשימת העובדים`, `${named('שם משותף')} (3) - הצג את ${named('שם משותף')} ברשימת העובדים`]);
+    const alike = [];
+    [['the \'with findings\' state', flat], ['three namesakes', three]].concat(SEEDS.map(([label]) => [label, findingsOn(seeded[label].d, seeded[label].today)]))
+        .forEach(([label, list]) => list.forEach(f => {
+            const texts = f.chips.map(chip => chip.text);
+            const arias = f.chips.map(chip => chip.aria);
+            if (new Set(texts).size !== texts.length || new Set(arias).size !== arias.length) alike.push(`${label}: ${f.kind}`);
+        }));
+    same('on every seed and fixture, no two chips of one line say the same words or are read aloud alike', alike, []);
+}
+
 // ================================================================== 5. the words
 
 suite('5. every word the check says, pinned');
@@ -972,24 +1199,29 @@ suite('5. every word the check says, pinned');
     const d = seeded.withFindings.d;
     const T_ = d.global('CREW_CHECK_TEXT');
     const R = d.global('CREW_CHECK_REUSED');
+    // A template the block may not have (yet): said as its absence, so a missing word is a red line, not a crash.
+    const say = (key, ...args) => (typeof T_[key] === 'function' ? T_[key](...args) : `(no ${key})`);
     same('nothing else in the block', Object.keys(T_).sort(), ['badPhone', 'chip', 'clean', 'counts', 'days', 'entry', 'goForm', 'goRow',
-        'goSite', 'idle', 'idleSites', 'archiveIf', 'never', 'neverSites', 'noPhone', 'noRate', 'oneDay', 'otherPhone', 'sameName',
-        'sharedPhone', 'title', 'tooFew', 'zeroStamped'].sort());
+        'goSite', 'idle', 'idleSites', 'archiveIf', 'never', 'neverSites', 'noPhone', 'noRate', 'noRateFromNow', 'oneDay', 'otherPhone',
+        'sameName', 'sharedPhone', 'title', 'tooFew', 'twin', 'zeroStamped'].sort());
     same('the way in, the title, the line under it, the too-few line and the calm line',
         [T_.entry, T_.title, T_.counts(40, 6), T_.tooFew(25), T_.clean],
         ['בדיקת הצוות', 'בדיקת הצוות', 'עובדים פעילים: 40 · אתרים פעילים: 6',
             'עדיין אין 25 ימי עבודה רשומים, ולכן לא נבדקו עובדים ואתרים בלי עבודה זמן רב.', '✓ לא נמצא בצוות דבר שכדאי לבדוק.']);
     same('what a door says aloud', [T_.goForm(named('אחמד')), T_.goRow(named('אחמד')), T_.goSite(named('הרצליה'))],
         [`עריכת הפרטים של ${named('אחמד')}`, `הצג את ${named('אחמד')} ברשימת העובדים`, `הצג את ${named('הרצליה')} ברשימת האתרים`]);
-    same('«כדאי לבדוק», each line for one and for many', [T_.noRate(1), T_.noRate(2), T_.badPhone(1), T_.badPhone(3),
+    same('«כדאי לבדוק», each line for one and for many', [T_.noRate(1), T_.noRate(2), say('noRateFromNow', 1), say('noRateFromNow', 2),
+        T_.badPhone(1), T_.badPhone(3),
         T_.sharedPhone(numbered('052-884-1930'), 2), T_.sameName(2, named('אחמד')), T_.idle(1, 25, '12/10'), T_.idle(2, 25, '12/10'),
         T_.archiveIf, T_.idleSites(1, 25, '12/10'), T_.idleSites(2, 25, '12/10')], [
         'בלי שכר יומי - ימי העבודה שלו לא יחושבו בשכר:',
         'בלי שכר יומי - ימי העבודה שלהם לא יחושבו בשכר:',
+        'בלי שכר יומי - ימי עבודה שיירשמו לו מעכשיו לא יחושבו בשכר:',
+        'בלי שכר יומי - ימי עבודה שיירשמו להם מעכשיו לא יחושבו בשכר:',
         'אין מספר טלפון תקין - המספר שנרשם לו לא ייפתח בוואטסאפ:',
         'אין מספר טלפון תקין - המספרים שנרשמו להם לא ייפתחו בוואטסאפ:',
         `מספר משותף - ${numbered('052-884-1930')} רשום אצל 2 עובדים פעילים:`,
-        `שם כפול - 2 עובדים פעילים בשם ${named('אחמד')}:`,
+        `שם כפול - 2 עובדים פעילים בשם ${named('אחמד')}, ממוספרים לפי הסדר ברשימת העובדים:`,
         'לא עבד ב-25 ימי העבודה האחרונים (מאז 12/10), ועדיין פעיל:',
         'לא עבדו ב-25 ימי העבודה האחרונים (מאז 12/10), ועדיין פעילים:',
         'אם מכבים עובד בכפתור «פעיל»:',
@@ -997,17 +1229,20 @@ suite('5. every word the check says, pinned');
         'אתרים שלא נרשמה בהם עבודה ב-25 ימי העבודה האחרונים (מאז 12/10), ועדיין פעילים:']);
     same('«לידיעה», each line for one and for many', [T_.otherPhone(1), T_.otherPhone(2), T_.noPhone(1), T_.noPhone(2),
         T_.zeroStamped(1), T_.zeroStamped(2), T_.never(1), T_.never(2), T_.neverSites(1), T_.neverSites(2)], [
-        'מספר שאינו נייד ישראלי - אי אפשר לפתוח לו הודעה בוואטסאפ:',
-        'מספרים שאינם ניידים ישראליים - אי אפשר לפתוח להם הודעה בוואטסאפ:',
+        'מספר שאינו נייד ישראלי - האפליקציה לא תפתח לו הודעה בוואטסאפ:',
+        'מספרים שאינם ניידים ישראליים - האפליקציה לא תפתח להם הודעה בוואטסאפ:',
         'בלי טלפון - אי אפשר לפתוח לו הודעה בוואטסאפ:',
         'בלי טלפון - אי אפשר לפתוח להם הודעה בוואטסאפ:',
-        'ימים שנרשמו לו בלי שכר יומי יישארו בלי סכום גם אחרי שיוזן שכר:',
-        'ימים שנרשמו להם בלי שכר יומי יישארו בלי סכום גם אחרי שיוזן שכר:',
-        'פעיל בלי אף יום עבודה רשום:', 'פעילים בלי אף יום עבודה רשום:',
+        'ימים שנרשמו לו בלי שכר יומי - בתקופת החשבון שלהם הנצבר לא יחושב, גם אחרי שיוזן שכר:',
+        'ימים שנרשמו להם בלי שכר יומי - בתקופת החשבון שלהם הנצבר לא יחושב, גם אחרי שיוזן שכר:',
+        'עובד פעיל בלי אף יום עבודה רשום:', 'עובדים פעילים בלי אף יום עבודה רשום:',
         'אתר פעיל בלי אף יום עבודה רשום:', 'אתרים פעילים בלי אף יום עבודה רשום:']);
     same('a chip that says more than the name, and the two counts of stamped days',
         [T_.chip(named('אחמד'), '2'), T_.oneDay, T_.days(3), T_.chip(named('אחמד'), T_.oneDay)],
         [`${named('אחמד')} · 2`, 'יום אחד', '3 ימים', `${named('אחמד')} · יום אחד`]);
+    same('a namesake\'s number, the same on every line he is on, and with more after it',
+        [say('twin', named('אחמד'), 2), T_.chip(say('twin', named('אחמד'), 2), '11/10')],
+        [`${named('אחמד')} (2)`, `${named('אחמד')} (2) · 11/10`]);
     same('the idle men\'s note, one line: the condition and then the archive question\'s own sentence',
         [T_.archiveIf, R.archiveSays].join(' '), 'אם מכבים עובד בכפתור «פעיל»: הימים שכבר נרשמו יישמרו, והעובד לא יופיע ברשימה היומית.');
     check('the block is frozen, and so is the borrowed one', Object.isFrozen(T_) && Object.isFrozen(R));

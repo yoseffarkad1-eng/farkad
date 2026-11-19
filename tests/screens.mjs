@@ -316,10 +316,12 @@ export const SCREENS = [
     // The same dialog with every line it has (the idle men's note among them, which the large
     // display's gate must measure): IN MEMORY ONLY, the model's own writers on the live
     // schedule and nothing committed - w02's rate first, so the day added for him is stamped
-    // with it; then a typo'd number, a shared one, another country's, a name twice, two sites,
-    // and eleven working days before the seed (11/10-22/10, not the Saturday) with ראמי חורי on
-    // the first only. Taken back on closing: the eleven keys deleted, the crew and the sites
-    // put back as they were.
+    // with it (his seeded days keep their 410: the man whose rate was cleared); then a typo'd
+    // number, a shared one, another country's, a name twice - the second of them with no rate,
+    // so both sentences of «בלי שכר יומי» are drawn and a namesake is named on three lines -
+    // two sites, and eleven working days before the seed (11/10-22/10, not the Saturday) with
+    // ראמי חורי on the first only. Taken back on closing: the eleven keys deleted, the crew and
+    // the sites put back as they were.
     { name: 'crew - «בדיקת הצוות», with findings', scope: ['#crewCheckModal'],
         open: async page => {
             await view('roster')(page);
@@ -333,6 +335,7 @@ export const SCREENS = [
                     w('w05').phone = w('w01').phone;
                     w('w04').phone = '+970 59-123-4567';
                     w('w13').name = w('w12').name;
+                    w('w13').dailyRate = 0;
                     S.places.push({ id: 'p6', name: 'חדרה - בית הספר', active: true }, { id: 'p7', name: 'כפר סבא - מרכז', active: true });
                     ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-18', '2026-10-19',
                         '2026-10-20', '2026-10-21', '2026-10-22'].forEach((date, i) => {

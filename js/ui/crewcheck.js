@@ -56,18 +56,25 @@ const CREW_CHECK_TEXT = Object.freeze({
     goSite: name => `הצג את ${name} ברשימת האתרים`,
 
     // --- כדאי לבדוק
-    // true of the days already recorded and of the days to come, while he has no rate
+    // Of a man none of whose recorded days carries a daily rate: true of those days and of the
+    // days to come, while he has no rate.
     noRate: count => (count === 1
         ? 'בלי שכר יומי - ימי העבודה שלו לא יחושבו בשכר:'
         : 'בלי שכר יומי - ימי העבודה שלהם לא יחושבו בשכר:'),
+    // Of a man whose rate was cleared AFTER days of his were stamped with it: the pay sheet
+    // prices those at their stamp (iron law 2), so only the days to come are said.
+    noRateFromNow: count => (count === 1
+        ? 'בלי שכר יומי - ימי עבודה שיירשמו לו מעכשיו לא יחושבו בשכר:'
+        : 'בלי שכר יומי - ימי עבודה שיירשמו להם מעכשיו לא יחושבו בשכר:'),
     // around the seder's own words for the same fact, «אין מספר טלפון תקין»
     badPhone: count => (count === 1
         ? `${CREW_CHECK_REUSED.noPhone} - המספר שנרשם לו לא ייפתח בוואטסאפ:`
         : `${CREW_CHECK_REUSED.noPhone} - המספרים שנרשמו להם לא ייפתחו בוואטסאפ:`),
     // around the row's own badge: «מספר משותף - 052-000-0010 רשום אצל 2 עובדים פעילים:»
     sharedPhone: (number, count) => `${CREW_CHECK_REUSED.shared} - ${number} רשום אצל ${count} עובדים פעילים:`,
-    // around the row's own badge: «שם כפול - 2 עובדים פעילים בשם וליד זועבי:»
-    sameName: (count, name) => `${CREW_CHECK_REUSED.sameName} - ${count} עובדים פעילים בשם ${name}:`,
+    // around the row's own badge, and what the number beside each of them is (twin, below):
+    // «שם כפול - 2 עובדים פעילים בשם וליד זועבי, ממוספרים לפי הסדר ברשימת העובדים:»
+    sameName: (count, name) => `${CREW_CHECK_REUSED.sameName} - ${count} עובדים פעילים בשם ${name}, ממוספרים לפי הסדר ברשימת העובדים:`,
     idle: (count, days, since) => (count === 1
         ? `לא עבד ב-${days} ימי העבודה האחרונים (מאז ${since}), ועדיין פעיל:`
         : `לא עבדו ב-${days} ימי העבודה האחרונים (מאז ${since}), ועדיין פעילים:`),
@@ -82,28 +89,37 @@ const CREW_CHECK_TEXT = Object.freeze({
         : `אתרים שלא נרשמה בהם עבודה ב-${days} ימי העבודה האחרונים (מאז ${since}), ועדיין פעילים:`),
 
     // --- לידיעה, never counted
+    // It is the APP that will not open it - the seder refuses another country's number on
+    // purpose (sederWaNumber) - and not WhatsApp, where the owner may write to him every day.
     otherPhone: count => (count === 1
-        ? 'מספר שאינו נייד ישראלי - אי אפשר לפתוח לו הודעה בוואטסאפ:'
-        : 'מספרים שאינם ניידים ישראליים - אי אפשר לפתוח להם הודעה בוואטסאפ:'),
+        ? 'מספר שאינו נייד ישראלי - האפליקציה לא תפתח לו הודעה בוואטסאפ:'
+        : 'מספרים שאינם ניידים ישראליים - האפליקציה לא תפתח להם הודעה בוואטסאפ:'),
     // around the row's own «בלי טלפון»
     noPhone: count => (count === 1
         ? `${CREW_CHECK_REUSED.noPhoneRow} - אי אפשר לפתוח לו הודעה בוואטסאפ:`
         : `${CREW_CHECK_REUSED.noPhoneRow} - אי אפשר לפתוח להם הודעה בוואטסאפ:`),
     // days recorded while his roster had an hourly rate and no daily one: their stamp is for
     // ever (iron law 2), so this promises nothing and asks for nothing - it is the reason the
-    // pay sheet can still say «בלי שכר יומי» about him after his rate is typed
+    // pay sheet can still say «בלי שכר יומי - הנצבר לא חושב» about him after his rate is typed,
+    // for the WHOLE account period that holds one, the days at the new rate in it too (one
+    // unpriced day and payrollReport gives the period no amount); said in the sheet's words
     zeroStamped: count => (count === 1
-        ? 'ימים שנרשמו לו בלי שכר יומי יישארו בלי סכום גם אחרי שיוזן שכר:'
-        : 'ימים שנרשמו להם בלי שכר יומי יישארו בלי סכום גם אחרי שיוזן שכר:'),
-    never: count => (count === 1 ? 'פעיל בלי אף יום עבודה רשום:' : 'פעילים בלי אף יום עבודה רשום:'),
+        ? 'ימים שנרשמו לו בלי שכר יומי - בתקופת החשבון שלהם הנצבר לא יחושב, גם אחרי שיוזן שכר:'
+        : 'ימים שנרשמו להם בלי שכר יומי - בתקופת החשבון שלהם הנצבר לא יחושב, גם אחרי שיוזן שכר:'),
+    // the man named as the subject, as the sites' line names the site
+    never: count => (count === 1 ? 'עובד פעיל בלי אף יום עבודה רשום:' : 'עובדים פעילים בלי אף יום עבודה רשום:'),
     neverSites: count => (count === 1 ? 'אתר פעיל בלי אף יום עבודה רשום:' : 'אתרים פעילים בלי אף יום עבודה רשום:'),
 
-    // --- a chip that says more than the name: «וליד זועבי · 2», «ראמי חורי · 11/10»,
-    // «יוסי מזרחי · +970 59-123-4567», «עלי חסן · יום אחד». Not the day check's «N ימים»
-    // template: it is never asked for one day, and «1 ימים» is not Hebrew.
+    // --- a chip that says more than the name: «ראמי חורי · 11/10», «יוסי מזרחי · +970
+    // 59-123-4567», «עלי חסן · יום אחד». Not the day check's «N ימים» template: it is never
+    // asked for one day, and «1 ימים» is not Hebrew.
     chip: (name, more) => `${name} · ${more}`,
     oneDay: 'יום אחד',
-    days: n => `${n} ימים`
+    days: n => `${n} ימים`,
+    // A name two or more active men hold, with his place among them in the crew list's order -
+    // the same on every line he is on, in the words and read aloud: «וליד זועבי (2)». Brackets,
+    // not « · 2», which would read like a chip's day or count.
+    twin: (name, n) => `${name} (${n})`
 });
 
 // The words it borrows, each beside the screen that owns it. Read from their owners' blocks
@@ -150,6 +166,15 @@ function crewCheckTyped(phone) {
 // no area code), and it belongs with the typos, where it is mended in one field. Digits after
 // the prefix that start with 0 are a local number behind a stray plus: no country code
 // starts with 0.
+//
+// AND ONE NUMBER. A field with two in it - a man with two SIMs, his West Bank number typed
+// before his Israeli one - is two numbers whichever comes first: the seder refuses the field,
+// and deleting one of the two mends it, so it is counted with the typos, exactly as the same
+// two numbers the other way round are. One number has no second `+`, and no more digits after
+// its prefix than a whole international number can have: 15, its country code included
+// (ITU-T E.164). Two numbers never fit in 15 - the shortest pair is 17 - so the count alone
+// tells them apart, however they were separated: a slash, a comma, a word or a space.
+const CREW_CHECK_ONE_NUMBER_DIGITS = 15;
 function crewCheckForeign(typed) {
     const text = String(typed)
         .replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660))
@@ -158,9 +183,8 @@ function crewCheckForeign(typed) {
     let rest = null;
     if (text.startsWith('+')) rest = text.slice(1);
     else if (text.startsWith('00')) rest = text.slice(2);
-    if (rest === null) return false;
-    rest = rest.replace(/[^0-9]/g, '');
-    return rest !== '' && !rest.startsWith('972') && !rest.startsWith('0');
+    if (rest === null || rest.includes('+')) return false;
+    return rest !== '' && rest.length <= CREW_CHECK_ONE_NUMBER_DIGITS && !rest.startsWith('972') && !rest.startsWith('0');
 }
 
 // What the phone field is, of four: 'none' (no digit typed at all - empty, spaces, «אין», a
@@ -182,8 +206,10 @@ function crewCheckPhoneKind(phone) {
 //     info: { otherPhone, noPhone, zeroStamped, never, neverSites } }
 //
 // every list in roster order, a man as { id, name } (with `phone`, `last` or `days` where the
-// line says one), a site as { id, name } (with `last`). `since` is the first of the last
-// CREW_CHECK_IDLE_DAYS working days, or null while the record holds fewer.
+// line says one; on `noRate`, `priced`: how many of his recorded days carry a daily rate in
+// their stamp - the days the pay sheet prices whatever the roster says now), a site as
+// { id, name } (with `last`). `since` is the first of the last CREW_CHECK_IDLE_DAYS working
+// days, or null while the record holds fewer.
 //
 // THE CALENDAR is the day check's own: a working day is a key on or before `today` on which
 // any man the record holds, archived included, has a site (dayCheckIsWorkingDay) - absences
@@ -218,6 +244,7 @@ function crewCheckRead(schedule, today, layer, asOf) {
     const lastMan = new Map();
     const lastSite = new Map();
     const zero = new Map();
+    const priced = new Map();
     for (const date of dates) {
         if (bound !== null && date > bound) break;
         if (date <= today && dayCheckIsWorkingDay(schedule, date, side)) working.push(date);
@@ -230,12 +257,15 @@ function crewCheckRead(schedule, today, layer, asOf) {
                     if (entry && placeIds.has(entry.placeId)) lastSite.set(entry.placeId, date);
                 });
                 // A day whose STAMP has no daily rate: the pay sheet never prices it, and no
-                // rate typed now changes that. The pay report reads the 'actual' layer and no
-                // other (ratesForDay), so this does too - the day check's own call.
+                // rate typed now changes that. A day whose stamp HAS one is priced at it, the
+                // roster's rate cleared or not (iron law 2) - what «בלי שכר יומי» may not deny.
+                // The pay report reads the 'actual' layer and no other (ratesForDay), so this
+                // does too - the day check's own call. One fact each, and no figure.
                 const worker = activeById.get(id);
                 if (worker && side === 'actual') {
                     const rates = ratesForDay(schedule, date, id, worker);
                     if (rates.stamped && rates.daily <= 0) zero.set(id, (zero.get(id) || 0) + 1);
+                    if (rates.stamped && rates.daily > 0) priced.set(id, (priced.get(id) || 0) + 1);
                 }
             });
         }
@@ -257,7 +287,7 @@ function crewCheckRead(schedule, today, layer, asOf) {
         const kind = crewCheckPhoneKind(worker.phone);
         // '' / 0 / '0' / undefined / negative - and an hourly rate alone, which stamps
         // daily: 0 onto his days (currentRates, js/model/money.js) and is never priced.
-        if ((Number(worker.dailyRate) || 0) <= 0) read.check.noRate.push(who);
+        if ((Number(worker.dailyRate) || 0) <= 0) read.check.noRate.push({ id: who.id, name: who.name, priced: priced.get(worker.id) || 0 });
         if (kind === 'bad') read.check.badPhone.push({ id: who.id, name: who.name, phone: crewCheckTyped(worker.phone) });
         if (kind === 'other') read.info.otherPhone.push({ id: who.id, name: who.name, phone: crewCheckTyped(worker.phone) });
         if (last === null) read.info.never.push(who);
@@ -335,15 +365,62 @@ function crewCheckContext(read) {
     return day + CREW_CHECK_TEXT.counts(read.counts.men, read.counts.sites);
 }
 
+// WHERE A LINE MAY BREAK (fix round 1). On a narrow phone the line under the title broke
+// inside «label: n», leaving the men's count at the head of the sites' line, and a typed
+// number broke at its hyphen - «… · 03-» and then «5551234», two numbers to the eye, when the
+// number is the one fact the line is there to show. So each piece that must be read whole is
+// ONE inline block (.crewcheck-whole, css/design.css - .report-dates' rule): it goes to the
+// next line whole, and wraps inside itself only when no line can hold it at all (320px at
+// doubled text). The words are the same words: textContent is one sentence, as before.
+//
+// The line under the title, drawn as its three pieces - the day, the men, the sites - with
+// the separators between them, where it may break.
+function crewCheckContextInto(node, read) {
+    node.textContent = '';
+    crewCheckContext(read).split(' · ').forEach((part, at) => {
+        if (at > 0) node.appendChild(el('span', null, ' · '));
+        node.appendChild(el('span', 'crewcheck-whole', part));
+    });
+    return node;
+}
+
+// Words that may hold a typed number - an LTR isolate, LRI…PDI (isolateLtr) - as `node`'s
+// own text up to the first number, and after it each number one block of its own, laid out
+// left to right (.crewcheck-number), and the words between and after it as they were.
+const CREW_CHECK_NUMBER = /(\u2066[^\u2069]*\u2069)/;
+function crewCheckWordsInto(node, words) {
+    const parts = String(words).split(CREW_CHECK_NUMBER);
+    node.textContent = parts[0];
+    parts.slice(1).forEach((part, at) => {
+        if (part === '') return;
+        node.appendChild(el('span', at % 2 === 0 ? 'crewcheck-whole crewcheck-number' : null, part));
+    });
+    return node;
+}
+
 // A man's chip: what it says, what it says aloud, and where it goes. Read aloud, a chip that
 // says more than his name says that first (dayCheckWorkerChip's rule, js/ui/daycheck.js).
-function crewCheckManChip(worker, door, field, more) {
+// `twins`: each active man whose name another active man holds too, to his place among them
+// (crewCheckTwins) - his number goes after his name on every chip of his, so that two men
+// with one name are never two identical buttons read aloud alike.
+function crewCheckManChip(worker, door, field, more, twins) {
+    const mark = twins && twins.has(worker.id) ? twins.get(worker.id) : null;
     const name = isolate(worker.name);
-    const text = more === undefined ? worker.name : CREW_CHECK_TEXT.chip(name, more);
+    const said = mark === null ? name : CREW_CHECK_TEXT.twin(name, mark);
+    const plain = more === undefined && mark === null;
+    const text = plain ? worker.name : (more === undefined ? said : CREW_CHECK_TEXT.chip(said, more));
     const go = door === 'form' ? CREW_CHECK_TEXT.goForm(name) : CREW_CHECK_TEXT.goRow(name);
-    const chip = { text, aria: more === undefined ? go : `${text} - ${go}`, door, workerId: worker.id };
+    const chip = { text, aria: plain ? go : `${text} - ${go}`, door, workerId: worker.id };
     if (field) chip.field = field;
     return chip;
+}
+
+// The namesakes' numbers: each active man in a «שם כפול» finding to his place in it, 1, 2, …
+// - the finding lists them in roster order, the order of the crew list.
+function crewCheckTwins(read) {
+    const twins = new Map();
+    read.check.sameName.forEach(group => group.men.forEach((man, at) => twins.set(man.id, at + 1)));
+    return twins;
 }
 
 function crewCheckSiteChip(place, more) {
@@ -359,8 +436,10 @@ function crewCheckSiteChip(place, more) {
 //      chips: [{ text, aria, door: 'form' | 'row' | 'site', workerId? | placeId?, field? }] }]
 //
 // `say` is the finding's sentence, `note` the quiet line under its chips (only the idle men
-// have one), and each chip one man or one site with the one door it opens. Pure: the reading
-// and today's date in, words out.
+// have one), and each chip one man or one site with the one door it opens. A kind is one
+// finding, but for one number or one name on two rows (one finding each) and «בלי שכר יומי»
+// (two at most: the men none of whose days is priced, then the men with days that still are).
+// Pure: the reading and today's date in, words out.
 function crewCheckFindings(read, today) {
     const out = [];
     if (!read || !read.check || !read.info) return out;
@@ -370,21 +449,30 @@ function crewCheckFindings(read, today) {
     const push = (kind, tier, say, chips, note) => out.push({ kind, tier, say, note: note || null, chips });
     const c = read.check;
     const i = read.info;
+    const twins = crewCheckTwins(read);
+    const man = (worker, door, field, more) => crewCheckManChip(worker, door, field, more, twins);
 
-    if (c.noRate.length > 0) {
-        push('noRate', 'check', T.noRate(c.noRate.length), c.noRate.map(worker => crewCheckManChip(worker, 'form', 'daily')));
+    // «בלי שכר יומי» in the words true of each man: «ימי העבודה שלו לא יחושבו בשכר» only of a
+    // man none of whose recorded days carries a daily rate (no stamp - priced by the roster's
+    // nothing - or a stamp of 0), and of a man with days the sheet still prices at their stamp
+    // only what is true of him - the days recorded from now on. Two lines when both are there.
+    const unpriced = c.noRate.filter(worker => !(worker.priced > 0));
+    const stillPriced = c.noRate.filter(worker => worker.priced > 0);
+    if (unpriced.length > 0) push('noRate', 'check', T.noRate(unpriced.length), unpriced.map(worker => man(worker, 'form', 'daily')));
+    if (stillPriced.length > 0) {
+        push('noRate', 'check', T.noRateFromNow(stillPriced.length), stillPriced.map(worker => man(worker, 'form', 'daily')));
     }
     if (c.badPhone.length > 0) {
         push('badPhone', 'check', T.badPhone(c.badPhone.length),
-            c.badPhone.map(worker => crewCheckManChip(worker, 'form', 'phone', isolateLtr(worker.phone))));
+            c.badPhone.map(worker => man(worker, 'form', 'phone', isolateLtr(worker.phone))));
     }
     c.sharedPhone.forEach(group => push('sharedPhone', 'check', T.sharedPhone(isolateLtr(group.number), group.men.length),
-        group.men.map(worker => crewCheckManChip(worker, 'form', 'phone'))));
+        group.men.map(worker => man(worker, 'form', 'phone'))));
     c.sameName.forEach(group => push('sameName', 'check', T.sameName(group.men.length, isolate(group.name)),
-        group.men.map((worker, at) => crewCheckManChip(worker, 'form', 'name', String(at + 1)))));
+        group.men.map(worker => man(worker, 'form', 'name'))));
     if (c.idle.length > 0) {
         push('idle', 'check', T.idle(c.idle.length, CREW_CHECK_IDLE_DAYS, since),
-            c.idle.map(worker => crewCheckManChip(worker, 'row', null, crewCheckDateWord(worker.last, day))),
+            c.idle.map(worker => man(worker, 'row', null, crewCheckDateWord(worker.last, day))),
             `${T.archiveIf} ${CREW_CHECK_REUSED.archiveSays}`);
     }
     if (c.idleSites.length > 0) {
@@ -394,17 +482,17 @@ function crewCheckFindings(read, today) {
 
     if (i.otherPhone.length > 0) {
         push('otherPhone', 'info', T.otherPhone(i.otherPhone.length),
-            i.otherPhone.map(worker => crewCheckManChip(worker, 'form', 'phone', isolateLtr(worker.phone))));
+            i.otherPhone.map(worker => man(worker, 'form', 'phone', isolateLtr(worker.phone))));
     }
     if (i.noPhone.length > 0) {
-        push('noPhone', 'info', T.noPhone(i.noPhone.length), i.noPhone.map(worker => crewCheckManChip(worker, 'form', 'phone')));
+        push('noPhone', 'info', T.noPhone(i.noPhone.length), i.noPhone.map(worker => man(worker, 'form', 'phone')));
     }
     if (i.zeroStamped.length > 0) {
         push('zeroStamped', 'info', T.zeroStamped(i.zeroStamped.length),
-            i.zeroStamped.map(worker => crewCheckManChip(worker, 'row', null, worker.days === 1 ? T.oneDay : T.days(worker.days))));
+            i.zeroStamped.map(worker => man(worker, 'row', null, worker.days === 1 ? T.oneDay : T.days(worker.days))));
     }
     if (i.never.length > 0) {
-        push('never', 'info', T.never(i.never.length), i.never.map(worker => crewCheckManChip(worker, 'row')));
+        push('never', 'info', T.never(i.never.length), i.never.map(worker => man(worker, 'row')));
     }
     if (i.neverSites.length > 0) {
         push('neverSites', 'info', T.neverSites(i.neverSites.length), i.neverSites.map(place => crewCheckSiteChip(place)));
@@ -500,7 +588,7 @@ function renderCrewCheck() {
     const today = todayStr();
     const read = crewCheckRead(State.schedule, today, State.layer);
     if (parts.title) parts.title.textContent = CREW_CHECK_TEXT.title;
-    if (parts.context) parts.context.textContent = crewCheckContext(read);
+    if (parts.context) crewCheckContextInto(parts.context, read);
     if (parts.lead) parts.lead.textContent = CREW_CHECK_REUSED.lead;
     if (parts.close) parts.close.textContent = CREW_CHECK_REUSED.close;
     crewCheckDraw(parts.list, read, today, crewCheckLive());
@@ -561,7 +649,7 @@ function crewCheckDraw(container, read, today, live) {
 function crewCheckFindingNode(finding, live) {
     const node = el('div', 'daycheck-finding');
     node.dataset.kind = finding.kind;
-    node.appendChild(el('p', 'daycheck-say', finding.say));
+    node.appendChild(crewCheckWordsInto(el('p', 'daycheck-say'), finding.say));
     const chips = el('div', 'daycheck-chips');
     finding.chips.forEach(chip => chips.appendChild(crewCheckChipNode(finding, chip, live)));
     node.appendChild(chips);
@@ -574,9 +662,10 @@ function crewCheckFindingNode(finding, live) {
 // which no button borrows.
 function crewCheckChipNode(finding, chip, live) {
     const site = chip.door === 'site';
-    if (!live) return el('span', site ? 'daycheck-site daycheck-plain' : 'daycheck-plain', chip.text);
+    if (!live) return crewCheckWordsInto(el('span', site ? 'daycheck-site daycheck-plain' : 'daycheck-plain'), chip.text);
     const node = button(chip.text, site ? 'btn-secondary daycheck-go daycheck-site' : 'btn-secondary daycheck-go daycheck-man',
         () => crewCheckGo(chip), chip.aria);
+    crewCheckWordsInto(node, chip.text);
     if (chip.door === 'form') node.setAttribute('aria-haspopup', 'dialog');
     node.dataset.crewcheckFocus = site ? `${finding.kind}:p:${chip.placeId}` : `${finding.kind}:w:${chip.workerId}`;
     return node;
@@ -606,14 +695,22 @@ function crewCheckChipNode(finding, chip, live) {
 // whatever the door put there: after a row or a site door has scrolled the crew list, about
 // one press in twenty-two on the glass is a «פעיל» switch, most of them OTHER men's, and one
 // press there archives a man with no question and no undo; after the form door the same
-// touch can land on its «שמור», which saves the row as the form reads it. So every door holds
-// the switches and «שמור» for DOUBLE_TAP_GUARD_MS (js/ui/day.js) from the chip's own press -
-// with the house's own guard (guardFingersOn), judged on each later PRESS's own time: a touch
-// that comes down at 650 ms is clicked after 700, and a test of the clock at its click would
-// let it through. A keyboard's click is never held; a press that comes down later is what it
-// always was. Memory only, never kept.
+// touch can land on its «שמור», which saves the row as the form reads it. And on what writes
+// nothing but undoes the door all the same (fix round 1, the review's last finding): after the
+// last site's door, «בדיקת הצוות» stands at the foot right under it and the touch opened the
+// check again - on a smaller phone «כרטיס אתר» opened the card; in the form, «ביטול» shut it
+// and «עוד פרטים» folded away the number it had been opened for. So every door holds, for
+// DOUBLE_TAP_GUARD_MS (js/ui/day.js) from the chip's own press, every control of the crew
+// screen and every button, fold and choice of the form - with the house's own guard
+// (guardFingersOn), judged on each later PRESS's own time: a touch that comes down at 650 ms
+// is clicked after 700, and a test of the clock at its click would let it through. A
+// keyboard's click is never held; a press that comes down later is what it always was. A box
+// of the form to type in is not held: a touch there only moves the caret. Memory only, never
+// kept.
 let crewCheckHoldUntil = 0;
 let crewCheckMarked = null;
+const CREW_CHECK_HELD_ON_ROSTER = 'button, input, select, summary';
+const CREW_CHECK_HELD_ON_FORM = 'button, summary, select';
 
 function crewCheckArmHold() {
     if (typeof document === 'undefined' || typeof guardFingersOn !== 'function'
@@ -621,10 +718,13 @@ function crewCheckArmHold() {
     const press = typeof openPress === 'function' ? openPress() : null;
     crewCheckHoldUntil = (press ? press.stamp : sheetClock()) + DOUBLE_TAP_GUARD_MS;
     const held = pressed => Boolean(pressed) && pressed.stamp < crewCheckHoldUntil;
-    // «פעיל», and an archived row's «כבוי» restore: both are .worker-active-toggle. Installed
-    // once each (guardFingersOn keeps the list); nothing else guards either surface.
-    guardFingersOn(document.getElementById('rosterView'), '.worker-active-toggle', held);
-    guardFingersOn(document.getElementById('workerFormModal'), 'button[onclick="saveWorkerForm()"]', held);
+    // The crew screen: «פעיל» and an archived row's «כבוי» restore (.worker-active-toggle),
+    // «בדיקת הצוות» itself, the cards' buttons, «עוד ⋯», the adding buttons, the crew search,
+    // the fold of the men switched off. The form: «שמור», «ביטול», the buttons under them, its
+    // two folds and the pay cycle's choice. Installed once each (guardFingersOn keeps the
+    // list); nothing else guards either surface.
+    guardFingersOn(document.getElementById('rosterView'), CREW_CHECK_HELD_ON_ROSTER, held);
+    guardFingersOn(document.getElementById('workerFormModal'), CREW_CHECK_HELD_ON_FORM, held);
     return true;
 }
 
