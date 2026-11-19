@@ -1,6 +1,127 @@
-## v204 — «בניית סידור» in the dock, where «מהיום הקודם» stood; «מהיום הקודם» in «עוד ⋯» (candidate, not served)
+## v205 — a waiting build takes itself at the next launch of the app (candidate, not served)
 
-**NOT SERVED YET.** A candidate on the v203 candidate (049b5b3). The release commit moves the
+**NOT SERVED YET.** A candidate on v204 (main, 6ab193d). The release commit moves the three
+build stamps to v205, and its «מה חדש» entry is at the top of WHATSNEW_BUILDS (proposed). The
+owner asked on 2026-11-19: «هل بامكانك تخلي التحديث اتوماتيكي ما في داعي اكبس على التحديث لوحده
+يعمل تحديث» - make the update automatic, no need to press it.
+
+Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`,
+`firestore.rules` or `functions`. The change is `js/ui/offline.js`; one hidden element in
+`index.html` (`#launchCover`), its rule in `css/app.css` (on the stuck frame's list as well) and
+its size said again in `css/large.css`; and two things in `sw.js` (below).
+
+**What he sees.** When a new build is installed and waiting and the app is opened AFRESH - a
+real start, the app's only window, not a return to an app that was only in the background - and
+he has not touched it yet, the whole screen is covered at once by one line, «מעדכן לגרסה
+חדשה…», and about two or three seconds later (measured in Chromium) the app opens on the new
+build. If the app only came back from the background - an iPhone's usual opening - nothing
+changes: the banner «גרסה חדשה זמינה» offers the update exactly as in v204. If he touches the app
+first, or another window of the app is open, the banner offers it too, and the next fresh start
+takes it.
+
+**THE RULE, exactly.** On a page freshly loaded (a navigation or a reload; a page brought back
+from the back-forward cache, `pageshow.persisted`, is not one), the boot asks for a waiting build
+as early as it can - `getRegistration()`, then `register()`'s own answer, then the re-check 1.5 s
+later - and takes it only if nothing has been pressed and no key struck since the page loaded
+(pointerdown, touchstart, keydown on the window, in the capture phase) and `midEdit()` is false.
+Then, in this order:
+1. the cover goes up at once - whole glass, above every layer, one proposed line - and stays up
+   through everything below, so there is one cover and no flicker. It takes every touch on
+   itself, and on the window every key, click, double click and typed character - a click that
+   assistive technology dispatches on a control included - and hides the page's other top-level
+   elements from assistive technology (aria-hidden, put back when it comes down). It moves NO
+   focus: nothing is blurred, nothing focused, nothing made inert, and a press on it is
+   prevented before the browser can move the focus, so no box can fire a `change`;
+2. the worker this page runs under is asked whether this is the app's ONLY window (sw.js,
+   'other-windows': the browser's own list of windows, controlled or not, of any build, frozen
+   in the background or not). Another window, no answer within a second, or no way to ask: the
+   cover comes down and the banner offers the update, as in v204. A launch in one window would
+   otherwise reload every other window by law 7, and one of them can hold an advance being
+   typed. The worker's list, and not the windows themselves (a BroadcastChannel every window answers
+   on), because a window of an older build was never taught to answer, a window still booting
+   has not started to, and a window the browser has frozen in the background runs nothing until
+   it is woken (the Page Lifecycle rules - NOT measured here: headless Chromium accepts the
+   freeze for a visible page and does nothing, its timers kept running and a BroadcastChannel
+   message to it was heard at once); the worker's list holds all three;
+3. skip-waiting is posted to THAT worker;
+4. the page waits for the controllerchange to that worker - by identity - and then for it to be
+   `activated`;
+5. `midEdit()` is asked once more - a dialog the old build put up under the cover (a lost close
+   is told only once) must be seen - and then `location.reload()`.
+If any of it fails - the build made redundant by a newer one installed under the cover, a dialog
+up at the end, 12 s gone - the cover comes down, the banner offers the update (bound to the build
+really waiting, never to a redundant one), and the page never reloads by itself after that. If
+the new build has already taken the page over, the update stays offered: a return to the
+foreground shows the banner again, and «רענן עכשיו» or «בדוק עדכון» reloads; a press made at any
+time before the handover reloads when it comes.
+
+**sw.js.** (1) The 'other-windows' question above, answered on the port the page opened. (2) The
+6-second pause before forgetting a closed window's record is no longer part of the event that
+asked for it: a navigation, the activation and a 'running' message each end in
+forgetClosedClients, and while the pause sat inside their waitUntil the worker counted as busy for
+six more seconds, and a waiting build cannot take over from a busy worker - a reload launch held
+its cover about 8.5 s, 6 of them this pause. The first reading still belongs to the event; the
+second look is scheduled on its own, and if the worker is stopped first nothing is forgotten that
+time (bytes, never a window's identity) and the next event looks again. Measured after: about
+2.5-3 s from the reload to the new build.
+
+**Everything else is v204's**, byte for byte: the banner and its words, «אחר כך», the re-offer on
+every return to the foreground, law 7's catch-up of every other window at the first moment nobody
+is typing, and a first install never reloading. «רענן עכשיו» is v204's but for two things: a press
+reaches the build that is really waiting when the one in hand was made redundant, and it is
+remembered, so a handover that comes late still reloads for it. A launch needs no place kept: it
+opens where any launch opens.
+
+**What was tried first, and dropped.** Two candidates also took the update while the app was in
+use - at a leaving, at a return - and reloaded the page: 684c0f2 and 81ca7a3. Each was stopped by an
+adversarial review with P1 findings, every one in that live path: a reload that landed seconds
+after the quiet decision under a sheet opened meanwhile, in every other window, and after «אחר
+כך»; an advance being typed on «מקדמות» reloaded away when he switched to the bank app; a screen
+left on yesterday-as-today reopened on yesterday after midnight with the morning's follow spent; a
+reload asked of a worker still activating with the old page taking taps it then threw away; the
+deductions chosen with «הצג בדוח» reset; and in the second, a count erased to retype committed as
+a durable 0 by the cover's blur, and a refused press whose yes outlived it. The live path is gone,
+not patched a third time. The third review (on bdaed5e, the launch alone) confirmed a P1 - the
+launch in a second window reloading the first by law 7 - a P2 - the redundant build, a 12-second
+cover and a dead button - and five P3s - a dialog reloaded away unseen, a late handover
+swallowed, the 8.5-second cover, assistive technology clicking through, and a news line that
+promised too much. Each is repaired above, and each has a check that was red on bdaed5e.
+
+**THE ROLLOUT.** Automatic updating holds FROM v205 ON: a phone on v204 or older runs the old rule
+and needs ONE tap («רענן עכשיו», or closing the app fully) to reach v205.
+
+**NOT DONE, said.** An app that is RESUMED - brought back from the background, not started afresh
+- keeps the banner, as in v204: on an iPhone that is the usual way back into the app, and there
+the build is taken by a press, or by the next fresh start. How often iOS starts a home-screen app
+afresh on the owner's phones is not measured. A fresh start with another window of the app open
+(on a computer, or an Android tab beside the installed app) gets the banner. A build that
+finishes installing only after the launch's re-check (1.5 s) is offered by the banner. The
+visibility events are synthesised in the suites (headless Chromium never changes
+`visibilityState`). Nothing of this has been tried on a real phone.
+
+**Tests.** `tests/autoupdate.test.mjs` (new, in `npm test`): js/ui/offline.js in a V8 context - the
+launch covers, asks the worker, asks THAT build, reloads once activated; a touched launch, a dialog,
+a box with digits, a page from the back-forward cache take nothing; 12 s without a handover brings
+the cover down with the banner and no reload ever after; the cover takes a tap, its mousedown and a
+key and blurs nothing; a first install; law 7 and the press as in v204; every live path of the two
+first reviews reloading nothing; and the third review's P1 (another window, no answer, no way to
+ask), P2 (redundant under the cover; the press reaching the newer build), P3-a (a dialog under the
+cover), P3-b (the late handover: offered on return, the press and «בדוק עדכון» reloading) and P3-d
+(clicks and typing stopped, aria-hidden on and off) - each red on bdaed5e. `tests/update.test.mjs`,
+against a real deploy: the restart suite's re-offer kept for a restart touched at once (MOVED ON
+PURPOSE: an untouched restart is now the launch); the launch of the only window by a reload, with a
+real tap on the Rima box and a key under the cover, the count 3 on the record, the disk and the box
+afterwards with nothing new queued, and landing within 6 s (the third review's P3-c; it measured
+8.5 s on bdaed5e); a touched launch; a worker deaf to skip-waiting; a second window opened beside
+one with an advance being typed (P1), and a third after the second closed; a newer build installed
+under the cover and the press then landing on it (P2); a click dispatched on a control under the
+cover writing nothing (P3-d); the live scenarios reloading nothing; past midnight with no note; a
+first install. Every other expectation of the file is v204's. «מה חדש» has one item
+(tests/whatsnew.test.mjs, tests/whatsnew.browser.mjs).
+
+## v204 — «בניית סידור» in the dock, where «מהיום הקודם» stood; «מהיום הקודם» in «עוד ⋯»
+
+**SERVED on 2026-11-18** (main 6ab193d, PR #85; both gates exited 0 on ddfcf32, whose tree it is). Written as a candidate on the v203 candidate (049b5b3). The release commit moves the
 three build stamps to v204, and its «מה חדש» entry is at the top of WHATSNEW_BUILDS (proposed).
 The owner chose option 1 on 2026-11-18: «בניית סידור» in place of «מהיום הקודם». Before that he
 had asked for the journey to be "مش داخل كبسه الواتس اب" - not inside the WhatsApp button - and

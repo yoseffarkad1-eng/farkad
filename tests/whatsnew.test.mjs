@@ -87,6 +87,11 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    { build: 'v205', items: [
+        { title: 'עדכון לבד בפתיחה מחדש',
+            text: 'כשפותחים את האפליקציה מחדש וגרסה חדשה מחכה היא נכנסת לבד; אם האפליקציה רק חזרה מהרקע, הפס «גרסה חדשה זמינה» נשאר.',
+            where: 'הגדרות ← מכשיר ועזרה ← עדכון וגרסה', go: 'version' }
+    ] },
     { build: 'v204', items: [
         { title: 'בניית סידור במקום מהיום הקודם',
             text: 'בניית סידור נמצא עכשיו למטה ליד שליחה לוואטסאפ, ומהיום הקודם עבר ל«עוד ⋯» בתחתית הרשימה ולשלב הראשון של הסידור.',

@@ -1276,4 +1276,9 @@
     :root.display-large .day-header .day-tools { margin-top: 2px !important; row-gap: 3px !important; }
 }
 
+
+/* v205: the launch's cover (css/app.css, .launch-cover): its one line said again, larger and
+   heavier, as everything read first is here. */
+:root.display-large .launch-cover { font-size: 24px !important; font-weight: 800 !important; line-height: 1.5 !important; }
+
 }

@@ -21,7 +21,7 @@
 // The version string below is the whole update mechanism. Bump it in the same commit as
 // any change to a cached file, or returning visitors keep running the old build.
 
-const VERSION = 'farkad-v204';
+const VERSION = 'farkad-v205';
 
 // A scheduled server push wakes this worker even with every app window closed.
 // Always display a visible notification; neither iOS nor Android needs a page timer.
@@ -786,6 +786,15 @@ function reapLater(attempt) {
 // device with two old shelves was still carrying them a full half-minute later. Shelves
 // go promptly; records are forgotten afterwards, unhurried, because being slow about
 // forgetting costs a few bytes and being quick about it costs a window its identity.
+//
+// And the pause is NOT part of the event that asked for it (v205). A navigation, the
+// activation and a 'running' message each end in forgetClosedClients, and while the pause
+// sat inside their waitUntil the worker counted as busy for six more seconds - and a
+// waiting build cannot take over from a busy worker. A launch that took a waiting build
+// (js/ui/offline.js) held its cover about 8.5 s after a reload, 6 s of it this pause
+// (measured in Chromium; 2.5 s without it). The first reading still belongs to the event;
+// the second look is scheduled on its own, and if the worker is stopped before it comes,
+// nothing is forgotten this time - bytes, not a window - and the next event looks again.
 const FORGET_GRACE_MS = 6000;
 
 // Every window this worker can see, controlled or not. `includeUncontrolled` matters: a
@@ -824,13 +833,16 @@ function forgetClosedClients() {
         // Two readings a few seconds apart, and only what is absent from both goes. The
         // store stays bounded - a window that has really closed is absent from every
         // reading from then on - and a navigation in flight is never mistaken for one.
-        return new Promise(resolve => setTimeout(resolve, FORGET_GRACE_MS))
-            .then(() => liveClientUrls())
-            .then(live => (live === null ? undefined
-                : caches.open(CLIENTS).then(cache => Promise.all(
-                    stale.filter(request => !live.has(request.url))
-                        .map(request => cache.delete(request))
-                ))));
+        setTimeout(() => {
+            liveClientUrls()
+                .then(live => (live === null ? undefined
+                    : caches.open(CLIENTS).then(cache => Promise.all(
+                        stale.filter(request => !live.has(request.url))
+                            .map(request => cache.delete(request))
+                    ))))
+                .catch(() => undefined);
+        }, FORGET_GRACE_MS);
+        return undefined;
     }).catch(() => undefined);
 }
 
@@ -1161,6 +1173,24 @@ self.addEventListener('message', event => {
         // what lets the old shelf go the moment its last window is replaced, instead of
         // at the next launch, which on an installed app might be tomorrow.
         event.waitUntil(reapLater());
+    }
+
+    // v205: IS THE WINDOW THAT ASKS THE APP'S ONLY WINDOW? Asked by a launch before it takes a
+    // waiting build (js/ui/offline.js, launchAskAlone): a launch in one window reloads every
+    // other window by law 7, and one of them may hold an advance being typed. Answered from
+    // the browser's own list of windows - controlled or not, of any build, booting, frozen in
+    // the background or not. A window of an older build was never taught to answer a question
+    // itself, one still booting has not started to, and one frozen in the background runs
+    // nothing until woken (the Page Lifecycle rules); this list holds them all. On the port the
+    // page opened, so the answer reaches the one that asked.
+    if (event.data && event.data.type === 'other-windows') {
+        const reply = event.ports && event.ports[0];
+        if (!reply) return;
+        const asker = event.source && event.source.id;
+        event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+            .then(clients => reply.postMessage({ type: 'other-windows',
+                others: asker ? clients.filter(client => client.id !== asker).length : -1 }))
+            .catch(() => reply.postMessage({ type: 'other-windows', others: -1 })));
     }
 
     // THE CENSUS: which builds have a window open on this origin, right now.

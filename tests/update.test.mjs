@@ -41,6 +41,12 @@ const check = (name, pass, detail = '') => {
     console.log(`${pass ? '  PASS' : '**FAIL**'}  ${name}${detail ? '  — ' + detail : ''}`);
 };
 const suite = name => console.log(`\n${name}`);
+// For a claim that is easier to state as "these two are the same thing".
+const same = (name, actual, expected) => {
+    const a = JSON.stringify(actual);
+    const b = JSON.stringify(expected);
+    check(name, a === b, a === b ? '' : `${a} !== ${b}`);
+};
 
 // A precondition of the test rather than a claim about the app: if the copy did not come
 // out the way this file expects, every assertion below is measuring the wrong thing.
@@ -64,7 +70,9 @@ for (const item of await deployedFrom(ROOT)) {
 // so a deploy that moved only one of them would be testing the crash banner instead.
 const BUILDS = {
     old: { app: 'v79', cache: 'farkad-v79' },
-    new: { app: 'v79-deploy-test', cache: 'farkad-v79-deploy-test' }
+    new: { app: 'v79-deploy-test', cache: 'farkad-v79-deploy-test' },
+    // v205: a build newer than `new`, put on the server while `new` waits (the third review's P2).
+    newer: { app: 'v79-deploy-test2', cache: 'farkad-v79-deploy-test2' }
 };
 
 async function deploy(build) {
@@ -96,6 +104,58 @@ const newPage = async () => {
     page.on('dialog', d => d.accept());
     return page;
 };
+
+// v205. The page going to the background or coming back, as a phone's page sees it. Headless
+// Chromium never changes visibilityState itself (measured in the one-window suite below), so
+// it is answered by hand and the page's own event dispatched; everything it reaches is real.
+const visibility = (page, state) => page.evaluate(state => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => state === 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+}, state);
+
+// v205. A page touched before its boot is done: a key struck as the document is parsed, before
+// the app has asked about a waiting build. Synthetic, and early on purpose - a person's first
+// press lands somewhere in that same second, and this is the press the launch must see.
+const touchedAtLoad = page => page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
+    }, { once: true });
+});
+
+// v205. A copy of the new build whose worker does not answer «skip-waiting»: the launch asks,
+// and no handover ever comes. Put back after the suite that uses it.
+async function holdSkipWaiting(on) {
+    const path = join(dir, 'sw.js');
+    const text = await readFile(path, 'utf8');
+    const live = "if (event.data === 'skip-waiting') self.skipWaiting();";
+    const held = "if (event.data === 'skip-waiting') { /* held by tests/update.test.mjs */ }";
+    given('sw.js answers skip-waiting where this test can hold it', text.includes(on ? live : held));
+    await writeFile(path, on ? text.replace(live, held) : text.replace(held, live));
+}
+
+// v205. The day's first site, with a Rima count on today's record, and what the record, the
+// disk and the queue say about it.
+const seedRima = (page, count) => page.evaluate(count => {
+    State.schedule.workers = [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400 }];
+    State.schedule.places = [{ id: 'p_01', name: 'אתר צפון', active: true }];
+    State.commitRoster();
+    State.commit(setRimaCount(State.schedule, todayStr(), 'p_01', count));
+    showView('day');
+    if (typeof setDayMode === 'function') setDayMode('sites');
+    render();
+}, count);
+const rimaState = page => page.evaluate(() => {
+    const disk = JSON.parse(localStorage.getItem('scheduleData:v2') || '{}');
+    const day = (disk.days || {})[todayStr()] || {};
+    const box = document.querySelector('.rima-input');
+    return {
+        record: rimaCount(State.schedule, todayStr(), 'p_01'),
+        disk: (day.rima || {}).p_01 === undefined ? null : day.rima.p_01,
+        pending: FarkadSync.pendingPaths().filter(path => path.indexOf('.rima.') !== -1).sort(),
+        box: box ? box.value : null
+    };
+});
 
 // The worker has to be in charge before a second build means anything: an update is a
 // SECOND worker, and until the first one controls the page there is nothing to update
@@ -239,7 +299,7 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
 
 // ---------------------------------------------------------------- the second offer
 {
-    suite('a waiting update is offered again to a phone that was restarted');
+    suite('a waiting update is offered again to a phone restarted and touched at once; an untouched launch takes it (v205)');
 
     // iOS restarts a home-screen app freely, and the banner does not survive that: an
     // update could sit installed and unannounced, which from the outside is exactly what
@@ -249,6 +309,11 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
     // Worth its own suite because it is a SECOND mechanism, and while the two were tested
     // together the timing decided which one was really being measured - this file's first
     // version passed with the live update path deleted outright.
+    //
+    // MOVED ON PURPOSE (v205, the owner's request of 2026-11-19): a restart that nobody has
+    // touched is now the LAUNCH, and it takes the waiting build under a cover (the suite
+    // after the next measures that whole). The re-offer is what a restart touched at once
+    // gets - a press already under way - and that half is v204's, word for word.
     await deploy(BUILDS.old);
     const first = await newPage();
     await first.goto(`${BASE}/index.html`, { waitUntil: 'load' });
@@ -262,8 +327,10 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
         .then(() => true, () => false);
     given('an update is installed and waiting', ready);
 
-    // The restart. Same storage, same registration, a page that has never seen a banner.
+    // The restart. Same storage, same registration, a page that has never seen a banner -
+    // touched as it opens.
     const again = await first.context().newPage();
+    await touchedAtLoad(again);
     await again.goto(`${BASE}/index.html`, { waitUntil: 'load' });
     await controlled(again);
 
@@ -273,6 +340,10 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
     check('and the phone is still on the old build until somebody takes it',
         (await again.evaluate(() => APP_VERSION)) === BUILDS.old.app,
         await again.evaluate(() => APP_VERSION));
+    check('no cover went up over a page touched as it opened',
+        (await again.locator('#launchCover').isVisible()) === false);
+    await again.waitForTimeout(6000);
+    check('six seconds on, nothing has reloaded it', (await again.evaluate(() => APP_VERSION)) === BUILDS.old.app);
 
     await first.context().close();
 }
@@ -505,6 +576,409 @@ const allCacheNames = page => page.evaluate(() => caches.keys());
         `${relaunched.meta} / ${relaunched.script}`);
 
     await context.close();
+}
+
+// ================================================================ v205: the launch
+//
+// The owner, 2026-11-19: "make the update automatic, no need to press it". A waiting build is
+// taken at the next LAUNCH only - a fresh page nobody has touched - under a cover, and nowhere
+// else. Two candidates that reloaded a page already in use (684c0f2, 81ca7a3) were stopped by
+// review; the last suites below hold that nothing of that is left.
+
+// A phone with ONE window of the app, on the old build, in use, and the new build installed
+// and offered - the shape every launch below starts from (a launch with another window open is
+// refused, the third review's P1). `seed` runs on the page first; `deployed` is the build put
+// on the server after the offer (to have a newer one waiting behind it).
+async function onePhoneWithUpdate({ seed = null, holdSkip = false } = {}) {
+    await deploy(BUILDS.old);
+    const page = await newPage();
+    await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(page);
+    await page.reload({ waitUntil: 'load' });
+    await controlled(page);
+    if (seed) await seed(page);
+    await page.waitForTimeout(2000);
+    await page.keyboard.press('Shift');
+    if (holdSkip) await holdSkipWaiting(true);
+    await deploy(BUILDS.new);
+    await page.evaluate(() => navigator.serviceWorker.getRegistration().then(registration => registration.update()));
+    const offered = await page.waitForSelector('#updateBanner:visible', { timeout: 25000 }).then(() => true, () => false);
+    // The worker settles (the earlier reload's own work done) before the launch is made.
+    await page.waitForTimeout(3000);
+    return { page, offered };
+}
+
+{
+    suite('v205: a launch of the only window - a reload nobody has touched - takes the waiting build under a cover, in a few seconds, and the cover eats a tap and a key');
+
+    const { page: launch, offered } = await onePhoneWithUpdate({ seed: page => seedRima(page, 3) });
+    given('the new build is installed and waiting', offered);
+    const seeded = await rimaState(launch);
+    given('a Rima count of 3 on today\'s record and on the disk', seeded.record === 3 && seeded.disk === 3, JSON.stringify(seeded));
+
+    // The launch: the app opened again - a reload - and nobody touches it.
+    const t0 = Date.now();
+    await launch.reload({ waitUntil: 'load' });
+    const covered = await launch.waitForSelector('#launchCover:visible', { timeout: 10000 }).then(() => true, () => false);
+    check('a cover goes over the glass at once', covered);
+    if (covered) {
+        same('with its one line', (await launch.textContent('#launchCover').catch(() => '')).trim(), 'מעדכן לגרסה חדשה…');
+        const glass = await launch.evaluate(() => {
+            const cover = document.getElementById('launchCover').getBoundingClientRect();
+            const box = document.querySelector('.rima-input');
+            const at = box ? box.getBoundingClientRect() : null;
+            return { whole: cover.left <= 0 && cover.top <= 0 && cover.right >= innerWidth && cover.bottom >= innerHeight,
+                box: at ? { x: at.left + at.width / 2, y: at.top + at.height / 2 } : null };
+        }).catch(() => ({ whole: false, box: null }));
+        check('over the whole glass', glass.whole);
+        // A tap on the Rima box under it, and a key: the cover takes both.
+        const tapped = glass.box || { x: 100, y: 300 };
+        const top = await launch.evaluate(at => { const n = document.elementFromPoint(at.x, at.y); return n ? n.id : null; }, tapped).catch(() => 'gone');
+        check('what lies under a finger is the cover', top === 'launchCover' || top === 'gone', String(top));
+        await launch.mouse.click(tapped.x, tapped.y).catch(() => {});
+        await launch.keyboard.type('5').catch(() => {});
+        const after = await launch.evaluate(() => ({ focused: document.activeElement ? document.activeElement.className : null,
+            box: (document.querySelector('.rima-input') || {}).value })).catch(() => null);
+        check('the tap moved no focus and the key typed nothing', after === null
+            || (String(after.focused).indexOf('rima-input') === -1 && after.box === '3'), JSON.stringify(after));
+    }
+    const landed = await launch.waitForFunction(expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,
+        BUILDS.new.app, { timeout: 25000, polling: 100 }).then(() => Date.now() - t0, () => null);
+    check('the launch hands over and reloads onto the new build', landed !== null);
+    // The third review's P3-c: the cover was up about 8.5 s, 6 s of it sw.js's forget grace held
+    // inside the navigation's own lifetime; out of it, the handover comes in about 2.5 s.
+    check('in a few seconds - not the 8.5 s the forget grace held it to', landed !== null && landed <= 6000, `${landed} ms`);
+    console.log(`  (measured: the reload launch landed on the new build ${landed} ms after the reload)`);
+    await controlled(launch);
+    await launch.waitForTimeout(800);
+    const built = await buildOnScreen(launch);
+    check('page and scripts from the same build', built.meta === built.script, `${built.meta} / ${built.script}`);
+    check('the cover is gone with the old page', (await launch.locator('#launchCover').isVisible()) === false);
+    const rima = await rimaState(launch);
+    same('the Rima count still 3 on the record and on the disk, the box reading 3, and nothing new queued for it',
+        [rima.record, rima.disk, rima.box, rima.pending], [3, 3, '3', seeded.pending]);
+    await launch.context().close();
+}
+
+{
+    suite('v205: a launch touched before the cover could go up takes nothing; the banner offers it; the next untouched launch takes it');
+
+    await deploy(BUILDS.old);
+    const first = await newPage();
+    await first.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(first);
+    await first.reload({ waitUntil: 'load' });
+    await controlled(first);
+    await first.waitForTimeout(2000);
+    await first.keyboard.press('Shift');
+    await deploy(BUILDS.new);
+    await first.evaluate(() => navigator.serviceWorker.getRegistration().then(registration => registration.update()));
+    given('the new build is installed and waiting',
+        await first.waitForSelector('#updateBanner:visible', { timeout: 25000 }).then(() => true, () => false));
+
+    const touched = await first.context().newPage();
+    await touchedAtLoad(touched);
+    await touched.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(touched);
+    check('the banner offers the update', await touched.waitForSelector('#updateBanner:visible', { timeout: 10000 }).then(() => true, () => false));
+    check('no cover', (await touched.locator('#launchCover').isVisible()) === false);
+    await touched.evaluate(() => { window.__thisWindow = 'not reloaded'; });
+    await touched.waitForTimeout(8000);
+    check('eight seconds on, the same window on the old build',
+        (await touched.evaluate(() => window.__thisWindow === 'not reloaded' && APP_VERSION).catch(() => null)) === BUILDS.old.app);
+    await touched.close();
+    await first.close();
+
+    const next = await first.context().newPage();
+    next.on('dialog', d => d.accept());
+    await next.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    const landed = await next.waitForFunction(expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,
+        BUILDS.new.app, { timeout: 25000, polling: 200 }).then(() => true, () => false);
+    check('the next launch, untouched, is on the new build', landed);
+    await next.context().close();
+}
+
+{
+    suite('v205: a handover that never comes takes the cover down at 12 s, leaves the banner, and reloads nothing');
+
+    const { page: launch, offered } = await onePhoneWithUpdate({ holdSkip: true });
+    given('the new build is installed and waiting, deaf to skip-waiting', offered);
+    await launch.reload({ waitUntil: 'load' });
+    const covered = await launch.waitForSelector('#launchCover:visible', { timeout: 10000 }).then(() => true, () => false);
+    check('the untouched launch puts the cover up', covered);
+    const upAt = Date.now();
+    await launch.evaluate(() => { window.__thisWindow = 'not reloaded'; });
+    const down = await launch.waitForSelector('#launchCover', { state: 'hidden', timeout: 20000 }).then(() => true, () => false);
+    const took = Date.now() - upAt;
+    check('the cover comes down by itself, about twelve seconds on', down && took >= 10000 && took <= 15000, `${took} ms`);
+    check('and the banner offers the update', await launch.locator('#updateBanner').isVisible());
+    await launch.waitForTimeout(5000);
+    check('five seconds more: the same window, the old build - nothing reloaded it',
+        (await launch.evaluate(() => window.__thisWindow === 'not reloaded' && APP_VERSION).catch(() => null)) === BUILDS.old.app);
+    await launch.context().close();
+    await holdSkipWaiting(false);
+}
+
+// ---------------------------------------------------------------- the third review (bdaed5e)
+{
+    suite('v205, P1 of the third review: a launch with another window open takes nothing - that window keeps the advance being typed in it');
+
+    // Window A: on «מקדמות», «+ מקדמה חדשה», 500 typed, the focus on the empty note box -
+    // midEdit() is false there. The build waits. Window B is opened and nobody touches it.
+    await deploy(BUILDS.old);
+    const a = await newPage();
+    await a.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(a);
+    await a.reload({ waitUntil: 'load' });
+    await controlled(a);
+    await a.evaluate(() => {
+        State.schedule.workers = [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400 }];
+        State.schedule.places = [{ id: 'p_01', name: 'אתר צפון', active: true }];
+        State.commitRoster();
+        render();
+    });
+    await a.waitForTimeout(1500);
+    await a.keyboard.press('Shift');
+    await deploy(BUILDS.new);
+    await a.evaluate(() => navigator.serviceWorker.getRegistration().then(registration => registration.update()));
+    given('the new build is offered in A', await a.waitForSelector('#updateBanner:visible', { timeout: 25000 }).then(() => true, () => false));
+    await a.evaluate(() => { showView('advances'); showWorkerAdvances('w_01'); });
+    await a.waitForTimeout(300);
+    await a.getByRole('button', { name: '+ מקדמה חדשה' }).click();
+    await a.waitForTimeout(200);
+    await a.locator('.advance-form input').nth(0).fill('500');
+    await a.locator('.advance-form input').nth(2).click();
+    given('A: 500 typed, the focus on the empty note, midEdit() false',
+        (await a.evaluate(() => [document.querySelector('.advance-form input').value, midEdit()])).join() === '500,false');
+    await a.evaluate(() => { window.__thisWindow = 'A, not reloaded'; });
+    await a.waitForTimeout(3000);
+
+    const b = await a.context().newPage();
+    b.on('dialog', d => d.accept());
+    await b.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    const offeredInB = await b.waitForSelector('#updateBanner:visible', { timeout: 10000 }).then(() => true, () => false);
+    check('B, the second window, offers the update with the banner, as v204 did', offeredInB);
+    check('and no cover stands over it', (await b.locator('#launchCover').isVisible()) === false);
+    await b.waitForTimeout(6000);
+    same('A is the same window, on the old build, on «מקדמות» with the form open and its 500',
+        await a.evaluate(() => [window.__thisWindow, APP_VERSION, currentView, (document.querySelector('.advance-form input') || {}).value])
+            .catch(e => String(e)), ['A, not reloaded', BUILDS.old.app, 'advances', '500']);
+    same('and B too was not reloaded: the old build', await b.evaluate(() => APP_VERSION).catch(() => null), BUILDS.old.app);
+
+    // B closed, A - open, untouched since - is still counted: a window opened now takes nothing.
+    // (A window FROZEN in the background is counted the same way - it is on the browser's own
+    // list - but this harness cannot freeze one: measured, Page.setWebLifecycleState on a
+    // visible headless page is accepted and does nothing, its timers kept running.)
+    await b.close();
+    const c = await a.context().newPage();
+    c.on('dialog', d => d.accept());
+    await c.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    check('B closed, a window opened untouched still counts A, and offers the banner instead of taking the update',
+        await c.waitForSelector('#updateBanner:visible', { timeout: 10000 }).then(() => true, () => false));
+    await c.waitForTimeout(3000);
+    same('A is the same window with its 500, and C took nothing',
+        [await a.evaluate(() => [window.__thisWindow, (document.querySelector('.advance-form input') || {}).value]).catch(e => String(e)),
+            await c.evaluate(() => APP_VERSION).catch(() => null)],
+        [['A, not reloaded', '500'], BUILDS.old.app]);
+    await a.context().close();
+}
+
+{
+    suite('v205, P2 of the third review: a newer build installed under the cover ends the launch at once, and «רענן עכשיו» then reaches it');
+
+    const { page, offered } = await onePhoneWithUpdate();
+    given('the new build is waiting', offered);
+    await deploy(BUILDS.newer);                          // and a newer one is on the server
+    const t0 = Date.now();
+    await page.reload({ waitUntil: 'load' });
+    const covered = await page.waitForSelector('#launchCover:visible', { timeout: 10000 }).then(() => true, () => false);
+    given('the launch put the cover up', covered);
+    // The check the navigation makes by itself, asked again here so the newer build is surely
+    // installed under the cover: the build the launch asked becomes redundant.
+    await page.evaluate(() => navigator.serviceWorker.getRegistration().then(registration => registration.update())).catch(() => {});
+    const down = await page.waitForSelector('#launchCover', { state: 'hidden', timeout: 15000 }).then(() => Date.now() - t0, () => null);
+    check('the cover comes down as soon as the build it asked is redundant - well before 12 s', down !== null && down < 9000, `${down} ms`);
+    check('the banner offers the update', await page.locator('#updateBanner').isVisible().catch(() => false));
+    const [moved] = await Promise.all([
+        page.waitForNavigation({ timeout: 25000 }).then(() => true, () => false),
+        page.locator('#updateBanner button', { hasText: 'רענן עכשיו' }).click().catch(() => {})
+    ]);
+    check('a press of «רענן עכשיו» does something', moved);
+    const on = await page.waitForFunction(expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,
+        BUILDS.newer.app, { timeout: 25000, polling: 200 }).then(() => true, () => false);
+    check('and lands on the NEWER build', on, await page.evaluate(() => APP_VERSION).catch(() => '(unread)'));
+    await page.context().close();
+}
+
+{
+    suite('v205, P3-d of the third review: under the cover a click dispatched on a control (as assistive technology does) writes nothing, and the page is hidden from it');
+
+    const { page, offered } = await onePhoneWithUpdate({ seed: page => page.evaluate(() => {
+        State.schedule.workers = [{ id: 'w_01', name: 'דוד', active: true, dailyRate: 400 }, { id: 'w_02', name: 'משה', active: true, dailyRate: 400 }];
+        State.schedule.places = [{ id: 'p_01', name: 'אתר צפון', active: true }];
+        State.commitRoster();
+        State.commit(assignPlace(State.schedule, todayStr(), 'w_01', 'actual', 'p_01'));
+        State.commit(assignPlace(State.schedule, todayStr(), 'w_02', 'actual', 'p_01'));
+        showView('day');
+        if (typeof setDayMode === 'function') setDayMode('sites');
+        render();
+    }) });
+    given('the new build is waiting', offered);
+    const placed = page => page.evaluate(() => {
+        const disk = JSON.parse(localStorage.getItem('scheduleData:v2') || '{}');
+        const day = ((disk.days || {})[todayStr()] || {}).actual || {};
+        return { record: entriesFor(State.schedule, todayStr(), 'w_01', 'actual').map(entry => entry.placeId),
+            disk: ((day.w_01 || {}).entries || []).map(entry => entry.placeId) };
+    });
+    given('דוד is on אתר צפון, on the record and the disk', JSON.stringify(await placed(page)) === JSON.stringify({ record: ['p_01'], disk: ['p_01'] }));
+    await page.reload({ waitUntil: 'load' });
+    given('the launch put the cover up', await page.waitForSelector('#launchCover:visible', { timeout: 10000 }).then(() => true, () => false));
+    const under = await page.evaluate(() => {
+        const hidden = document.getElementById('dayView').closest('[aria-hidden="true"]') !== null
+            || document.getElementById('dayView').getAttribute('aria-hidden') === 'true';
+        const remove = document.querySelector('[aria-label^="הסר את"]');
+        if (remove) remove.click();                      // what VoiceOver's or TalkBack's activation dispatches
+        return { hidden, found: Boolean(remove), coverHidden: document.getElementById('launchCover').getAttribute('aria-hidden') };
+    }).catch(e => ({ error: String(e) }));
+    check('the day under the cover is hidden from assistive technology, the cover is not', under.hidden === true && under.coverHidden === null, JSON.stringify(under));
+    check('a remove button was there to be activated', under.found === true);
+    const right = await placed(page).catch(() => null);
+    same('its click wrote nothing: דוד still on אתר צפון, on the record and the disk', right === null ? null : right, { record: ['p_01'], disk: ['p_01'] });
+    const landed = await page.waitForFunction(expected => typeof APP_VERSION === 'string' && APP_VERSION === expected,
+        BUILDS.new.app, { timeout: 25000, polling: 200 }).then(() => true, () => false);
+    check('the launch went on to the new build', landed);
+    await controlled(page);
+    await page.waitForTimeout(500);
+    same('and after it, דוד is still on אתר צפון', await placed(page), { record: ['p_01'], disk: ['p_01'] });
+    await page.context().close();
+}
+
+{
+    suite('v205: nothing reloads a page in use at a leaving or a return, as in v204 - every live path the reviews of 684c0f2 and 81ca7a3 found');
+
+    // Each of these reloaded the page in one of the candidates, and lost or wrote something.
+    // Since the redesign a page in use is never reloaded by the update at all - only a press of
+    // the banner reloads it, as in v204.
+    await deploy(BUILDS.old);
+    const page = await newPage();
+    await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(page);
+    await page.reload({ waitUntil: 'load' });
+    await controlled(page);
+    await seedRima(page, 3);
+    const seeded = await rimaState(page);
+    await page.waitForTimeout(2000);
+    await page.keyboard.press('Shift');
+    await deploy(BUILDS.new);
+    await page.evaluate(() => navigator.serviceWorker.getRegistration().then(registration => registration.update()));
+    given('the new build is installed and waiting',
+        await page.waitForSelector('#updateBanner:visible', { timeout: 25000 }).then(() => true, () => false));
+    await page.evaluate(() => { window.__thisWindow = 'not reloaded'; });
+    const stillHere = async () => (await page.evaluate(() => window.__thisWindow === 'not reloaded' && APP_VERSION).catch(() => null)) === BUILDS.old.app;
+    const leaveAndCome = async () => {
+        await visibility(page, 'hidden');
+        await page.waitForTimeout(2500);
+        await visibility(page, 'visible');
+        await page.waitForTimeout(2500);
+    };
+
+    // 81ca7a3, P1: a Rima count erased to retype, still focused - its blur committed a durable 0.
+    await page.locator('.rima-input').first().click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.press('Backspace');
+    given('the count erased, the box still focused and empty',
+        await page.evaluate(() => document.activeElement && document.activeElement.classList.contains('rima-input') && document.activeElement.value === ''));
+    await leaveAndCome();
+    check('the erased count: leaving and coming back reload nothing', await stillHere());
+    const rima = await rimaState(page);
+    same('and write nothing - 3 on the record and the disk, nothing new queued', [rima.record, rima.disk, rima.pending], [3, 3, seeded.pending]);
+    check('the box still has the focus, empty, as he left it',
+        await page.evaluate(() => document.activeElement && document.activeElement.classList.contains('rima-input') && document.activeElement.value === ''));
+    await page.keyboard.type('3');
+    await page.evaluate(() => document.activeElement.blur());
+    await page.waitForTimeout(300);
+
+    // 684c0f2, P1-B: an advance with 500 typed, the focus on the empty note.
+    await page.evaluate(() => { showView('advances'); showWorkerAdvances('w_01'); });
+    await page.waitForTimeout(300);
+    await page.getByRole('button', { name: '+ מקדמה חדשה' }).click();
+    await page.waitForTimeout(200);
+    await page.locator('.advance-form input').nth(0).fill('500');
+    await page.locator('.advance-form input').nth(2).click();
+    await leaveAndCome();
+    check('the advance being typed: leaving for the bank app and coming back reload nothing', await stillHere());
+    same('the 500 is still in its box', await page.locator('.advance-form input').nth(0).inputValue().catch(() => null), '500');
+    await page.locator('.advance-form').getByRole('button', { name: 'ביטול' }).click().catch(() => {});
+    await page.evaluate(() => { showWorkerAdvances(null); showView('day'); });
+    await page.waitForTimeout(300);
+
+    // 81ca7a3, P1: «רענן עכשיו» pressed while a count box holds digits (an iPhone's tap moves
+    // no focus): v204's own way - the reload waits for the box to be left, never for a leaving
+    // or a return of the app.
+    await page.locator('.rima-input').first().click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('7');
+    await page.evaluate(() => {
+        const press = [...document.querySelectorAll('#updateBanner button')].find(b => b.textContent.trim() === 'רענן עכשיו');
+        if (press) press.click();
+    });
+    await page.waitForTimeout(3000);
+    await leaveAndCome();
+    check('the refused press, the box still holding 7: leaving and coming back reload nothing', await stillHere());
+    same('and the 7 is still only in the box, not on the record', [await page.evaluate(() => document.activeElement.value), (await rimaState(page)).record], ['7', 3]);
+    await page.context().close();
+}
+
+{
+    suite('v205: past midnight, a page in use is not reloaded and keeps no note; the morning\'s follow is v204\'s');
+
+    // 684c0f2's P1-C and 81ca7a3's P2: the place a reload kept across midnight. Nothing is kept
+    // now, because a page in use is never reloaded by the update.
+    await deploy(BUILDS.old);
+    const ctx = await browser.newContext({ timezoneId: 'Asia/Jerusalem' });
+    const page = await ctx.newPage();
+    page.on('dialog', d => d.accept());
+    await page.clock.install({ time: new Date('2026-11-10T23:50:00+02:00') });
+    await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await controlled(page);
+    await page.reload({ waitUntil: 'load' });
+    await controlled(page);
+    await page.waitForTimeout(2000);
+    await page.keyboard.press('Shift');
+    await deploy(BUILDS.new);
+    await page.evaluate(() => navigator.serviceWorker.getRegistration().then(registration => registration.update()));
+    given('the new build is offered', await page.waitForSelector('#updateBanner:visible', { timeout: 25000 }).then(() => true, () => false));
+    given('the day screen is on Tuesday', (await page.evaluate(() => State.date)) === '2026-11-10');
+    await page.evaluate(() => { window.__thisWindow = 'not reloaded'; });
+    await page.clock.setSystemTime(new Date('2026-11-11T00:15:00+02:00'));
+    await visibility(page, 'hidden');
+    await page.waitForTimeout(3000);
+    check('locked after midnight: not reloaded', (await page.evaluate(() => window.__thisWindow === 'not reloaded').catch(() => false)) === true);
+    same('and no place note anywhere', await page.evaluate(() => [sessionStorage.length, localStorage.getItem('farkadUpdateReturn')]), [0, null]);
+    await page.clock.setSystemTime(new Date('2026-11-11T07:10:00+02:00'));
+    await visibility(page, 'visible');
+    await page.waitForTimeout(300);
+    same('the 07:10 unlock: the day screen follows to Wednesday, the same window, the old build',
+        await page.evaluate(() => [State.date, window.__thisWindow, APP_VERSION]), ['2026-11-11', 'not reloaded', BUILDS.old.app]);
+    await ctx.close();
+}
+
+{
+    suite('a first install is never reloaded by any of it (v205)');
+
+    await deploy(BUILDS.new);
+    const page = await newPage();
+    await page.goto(`${BASE}/index.html`, { waitUntil: 'load' });
+    await page.evaluate(() => { window.__thisWindow = 'not reloaded'; });
+    await controlled(page);
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForTimeout(3000);
+    check('the first visit is the same window after the worker claims it',
+        (await page.evaluate(() => window.__thisWindow === 'not reloaded')) === true);
+    check('no cover went up', (await page.locator('#launchCover').isVisible()) === false);
+    check('nothing is waiting to be taken', (await page.evaluate(() => navigator.serviceWorker
+        .getRegistration().then(r => Boolean(r && r.waiting)))) === false);
+    await page.context().close();
 }
 
 // ---------------------------------------------------------------- the way out
