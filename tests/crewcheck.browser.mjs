@@ -501,6 +501,8 @@ async function twoTaps(chipLocator, target, gap) {
     for (let attempt = 0; attempt < 4; attempt += 1) {
         await openFresh();
         await page.evaluate(() => { window.__downs.length = 0; });
+        await chipLocator.scrollIntoViewIfNeeded();
+        await pause(page, 60);
         const box = await chipLocator.boundingBox();
         const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
         const started = Date.now();
@@ -704,7 +706,12 @@ await main.context.close();
 // ================================================================== 15. the floors, on tests/screens.mjs's two entries
 
 const MINE = screen => screen.name.startsWith('crew - «בדיקת הצוות»');
-given('tests/screens.mjs has the two entries', SCREENS.filter(MINE).length === 2, String(SCREENS.filter(MINE).length));
+suite('15. tests/screens.mjs walks the dialog twice, straight after the crew\'s reorder panel');
+{
+    const at = SCREENS.findIndex(screen => screen.name === 'crew - reorder');
+    same('its two entries, in their place', SCREENS.slice(at + 1, at + 3).map(screen => [screen.name, screen.scope]),
+        [['crew - «בדיקת הצוות», calm', ['#crewCheckModal']], ['crew - «בדיקת הצוות», with findings', ['#crewCheckModal']]]);
+}
 const words = t => `${t.size}px/${t.weight} ${t.contrast} «${t.words}» ${t.where}`;
 const seenKinds = new Set();
 let seenNote = false;
