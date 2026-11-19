@@ -1160,6 +1160,21 @@ await block('S9 this phone: the sync line is #storageNotice\'s, the backup row\'
         reminder: 'שבועיים ויותר בלי קובץ גיבוי חדש מהמכשיר הזה.', warn: true });
     d.Store.set('scheduleData:lastBackup', '2026-11-16');
     same('and not before', facts(d).backup, { sentence: 'קובץ גיבוי נמסר לדפדפן: לפני 3 ימים.', reminder: null, warn: false });
+
+    // A phone with nothing on it - a first install, where the chip is the first thing he may tap:
+    // the dialog opens, says what there is, and writes nothing.
+    const empty = frame(phone());
+    const untouched = [disk(empty), record(empty)];
+    given('a first install: no man, no site', empty.State.schedule.workers.length === 0 && empty.State.schedule.places.length === 0);
+    same('the dialog opens on it', empty.run('openStatus()'), true);
+    const words = JSON.parse(said(empty));
+    same('and says what there is: nobody today, nobody owing, no site worked, no backup yet', ['עוד אין היום אף עובד באתר.',
+        'אף עובד לא חייב כסף כרגע.', 'לא נרשמה עבודה באתרים ב-8 השבועות האחרונים.', 'אין במכשיר הזה רישום של ייצוא קובץ גיבוי.']
+        .filter(sentence => !words.includes(sentence)), []);
+    same('no payday line, no close line and no caption: nothing to say is said by nothing',
+        [facts(empty).payday, facts(empty).close, facts(empty).pulse.caption], [null, null, null]);
+    same('and nothing written', [disk(empty), record(empty)], untouched);
+    empty.run('closeStatus()');
 });
 
 // ================================================================== S10 the words
