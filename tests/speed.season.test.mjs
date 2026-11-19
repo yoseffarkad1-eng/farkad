@@ -275,7 +275,11 @@ const CLOCKS = [
     ['his statement', `speedReset(); ${MAN_WAYS[0][1]('w_01')}`, { open: [X(0.5), X(1 / 2)], closed: X(1.25, 30) }],
     ['«מקדמות»', `speedReset(); ${BOOK_WAYS[0][1]}`, { open: [X(0.35), X(1 / 4)], closed: X(1 / 2) }],
     ['a man\'s page of «מקדמות»', `speedReset(); ${BOOK_MAN_WAYS[0][1]('w_01')}`, { open: [X(0.6, 20), X(0.6, 20)], closed: X(1.25, 30) }],
-    ['«סגירות שנרשמו»', `speedReset(); ${BOOK_WAYS[1][1]}`, { open: [X(0.35), X(1 / 4)], closed: X(1 / 2) }],
+    // Unmoved, v204 ALREADY keeps this page's one reading - the board, OWES_KEPT - and
+    // season-open has no close to list: v204 draws it unmoved in milliseconds (measured, 8 ms),
+    // and a quarter of that is no ceiling. The contract's own rule for a reading already cheap
+    // on v204 holds it instead: never slower than 1.25x + 30 ms.
+    ['«סגירות שנרשמו»', `speedReset(); ${BOOK_WAYS[1][1]}`, { open: [X(0.35), X(1.25, 30)], closed: X(1 / 2) }],
     ['owesReadNow («שים לב»)', 'OWES_KEPT = null; return JSON.stringify(owesReadNow());', { open: [X(0.35), X(1 / 4)], closed: X(1 / 2) }],
     ['«סגירת שבוע»\'s list', `speedReset(); ${way(BOOK_WAYS, /סגירת שבוע/)}`, { open: [X(0.75), X(1 / 4)], closed: X(1.25, 30) }],
     ['the reminder\'s count', `speedReset(); ${way(BOOK_WAYS, /reminder/)}`, { open: [X(0.75), X(1 / 4)], closed: X(1.25, 30) }],
