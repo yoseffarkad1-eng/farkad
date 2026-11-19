@@ -195,6 +195,24 @@ function migrationQuestions() {
     openMigrationModal();
 }
 
+// «מי עבד איפה», entered the way a person enters it: the finder, then «איפה עבד» on עלי חסן.
+// Runs in the page.
+function historyThroughTheFinder() {
+    openFind();
+    const door = document.querySelector('#findList [data-worker-id="w02"] [data-find-door="history"]');
+    if (!door) throw new Error('no «איפה עבד» on w02 in the finder');
+    door.click();
+}
+
+// Choices made in the dialog's own fields, each by its own change event. Runs in the page.
+function historyChosen(choices) {
+    choices.forEach(([id, value]) => {
+        const field = document.getElementById(id);
+        field.value = value;
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+}
+
 // A record with something for «שים לב» and «סגירות שנרשמו» to say: סאמר ח'טיב - paid by the
 // week - took 1,500 two weeks ago; that week of his and רון לוי's were closed at one moment,
 // and his week since was left open. IN MEMORY ONLY: the model's own writers on the
@@ -448,6 +466,25 @@ export const SCREENS = [
             await run(page, () => { const field = document.querySelector('#findModal input'); if (field) { field.value = 'ר'; field.dispatchEvent(new Event('input', { bubbles: true })); } });
             await pause(page, 300); },
         close: page => run(page, () => closeFind()) },
+    // «מי עבד איפה» (js/ui/history.js), each opened through the finder's door on עלי חסן and
+    // then chosen as a person chooses: the default range; p1 with Rima's lines and their note;
+    // p2 with «עובדי יוסף גבס» apart (the seed counts Rima only at p1 and יוסף גבס only at
+    // p2); and «תאריכים אחרים» with the text's fold open.
+    { name: 'find - where one man worked', scope: ['#historyModal'],
+        open: async page => { await home(page); await run(page, historyThroughTheFinder); await pause(page, 350); },
+        close: page => run(page, () => closeHistory()) },
+    { name: 'find - a site and everyone, with Rima', scope: ['#historyModal'],
+        open: async page => { await home(page); await run(page, historyThroughTheFinder);
+            await run(page, historyChosen, [['historyMan', ''], ['historySite', 'p1'], ['historyRange', 'thisMonth']]); await pause(page, 350); },
+        close: page => run(page, () => closeHistory()) },
+    { name: 'find - a site and everyone, with יוסף גבס', scope: ['#historyModal'],
+        open: async page => { await home(page); await run(page, historyThroughTheFinder);
+            await run(page, historyChosen, [['historyMan', ''], ['historySite', 'p2'], ['historyRange', 'thisMonth']]); await pause(page, 350); },
+        close: page => run(page, () => closeHistory()) },
+    { name: 'find - two dates and the text', scope: ['#historyModal'],
+        open: async page => { await home(page); await run(page, historyThroughTheFinder);
+            await run(page, historyChosen, [['historyRange', 'custom']]); await run(page, () => historyToggleText()); await pause(page, 350); },
+        close: page => run(page, () => closeHistory()) },
     { name: 'the «מה חדש» line', scope: ['#whatsNewBanner'],
         open: async page => { await home(page); await run(page, () => whatsNewShowLine()); await pause(page); },
         close: page => run(page, () => whatsNewHideLine()) },
