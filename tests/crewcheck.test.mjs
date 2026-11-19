@@ -1009,7 +1009,7 @@ suite('5. every word the check says, pinned');
         [T_.chip(named('אחמד'), '2'), T_.oneDay, T_.days(3), T_.chip(named('אחמד'), T_.oneDay)],
         [`${named('אחמד')} · 2`, 'יום אחד', '3 ימים', `${named('אחמד')} · יום אחד`]);
     same('the idle men\'s note, one line: the condition and then the archive question\'s own sentence',
-        `${T_.archiveIf} ${R.archiveSays}`, 'אם מכבים עובד בכפתור «פעיל»: הימים שכבר נרשמו יישמרו, והעובד לא יופיע ברשימה היומית.');
+        [T_.archiveIf, R.archiveSays].join(' '), 'אם מכבים עובד בכפתור «פעיל»: הימים שכבר נרשמו יישמרו, והעובד לא יופיע ברשימה היומית.');
     check('the block is frozen, and so is the borrowed one', Object.isFrozen(T_) && Object.isFrozen(R));
     same('the threshold is one constant', d.global('CREW_CHECK_IDLE_DAYS'), 25);
 }
@@ -1151,6 +1151,209 @@ suite('6. it writes nothing: the whole disk byte for byte, and no writer called'
     d.run("State.schedule.workers[0].name = 'שם אחר'; State.commitRoster();");
     check('and the instrument is live: a roster edit is counted and moves the disk',
         d.run('__writes.length') > 0 && JSON.stringify(d.dump()) !== disk);
+}
+
+// ================================================================== 7. quiet where nothing is wrong
+//
+// EVERY EVENING READ AS OF ITSELF: crewCheckRead(schedule, evening, 'actual', evening) - the
+// record as it stood that evening, the days after it not yet written. Read on the whole
+// record instead (the app's reading, right for the app), a man who comes back later is never
+// idle on an evening before he does, so "of the names, how many came back" is 0% by
+// construction and measures nothing; it is printed beside, so the reason stays on the page.
+const pct = (a, b) => (b ? `${(100 * a / b).toFixed(1)}%` : '-');
+const median = list => { const x = list.slice().sort((a, b) => a - b); return x.length ? x[Math.floor(x.length / 2)] : null; };
+
+// Each date key up to `last`, as an evening. `asOf`: read as of itself, or whole.
+function evenings(d, schedule, last, asOf) {
+    const read = d.global('crewCheckRead');
+    return Object.keys(schedule.days).sort().filter(date => date <= last)
+        .map(evening => ({ evening, read: read(schedule, evening, 'actual', asOf ? evening : undefined) }));
+}
+const worksAfter = (schedule, id, evening) => Object.keys(schedule.days).some(date => date > evening
+    && Boolean(((schedule.days[date] || {}).actual || {})[id]) && !schedule.days[date].actual[id].absent);
+
+suite('7. the day check\'s seasons: no idle man on any evening, the check quiet on most, the dormant only for information');
+{
+    const d = device('2026-06-07');
+    const sum = { evenings: 0, calm: 0, idle: 0, idleSites: 0, idleSitesBack: 0, dormantChecked: 0, dormantInfo: 0, archived: 0, never: 0 };
+    for (const habit of ['full', 'sites']) for (const rimaFriday of [true, false]) for (const seed of [11, 22, 33, 44, 55]) {
+        const schedule = daycheckSeason(seed, habit, rimaFriday);
+        const keys = Object.keys(schedule.days).sort();
+        const siteBack = (id, evening) => keys.some(date => date > evening && (Object.values(schedule.days[date].actual)
+            .some(record => !record.absent && record.entries.some(entry => entry.placeId === id)) || (schedule.days[date].rima || {})[id] > 0));
+        evenings(d, schedule, keys[keys.length - 1], true).forEach(({ evening, read }) => {
+            sum.evenings += 1;
+            if (checkEmpty(read)) sum.calm += 1;
+            sum.idle += read.check.idle.length;
+            sum.idleSites += read.check.idleSites.length;
+            sum.idleSitesBack += read.check.idleSites.filter(place => siteBack(place.id, evening)).length;
+            sum.dormantChecked += Object.values(read.check).flat().flatMap(item => item.men ? item.men : [item])
+                .filter(item => /^w_1[5-7]$/.test(item.id)).length;
+            sum.archived += JSON.stringify(read).includes('"w_18"') ? 1 : 0;
+            sum.never += read.info.never.length;
+            if (['w_15', 'w_16', 'w_17'].every(id => ids(read.info.never).includes(id))) sum.dormantInfo += 1;
+        });
+    }
+    console.log(`  (20 seasons, ${sum.evenings} evenings: calm on ${pct(sum.calm, sum.evenings)}; idle sites ${(sum.idleSites / sum.evenings).toFixed(2)} an evening, of them a site worked again later ${pct(sum.idleSitesBack, sum.idleSites)}; «never» ${(sum.never / sum.evenings).toFixed(2)} an evening)`);
+    given('the seasons have evenings to read', sum.evenings > 1500, String(sum.evenings));
+    same('no man is idle on any evening of any season', sum.idle, 0);
+    check('nothing to check on at least 85% of evenings', sum.calm / sum.evenings >= 0.85, pct(sum.calm, sum.evenings));
+    same('the three men who never work are never under «כדאי לבדוק»', sum.dormantChecked, 0);
+    same('they are under «לידיעה» on every evening', sum.dormantInfo, sum.evenings);
+    same('and the archived man is on no line on any evening', sum.archived, 0);
+}
+
+suite('7. the time-season record: every line empty once it holds 25 working days, and nothing to check before');
+{
+    const d = seeded['the time-season record'].d;
+    const S = d.State.schedule;
+    let read = 0, windowed = 0, noisy = [];
+    evenings(d, S, '2026-11-19', true).forEach(({ evening, read: r }) => {
+        read += 1;
+        if (!checkEmpty(r)) noisy.push(`${evening} check`);
+        if (r.since !== null) {
+            windowed += 1;
+            if (!infoEmpty(r)) noisy.push(`${evening} info`);
+        }
+    });
+    given('every evening of it was read', read === Object.keys(S.days).length, String(read));
+    same(`on ${read} evenings (${windowed} of them with the window open), not one line`, noisy, []);
+}
+
+suite('7. the turnover model, each evening read as of itself: how often a man named comes back, and who is named at all');
+{
+    const LAST = '2026-09-20';
+    const d = device('2026-09-20');
+    const isWorking = d.global('dayCheckIsWorkingDay');
+    const asOf = { names: 0, back: 0, evenings: 0, sitesNamed: 0 };
+    const whole = { names: 0, back: 0 };
+    const leavers = [];
+    const regulars = [];
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+        const { schedule, kind } = turnoverSeason(seed);
+        const first = new Map();
+        evenings(d, schedule, LAST, true).forEach(({ evening, read }) => {
+            asOf.evenings += 1;
+            asOf.names += read.check.idle.length;
+            asOf.sitesNamed += read.check.idleSites.length;
+            read.check.idle.forEach(man => {
+                if (worksAfter(schedule, man.id, evening)) asOf.back += 1;
+                if (!first.has(man.id)) first.set(man.id, { evening, last: man.last });
+            });
+        });
+        evenings(d, schedule, LAST, false).forEach(({ evening, read }) => {
+            whole.names += read.check.idle.length;
+            whole.back += read.check.idle.filter(man => worksAfter(schedule, man.id, evening)).length;
+        });
+        // The record's own runs: on the calendar of the whole record, the longest run of working
+        // days with no site of his, up to the last evening - never the generator's plan.
+        const keys = Object.keys(schedule.days).sort();
+        const W = keys.filter(date => isWorking(schedule, date, 'actual'));
+        const at = new Map(W.map((date, i) => [date, i]));
+        schedule.workers.forEach(worker => {
+            const mine = keys.filter(date => schedule.days[date].actual[worker.id]);
+            if (kind.get(worker.id) === 'leaver') {
+                const last = mine[mine.length - 1] || null;
+                leavers.push({ seed, id: worker.id, last, inScope: last !== null && calendarDays(last, LAST) >= 45,
+                    named: first.has(worker.id), after: first.has(worker.id) ? calendarDays(first.get(worker.id).last, first.get(worker.id).evening) : null });
+            }
+            if (kind.get(worker.id) === 'regular') {
+                let longest = 0;
+                let previous = null;
+                mine.filter(date => date <= LAST).forEach(date => {
+                    if (previous !== null) longest = Math.max(longest, at.get(date) - at.get(previous) - 1);
+                    previous = date;
+                });
+                if (previous !== null) longest = Math.max(longest, W.filter(date => date > previous && date <= LAST).length);
+                regulars.push({ seed, id: worker.id, longest, named: first.has(worker.id) });
+            }
+        });
+    }
+    const scope = leavers.filter(man => man.inScope);
+    const named_ = regulars.filter(man => man.named);
+    console.log(`  (8 seasons, ${asOf.evenings} evenings to 20/09, as of each: ${(asOf.names / asOf.evenings).toFixed(2)} men named an evening, of them a man who worked again later ${pct(asOf.back, asOf.names)}; sites ${(asOf.sitesNamed / asOf.evenings).toFixed(2)} an evening)`);
+    console.log(`  (the whole record read instead, the app's reading: ${(whole.names / asOf.evenings).toFixed(2)} an evening, of them back later ${pct(whole.back, whole.names)} - by construction)`);
+    console.log(`  (leavers: ${leavers.length}; last day 45+ calendar days before 20/09: ${scope.length}, named ${scope.filter(m => m.named).length}, the first time after a median ${median(scope.map(m => m.after))} and at most ${Math.max(...scope.map(m => m.after))} calendar days; out of the window's reach ${leavers.length - scope.length}, of them named anyway ${leavers.filter(m => !m.inScope && m.named).length})`);
+    console.log(`  (regulars: ${regulars.length}; named ${named_.length}, each with a run of ${Math.min(...named_.map(m => m.longest))}+ working days; never named ${regulars.length - named_.length}, their longest run ${Math.max(...regulars.filter(m => !m.named).map(m => m.longest))})`);
+    given('the model names somebody to measure', asOf.names > 1000 && scope.length >= 30, `${asOf.names} ${scope.length}`);
+    check('of the men named, at most 35% work again later', asOf.back / asOf.names <= 0.35, pct(asOf.back, asOf.names));
+    same('every man who left, whose last day is 45 or more calendar days before the last evening, is named',
+        scope.filter(man => !man.named).map(man => `${man.seed}:${man.id}`), []);
+    check('within 45 calendar days of his last day', scope.every(man => man.after <= 45), JSON.stringify(scope.map(man => man.after)));
+    same('no regular is named whose record holds no run of 25 working days without a site of his, and every one whose record holds one is',
+        regulars.filter(man => man.named !== (man.longest >= IDLE)).map(man => `${man.seed}:${man.id}:${man.longest}`), []);
+    check('and the line between them is real: regulars on both sides of it', named_.length > 5 && regulars.length - named_.length > 100,
+        `${named_.length} / ${regulars.length}`);
+    same('read whole, a man who works again later is never named before he does: the reason for asOf', whole.back, 0);
+}
+
+// ================================================================== 8. the cost
+
+function medianOf(d, schedule, times) {
+    const read = d.global('crewCheckRead');
+    const runs = [];
+    for (let k = 0; k < times; k += 1) {
+        const t = performance.now();
+        read(schedule, '2026-11-19', 'actual');
+        runs.push(performance.now() - t);
+    }
+    runs.sort((a, b) => a - b);
+    return { median: runs[Math.floor(times / 2)], max: runs[times - 1] };
+}
+suite('8. the cost of one reading');
+{
+    const time = seeded['the time-season record'].d;
+    const S = time.State.schedule;
+    const small = medianOf(time, S, 25);
+    console.log(`  (the time-season record, 40 men x ${Object.keys(S.days).length} day keys, ${Math.round(JSON.stringify(S).length / 1024)} KiB: median ${small.median.toFixed(1)} ms, max ${small.max.toFixed(1)} ms of 25)`);
+    check('the time-season record: at most 30 ms, the median of 25', small.median <= 30, small.median.toFixed(1));
+    const big = bigSeason(60, '2025-11-01');
+    const B = big.State.schedule;
+    const heavy = medianOf(big, B, 15);
+    console.log(`  (60 men x ${Object.keys(B.days).length} day keys, ${Math.round(JSON.stringify(B).length / 1024)} KiB: median ${heavy.median.toFixed(1)} ms, max ${heavy.max.toFixed(1)} ms of 15)`);
+    given('the heavy record is the size the budget names', Object.keys(B.days).length >= 320 && B.workers.length === 60, String(Object.keys(B.days).length));
+    check('60 men over a year: at most 120 ms, the median of 15', heavy.median <= 120, heavy.median.toFixed(1));
+}
+
+// ================================================================== 9. not in a draw
+//
+// On a DOM that holds nodes (the harness's own document answers null to every id, so the
+// dialog could never be open there and "no reading" would hold over nothing). renderRoster
+// is the crew screen's draw; its lists are not registered and take their null branch.
+suite('9. the crew screen\'s draws read nothing while the dialog is shut, and once a draw while it is open');
+{
+    const d = screensSeed();
+    withDom(d);
+    d.run(`window.__reads = 0;
+        const __crewCheckReadReal = crewCheckRead;
+        crewCheckRead = function () { __reads += 1; return __crewCheckReadReal.apply(this, arguments); };`);
+    const host = d.dom.getElementById('crewCheckFoot');
+    d.run('renderRoster()');
+    const entry = host.firstChild;
+    for (let k = 0; k < 9; k += 1) d.run('renderRoster()');
+    same('ten draws with the dialog shut: no reading', d.run('__reads'), 0);
+    check('the entry is built once and is the same node after ten draws', Boolean(entry) && entry === host.firstChild
+        && entry.id === 'crewCheckEntry' && entry.textContent === 'בדיקת הצוות' && host.children.length === 1);
+    same('shown while there are men', host.hidden, false);
+    same('its words and what it says it opens', [entry.className, entry.getAttribute('aria-haspopup')], ['btn-secondary crewcheck-entry', 'dialog']);
+    d.run('openCrewCheck()');
+    same('opened: one reading', d.run('__reads'), 1);
+    for (let k = 0; k < 5; k += 1) d.run('renderRoster()');
+    same('five draws over the open dialog: exactly one reading each', d.run('__reads'), 6);
+    d.run('closeCrewCheck()');
+    d.run('renderRoster(); renderRoster()');
+    same('shut again: no more', d.run('__reads'), 6);
+    d.run('const __kept = State.schedule.workers; State.schedule.workers = []; renderRoster();');
+    same('with no men the row is hidden, the node kept', [host.hidden, host.firstChild === entry], [true, true]);
+    d.run('State.schedule.workers = __kept; renderRoster();');
+    same('and shown again with the first man', host.hidden, false);
+    // A build without the file draws the crew screen as before: roster.js asks by name.
+    const bare = makeDevice({ deviceId: 'd_crewcheck_bare' });
+    const dom = makeDom();
+    ['crewCheckFoot'].forEach(id => dom.register(id));
+    bare.ctx.document = dom;
+    vm.runInContext('renderRoster()', bare.ctx);
+    same('without js/ui/crewcheck.js the crew screen draws and the host stays empty', dom.getElementById('crewCheckFoot').children.length, 0);
 }
 
 report();
