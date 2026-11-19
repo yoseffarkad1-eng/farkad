@@ -1101,10 +1101,13 @@ body.journey-on #sederModal { z-index: 60; }
    sentences come first and stand apart on the second ground. THE MONEY LEADS: «נצבר» and what
    was handed over, each the width of the dialog and larger, then «נצבר»'s sentences, then the
    days two to a row where they fit. A FIGURE IS NEVER BROKEN INSIDE ITS DIGITS where it fits on
-   a line of its own: the days' grid drops to one column when its words grow (its floor is in
+   a line of its own (and the money's size is held to what a seven-figure year at doubled text
+   still fits on the 375px phone): the days' grid drops to one column when its words grow (its floor is in
    em, so doubled text halves the columns and leaves 1x and the large display as they were), and
    a value breaks only where it alone is wider than its line - at doubled text on the 320px
-   phone a seven-figure «נצבר» was drawn «47885» over «15». A MONTH is one tonal button: its name
+   phone a seven-figure «נצבר» was drawn «47885» over «15». A tile is ONE column of label and
+   value (nowrap): a column that may wrap sizes its line to its widest word, and a figure that
+   may not break inside then pushed the tile past the dialog's edge. A MONTH is one tonal button: its name
    and his own men's worker-site days on one line, the bar under them in the accent (one series,
    one hue - never a site's colour), its figures label over value, and under them what «סיכום
    חודש» says beside the same figures (not over yet; the men its «נצבר» leaves out). A man and a
@@ -1131,9 +1134,10 @@ body.journey-on #sederModal { z-index: 60; }
 #yearSummaryModal .msum-tiles { grid-template-columns: repeat(auto-fit, minmax(min(100%, 9em), 1fr)); }
 #yearSummaryModal .msum-tiles.ysum-lead { grid-template-columns: minmax(0, 1fr); }
 #yearSummaryModal .ysum-counts { margin-top: 10px; }
+#yearSummaryModal .msum-tile { flex-wrap: nowrap; }
 #yearSummaryModal .msum-tile .msum-value { overflow-wrap: break-word; }
 .ysum-lead .msum-tile { padding-inline: 10px; }
-.ysum-lead .msum-tile .msum-value { font-size: 32px; }
+.ysum-lead .msum-tile .msum-value { font-size: 31px; }
 .ysum-months-hint { margin: 0 0 10px; }
 .ysum-month { display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; min-height: 48px; margin: 0 0 8px; padding: 10px 12px; text-align: start; }
 .ysum-month-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; min-width: 0; }

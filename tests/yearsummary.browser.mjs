@@ -786,8 +786,15 @@ try {
                             node.appendChild(probe);
                             const natural = probe.getBoundingClientRect().width;
                             probe.remove();
-                            const cs = getComputedStyle(node);
-                            const room = node.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+                            // THE ROOM IS THE DIALOG'S, not the box the figure happens to be in: the
+                            // widest line its place could have - the body's width less every padding
+                            // and border between the two. Two tiles to a row where one would hold the
+                            // figure is the fault itself (fix round 1: «4788» over «515» at 440).
+                            const flat = at => { const cs = getComputedStyle(at); return parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)
+                                + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth); };
+                            const body = document.getElementById('yearSummaryBody');
+                            let room = body.clientWidth - parseFloat(getComputedStyle(body).paddingLeft) - parseFloat(getComputedStyle(body).paddingRight);
+                            for (let at = node; at && at !== body; at = at.parentElement) room -= flat(at);
                             const one = { figure: node.textContent, lines: lines.size, natural: Math.round(natural), room: Math.round(room) };
                             (natural <= room + 1 ? out.broken : out.tooWide).push(one);
                         }
