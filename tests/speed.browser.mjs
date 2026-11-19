@@ -154,11 +154,11 @@ function row(name, v204, mine, limit, saying) {
 async function both(act, done, options = {}) {
     const out = {};
     for (const tree of options.only ? [options.only] : ['v204', 'now']) {
-        const { context, page } = await freshPage(tree, options.record || SEASON.open, options);
+        const { context, page, cdp } = await freshPage(tree, options.record || SEASON.open, options);
         if (options.before) await page.evaluate(options.before);
         out[tree] = await measure(page, act, done);
         if (options.after) out[`${tree}After`] = await options.after(page);
-        if (options.keep) out[`${tree}Page`] = { context, page }; else await context.close();
+        if (options.keep) out[`${tree}Page`] = { context, page, cdp }; else await context.close();
     }
     return out;
 }
@@ -262,15 +262,31 @@ async function both(act, done, options = {}) {
             for (let n = 0; n < 1200 && document.querySelector('.owes-pending'); n += 1) await new Promise(resolve => setTimeout(resolve, 50));
             await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
         };
+        // Drawn afresh: no reading at all - REPORT_ONCE planted, as tests/reports.speed.test.mjs
+        // draws one - and the gate answered once for the record, as there, but by v196's own rule
+        // (reportGateAnswer: a record that carries the approval is not planned). The bare plan of
+        // season-closed takes minutes (161 s in Node, measured), and a draw asks the gate a dozen
+        // times; the answer is the gate's either way (tests/reports.speed.test.mjs holds the two equal).
         window.speedDraw = async (code, selector, afresh) => {
             const was = REPORT_ONCE;
-            if (afresh) { REPORT_ONCE = { schedule: State.schedule }; OWES_KEPT = null; }
+            const gate = carryReportingEnabled;
+            if (afresh) {
+                const record = State.schedule;
+                let answer;
+                carryReportingEnabled = function (schedule) {
+                    if (schedule !== record || arguments.length !== 1) return gate.apply(this, arguments);
+                    if (answer === undefined) answer = reportGateAnswer(schedule, gate);
+                    return answer;
+                };
+                REPORT_ONCE = { schedule: record };
+                OWES_KEPT = null;
+            }
             try {
                 // eslint-disable-next-line no-new-func
                 new Function(code)();
                 await settle();
                 return document.querySelector(selector).innerHTML;
-            } finally { if (afresh) REPORT_ONCE = was; }
+            } finally { if (afresh) { REPORT_ONCE = was; carryReportingEnabled = gate; } }
         };
         window.speedPicture = async () => {
             let file = null;
