@@ -47,10 +47,10 @@ const server = await serve(root);
 check('the browser is served the named tree', (await verifyServedAssets(server.url, root, expectedShaFor(root))).ok);
 const browser = await launchLocalBrowser(chromium, { executablePath: process.env.CHROME_PATH });
 const errors = [];
-// The one error the test page itself makes (criterion 19 says why), and how many of it the page
-// counted where it was thrown.
+// The one error the test page itself makes (criterion 19 says why), and the list the midnight
+// walk's pages hand theirs to - kept apart from every other page's, and read at the very end.
 const BLOCKED_WORKER = "Cannot read properties of undefined (reading 'update')";
-let blockedWorkerRaised = 0;
+const midnightErrors = [];
 const SHOTS = process.env.HISTORY_SHOTS || '';
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 
@@ -67,9 +67,9 @@ const moved = (then, now) => {
 };
 const isOpen = page => page.evaluate(() => document.getElementById('historyModal').style.display === 'flex');
 const pause = (page, ms = 300) => page.waitForTimeout(ms);
-const phone = async (width, height, scheme, large, seeded = true) => {
+const phone = async (width, height, scheme, large, seeded = true, sink = errors) => {
     const opened = await openApp(browser, server.url, { width, height, scheme, large, seeded });
-    opened.page.on('pageerror', error => errors.push(error.message));
+    opened.page.on('pageerror', error => sink.push(error.message));
     return opened;
 };
 const home = page => page.evaluate(() => {
@@ -567,7 +567,7 @@ try {
     {
         suite('19. left open across midnight: a day of the old today, tapped in the morning, is the day he gets');
         for (const how of ['a row of the old today', 'its «סגור»']) {
-            const { context, page } = await phone(375, 667, 'light', false);
+            const { context, page } = await phone(375, 667, 'light', false, true, midnightErrors);
             await home(page);
             await throughTheDoor(page, 'w02');
             given(`${how}: it is open on the evening of ${TODAY}`, await isOpen(page)
@@ -575,18 +575,18 @@ try {
             // THE TEST PAGE'S OWN FAULT, SET APART. tests/screens.mjs blocks the service worker, so
             // the registration js/ui/offline.js keeps for the phone's return never came, and its
             // listener reads `update` of nothing on the return made here (tests/midnight.browser.mjs
-            // allows the worker and never meets it). What the return raised is counted IN THE PAGE,
-            // where it is thrown - Playwright hands each error to this file later, and on a loaded
-            // machine two of them came after a window of 100 ms had closed (the run on ef85afe) -
-            // and exactly that many of that one message are taken off at the end. Any other error,
-            // and any more of that one, still counts.
+            // allows the worker and never meets it). What the return raised is read IN THE PAGE,
+            // where it is thrown, and must be that one message. And whatever these two pages raise,
+            // whenever Playwright hands it over - one came after a window of 100 ms had closed on a
+            // loaded machine (the run on ef85afe), and one more after the page's own count, as the
+            // walk left (the run on e96492a) - goes to a list of their own, held at the very end to
+            // that one message: never to the list every other page is held to nothing by.
             await page.evaluate(() => { window.__raised = []; window.addEventListener('error', event => window.__raised.push(String(event.message))); });
             await lockUntil(page, '2026-11-11T07:10:00+02:00');
             await pause(page, 100);
             const raised = await page.evaluate(() => window.__raised);
             check(`${how}: the return raised nothing but the blocked worker's own read of a registration that never came`,
                 raised.every(message => message.endsWith(BLOCKED_WORKER)), JSON.stringify(raised));
-            blockedWorkerRaised += raised.length;
             same(`${how}: unlocked in the morning with it open, the day under it is still the evening's`,
                 await page.evaluate(() => [todayStr(), State.date, document.getElementById('historyModal').style.display]),
                 ['2026-11-11', TODAY, 'flex']);
@@ -1097,11 +1097,11 @@ try {
     }
 
     suite('26. and nothing threw');
-    // But the blocked worker's own errors that the midnight walk's returns raised, counted in the
-    // page there (criterion 19) - whenever they were handed over. Not one more, and nothing else.
-    let excused = blockedWorkerRaised;
-    const counted = errors.filter(message => !(message === BLOCKED_WORKER && excused-- > 0));
-    check('no uncaught browser errors', counted.length === 0, JSON.stringify(counted.slice(0, 5)));
+    check('no uncaught browser errors', errors.length === 0, JSON.stringify(errors.slice(0, 5)));
+    // The midnight walk's two pages (criterion 19): nothing but the test page's own blocked worker,
+    // however late it was handed over.
+    check('and the midnight walk\'s pages raised nothing but the blocked worker\'s own read of a registration that never came',
+        midnightErrors.every(message => message === BLOCKED_WORKER), JSON.stringify(midnightErrors));
 } finally {
     await browser.close();
     await server.close();
