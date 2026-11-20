@@ -414,6 +414,18 @@ export const SCREENS = [
             if (fold) fold.click();
         }); await pause(page, 350); },
         close: page => run(page, () => closeMonthSummary()) },
+    // «סיכום שנה» (js/ui/yearsummary.js), through «סיכום חודש»'s own door, and measured once it
+    // has read (it paints «מחשב את השנה…» first and reads after the frame).
+    { name: 'reports - the year on one screen', scope: ['#yearSummaryModal'],
+        open: async page => { await view('reports')(page); await run(page, () => { openMonthSummary(); }); await pause(page, 200);
+            await run(page, () => {
+                const door = document.getElementById('monthSummaryYear');
+                if (!door || door.hidden) throw new Error('no «סיכום שנה» door in «סיכום חודש»');
+                door.click();
+            });
+            await page.waitForFunction(() => document.querySelector('#yearSummaryBody .msum-tile, #yearSummaryBody .empty-hint') !== null);
+            await pause(page, 200); },
+        close: page => run(page, () => closeYearSummary()) },
     { name: 'reports - a payslip to each man', scope: ['#payslipsModal'],
         open: async page => { await view('reports')(page); await run(page, () => { openPayslips('current'); }); await pause(page, 350); },
         close: page => run(page, () => closePayslips()) },
