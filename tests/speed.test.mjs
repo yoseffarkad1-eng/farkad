@@ -26,6 +26,12 @@
 //    9. appends: a copy keeps, the record forgets.     10. no write inside a way in.
 //   11. the source.     12. the gate as before.     19. S4's copies.     20. rows are flat.
 //   21. one memo, dropped when it cannot serve.
+//   (fix round 1, the review of v206)
+//   22. a hand on a drawn page - a man's page opened from «מקדמות», a letter typed into its
+//       search, figures typed into a closing box and «הצג בדוח» pressed - each inside a reading,
+//       and ONE copy of the record for a reading that works out nothing new (criterion 4 holds
+//       every repeated reading to one; criterion 8 counts per reading, and no question bare).
+//   23. a record nobody approved: the sheets the gate's own plan prices are not kept.
 //
 // The clocks are tests/speed.season.test.mjs's and tests/speed.browser.mjs's; here nothing
 // is timed but the suite itself. Synthetic data only.
@@ -36,7 +42,7 @@ import { join } from 'node:path';
 import { makeDevice, makeCloud, settle, settleUntil } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 import { ROOT, BASE, TODAY, AT, SHUT, OPEN, filesOf, baseDiffers, openDevice, mediumDisk, addDays, workdays,
-    mulberry, RANGE_NAMES, PAGE_WAYS, MAN_WAYS, SEVEN, V196, phone, counted, realCalls, twice, waysOf, outcome,
+    mulberry, RANGE_NAMES, PAGE_WAYS, MAN_WAYS, SEVEN, V196, phone, counted, realCalls, twice, readingsOf, waysOf, outcome,
     compareAll, FRESH, writesScenario, resetStep } from './speed.seed.mjs';
 
 process.env.TZ = 'Asia/Jerusalem';
@@ -361,19 +367,26 @@ const COUNT_WAYS = (device, men) => waysOf(device, men, { ranges: [RANGE_NAMES[0
         const c = cold.counted;
         const was = counted(old, body).counted;
         const of = fn => realCalls(c, [fn]);
+        // Per READING: a way in that draws a page and then types into it, or presses one of its
+        // buttons, is a reading for the page and one for each hand on it (fix round 1).
+        const readings = readingsOf(c);
+        const each = (test) => readings.every(reading => test(fn => realCalls({ calls: reading.calls }, [fn]), reading));
         const rules = [
-            ['ledgerEntries once', of('ledgerEntries').length <= 1],
-            ['foldLedger once', of('foldLedger').length <= 1],
+            ['ledgerEntries once a reading', each(r => r('ledgerEntries').length <= 1)],
+            ['foldLedger once a reading', each(r => r('foldLedger').length <= 1)],
             ['advanceHistory never (grouped from the entries)', of('advanceHistory').length === 0],
-            ['advanceWalk once per (man, from, to, carriedIn)', twice(of('advanceWalk')).length === 0],
-            ['advancePositionInto once per (man, from)', twice(of('advancePositionInto')).length === 0],
-            ['overpaidAdvances once per man', twice(of('overpaidAdvances')).length === 0],
-            ['advanceOutstanding once per advance', twice(of('advanceOutstanding')).length === 0],
-            ['payrollReport once per range', twice(of('payrollReport')).length === 0],
-            ['the key at most twice', c.keys <= 2],
+            ['advanceWalk once per (man, from, to, carriedIn) a reading', each(r => twice(r('advanceWalk')).length === 0)],
+            ['advancePositionInto once per (man, from) a reading', each(r => twice(r('advancePositionInto')).length === 0)],
+            ['overpaidAdvances once per man a reading', each(r => twice(r('overpaidAdvances')).length === 0)],
+            ['advanceOutstanding once per advance a reading', each(r => twice(r('advanceOutstanding')).length === 0)],
+            ['payrollReport once per range a reading', each(r => twice(r('payrollReport')).length === 0)],
+            ['the key at most twice a reading', each((r, reading) => reading.keys <= 2)],
+            // (fix round 1) a letter typed into «מקדמות»'s search and a figure typed into the
+            // closing box were asked bare, every advance of every man again at each one
+            ['every question of the seven asked inside a reading', c.bare.length === 0],
             ['12. the gate not asked on an approved record', c.questions === 0 && c.plans === 0]
         ];
-        rules.filter(rule => !rule[1]).forEach(rule => wrong.push(`${name}: ${rule[0]} (${j({ keys: c.keys, q: c.questions, n: c.calls.length })})`));
+        rules.filter(rule => !rule[1]).forEach(rule => wrong.push(`${name}: ${rule[0]} (${j({ keys: c.keys, readings: readings.length, bare: c.bare.length, q: c.questions, n: c.calls.length })})`));
         const asksSeven = SEVEN.some(fn => realCalls(c, [fn]).length > 0) || c.keys > 0;
         if (!asksSeven) {
             monthChecked += 1;
@@ -401,6 +414,7 @@ const COUNT_WAYS = (device, men) => waysOf(device, men, { ranges: [RANGE_NAMES[0
     const ways = COUNT_WAYS(now, record.men);
     const wrong = [];
     const sheets = [];
+    const keysTaken = [];
     ways.forEach(([name, body]) => {
         now.run('REPORT_SHARED_KEPT = null; 1');
         const first = counted(now, body);
@@ -409,14 +423,29 @@ const COUNT_WAYS = (device, men) => waysOf(device, men, { ranges: [RANGE_NAMES[0
         if (again.out !== first.out) wrong.push(`${name}: not the same bytes`);
         const walks = realCalls(c, SEVEN);
         if (walks.length) wrong.push(`${name}: ${walks.length} real calls of the seven (${walks.slice(0, 2).join(', ')})`);
-        const firstKey = c.events.indexOf('key');
-        const late = c.events.filter((event, at) => event === 'payrollReport' && firstKey !== -1 && at > firstKey);
-        if (late.length) wrong.push(`${name}: ${late.length} pay sheets worked out after its first question`);
-        if (c.keys > 2) wrong.push(`${name}: ${c.keys} keys`);
+        // Per reading: a sheet worked out after the reading's first key is a sheet S4 did not keep.
+        readingsOf(c).forEach((reading, at) => {
+            const events = [];
+            let open = false;
+            let seen = -1;
+            c.events.forEach(event => {
+                if (event === 'open') { seen += 1; open = seen === at; return; }
+                if (event === 'close') { open = false; return; }
+                if (open) events.push(event);
+            });
+            const firstKey = events.indexOf('key');
+            const late = events.filter((event, n) => event === 'payrollReport' && firstKey !== -1 && n > firstKey);
+            if (late.length) wrong.push(`${name}: reading ${at + 1}: ${late.length} pay sheets worked out after its first question`);
+            // (fix round 1) ONE copy of the record: a reading that adopted the kept memo and worked
+            // out nothing new is put back without the second key.
+            if (reading.keys > 1) wrong.push(`${name}: reading ${at + 1} worked out nothing new and took ${reading.keys} copies of the record`);
+        });
         sheets.push(`${name.replace(/^.*: /, '')} ${realCalls(c, ['payrollReport']).length}`);
+        keysTaken.push(c.keys);
     });
-    same(`${ways.length} ways in, each twice on the unmoved record: the second asks the model nothing it already answered`, wrong, []);
+    same(`${ways.length} ways in, each twice on the unmoved record: the second asks the model nothing it already answered, and each of its readings takes ONE copy of the record`, wrong, []);
     console.log(`        (pay sheets worked out by the second reading, all before its first question: ${sheets.join(', ')})`);
+    check(`and those copies were taken: ${keysTaken.reduce((sum, n) => sum + n, 0)} keys over the ${ways.length} repeats`, keysTaken.filter(n => n > 0).length > ways.length / 2);
 }
 
 // ---------------------------------------------------------------- 3. fresh after every kind of write
@@ -434,12 +463,16 @@ const COUNT_WAYS = (device, men) => waysOf(device, men, { ranges: [RANGE_NAMES[0
 
     const record = MEDIUM.with;
     const ways = (device) => FRESH(device, record.men);
+    // The key plants say when they throw (SPEED_KEY_THREW), so a memo can be held to it: a way in
+    // whose key failed keeps nothing. "At the close" is a reading's SECOND key - since fix round
+    // 1 a reading that adopted and worked out nothing takes no second one, and keeps.
     const plants = [
         ['a reader that throws inside the reading', 'payrollRows = () => { throw new Error("planted"); }; 1'],
         ['todayStr that throws', 'todayStr = () => { throw new Error("planted today"); }; 1'],
-        ['the kept key that throws at the first question', 'reportSharedKey = () => { throw new Error("planted key"); }; 1'],
-        ['the kept key that throws at the close', `(function () { const real = reportSharedKey; let asked = 0;
-            reportSharedKey = function () { asked += 1; if (asked % 2 === 0) throw new Error("planted close"); return real.apply(this, arguments); }; })(); 1`]
+        ['the kept key that throws at the first question', 'reportSharedKey = () => { SPEED_KEY_THREW = true; throw new Error("planted key"); }; 1'],
+        ['the kept key that throws at the close', `(function () { const real = reportSharedKey; const read = reportReadOnce; let asked = 0;
+            reportReadOnce = function () { if (!reportReading()) asked = 0; return read.apply(this, arguments); };
+            reportSharedKey = function () { asked += 1; if (asked === 2) { SPEED_KEY_THREW = true; throw new Error("planted close"); } return real.apply(this, arguments); }; })(); 1`]
     ];
     for (const [name, plant] of plants) {
         const now = phone(record.disk, NOW);
@@ -449,16 +482,23 @@ const COUNT_WAYS = (device, men) => waysOf(device, men, { ranges: [RANGE_NAMES[0
         // A memo kept beforehand, so a failed key has something it must not hand on.
         now.way(list[0][1]);
         given(`${name}: a memo is kept beforehand`, now.run('REPORT_SHARED_KEPT !== null'));
+        now.run('var SPEED_KEY_THREW = false; 1');
         now.run(plant);
         if (!/reportSharedKey/.test(plant)) old.run(plant);
+        let threw = 0;
         list.forEach(([way, body]) => {
+            now.run('SPEED_KEY_THREW = false; 1');
             const mine = outcome(now, body);
             const theirs = outcome(old, body);
             if (mine !== theirs) wrong.push(`${way}: ${mine.slice(0, 60)} / ${theirs.slice(0, 60)}`);
             if (!now.run('speedClean()')) wrong.push(`${way}: a reader left swapped or a reading open`);
-            if (/key/.test(name) && !now.run('REPORT_SHARED_KEPT === null')) wrong.push(`${way}: a memo kept from a reading whose key failed`);
+            if (now.run('SPEED_KEY_THREW')) {
+                threw += 1;
+                if (!now.run('REPORT_SHARED_KEPT === null')) wrong.push(`${way}: a memo kept from a reading whose key failed`);
+            }
         });
         same(`${name}: every way in ends as v204's does (the same bytes, or the same throw), and leaves the page clean`, wrong, []);
+        if (/key/.test(name)) check(`${name}: and it did throw, in ${threw} of ${list.length} ways in`, threw > list.length / 2, String(threw));
     }
 }
 
@@ -638,6 +678,26 @@ const COUNT_WAYS = (device, men) => waysOf(device, men, { ranges: [RANGE_NAMES[0
     same('and its draw is v204\'s', outcome(now, PAGE_WAYS[0][1]), outcome(old, PAGE_WAYS[0][1]));
     same('two readings are handed two arrays', now.run(`(function () { const one = reportReadOnce(() => { foldLedger(State.schedule); return ${ask}; });
         const two = reportReadOnce(() => { foldLedger(State.schedule); return ${ask}; }); return one !== two && JSON.stringify(one) === JSON.stringify(two); })()`), true);
+
+    // (fix round 1) AND A SHEET THE READING ITSELF WORKED OUT: what it puts aside is a copy
+    // nobody was handed, so a reader writing into the rows it was handed - in the very reading
+    // that priced them - cannot reach the next reading either. (Without the copy every check
+    // above still passes: the review of v206, by a mutant.)
+    now.run(`REPORT_SHARED_KEPT = null; reportReadOnce(() => {
+        foldLedger(State.schedule);
+        const rows = ${ask};
+        rows[0].amount = -1; rows[0].speedPlanted = true;
+    }); 1`);
+    given('the reading that priced the sheet and wrote into it was kept, with the sheet', now.run(`REPORT_SHARED_KEPT !== null
+        && REPORT_SHARED_KEPT.sheets.has(${j(`${span.from}..${span.to}`)})`));
+    const handed = now.run(`reportReadOnce(() => { foldLedger(State.schedule); return JSON.stringify(${ask}); })`);
+    same('a sheet worked out and written into in one reading: the next reading is handed the real function\'s rows, JSON for JSON',
+        handed, now.run(`JSON.stringify(SPEED_REAL.payrollReport(State.schedule, ${j(span.from)}, ${j(span.to)}))`));
+    check('(and the next reading was handed the kept sheet, not a sheet of its own)', now.run(`(function () {
+        SPEED_COUNT = { calls: [], events: [], keys: 0, questions: 0, plans: 0, bare: [] };
+        reportReadOnce(() => { foldLedger(State.schedule); ${ask}; });
+        const sheets = SPEED_COUNT.calls.filter(call => call.indexOf('payrollReport(') === 0).length; SPEED_COUNT = null; return sheets === 0; })()`));
+    same('and its draw is v204\'s, after it too', outcome(now, PAGE_WAYS[0][1]), outcome(old, PAGE_WAYS[0][1]));
 }
 
 // ---------------------------------------------------------------- 20. rows are flat
@@ -693,6 +753,86 @@ const COUNT_WAYS = (device, men) => waysOf(device, men, { ranges: [RANGE_NAMES[0
     const before = now.run('REPORT_SHARED_KEPT');
     now.way(`return JSON.stringify(monthSummaryFacts('${TODAY.slice(0, 7)}'));`);
     check('a reading that asks none of the seven («סיכום חודש») neither drops nor replaces it', now.run('REPORT_SHARED_KEPT') === before);
+}
+
+// ---------------------------------------------------------------- 22. a hand on a drawn page
+//
+// (fix round 1, the review of v206) What a person does once a page is drawn: opens a man from
+// the list of «מקדמות», types a letter into its search, types a figure into his closing box
+// and presses «הצג בדוח». The page was a reading; each of these was its own reading - or none:
+// the letter and the figure were asked bare, every advance of every man again at each one, and
+// a man's page paid two copies of the whole record for answers the board had kept.
+{
+    section('22. a hand on a drawn page: a man\'s page, a letter typed, a figure typed - each inside a reading, one copy of the record where nothing is new');
+
+    const record = MEDIUM.with;
+    const now = phone(record.disk, NOW);
+    const old = phone(record.disk, OLD);
+    // The page drawn on both phones; then the hand on it, counted on this one.
+    const hand = (setup, body) => {
+        now.way(setup); old.way(setup);
+        const mine = counted(now, body);
+        const theirs = outcome(old, body);
+        return { c: mine.counted, same: (mine.error === null ? `ok:${mine.out}` : `threw:${mine.error}`) === theirs, error: mine.error };
+    };
+    const board = 'speedReset(); ADVANCE_SEARCH = ""; return speedAdvances(null);';
+
+    const man = hand(board, 'return speedAdvances("w_1");');
+    same('a man\'s page of «מקדמות» opened from the board, the record unmoved: v204\'s page, the seven asked nothing, ONE copy of the record',
+        [man.same, realCalls(man.c, SEVEN).length, readingsOf(man.c).map(reading => reading.keys)], [true, 0, [1]]);
+
+    const letter = hand(board, `const field = speedSearchField(); field.value = '1'; speedFire(field, 'input');
+        const out = speedDrawn('advancesView'); ADVANCE_SEARCH = ''; return out;`);
+    same('a letter typed into its search: v204\'s list, asked inside ONE reading, the seven asked nothing, one copy of the record',
+        [letter.same, letter.c.bare.length, readingsOf(letter.c).map(reading => reading.keys), realCalls(letter.c, SEVEN).length], [true, 0, [1], 0]);
+    const second = hand('ADVANCE_SEARCH = ""; return 1;', `const field = speedSearchField(); field.value = '12'; speedFire(field, 'input');
+        const out = speedDrawn('advancesView'); ADVANCE_SEARCH = ''; return out;`);
+    same('and the next letter the same', [second.same, second.c.bare.length, readingsOf(second.c).map(reading => reading.keys)], [true, 0, [1]]);
+
+    // A man whose closing box has its field (his last finished period open, nothing in the way).
+    const closable = record.men.filter(id => now.way(`speedReset(); return speedKeepRange(() => { openWorkerSettlement(${j(id)}); return speedBoxField() !== null; });`));
+    given('a man whose closing box has a field to type into', closable.length > 0, j(closable));
+    const id = closable[0];
+    const box = `speedReset(); openWorkerSettlement(${j(id)}); return 1;`;
+    const figure = hand(box, `return speedBoxPress(speedBoxField(), ['1', '0']);`);
+    const readings = readingsOf(figure.c);
+    same(`two figures typed into ${id}'s closing box and «הצג בדוח» pressed: what v204 shows and chooses, every question asked inside a reading - one for each figure, one for the press`,
+        [figure.same, figure.c.bare.length, readings.length], [true, 0, 3]);
+    check('each asking each question once, and the press - the last figure\'s own plan - working out nothing new: one copy of the record',
+        readings.every(reading => twice(reading.calls.filter(call => call.indexOf('copy:') !== 0)).length === 0)
+            && readings[2] && readings[2].keys === 1 && realCalls({ calls: readings[2].calls }, SEVEN).length === 0,
+        j(readings.map(reading => [reading.keys, reading.calls.length])));
+}
+
+// ---------------------------------------------------------------- 23. the gate's plan
+//
+// (fix round 1, the review of v206) On a record nobody approved the gate's own question plans
+// the migration inside the reading, and the plan walks a man with a debt and no daily rate four
+// thousand fortnights ahead, a sheet each. Those sheets are shared inside the reading as v196
+// shares one, and not kept: kept, they held some 50 MB after one draw of a season.
+{
+    section('23. a record nobody approved: the sheets the gate\'s own plan prices are not kept for the next reading');
+
+    const [seed, record] = SEEDED.filter(([n]) => n % 4 === 0)[0];
+    const now = phone(record.disk, NOW, { flags: OPEN, today: record.today, unapproved: true });
+    const old = phone(record.disk, OLD, { flags: OPEN, today: record.today, unapproved: true });
+    given(`seed ${seed}: a man with a debt and no daily rate, on a record nobody approved`, record.men.indexOf('w_nr') !== -1
+        && now.run('reportReadOnce(() => carryReportingEnabled(State.schedule))') === false);
+    now.run('REPORT_SHARED_KEPT = null; REPORT_GATE_KEPT = null; 1');
+    const draw = counted(now, PAGE_WAYS[0][1]);
+    given('the draw planned the migration, once', draw.counted.plans === 1, String(draw.counted.plans));
+    const priced = realCalls(draw.counted, ['payrollReport']).length;
+    const kept = now.run('REPORT_SHARED_KEPT === null ? -1 : REPORT_SHARED_KEPT.sheets.size');
+    given(`the gate's plan priced the sheets of his fortnights inside the draw: ${priced}`, priced > 1000, String(priced));
+    check(`and the reading kept ${kept} sheets: the ranges the draw itself read, none of the plan's`, kept >= 1 && kept <= 60, String(kept));
+    same('the draw is v204\'s', `ok:${draw.out}`, outcome(old, PAGE_WAYS[0][1]));
+    // A send's provenance key: the tick moves, the gate's kept answer with it, and the gate is asked
+    // again - planned from the walks that were kept, which need no sheet.
+    now.run('Store.set("farkad:prov:sent:advance:speed_plan", "1"); 1');
+    old.run('Store.set("farkad:prov:sent:advance:speed_plan", "1"); 1');
+    const again = counted(now, PAGE_WAYS[0][1]);
+    same('the next draw, the tick moved and the record not: the gate planned again from what was kept - the seven asked nothing - and v204\'s bytes',
+        [again.counted.plans, realCalls(again.counted, SEVEN).length, `ok:${again.out}` === outcome(old, PAGE_WAYS[0][1])], [1, 0, true]);
 }
 
 section('end');

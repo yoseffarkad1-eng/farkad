@@ -130,7 +130,17 @@ export function openDevice(storage, options = {}) {
     ['reportsView', 'advancesView', 'workerDaysTitle', 'workerDaysMeta', 'workerDaysBody', 'workerDaysModal']
         .forEach(id => dom.register(id));
     const make = dom.createElement;
-    dom.createElement = tag => { const node = make(tag); node.dataset = node.dataset || {}; return node; };
+    // Every node keeps its listeners (tests/moneydom.mjs drops them), so a way in can type into
+    // a field or press a button the page drew - speedFire, below - as a person's finger does.
+    dom.createElement = tag => {
+        const node = make(tag);
+        node.dataset = node.dataset || {};
+        const on = {};
+        node.addEventListener = (type, fn) => { (on[type] = on[type] || []).push(fn); };
+        node.removeEventListener = (type, fn) => { if (on[type]) on[type] = on[type].filter(one => one !== fn); };
+        node.speedListeners = on;
+        return node;
+    };
     device.ctx.document = dom;
     device.dom = dom;
     device.run = code => vm.runInContext(code, device.ctx, { filename: options.label || 'speed' });
@@ -420,6 +430,45 @@ function speedAdvances(worker, page) {
 function speedClosureKeys() {
     return carryReportingEnabled(State.schedule) === true ? owesClosures(State.schedule).map(group => group.key) : [];
 }
+// What a person does to a page once it is drawn: a node's own listeners, called as an event
+// would call them.
+function speedFire(node, type) {
+    const on = (node && node.speedListeners && node.speedListeners[type]) || [];
+    const event = { type, target: node, currentTarget: node, preventDefault() {}, stopPropagation() {} };
+    on.slice().forEach(fn => fn.call(node, event));
+}
+function speedSearchField() {
+    return document.getElementById('advancesView').querySelectorAll('INPUT').filter(node => node.type === 'search')[0] || null;
+}
+// «מקדמות» drawn, then a letter typed into its search: the list as it then reads.
+function speedSearch(text) {
+    ADVANCE_WORKER = null; OWES_PAGE = null; ADVANCE_SEARCH = '';
+    clear(document.getElementById('advancesView')); renderAdvances();
+    const field = speedSearchField();
+    if (field) { field.value = text; speedFire(field, 'input'); }
+    const out = speedDrawn('advancesView');
+    ADVANCE_SEARCH = '';
+    return out;
+}
+// A man's closing box drawn, figures typed into it one after the other, and «הצג בדוח»
+// pressed: the box as each figure left it, what the press chose, and what the box said.
+function speedBoxField() {
+    return document.getElementById('workerDaysBody').querySelectorAll('INPUT').filter(node => node.inputMode === 'decimal')[0] || null;
+}
+function speedBoxPress(field, figures) {
+    const typed = figures.map(figure => { field.value = figure; speedFire(field, 'input'); return speedDrawn('workerDaysBody'); });
+    const show = document.getElementById('workerDaysBody').querySelectorAll('BUTTON').filter(node => node.textContent === 'הצג בדוח')[0];
+    if (show) speedFire(show, 'click');
+    const said = document.getElementById('workerDaysBody').querySelectorAll('.field-error').map(node => node.textContent);
+    return typed.join('|') + '|' + JSON.stringify(Array.from(REPORT_DEDUCTIONS.entries())) + '|' + JSON.stringify(said);
+}
+function speedBoxTyped(id, figures) {
+    return speedKeepRange(() => {
+        openWorkerSettlement(id);
+        const field = speedBoxField();
+        return field ? speedBoxPress(field, figures) : 'no field|' + speedDrawn('workerDaysBody');
+    });
+}
 1`;
 
 export const RANGE_NAMES = ['the default account', 'the same fortnight picked by hand', 'the fortnight before', 'this week',
@@ -437,7 +486,11 @@ export const PAGE_WAYS = [
 export const MAN_WAYS = [
     ['his statement', id => `return JSON.stringify(workerStatementText(${JSON.stringify(id)}));`],
     ['his days', id => `openWorkerDays(${JSON.stringify(id)}); return ['workerDaysTitle', 'workerDaysMeta', 'workerDaysBody'].map(speedDrawn).join('|') + document.getElementById('workerDaysTitle').textContent + document.getElementById('workerDaysMeta').textContent;`],
-    ['his closing box', id => `return speedKeepRange(() => { openWorkerSettlement(${JSON.stringify(id)}); return speedDrawn('workerDaysBody') + document.getElementById('workerDaysTitle').textContent + document.getElementById('workerDaysMeta').textContent + '|' + REPORT_RANGE.from + '..' + REPORT_RANGE.to; });`]
+    ['his closing box', id => `return speedKeepRange(() => { openWorkerSettlement(${JSON.stringify(id)}); return speedDrawn('workerDaysBody') + document.getElementById('workerDaysTitle').textContent + document.getElementById('workerDaysMeta').textContent + '|' + REPORT_RANGE.from + '..' + REPORT_RANGE.to; });`],
+    // (fix round 1) what the box does once it is drawn: figures typed into it - the preview
+    // read again at every digit; '1' may be more than he may give, '0' never is - and «הצג
+    // בדוח» pressed, which plans the close once more.
+    ['his closing box, figures typed and «הצג בדוח» pressed', id => `return speedBoxTyped(${JSON.stringify(id)}, ['1', '0']);`]
 ];
 // The readings that do not depend on the report's range.
 export const BOOK_WAYS = [
@@ -451,7 +504,10 @@ export const BOOK_WAYS = [
     ['the payslips, the period before', 'return JSON.stringify(payslipsFacts("previous"));'],
     ['the month', `return JSON.stringify(monthSummaryFacts('${TODAY.slice(0, 7)}'));`],
     ['the month before', `return JSON.stringify(monthSummaryFacts('${addDays(TODAY, -31).slice(0, 7)}'));`],
-    ['«איפוס מקדמות»\'s reading', 'return JSON.stringify(advanceResetRead(State.schedule, todayStr()));']
+    ['«איפוס מקדמות»\'s reading', 'return JSON.stringify(advanceResetRead(State.schedule, todayStr()));'],
+    // (fix round 1) «מקדמות» drawn and a letter typed into its search: every man listed is his
+    // advances read again, at every letter.
+    ['«מקדמות», a letter typed into its search', 'return speedSearch("1");']
 ];
 export const BOOK_MAN_WAYS = [
     ['his page of «מקדמות»', id => `return speedAdvances(${JSON.stringify(id)});`],
@@ -467,9 +523,10 @@ export const CLOSE_WAY = ['a close\'s page', key => `return speedAdvances(null, 
 // model - what S1, S3 and S4 did not answer. Transparent: each hands back what the function
 // hands back. Rows of every pay sheet worked out are held to being flat (criterion 20).
 export const COUNTER = `var SPEED_COUNT = null; var SPEED_FLAT = { sheets: 0, rows: 0, bad: [] }; var SPEED_INSTALLED = {};
-var SPEED_WRITES = 0; var SPEED_REAL = {};
+var SPEED_WRITES = 0; var SPEED_REAL = {}; var SPEED_DEPTH = 0;
 (function () {
     const arg = one => typeof one + ':' + (Object.is(one, -0) ? '-0' : String(one));
+    const SEVEN_NAMES = ${j(SEVEN)};
     ${j(SEVEN.concat(['payrollReport', 'appendLedgerEntry']))}.forEach(name => {
         const real = globalThis[name];
         if (typeof real !== 'function') return;
@@ -479,6 +536,8 @@ var SPEED_WRITES = 0; var SPEED_REAL = {};
             if (SPEED_COUNT) {
                 SPEED_COUNT.calls.push((mine ? '' : 'copy:') + name + '(' + Array.prototype.slice.call(arguments, 1).map(arg).join('|') + ')');
                 SPEED_COUNT.events.push((mine ? '' : 'copy:') + name);
+                // A question of the seven about the record asked outside every reading: bare.
+                if (mine && SPEED_DEPTH === 0 && SEVEN_NAMES.indexOf(name) !== -1 && SPEED_COUNT.bare) SPEED_COUNT.bare.push(name);
             }
             if (name === 'appendLedgerEntry' && mine) SPEED_WRITES += 1;
             const out = real.apply(this, arguments);
@@ -500,6 +559,18 @@ var SPEED_WRITES = 0; var SPEED_REAL = {};
         const realKey = reportSharedKey;
         reportSharedKey = function () { if (SPEED_COUNT) { SPEED_COUNT.keys += 1; SPEED_COUNT.events.push('key'); } return realKey.apply(this, arguments); };
     }
+    // Where each reading opens and closes (the outermost only - a way in nested in one is the
+    // same reading), so the counts can be read per reading: 'open' ... 'close' in the events.
+    if (typeof reportReadOnce === 'function' && typeof reportReading === 'function') {
+        const realRead = reportReadOnce;
+        reportReadOnce = function () {
+            const opens = !reportReading();
+            if (opens) { SPEED_DEPTH += 1; if (SPEED_COUNT) SPEED_COUNT.events.push('open'); }
+            try { return realRead.apply(this, arguments); } finally {
+                if (opens) { SPEED_DEPTH -= 1; if (SPEED_COUNT) SPEED_COUNT.events.push('close'); }
+            }
+        };
+    }
     const settled = carryMigrationSettled;
     carryMigrationSettled = function () { if (SPEED_COUNT) SPEED_COUNT.questions += 1; return settled.apply(this, arguments); };
     const plan = planAdvanceCarry;
@@ -518,7 +589,7 @@ var SPEED_WRITES = 0; var SPEED_REAL = {};
     ${j(SEVEN.concat(['appendLedgerEntry'], V196))}.forEach(name => { SPEED_INSTALLED[name] = globalThis[name]; });
 })();
 function speedCount(body) {
-    SPEED_COUNT = { calls: [], events: [], keys: 0, questions: 0, plans: 0 };
+    SPEED_COUNT = { calls: [], events: [], keys: 0, questions: 0, plans: 0, bare: [] };
     let out = null; let error = null;
     try { out = body(); } catch (thrown) { error = String(thrown && thrown.message); }
     const counted = SPEED_COUNT;
@@ -544,6 +615,23 @@ export function phone(disk, files, options = {}) {
 export const counted = (device, body) => JSON.parse(device.run(`speedCount(() => (function () {\n${body}\n})())`));
 export const realCalls = (counts, names) => counts.calls.filter(call => names.some(name => call.indexOf(`${name}(`) === 0));
 export const twice = list => list.filter((one, at) => list.indexOf(one) !== at);
+// The readings a counted way in opened, in order, each with its keys and the real calls made
+// inside it (a way in that draws a page and then types into it is two readings, or more).
+// Every call of the counter is one entry of `calls` and one of `events`, in the same order.
+export const readingsOf = counts => {
+    const out = [];
+    let now = null;
+    let at = 0;
+    counts.events.forEach(event => {
+        if (event === 'open') { now = { keys: 0, calls: [] }; out.push(now); return; }
+        if (event === 'close') { now = null; return; }
+        if (event === 'key') { if (now) now.keys += 1; return; }
+        const call = counts.calls[at];
+        at += 1;
+        if (now) now.calls.push(call);
+    });
+    return out;
+};
 
 // The ways in of one record, as [name, body]. Every man's statement, days and closing box
 // on the default account and on an explicit range; the pages on every range of the seven.

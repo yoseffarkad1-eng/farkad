@@ -224,9 +224,23 @@ function reportSharedApart(asked, schedule) {
 // that throws means nothing adopted and nothing kept. A reading that asks none of the seven
 // (the month's summary) works out no key at all.
 //
+// AND A READING THAT ADDED NOTHING IS PUT BACK WITHOUT THE SECOND COPY. The second key - the
+// whole record as text again - is the check that the answers a reading WORKED OUT were worked
+// out on the record its first key read. A reading that took a kept memo and worked out no
+// answer and no sheet of its own has nothing to check: it hands back exactly what it was
+// handed, answers a reading of this same key already checked at its close. So it goes back on
+// the shelf under that key as it is, and whether the record moved since is the next reading's
+// first key's question, as it always was. Measured on a 1 MB season at 4x: the two copies of
+// the record were most of a man's page of «מקדמות» opened from the board (the review: 39 ms on
+// v204, 119 with two; with one, 67 against v204's 48 in a later run). A redraw, a man's page, a
+// letter typed into the search, the press of a button over a box already drawn: one copy.
+//
 // The pay sheets (S4) are kept with it: a range this reading works out is put aside as rows
 // nobody has touched; a range asked after the memo was adopted is handed a fresh copy of the
 // kept rows, and that copy is then the reading's, shared inside it exactly as v196 shares one.
+// NOT the sheets the gate's own question prices while it plans the migration of a record
+// nobody approved (reportReadOnce says when): those are shared inside the reading as v196
+// shares them and never put aside - see reportReadOnce.
 function reportShareLedger(schedule, found) {
     const page = typeof globalThis === 'object' && globalThis ? globalThis : {};
     const real = {};
@@ -250,6 +264,10 @@ function reportShareLedger(schedule, found) {
         && list.every((fn, at) => fn === found[at]);
     let moved = 0;
     let memo = null;
+    // How many answers a memo holds. Nothing is ever taken out of one or set twice (each
+    // answer is stored only where it is missing), so the same count means nothing was added.
+    const sizeOf = slot => (slot.entries ? 1 : 0) + (slot.fold ? 1 : 0) + (slot.history ? 1 : 0)
+        + slot.overpaid.size + slot.outstanding.size + slot.walks.size + slot.positions.size;
     let keyed = false;
     let key = null;
     let adopted = null;
@@ -268,7 +286,7 @@ function reportShareLedger(schedule, found) {
         if (kept.schedule !== schedule || key === null || kept.key !== key || !sameFound(kept.found)
             || moved !== 0 || !kept.memo) return;
         adopted = { memo: kept.memo, sheets: kept.sheets instanceof Map ? kept.sheets : new Map(),
-            held: liveMap(), legacy: liveLegacy() };
+            held: liveMap(), legacy: liveLegacy(), size: sizeOf(kept.memo) };
         memo = kept.memo;
         memo.held = adopted.held;
         memo.legacy = adopted.legacy;
@@ -385,6 +403,14 @@ function reportShareLedger(schedule, found) {
         // reach the record, something was asked, and the record still reads as it did.
         finish() {
             if (!keyed || key === null || moved !== 0 || !anything()) return;
+            // Adopted, and nothing worked out: handed back as it was handed, with no second copy
+            // of the record (see above). A sheet this reading priced before its first question
+            // is one the kept memo already holds, or it is new and the record is read again.
+            if (adopted && memo === adopted.memo && sizeOf(memo) === adopted.size
+                && Array.from(pristine.keys()).every(range => adopted.sheets.has(range))) {
+                REPORT_SHARED_KEPT = { schedule, key, found, memo, sheets: adopted.sheets };
+                return;
+            }
             try {
                 if (reportSharedKey(schedule) !== key) return;
                 const sheets = new Map(adopted ? adopted.sheets : []);
@@ -408,6 +434,14 @@ function reportReadOnce(read, self, args) {
         && typeof real.closed === 'function';
     let gate;
     let shared = null;
+    // While the gate's own question is being answered. On a record nobody approved it plans
+    // the migration, and the plan walks a man with a debt and no daily rate four thousand
+    // fortnights ahead: every one of those sheets is shared inside this reading, as v196
+    // shares a sheet, and NOT put aside for the next reading - kept, they held some 50 MB
+    // after one draw of «דוחות» on a season (the review of v206, measured), sheets of empty
+    // fortnights nobody will ever open. The walks the plan asks are kept (S1), so a plan asked
+    // again on the same record needs none of those sheets anyway.
+    let planning = 0;
     const sheets = new Map();
     const folds = new Map();
     REPORT_ONCE = { schedule, found };
@@ -415,7 +449,10 @@ function reportReadOnce(read, self, args) {
         if (model) {
             carryReportingEnabled = asked => {
                 if (asked !== schedule) return real.gate(asked);
-                if (gate === undefined) gate = reportGateAnswer(asked, real.gate);
+                if (gate === undefined) {
+                    planning += 1;
+                    try { gate = reportGateAnswer(asked, real.gate); } finally { planning -= 1; }
+                }
                 return gate;
             };
             payrollReport = function (asked, from, to) {
@@ -428,7 +465,7 @@ function reportReadOnce(read, self, args) {
                     if (kept !== undefined) sheets.set(key, kept);
                     else {
                         const rows = real.sheet(asked, from, to);
-                        if (shared) shared.sawSheet(key, rows);
+                        if (shared && planning === 0) shared.sawSheet(key, rows);
                         sheets.set(key, rows);
                     }
                 }
@@ -706,7 +743,11 @@ function renderAdvances() {
         });
         if (!list.children.length) list.appendChild(emptyHint('לא נמצא עובד.'));
     };
-    search.addEventListener('input', () => { ADVANCE_SEARCH = search.value.trim(); paint(); });
+    // Each letter typed draws the list again, and every man on it is his advances read again:
+    // inside the pay sheet's one reading, as the page's own drawing is (v206), so a letter is
+    // answered from what the page already worked out - outside it, every advance of every man
+    // listed sorted the whole ledger again, most of a second a letter on a season nobody closed.
+    search.addEventListener('input', () => { ADVANCE_SEARCH = search.value.trim(); reportReadOnce(paint); });
     paint(); root.appendChild(list);
 }
 
@@ -3113,22 +3154,27 @@ function renderPeriodClosure(worker) {
     // ended in two ARABIC letters (LAM U+0644, FEH U+0641) - a broken word, on the one line
     // that says what a man still owes. tests/reportnames.test.mjs pins this sentence and
     // holds every file under js/ to words with no Arabic letter inside a Hebrew one.
-    const paint = () => {
+    // The preview at every figure typed, and the plan each button asks before it acts, are read
+    // inside the pay sheet's one reading - as this box's own drawing is (v206): outside it,
+    // every digit walked his account again from his first advance. The plan is the same plan;
+    // the reading only answers again what it already worked out on this same record. (The
+    // close itself is planned once more, bare, the moment it is confirmed: closeAccountFor.)
+    const paint = () => reportReadOnce(() => {
         const next = chosenPlan();
         preview.textContent = Number.isFinite(readChoice()) && next.canClose
             ? `לתשלום לעובד: ${moneyText(next.gross - next.deducted)} ₪ · יישאר חוב פתוח: ${moneyText(next.carriedForward)} ₪`
             : `שכר התקופה: ${moneyText(plan.gross)} ₪ · ניתן לקזז עד ${moneyText(plan.deducted)} ₪. בחר את הסכום בעצמך.`;
-    };
+    });
     amount.addEventListener('input', paint); paint();
     box.appendChild(preview); box.appendChild(error);
-    const selected = () => {
+    const selected = () => reportReadOnce(() => {
         const next = chosenPlan();
         if (!Number.isFinite(readChoice()) || !next.canClose) {
             error.textContent = 'הכנס סכום תקין בין 0 לבין היתרה שניתן לקזז. אם הנתונים השתנו, פתח את החשבון מחדש.';
             return null;
         }
         return next;
-    };
+    });
     const actions = el('div', 'finance-actions');
     actions.appendChild(button('הצג בדוח', 'btn-secondary', () => {
         const next = selected(); if (!next) return;

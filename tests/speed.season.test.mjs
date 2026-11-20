@@ -37,7 +37,7 @@
 
 import { suite, check, same, given, report } from './runner.mjs';
 import { TODAY, AT, SHUT, OPEN, filesOf, seasonDisk, mediumDisk, RANGE_NAMES, PAGE_WAYS, MAN_WAYS, BOOK_WAYS, BOOK_MAN_WAYS,
-    SEVEN, phone, counted, realCalls, twice, waysOf, outcome, compareAll, writesScenario, resetStep } from './speed.seed.mjs';
+    SEVEN, phone, counted, realCalls, twice, readingsOf, waysOf, outcome, compareAll, writesScenario, resetStep } from './speed.seed.mjs';
 import { loadavg } from 'node:os';
 
 process.env.TZ = 'Asia/Jerusalem';
@@ -232,13 +232,18 @@ function againstV204(label, record, ways, options = {}) {
         device.run('REPORT_SHARED_KEPT = null; 1');
         const c = counted(device, body).counted;
         const of = fn => realCalls(c, [fn]);
-        [['ledgerEntries once', of('ledgerEntries').length <= 1], ['foldLedger once', of('foldLedger').length <= 1],
+        // Per reading: a way in that types into a drawn page is a reading for the page and one for
+        // each hand on it (fix round 1); and none of its questions bare.
+        const each = test => readingsOf(c).every(reading => test(fn => realCalls({ calls: reading.calls }, [fn]), reading));
+        [['ledgerEntries once a reading', each(r => r('ledgerEntries').length <= 1)], ['foldLedger once a reading', each(r => r('foldLedger').length <= 1)],
             ['advanceHistory never', of('advanceHistory').length === 0],
-            ['advanceWalk once per question', twice(of('advanceWalk')).length === 0],
-            ['advancePositionInto once per question', twice(of('advancePositionInto')).length === 0],
-            ['overpaidAdvances once per man', twice(of('overpaidAdvances')).length === 0],
-            ['advanceOutstanding once per advance', twice(of('advanceOutstanding')).length === 0],
-            ['payrollReport once per range', twice(of('payrollReport')).length === 0], ['the key at most twice', c.keys <= 2]]
+            ['advanceWalk once per question a reading', each(r => twice(r('advanceWalk')).length === 0)],
+            ['advancePositionInto once per question a reading', each(r => twice(r('advancePositionInto')).length === 0)],
+            ['overpaidAdvances once per man a reading', each(r => twice(r('overpaidAdvances')).length === 0)],
+            ['advanceOutstanding once per advance a reading', each(r => twice(r('advanceOutstanding')).length === 0)],
+            ['payrollReport once per range a reading', each(r => twice(r('payrollReport')).length === 0)],
+            ['the key at most twice a reading', each((r, reading) => reading.keys <= 2)],
+            ['every question of the seven inside a reading', c.bare.length === 0]]
             .filter(rule => !rule[1]).forEach(rule => wrong.push(`${name}: ${rule[0]}`));
     });
     same(`${ways.length} ways in on season-open`, wrong, []);
