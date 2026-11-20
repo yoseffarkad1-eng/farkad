@@ -50,6 +50,8 @@ const MODAL_CLOSERS = {
     siteCardModal: () => closeSiteCard(),
     // «מה חדש» (js/ui/whatsnew.js): closing it, by any road, is having seen it.
     whatsNewModal: () => closeWhatsNew(),
+    // «תמונת מצב» (js/ui/status.js): closing it lets go of the money reading still waiting.
+    statusModal: () => closeStatus(),
     migrationModal: () => closeMigrationModal(),
     // The one .modal that had no entry here, so Escape fell through to the bare
     // `display = 'none'` below and never reached closeSignInModal - which exists, and

@@ -986,26 +986,33 @@ function tellBackupHandedOver(name) {
 // Age of this device's recorded export handoff, not proof that a file was saved.
 // A missing record says nothing about copies elsewhere. Sync status cannot verify a
 // download, and malformed or future dates must not make an unknown age look fresh.
+//
+// Pure, the two below: the stored date and today in, the days and the sentence out. Split
+// out of renderBackupAge (v206) so «תמונת מצב» (js/ui/status.js) says the row's own sentence
+// rather than a second copy of it; the row draws exactly what it drew (tests/polish.*,
+// tests/settings.browser.mjs).
+function backupAgeDays(last, today) {
+    return isRealDate(last) && isRealDate(today) && last <= today ? daysBetween(last, today) : null;
+}
+
+function backupAgeSentence(last, today) {
+    const days = backupAgeDays(last, today);
+    if (last === null) return 'אין במכשיר הזה רישום של ייצוא קובץ גיבוי.';
+    if (days === null) return 'מועד מסירת קובץ הגיבוי לדפדפן אינו ידוע.';
+    if (days === 0) return 'קובץ גיבוי נמסר לדפדפן: היום.';
+    if (days === 1) return 'קובץ גיבוי נמסר לדפדפן: אתמול.';
+    return `קובץ גיבוי נמסר לדפדפן: לפני ${days} ימים.`;
+}
+
 function renderBackupAge() {
     const line = document.getElementById('backupAge');
     if (!line) return;
 
     const last = Store.get(LAST_BACKUP_KEY);
     const today = todayStr();
-    const days = isRealDate(last) && isRealDate(today) && last <= today
-        ? daysBetween(last, today) : null;
+    const days = backupAgeDays(last, today);
 
-    if (last === null) {
-        line.textContent = 'אין במכשיר הזה רישום של ייצוא קובץ גיבוי.';
-    } else if (days === null) {
-        line.textContent = 'מועד מסירת קובץ הגיבוי לדפדפן אינו ידוע.';
-    } else if (days === 0) {
-        line.textContent = 'קובץ גיבוי נמסר לדפדפן: היום.';
-    } else if (days === 1) {
-        line.textContent = 'קובץ גיבוי נמסר לדפדפן: אתמול.';
-    } else {
-        line.textContent = `קובץ גיבוי נמסר לדפדפן: לפני ${days} ימים.`;
-    }
+    line.textContent = backupAgeSentence(last, today);
 
     line.className = days === null || days >= 7 ? 'hint hint-warn' : 'hint';
 

@@ -324,6 +324,42 @@ h4 { font-size: 14px; margin: 0 0 8px; color: var(--ink-2); }
 .chip-warn { background: var(--warn-bg); color: var(--warn); }
 .chip-danger { background: var(--danger-bg); color: var(--danger); }
 
+/* v206: THE CHIP IS A DOOR - «תמונת מצב» (js/ui/status.js). The button is a hit area round
+   the pill and nothing else: no ground, no border, no padding of its own, 44px both ways (the
+   floor; «תצוגה גדולה» raises every button to 52, and css/large.css block 2 says the padding
+   and the margin again for it). THE HIT AREA IS NOT LAYOUT: (44 - 24) / 2 of padding above and
+   below the pill, taken back by as much negative margin, so the door's line is the pill's own
+   height - never less than what is in it, at any size of text - and the strip stands exactly as
+   tall as it did, the pill exactly where it was, on every phone, one line or two. On one line
+   the door spans the line's 44px as the buttons beside it do; where the strip already put the
+   chip on a line of its own (a long count, a narrow phone, the mode on), its line is the pill's
+   again and the door reaches past it into the strip's own room - tests/statusscreen.browser.mjs
+   (B12) measures it against the same page with the button taken off. It never shrinks (flex:
+   none): the pill inside is drawn as it always was, and a flex item that is the chip's own size
+   is what the chip was. No chevron: beside a long count it widened the door past the room the
+   strip has. */
+.status-door {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    margin-block: -10px;
+    padding: 10px 0;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--ink-3);
+}
+/* No hover filter: a filter makes the door a layer of its own, drawn over «הגדרות» where its
+   reach and that button's row meet (the chip on a line of its own) - and under a finger the
+   button beside it must stay on top, as it is at rest. */
+.status-door:hover { filter: none; }
+/* (0,3,0): over the look's own `.topbar .status-door-words`, which comes later in the cascade
+   and would otherwise draw the words beside the chip they stand in for. */
+.status-door > .status-door-words[hidden] { display: none; }
+
 .tabs { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
 
 .tab {

@@ -174,6 +174,12 @@
 @media (max-width: 700px) {
     :root.display-large .week-phone-date { min-height: 58px !important; }
 }
+/* «תמונת מצב» (v206, js/ui/status.js): a site's row. And the door round the sync chip: the
+   floor above makes it 52 tall, and its padding and margin are said again for 52 -
+   (52 - 24) / 2 each - so its line in the strip is still the pill's own (css/app.css,
+   .status-door). */
+:root.display-large .status-site { min-height: 64px !important; }
+:root.display-large .status-door { padding-block: 14px; margin-block: -14px; }
 
 /* ---- 3. THE SIZES, RESTATED --------------------------------------------------------- */
 :root.display-large body { font-size: 20px; line-height: 1.6; }
@@ -1112,6 +1118,36 @@
 :root.display-large .week-table tfoot td { font-size: 18px; }
 :root.display-large .week-table tfoot .name-cell { font-size: 18px; }
 }
+/* v206: «תמונת מצב» (css/design.css, its last block) - each size, weight and line-height it
+   sets, said again in its order by this block's table. */
+:root.display-large .topbar .status-door-words { font-size: 18px; font-weight: 700; }
+:root.display-large .status-sync { font-size: 20px; font-weight: 600; line-height: 1.45; }
+:root.display-large .status-head { font-size: 22px; font-weight: 800; }
+:root.display-large .status-line { font-size: 21px; font-weight: 600; line-height: 1.45; }
+:root.display-large .status-note { font-size: 20px; line-height: 1.45; }
+:root.display-large .status-go { font-size: 21px; font-weight: 650; }
+:root.display-large .status-hero-n { font-size: 51px; font-weight: 900; line-height: 1.4; }
+:root.display-large .status-hero-label { font-size: 21px; font-weight: 700; }
+:root.display-large .status-hero-sites { font-size: 20px; font-weight: 600; }
+:root.display-large .status-today-name { font-size: 21px; font-weight: 700; }
+:root.display-large .status-today-count { font-size: 23px; font-weight: 800; }
+:root.display-large .status-today-rima { font-size: 18px; font-weight: 700; }
+:root.display-large .status-money-label { font-weight: 600; }
+:root.display-large .status-money-amount { font-size: 23px; font-weight: 800; }
+:root.display-large .status-money-count { font-size: 20px; font-weight: 600; }
+:root.display-large .status-grid-head,
+:root.display-large .status-week { font-size: 18px; }
+:root.display-large .status-grid-head { font-weight: 700; }
+:root.display-large .status-week-date { font-size: 18px; font-weight: 700; }
+:root.display-large .status-week-total { font-size: 20px; font-weight: 800; }
+:root.display-large .status-cell { font-size: 18px; font-weight: 700; line-height: 30px; }
+:root.display-large .status-legend-word { font-size: 18px; font-weight: 600; }
+:root.display-large .status-site-name { font-size: 22px; font-weight: 800; }
+:root.display-large .status-site-off { font-size: 18px; font-weight: 700; }
+:root.display-large .status-phase { font-size: 18px; font-weight: 800; }
+:root.display-large .status-site-n { font-size: 29px; font-weight: 900; line-height: 1.4; }
+:root.display-large .status-site-label { font-size: 18px; font-weight: 600; }
+:root.display-large .status-site-rima { font-size: 18px; font-weight: 700; }
 
 /* ---- 4. THE SHAPES ------------------------------------------------------------------ */
 

@@ -77,6 +77,18 @@
     --group-weekly-mark: #dc6400;
     --group-biweekly-ink: #0b4a8f;
     --group-biweekly-mark: #2f7de1;
+    /* v206: «תמונת מצב»'s pulse (js/ui/status.js) - five steps of ONE hue (OKLCH 264, the
+       accent's family; no site's colour), few to many. Computed, not eyeballed: the step
+       nearest the surface 3:1 and more on it (WCAG 1.4.11 - so an empty day, which is the
+       surface itself, is told from a slow one), each step 1.25:1 and more from the next, the
+       lightness strictly monotone. Light, on #fff: 3.48, 5.06, 7.38, 10.39, 14.03; neighbours
+       1.46, 1.46, 1.41, 1.35. A cell carries no digit. In the dark scheme "more" is BRIGHTER
+       (tests/statusscreen.browser.mjs measures both from the computed styles). */
+    --pulse-1: #6288d9;
+    --pulse-2: #426bc6;
+    --pulse-3: #2950ad;
+    --pulse-4: #163990;
+    --pulse-5: #09256d;
     --radius: 12px;
     --radius-sm: 12px;
     --shadow: none;
@@ -104,6 +116,12 @@
     --group-weekly-mark: #ffb066;
     --group-biweekly-ink: #86d0ff;
     --group-biweekly-mark: #86d0ff;
+    /* Dark, on #14171c: 3.13, 4.50, 6.32, 8.80, 12.28; neighbours 1.44, 1.40, 1.39, 1.40. */
+    --pulse-1: #4364ac;
+    --pulse-2: #5b7ec8;
+    --pulse-3: #7999db;
+    --pulse-4: #9ab6ed;
+    --pulse-5: #c4d6fb;
     --shadow-lift: 0 12px 40px -8px rgba(0, 0, 0, .9);
 }
 @media (prefers-color-scheme: dark) {
@@ -129,6 +147,11 @@
         --group-weekly-mark: #ffb066;
         --group-biweekly-ink: #86d0ff;
         --group-biweekly-mark: #86d0ff;
+        --pulse-1: #4364ac;
+        --pulse-2: #5b7ec8;
+        --pulse-3: #7999db;
+        --pulse-4: #9ab6ed;
+        --pulse-5: #c4d6fb;
         --shadow-lift: 0 12px 40px -8px rgba(0, 0, 0, .9);
     }
 }
@@ -2138,5 +2161,161 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
     .week-table tfoot td { font-size: 14px; }
     .week-table tfoot .name-cell { font-size: 14px; }
 }
+
+/* ---- «תמונת מצב» (v206, js/ui/status.js) --------------------------------------------------
+   One column of sections, each a heading, sentences and the one button that goes to the
+   screen that owns them. Nothing side by side that a 320px phone with «תצוגה גדולה» cannot
+   hold. The charts are HTML with their numbers beside them and in their names: a site's
+   colour is identity only (1.5-2.9:1 on the dark grounds), so it is never the one thing a
+   number is told by, and the pulse's ramp (the --pulse tokens above) carries no digit. Every
+   size here is said again in css/large.css, block 3; the door's hit area is app.css's. */
+.topbar .status-door-words {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 9px;
+    border-radius: 12px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.status-sync { margin: 0 0 4px; color: var(--ink-2); font-size: 16px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.status-sync[hidden] { display: none; }
+.status-sec { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.status-head { margin: 0 0 10px; font-size: 19px; font-weight: 800; overflow-wrap: anywhere; }
+.status-line { margin: 0 0 8px; color: var(--ink); font-size: 17px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.status-empty, .status-pending, .status-money-count { color: var(--ink-2); }
+.status-warn { color: var(--warn); }
+.status-note { margin: 8px 0 0; color: var(--ink-2); font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
+/* A door: the tonal button, the whole width, under what it is the door of. */
+.status-go { display: block; width: 100%; min-height: 48px; margin: 4px 0 0; padding: 8px 14px; font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
+.status-doors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.status-doors .status-go { margin: 0; }
+
+/* 1. Today: the one figure of the screen, then what it is made of. */
+.status-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 0 0 8px; }
+.status-hero-n { color: var(--ink); font-size: 48px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+.status-hero-said { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.status-hero-label { color: var(--ink); font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+.status-hero-sites { color: var(--ink-2); font-size: 16px; font-weight: 600; }
+.status-bar { display: flex; gap: 2px; min-height: 10px; margin: 2px 0 10px; border-radius: 5px; overflow: hidden; }
+.status-bar-part { display: block; min-width: 4px; border-radius: 3px; }
+.status-today-sites { display: flex; flex-direction: column; gap: 6px; margin: 0 0 10px; }
+.status-today-site { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.status-swatch { flex: none; width: 14px; min-height: 14px; border-radius: 4px; }
+.status-today-name { flex: 1 1 auto; min-width: 0; font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+.status-today-count { flex: none; color: var(--ink); font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.status-today-rima { flex: none; color: var(--ink-2); font-size: 15px; font-weight: 700; }
+
+/* 3. The money: a line, then its button. */
+.status-money-row { margin: 0 0 12px; }
+.status-money-label { font-weight: 600; }
+.status-money-amount { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.status-money-count { margin-top: -4px; font-size: 16px; font-weight: 600; }
+
+/* 4. The pulse: a row per week, newest on top - its Friday, its days, its total. A row is one
+   button; its cells are drawn and its name says every day. */
+.status-caption { margin-bottom: 10px; }
+.status-grid { display: flex; flex-direction: column; gap: 4px; }
+.status-grid.status-cols-6 { --status-cols: 6; }
+.status-grid.status-cols-7 { --status-cols: 7; }
+.status-grid-head,
+.status-week {
+    display: grid;
+    grid-template-columns: 3.1em repeat(var(--status-cols, 6), minmax(0, 1fr)) 2.8em;
+    gap: 2px;
+    align-items: center;
+    font-size: 14px;
+}
+.status-grid-head { padding: 0 6px; color: var(--ink-2); font-weight: 700; text-align: center; }
+/* A day's column too narrow for its letter AND its geresh (seven columns on a 320px phone with
+   «תצוגה גדולה»: «ש׳» is wider than its column) keeps the letter alone - letters that ran into
+   each other were no letters at all. Measured in the column's own em, so it follows the mode and
+   the text's size; where container queries are not, the mark stays, as before. */
+.status-grid-day { container-type: inline-size; }
+@container (max-width: 1.3em) {
+    .status-day-mark { display: none; }
+}
+/* And a column too narrow even for the letter alone (the text doubled on a phone) shows none:
+   the day is in the row's name, read aloud, and letters drawn over each other say nothing. */
+@container (max-width: 0.85em) {
+    .status-day-letter { visibility: hidden; }
+}
+.status-week {
+    width: 100%;
+    min-height: 44px;
+    padding: 2px 6px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--ink);
+    text-align: center;
+}
+.status-week:hover { background: var(--surface-2); filter: none; }
+.status-week-date { color: var(--ink-2); font-size: 14px; font-weight: 700; text-align: start; font-variant-numeric: tabular-nums; }
+.status-week-total { color: var(--ink); font-size: 16px; font-weight: 800; text-align: end; font-variant-numeric: tabular-nums; }
+.status-cell { display: block; min-height: 30px; border-radius: 6px; color: var(--ink-3); font-size: 14px; font-weight: 700; line-height: 30px; }
+.status-step-0 { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.status-step-1 { background: var(--pulse-1); }
+.status-step-2 { background: var(--pulse-2); }
+.status-step-3 { background: var(--pulse-3); }
+.status-step-4 { background: var(--pulse-4); }
+.status-step-5 { background: var(--pulse-5); }
+.status-step-later { background: transparent; }
+.status-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 10px 0 0; }
+.status-legend-word { color: var(--ink-2); font-size: 14px; font-weight: 600; }
+.status-legend-step { display: block; width: 18px; min-height: 14px; border-radius: 4px; }
+
+/* 5. The sites: a row per site, a button to its card - its name, this month's count, its
+   word, and its eight weeks as a strip in the inks (emphasis, never its colour). */
+.status-site {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    width: 100%;
+    min-height: 64px;
+    margin: 0 0 8px;
+    padding: 10px 12px;
+    border: 0;
+    border-radius: 14px;
+    background: var(--surface-2);
+    color: var(--ink);
+    text-align: start;
+}
+.status-site:hover { filter: none; }
+/* A site the record names and the roster has not got opens nothing (no card behind it), so it
+   is not drawn as one of the buttons above it: no ground, a dashed line round it. */
+.status-site-unlisted { background: transparent; border: 1px dashed var(--line); }
+/* On the name's first line: the swatch and the chips stand on its baseline, so a name that wraps
+   keeps them beside the line it starts on. */
+.status-site-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; min-width: 0; }
+/* The name takes the room left on its line and wraps INSIDE it, so its swatch stays beside its
+   first line - a long name used to drop below the swatch and leave it alone on a line; the
+   chips after it go to the next line when they do not fit. It asks for 8em of that line, but
+   never more than the line has beside the swatch (14px and its 8px gap): at twice the text
+   size 8em is wider than the row, and the name would stand out of its own button. */
+.status-site-name { flex: 1 1 0; min-width: min(8em, calc(100% - 22px)); font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+.status-site-off { color: var(--ink-2); font-size: 15px; font-weight: 700; }
+.status-phase { padding: 1px 10px; border-radius: 999px; font-size: 15px; font-weight: 800; }
+.status-phase-rising,
+.status-phase-fresh { background: var(--accent-soft); color: var(--accent); }
+.status-phase-falling { background: var(--warn-bg); color: var(--warn); }
+.status-phase-quiet { background: var(--surface); color: var(--ink-2); }
+.status-site-mid { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.status-site-n { color: var(--ink); font-size: 26px; font-weight: 900; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.status-site-label { color: var(--ink-2); font-size: 15px; font-weight: 600; }
+.status-site-rima { color: var(--ink-2); font-size: 15px; font-weight: 700; }
+/* No fixed height in this layer (tests/payslips.test.mjs holds the tail of it to that): the
+   strip is at least 28px, each week a column stretched to it, and the week's fill a share of
+   the column, written on the fill by js/ui/status.js. */
+.status-strip { display: flex; align-items: stretch; gap: 3px; min-height: 28px; }
+.status-strip-bar { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; min-width: 0; }
+.status-strip-fill { display: block; min-height: 2px; border-radius: 3px 3px 0 0; background: var(--ink-3); }
+.status-strip-none .status-strip-fill { background: var(--line); }
+.status-strip-now .status-strip-fill { background: var(--accent); }
+.status-yosef { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
 
 }

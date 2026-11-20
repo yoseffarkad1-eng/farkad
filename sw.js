@@ -126,6 +126,7 @@ const SHELL = [
     './js/ui/closereminder.js',
     './js/ui/usual.js',
     './js/ui/reminders.js',
+    './js/ui/status.js',
     './js/app.js',
     // The cloud adapter and its configuration. Same-origin, imported at runtime, and
     // therefore exactly as much a part of the offline shell as any other script here -

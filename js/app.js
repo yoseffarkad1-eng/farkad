@@ -182,6 +182,11 @@ function render() {
     // «תזכורת לסגירת חשבונות» (js/ui/closereminder.js): nothing is read here - its line is
     // taken down at once if it is no longer wanted, and otherwise read once the draws stop.
     if (typeof closeReminderAfterRender === 'function') closeReminderAfterRender();
+    // And for «תמונת מצב» (js/ui/status.js): today, the next day, the pulse and the sites are
+    // read off this record and drawn again; the money, which costs, is read once the draws stop.
+    // After the close reminder, whose line it mirrors: a line this render took down is not
+    // left standing on it.
+    if (typeof renderStatusIfOpen === 'function') renderStatusIfOpen();
 
     // Last, because the two bars it measures have just been shown or hidden by the lines
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not
@@ -256,6 +261,8 @@ function renderSyncChip() {
     chip.textContent = label;
     chip.className = 'sync-chip' + (state ? ' ' + state : '');
     chip.hidden = label === '';
+    // The chip is the door of «תמונת מצב» (v206): the door is named by what the chip says.
+    if (typeof statusDoorSync === 'function') statusDoorSync(chip, label);
 }
 
 function watchSyncNotice() {
