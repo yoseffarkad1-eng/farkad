@@ -1236,6 +1236,12 @@
      card, the sheet and the advances screen - all above it - only when a door is pressed,
      and day.js asks for its entry by name when the day is drawn. -->
 <script src="js/ui/find.js"></script>
+<!-- «לוח חודשי», the crew's month as a third mode of the week tab. After week.js (its rows,
+     its mode and its cell), sitecolor.js, workercard.js (the card a name opens) and
+     monthsummary.js (the month's calendar and words). It runs nothing at load: week.js asks
+     for its door by name, through typeof, when the grid is drawn, and printout.js asks for
+     its picture only when one is wanted. -->
+<script src="js/ui/monthboard.js"></script>
 <!-- «מי חייב כסף», «שים לב» and «סגירות שנרשמו»: readings of the money record. After
      reports.js (the pay sheet's own functions and words, which ask for it by name through
      typeof when «מקדמות» and «דוחות» are drawn) and share.js (the two doors a closure's text

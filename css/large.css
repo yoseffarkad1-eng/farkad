@@ -698,6 +698,32 @@
 :root.display-large .week-cell .cell-line[data-initial]::before { font-size: 18px; line-height: 1; font-weight: 800; }
 :root.display-large .week-cell .cell-line .site-mark { font-size: 18px; }
 }
+/* «לוח חודשי» (js/ui/monthboard.js), one rule for one rule. The marks keep line-height 1, as
+   the week's copies above do: each is one glyph in a block of a fixed height. */
+:root.display-large #weekView .week-table .corner .month-board-door { font-size: 18px; font-weight: 700; line-height: 1.4; }
+:root.display-large .month-board-back { font-size: 20px; }
+:root.display-large .month-board-title { font-size: 22px; font-weight: 800; line-height: 1.4; }
+:root.display-large .month-board-steps > button,
+:root.display-large .month-board-out > button { font-size: 20px; }
+:root.display-large .month-board-home { font-size: 20px; }
+:root.display-large .month-board-filter { font-size: 20px; font-weight: 700; }
+:root.display-large .month-board-table thead .month-board-corner { font-size: 18px; font-weight: 600; line-height: 1.4; }
+:root.display-large .month-board-day { font-size: 18px; font-weight: 600; line-height: 1.4; }
+:root.display-large .month-board-dd { font-weight: 800; }
+:root.display-large .month-board-who { font-size: 18px; font-weight: 700; line-height: 1.4; }
+:root.display-large .month-board-badge { font-size: 18px; font-weight: 600; }
+:root.display-large .month-board .week-cell .cell-line[data-initial]::before { font-size: 18px; font-weight: 800; line-height: 1; }
+:root.display-large .month-board .week-cell .cell-line .site-mark { font-size: 18px; line-height: 1; }
+:root.display-large .month-board .week-cell .cell-extra::after { font-size: 18px; font-weight: 800; line-height: 1; }
+:root.display-large .month-board .cell-absent { font-size: 0; }
+:root.display-large .month-board .cell-absent::before { font-size: 18px; }
+:root.display-large .month-board-total-head { font-size: 18px; font-weight: 700; line-height: 1.4; }
+:root.display-large .month-board-total { font-size: 20px; font-weight: 800; }
+:root.display-large .month-board-foot-label { font-size: 18px; font-weight: 700; line-height: 1.4; }
+:root.display-large .month-board-count { font-size: 18px; font-weight: 700; }
+:root.display-large .month-board-key-letters { font-size: 18px; font-weight: 800; line-height: 1.4; }
+:root.display-large .month-board-marks { font-size: 18px; line-height: 1.45; }
+:root.display-large .month-board-note { font-size: 18px; line-height: 1.45; }
 :root.display-large .daycheck-entry { font-size: 20px; font-weight: 600; }
 :root.display-large #dayCheckModal .modal-content > h3 { line-height: 1.4; }
 :root.display-large .daycheck-clean { font-size: 20px; line-height: 1.4; font-weight: 650; }
@@ -1284,6 +1310,19 @@
     :root.display-large .week-cell .cell-line[data-initial]::before { font-size: 18px !important; }
     :root.display-large .week-cell .cell-line .site-mark { font-size: 18px !important; }
 }
+
+/* ---- «לוח חודשי» -----------------------------------------------------------------------
+   The week's shape above, on every width - the board draws the phone's cell everywhere: a
+   day is 64px both ways, the letter's block 30px, and a name keeps every line it needs (the
+   names' column is the week's, widened above on a phone). Two days and a half across the
+   320px phone with the names pinned; the grid scrolls in its box as before. */
+:root.display-large .month-board td.week-cell { width: 64px !important; min-width: 64px !important; height: 64px !important; }
+:root.display-large .month-board .month-board-date { width: 64px !important; min-width: 64px !important; }
+:root.display-large .month-board .week-cell .cell-line { min-width: 30px !important; height: 30px !important; padding: 0 5px !important; border-radius: 8px !important; margin: 2px auto !important; }
+:root.display-large .month-board .week-cell .cell-line[data-initial]::before { font-size: 18px !important; }
+:root.display-large .month-board .week-cell .cell-line .site-mark { font-size: 18px !important; }
+:root.display-large .month-board-who-name { display: block !important; -webkit-line-clamp: none !important; overflow: visible !important; overflow-wrap: anywhere; }
+:root.display-large .month-board-who { padding: 6px 4px !important; }
 
 /* THE DAY'S HEADER KEEPS ITS AIR HERE (v200). css/design.css took the air out from between the
    day header's lines for everybody (its last block): the top strip's 4px above and below its

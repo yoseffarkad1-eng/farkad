@@ -183,6 +183,7 @@ function printoutImage(kind) {
     // 'transport' (v179) is the summary of the day's rides, read and planned by
     // js/ui/transport.js; 'week' is the week; anything else is the report, as it always was.
     const spec = kind === 'week' ? readWeekPrintout()
+        : kind === 'month' ? (typeof readMonthPrintout === 'function' ? readMonthPrintout() : null)
         : kind === 'transport' ? readTransportPrintout() : readReportPrintout();
     if (!spec) return null;
 
@@ -191,6 +192,7 @@ function printoutImage(kind) {
     if (!probe) return null;
     const family = printoutFontFamily();
     const plan = kind === 'week' ? planWeekPrintout(spec, probe, family)
+        : kind === 'month' ? planMonthPrintout(spec, probe, family)
         : kind === 'transport' ? planTransportPrintout(spec, probe, family)
         : planReportPrintout(spec, probe, family);
 

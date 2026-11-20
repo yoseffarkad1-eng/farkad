@@ -4981,6 +4981,58 @@ body.day-tight .topbar { margin-bottom: 2px; }
     #weekView .week-legend, #weekView .week-legend-note { display: none; }
 }
 
+/* «לוח חודשי» (js/ui/monthboard.js) on paper: the week's own A4 landscape page
+   (body.week-print-layout, above), the board's title as the page's heading, the grid the
+   width of the sheet with the names a sixth of it, every cell its site's colour with the
+   board's letters in white - paper does not read css/design.css, so the letter is written
+   here - the doubled day's dot, the extra hours' plus and an absence's dash, then the legend
+   and the notes. Its own controls and the door in the week's corner are not on it, and
+   neither is the site's own men's row («בלי עובדי רימא»): the owner's figure, screen and
+   workbook only (v167) because paper is what gets handed on - hidden by its kind, with
+   .report-norima's own `!important`. A small crew is one page; a larger one runs on to the
+   next with the dates' header repeated, and no man is cut across two (tests/monthboard.
+   browser.mjs counts the pages). The week's paper is untouched (tests/week-print.browser.mjs). */
+.month-print-title { display: none; }
+@media print {
+    .month-board-door { display: none !important; }
+    #weekView .month-board-head, .month-board tr[data-kind="own"] { display: none !important; }
+    #weekView .month-print-title { display: block; font-size: 15pt; margin: 0 0 3mm; color: #000; }
+    #weekView .month-board-scroll { overflow: visible; padding-bottom: 0; margin-inline: 0; }
+    #weekView .month-board-strip::after { display: none; }
+    #weekView .month-board-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; }
+    /* Every cell keeps its ground on paper - a Saturday's shade, the foot's band - as the site
+       blocks keep their colours (.tag-place, .cell-line, above): a phone prints backgrounds
+       only when somebody ticked the box. */
+    #weekView .month-board-table th, #weekView .month-board-table td { position: static; width: auto; min-width: 0; max-width: none; height: auto; min-height: 0; padding: 1pt; border: .5pt solid #999; vertical-align: middle; text-align: center; background: #fff; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    #weekView .month-board-table .month-board-corner, #weekView .month-board-table .month-board-name, #weekView .month-board-table .month-board-foot-label { width: 16%; padding: 1pt 3pt; text-align: start; font-size: 8pt; }
+    #weekView .month-board-table .month-board-total-head, #weekView .month-board-table .month-board-total { width: 5%; font-size: 8pt; font-weight: 700; }
+    #weekView .month-board-table thead { display: table-header-group; }
+    #weekView .month-board-table tfoot { display: table-row-group; break-inside: avoid; }
+    #weekView .month-board-table tr { break-inside: avoid; }
+    #weekView .month-board-table tfoot td { background: #eee; font-size: 7.5pt; font-weight: 700; }
+    #weekView .month-board-table .month-board-saturday, #weekView .month-board .col-rest { background: #eee; opacity: 1; }
+    #weekView .month-board-who { display: block; width: auto; min-width: 0; min-height: 0; padding: 0; margin: 0; border: 0; background: none; color: #000; font: inherit; font-size: 8pt; font-weight: 600; text-align: inherit; white-space: normal; overflow-wrap: anywhere; }
+    /* A date's button is no box on paper, only its words. The dates' row is repeated at the
+       top of every page, and Chrome painted the repeated row's buttons as nothing - measured:
+       the second page of a 40-man month had its corner and «נוכחות» and blank dates. */
+    #weekView .month-board-day { display: contents; color: #000; font-size: 7pt; line-height: 1.15; }
+    #weekView .month-board-day > span { display: block; }
+    #weekView .month-board-who-name { display: inline; overflow: visible; }
+    #weekView .month-board-badge { display: inline; margin: 0 2pt 0 0; font-size: 6.5pt; }
+    #weekView .month-board .week-cell .cell-line { display: flex; align-items: center; justify-content: center; gap: 1pt; width: auto; max-width: 100%; height: 9pt; min-height: 0; padding: 0 1pt; margin: .5pt auto; border-radius: 2pt; white-space: nowrap; }
+    #weekView .month-board .week-cell .cell-line .site-name, #weekView .month-board .week-cell .cell-line .tag-rate { display: none; }
+    #weekView .month-board .week-cell .cell-line .site-mark { position: static; color: #fff; font-size: 5pt; }
+    #weekView .month-board .week-cell .cell-line[data-initial]::before { content: attr(data-initial); color: #fff; font-size: 6.5pt; font-weight: 800; line-height: 1; }
+    #weekView .month-board .week-cell .cell-double::after { content: '\25CF'; color: #fff; font-size: 5pt; line-height: 1; }
+    #weekView .month-board .week-cell .cell-extra::after { content: '+'; color: #fff; font-size: 6.5pt; font-weight: 800; line-height: 1; }
+    #weekView .month-board .cell-absent { color: transparent; font-size: 1pt; }
+    #weekView .month-board .cell-absent::before { content: '\2014'; color: #333; font-size: 7pt; }
+    #weekView .month-board-legend { display: flex; flex-wrap: wrap; gap: 2pt 6pt; margin-top: 3mm; }
+    #weekView .month-board-key { height: auto; min-height: 0; padding: 1pt 4pt; font-size: 7.5pt; white-space: normal; }
+    #weekView .month-board-key-letters { font-size: 7.5pt; font-weight: 800; }
+    #weekView .month-board-marks, #weekView .month-board-note { margin: 1.5mm 0 0; color: #333; font-size: 7.5pt; }
+}
+
 /* The usual site (js/ui/usual.js) is a SUGGESTION, and paper cannot say so: a site's name
    printed beside a man reads as where he worked. Its look is in css/design.css, which is
    screen only; this is the one thing about it that is not a look. */

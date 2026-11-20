@@ -11,10 +11,15 @@ let weekStart = null;
 let weekPhoneMode = 'grid';
 let weekPhoneDate = null;
 
+// A third mode, 'month': «לוח חודשי» (js/ui/monthboard.js), the crew's month drawn in place
+// of the week. Entered at the board's title, and left back onto the door it was opened by.
 function setWeekPhoneMode(mode) {
-    weekPhoneMode = mode === 'grid' ? 'grid' : 'days';
+    const from = weekPhoneMode;
+    weekPhoneMode = mode === 'grid' ? 'grid' : mode === 'month' ? 'month' : 'days';
     renderWeek();
-    document.querySelector(weekPhoneMode === 'grid' ? `[data-week-preview="${weekPhoneDate}"]` : '[data-week-mode=grid]')?.focus({preventScroll:true});
+    document.querySelector(weekPhoneMode === 'month' ? '#monthBoardTitle'
+        : weekPhoneMode === 'days' ? '[data-week-mode=grid]'
+        : from === 'month' ? '#monthBoardDoor' : `[data-week-preview="${weekPhoneDate}"]`)?.focus({preventScroll:true});
 }
 
 function selectWeekPhoneDate(date) {
@@ -49,6 +54,13 @@ function renderWeek() {
     const root = document.getElementById('weekView');
     if (!root) return;
 
+    // «לוח חודשי» (js/ui/monthboard.js): the board in place of the week's header, its phone panel
+    // and its table, on every width - drawn by its own function, which reads where the reader was
+    // before it clears. A build without the file has no door, so never this mode.
+    if (weekPhoneMode === 'month' && typeof renderMonthBoard === 'function' && State.schedule.workers.length > 0) {
+        renderMonthBoard(root);
+        return;
+    }
     clear(root);
     root.classList.toggle('week-phone-grid', weekPhoneMode === 'grid');
     // NO CREW AT ALL: there is no week to step through, print or share, in this week or
@@ -90,6 +102,8 @@ function renderWeek() {
     const head = el('thead');
     const headRow = el('tr');
     const corner = el('th', 'corner');
+    // «לוח חודשי» (js/ui/monthboard.js) in the one cell that had the room; the words stay for paper.
+    if (typeof monthBoardDoor === 'function') corner.appendChild(monthBoardDoor());
     corner.appendChild(el('span', 'name-clip', 'עובדים / ימים'));
     headRow.appendChild(corner);
     dates.forEach(date => {
