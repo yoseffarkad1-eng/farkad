@@ -3,6 +3,23 @@
 Branch `feat-history`, worktree `/home/user/farkad/.claude/worktrees/feat-history`, cut from
 `origin/main` 6ab193d68c960e4a56d947673c282b867acd258f. Not pushed, no PR.
 
+- **Fix round 3 is in, and changes no code.** The verification of d1358f0 - ONE finding,
+  «verification failures» (P1), carrying three reds: build.test's two stamp checks and
+  gate.integrity's stamp check. Each was opened at its code: CONFIRMED red, ALREADY HANDLED - the
+  contract's one expected red (the three stamps are the integrator's; the task forbids the track to
+  move them, so LEFT). Measured again, not taken from the verifier: a throwaway clone of d1358f0
+  (`/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/hist-stampprobe`,
+  never pushed) with ONE commit moving `index.html:109`, `js/app.js:7`, `sw.js:24` from v204 together
+  and nothing else: build **69/69**, gate-integrity **20/20**. No test was weakened; no file of the
+  app was touched in this round.
+- **Round 3's runs, on d1358f0** (its code is 20edf68's; d1358f0 changed this file alone), in the
+  worktree, `git status` empty: the `npm test` chain one step at a time, 109 steps - 106 exit 0;
+  `test:build` 67/69 and `test:gate-integrity` 19/20 (the stamp checks only); `test:owes` 189/190
+  inside the chain with the machine loaded (load ~5 on 4 CPUs, other tracks running) and **190/190
+  run again alone** - the miss did not come back, so it is read as the load, not this track (the
+  track touches nothing owes.js draws). `test:history` 192/192. `tests/history.browser.mjs` through
+  the wrapper `bt`: **1306/1306, exit 0**. No other browser suite was run: round 3 changed nothing a
+  suite loads.
 - **Fix round 2 is in.** The verification of e90616d - ONE finding, «verification failures» (P1),
   carrying three reds - was triaged against the code: the two stamp reds are CONFIRMED and ALREADY
   HANDLED (the contract's one expected red: the stamps are the integrator's, and the task forbids
