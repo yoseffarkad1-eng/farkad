@@ -555,7 +555,17 @@ try {
             await throughTheDoor(page, 'w02');
             given(`${how}: it is open on the evening of ${TODAY}`, await isOpen(page)
                 && await page.evaluate(today => State.date === today, TODAY));
+            // THE TEST PAGE'S OWN FAULT, SET APART. tests/screens.mjs blocks the service worker, so
+            // the registration js/ui/offline.js keeps for the phone's return never came, and its
+            // listener reads `update` of nothing on the return made here (tests/midnight.browser.mjs
+            // allows the worker and never meets it). That error only, across the return only; any
+            // other still counts below.
+            const held = errors.length;
             await lockUntil(page, '2026-11-11T07:10:00+02:00');
+            await pause(page, 100);
+            const raised = errors.splice(held);
+            check(`${how}: the return raised nothing but the blocked worker's own read of a registration that never came`,
+                raised.every(message => message === "Cannot read properties of undefined (reading 'update')"), JSON.stringify(raised));
             same(`${how}: unlocked in the morning with it open, the day under it is still the evening's`,
                 await page.evaluate(() => [todayStr(), State.date, document.getElementById('historyModal').style.display]),
                 ['2026-11-11', TODAY, 'flex']);
