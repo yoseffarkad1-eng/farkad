@@ -1118,7 +1118,7 @@ async function saveWorkerForm() {
     // Two workers called the same thing is realistic - and the day screen shows nothing
     // but names, so from that point on nobody can tell which row is whose, including at
     // the moment their pay is worked out. It is allowed, but never by accident.
-    const askedAbout = { name: null, phone: null };
+    const askedAbout = { name: null, phone: null, cycle: null };
 
     for (let round = 0; round < 4; round += 1) {
         const typed = read();
@@ -1155,7 +1155,7 @@ async function saveWorkerForm() {
             return;
         }
         if (addFrom && !addCycle) {
-            problem.textContent = 'בחר מחזור תשלום, או נקה את התאריך.';
+            problem.textContent = PAY_CYCLE_FORM_TEXT.dateWithoutCycle;
             document.getElementById('workerFormCycle').focus();
             return;
         }
@@ -1178,6 +1178,21 @@ async function saveWorkerForm() {
                 return;
             }
             nextCycles = payCyclesWith(editingWorkerId, addFrom, addCycle);
+            // (a) Already his cycle on that Friday: no boundary at all, said in the hint.
+            if (payCycleAlreadyFrom(editingWorkerId, addFrom, addCycle)) nextCycles = null;
+        }
+        // (b) A real change of HIS cycle is never saved silently with the rest of the form:
+        // it is said in plain words first, naming the Friday he chose (the owner, 2026-11-20).
+        // A new man's first cycle is part of adding him, and is said by the hint under it.
+        if (editingWorkerId && nextCycles !== null
+                && askedAbout.cycle !== `${addFrom}=${addCycle}`) {
+            const go = await askConfirm(payCycleChangeQuestion(editingWorkerId, typed.name, addFrom, addCycle));
+            if (!go) {
+                document.getElementById('workerFormCycle').focus();
+                return;
+            }
+            askedAbout.cycle = `${addFrom}=${addCycle}`;
+            continue;
         }
 
         const clash = State.schedule.workers.find(worker =>
@@ -1736,9 +1751,13 @@ function workerCycleTyped() {
         return;
     }
     if (!cycle) {
-        hint.textContent = 'בחר מחזור תשלום, או נקה את התאריך.';
+        hint.textContent = PAY_CYCLE_FORM_TEXT.dateWithoutCycle;
         return;
     }
+    // (a) The cycle that already governs that Friday adds nothing (the owner, 2026-11-20:
+    // "when I update there, there must be no mess").
+    const sameAlready = payCycleAlreadyFrom(editingWorkerId, from, cycle);
+    if (sameAlready) { hint.textContent = sameAlready; return; }
 
     const refusal = payCycleAddProblem(editingWorkerId, from, cycle);
     if (refusal) { hint.textContent = refusal; return; }
@@ -1775,7 +1794,9 @@ function renderWorkerCycleHistory(worker) {
         box.textContent = 'כרגע: כל שבועיים (ברירת מחדל).';
         return;
     }
-    box.textContent = 'רשום: ' + history
+    // (d) What governs him today, before the list of what was recorded.
+    const now = typeof payCycleAt === 'function' ? payCycleAt(worker, todayStr()) : null;
+    box.textContent = (now ? PAY_CYCLE_FORM_TEXT.now(now) + ' ' : '') + 'רשום: ' + history
         .map(entry => `מ-${entry.from} ${PAY_CYCLE_NAMES[entry.cycle] || entry.cycle}`)
         .join(' · ');
     // THE LAST CHANGE CAN BE TAKEN BACK (the owner, 2026-11-20). Every attempt at a cycle
@@ -1788,6 +1809,36 @@ function renderWorkerCycleHistory(worker) {
         box.appendChild(button(PAY_CYCLE_UNDO_TEXT.button(undo.last), 'btn-secondary pay-cycle-undo',
             () => undoLastPayCycle(worker.id)));
     }
+}
+
+// THE FORM'S CYCLE WORDS, proposed (2026-11-20) and pinned in tests/hourly50.test.mjs.
+const PAY_CYCLE_FORM_TEXT = {
+    dateWithoutCycle: 'בחרת תאריך בלי לבחור כל כמה זמן משלמים - בחר "כל שבוע" או "כל שבועיים", או מחק את התאריך.',
+    already: (name, cycle) => `${name} כבר משולם ${cycle === 'weekly' ? 'כל שבוע' : 'כל שבועיים'} מהתאריך הזה - לא יישמר שינוי.`,
+    now: cycle => `עכשיו: ${cycle === 'weekly' ? 'כל שבוע' : 'כל שבועיים'}.`,
+    title: name => `שינוי מחזור התשלום של ${name}`,
+    change: (name, from, cycle) => `מ-${shortCycleDate(from)} ${name} יקבל ${cycle === 'weekly' ? 'כל שבוע' : 'כל שבועיים'}.`,
+    stub: (from, to) => `הימים ${shortCycleDate(from)}–${shortCycleDate(to)} יחושבו כתקופה קצרה לחוד.`,
+    closedStay: 'תקופות שכבר נסגרו לא משתנות.',
+    ok: 'שמור את השינוי'
+};
+
+// The sentence for a cycle he ALREADY has on that Friday, or '' when the choice changes it.
+function payCycleAlreadyFrom(workerId, from, cycle) {
+    const worker = workerId ? State.worker(workerId) : null;
+    if (!worker || !from || !cycle || typeof payCycleAt !== 'function') return '';
+    if (payCycleHistory(worker) === null) return '';
+    return payCycleAt(worker, from) === cycle ? PAY_CYCLE_FORM_TEXT.already(worker.name, cycle) : '';
+}
+
+// The question a real cycle change is asked as: the man, the Friday, and the stub it leaves.
+function payCycleChangeQuestion(workerId, name, from, cycle) {
+    const proposed = { payCycles: payCyclesWith(workerId, from, cycle) };
+    const stub = periodRangeFor(proposed, shiftDate(from, -1));
+    const said = [PAY_CYCLE_FORM_TEXT.change(name, from, cycle)];
+    if (stub && stub.transition) said.push(PAY_CYCLE_FORM_TEXT.stub(stub.from, stub.to));
+    said.push(PAY_CYCLE_FORM_TEXT.closedStay);
+    return { title: PAY_CYCLE_FORM_TEXT.title(name), message: said.join(' '), ok: PAY_CYCLE_FORM_TEXT.ok };
 }
 
 // Every word of the undo, proposed (2026-11-20) and pinned in tests/hourly50.test.mjs.

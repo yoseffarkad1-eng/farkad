@@ -205,7 +205,64 @@ return (async () => {
     // A man with no history has nothing to take back.
     same('a man with no cycle history: nothing offered', e.call('payCycleUndoOffer', e.State.worker('w_a')), null);
 })();
-}).then(() => {
+}).then(async () => {
+
+// ---------------------------------------------------------------- H7
+
+suite('H7: the form makes no mess - Yosef\'s evening replayed');
+{
+    const d = crew();
+    d.State.worker('w_y').payCycles = '';
+    d.State.commitRoster();
+    const nodes = {};
+    for (const id of ['workerFormTitle', 'workerFormName', 'workerFormId', 'workerFormPhone',
+        'workerFormDaily', 'workerFormHourly', 'workerFormError', 'workerFormCycle', 'workerFormCycleFrom',
+        'workerFormCycleHint', 'workerFormCycleHistory', 'workerFormModal', 'workerFormMore']) {
+        nodes[id] = { value: '', textContent: '', style: {}, options: [{ textContent: '' }], focus() {},
+            appendChild() {}, open: false };
+    }
+    d.ctx.document.getElementById = id => nodes[id] || null;
+    d.ctx.document.createElement = () => ({ style: {}, setAttribute() {}, appendChild() {},
+        addEventListener() {}, classList: { add() {} }, textContent: '' });
+    d.ctx.workerPhoneTyped = () => {};
+    d.ctx.renderWorkerFormActions = () => {};
+    const disk = () => JSON.parse(d.raw('scheduleData:v2')).workers.find(w => w.id === 'w_y').payCycles || '';
+
+    // 1. «כל שבועיים מ-13/11» while he is already fortnightly: nothing to add.
+    d.call('editWorker', 'w_y');
+    nodes.workerFormCycle.value = 'biweekly'; nodes.workerFormCycleFrom.value = '2026-11-13';
+    d.call('workerCycleTyped');
+    same('the hint says so in one line', nodes.workerFormCycleHint.textContent,
+        'יוסף כבר משולם כל שבועיים מהתאריך הזה - לא יישמר שינוי.');
+    await d.call('saveWorkerForm');
+    same('saved with no boundary at all, and nothing asked', [disk(), d.asked.length], ['', 0]);
+
+    // 2. A date with no cycle: the clear sentence, nothing saved.
+    d.call('editWorker', 'w_y');
+    nodes.workerFormCycle.value = ''; nodes.workerFormCycleFrom.value = '2026-11-20';
+    await d.call('saveWorkerForm');
+    same('a date with no cycle is refused in the new words', nodes.workerFormError.textContent,
+        'בחרת תאריך בלי לבחור כל כמה זמן משלמים - בחר "כל שבוע" או "כל שבועיים", או מחק את התאריך.');
+
+    // 3. «כל שבוע מ-20/11»: asked first, in plain words; «ביטול» keeps the form.
+    d.call('editWorker', 'w_y');
+    nodes.workerFormCycle.value = 'weekly'; nodes.workerFormCycleFrom.value = '2026-11-20';
+    d.answer = false;
+    await d.call('saveWorkerForm');
+    same('the question names the man, the Friday and the stub it leaves', d.asked.map(q => [q.title, q.message, q.ok]), [[
+        'שינוי מחזור התשלום של יוסף',
+        'מ-20/11 יוסף יקבל כל שבוע. הימים 13/11–19/11 יחושבו כתקופה קצרה לחוד. תקופות שכבר נסגרו לא משתנות.',
+        'שמור את השינוי']]);
+    same('«ביטול»: nothing written, the form still holds his choice', [disk(), nodes.workerFormCycle.value], ['', 'weekly']);
+    d.answer = true;
+    await d.call('saveWorkerForm');
+    same('confirmed: one boundary, the one he meant', disk(), '2026-11-20=weekly');
+
+    // 4. The state is said before the list, and the way back is offered.
+    d.call('renderWorkerCycleHistory', d.State.worker('w_y'));
+    same('«עכשיו:» before «רשום:»', nodes.workerFormCycleHistory.textContent, 'עכשיו: כל שבוע. רשום: מ-2026-11-20 שבועי');
+    same('and «מחיקת השינוי האחרון» is there for it', Boolean(d.call('payCycleUndoOffer', d.State.worker('w_y'))), true);
+}
 
 // ---------------------------------------------------------------- H6
 

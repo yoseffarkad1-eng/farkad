@@ -101,7 +101,14 @@ for (const kind of ['append', 'same-date', 'closure']) {
     const { a, b, cloud } = await pair(`d_wait_${kind}`, kind === 'closure' ? '' : INITIAL);
     const nodes = form(a, { name: 'DUPLICATE', from: kind === 'closure' ? '2026-09-11' : '2026-10-16' });
     let answer;
-    a.ctx.askConfirm = () => new Promise(resolve => { answer = resolve; });
+    // The FIRST question (the duplicate name) is the one held open while the other phone
+    // writes. Since 2026-11-20 a real cycle change is asked about too, after the record has
+    // been read again (the owner: "no mess when I update"); that second question is answered
+    // yes here so the race this suite is about is still the one under test.
+    let asked = 0;
+    a.ctx.askConfirm = () => (asked++ === 0
+        ? new Promise(resolve => { answer = resolve; })
+        : Promise.resolve(true));
     const saving = a.call('saveWorkerForm');
     given('confirmation is pending', typeof answer === 'function');
     let received;
