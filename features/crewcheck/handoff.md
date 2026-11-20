@@ -5,27 +5,118 @@
 | Branch | `feat-crewcheck` (never pushed; no PR) |
 | Worktree | `/home/user/farkad/.claude/worktrees/feat-crewcheck` (`node_modules` a symlink to `/home/user/farkad/node_modules`) |
 | Base | `6ab193d68c960e4a56d947673c282b867acd258f` (origin/main, stamps v204 - not moved) |
-| The suites ran on | `b73550f671a64643089d3788d9a526a08a056dba`, the tree clean (`git status --short` empty): tests/crewcheck.browser.mjs and every Node re-run named below. The `npm test` chain and the eleven existing browser suites ran while HEAD moved `840bddb` → `b73550f` through commits that change `tests/crewcheck.browser.mjs` only - the app's bytes the same throughout (each browser suite checked the served tree against HEAD as it started), and the three Node suites that read the test corpus were run again on `b73550f`. Logs in `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-crewcheck/` (`chain/`, `browsers/`, `full*.out`) |
-| After it | this file's own commit, which adds this file and nothing else |
-| Contract | `features/crewcheck/contract.md` - revision 2, byte for byte the program's `crewcheck/contract.md` (re-read from disk before finishing: unchanged, md5 `20880f09a718e70afedcc4d7e49d28d5`, last written 17:35) |
+| Fix round 1 | `12c8b4b` (the fix), `fcd830b`, `d54fad5` and `69fc168` (the browser suite, and a hold tried and taken back out - below) - the eleven findings of the review of `68c7ab7` triaged; ten fixed, each with a check that failed on `68c7ab7`'s app code and passes here; one left for the owner (below, "Fix round 1") |
+| The suites ran on | fix round 1's commits, the tree clean but for this file (which no suite reads): tests/crewcheck.browser.mjs **544/544 on `69fc168`**; the `npm test` chain suite by suite and tests/largetext.browser.mjs (8335/8335) on `12c8b4b`, whose app bytes `69fc168` carries exactly (`git diff 12c8b4b 69fc168 -- js css index.html sw.js` empty); the Node suites that read the test corpus or the changed files again on `69fc168`. Before-and-after runs of the new checks below. Logs in `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-crewcheck/fix1/` (`chain/`, `final/`, `browser-*.out`, `probe/`); the build round's in `feat-crewcheck/` beside it |
+| After it | this file's own commit, which changes this file and nothing else |
+| Contract | `features/crewcheck/contract.md` - revision 2, byte for byte the program's `crewcheck/contract.md` (re-read from disk in fix round 1: unchanged, md5 `20880f09a718e70afedcc4d7e49d28d5`, last written 17:35). Where fix round 1 departs from its words, the departure and its reason are below; the contract itself is the program's and is not edited here |
+
+## Fix round 1 - the review of `68c7ab7`
+
+Triaged in the manner of `.claude/skills/triage/SKILL.md`: each cited line opened, each probe of the review re-run
+on this tree (`review-crewcheck/probes/norate.mjs`, `dualsim.mjs`) or measured again by a check of this track's own.
+
+| # | finding | sev. | verdict | outcome | the check that failed before and passes now |
+|---|---|---|---|---|---|
+| 1 | «בלי שכר יומי - ימי העבודה שלו לא יחושבו בשכר» said of a man whose rate was cleared after his days were stamped (crewcheck.js:60/260) | P2 | CONFIRMED: five days stamped 400, rate cleared - the sentence, and `payrollReport` 2000 | fixed | Node §1 «no daily rate: the words true of what his recorded days carry»; the agreement on every seed (`noRate all w02` on the 'with findings' state before) |
+| 2 | two numbers in one field, another country's first, filed as `otherPhone` (crewcheck.js:153) | P2 | CONFIRMED: `dualsim.mjs` gave `other` for three spellings, `bad` the other way round | fixed | Node §2: six dual spellings and the 15/16-digit boundary in the phone family; «a man with two numbers … counted, and the calm line does not stand» |
+| 3 | the same sentence false on the program's own fixture (עלי חסן, 15 days at 410) | P2 | CONFIRMED - the defect of 1, on `screens.mjs`'s 'with findings' state | fixed by 1 | Node §3 agreement and §4 `WITH_FINDINGS` (moved, below); browser §11 «the pay sheet prices his days at their stamp all the same» |
+| 4 | a typed number broken across lines on the glass (crewcheck.js:379/381/397) | P2 | CONFIRMED (the review's Chromium probe; and this suite's new check on `68c7ab7`'s code) | fixed | browser §15 «no typed number is broken across lines, and no «label: n» under the title», every phone, scheme and mode; Node §4 «a number … is drawn as one block» |
+| 5 | `zeroStamped` says the days stay without an amount; the whole account period has no total (crewcheck.js:95) | P3 | CONFIRMED: `payrollReport` (money.js:273-291) nulls the row for one unpriced day | fixed | Node §1 «the account period that holds them has no accrued, the days at the new rate in it too»; §3 agreement per period (`periodRangeFor`) |
+| 6 | two men with one name told apart only on «שם כפול» (crewcheck.js:342) | P3 | CONFIRMED: identical chips and labels on the never line | fixed | Node §4 «namesakes: one number each, the same on every line, and no two chips of one line alike» |
+| 7 | «אי אפשר לפתוח לו הודעה בוואטסאפ» untrue of WhatsApp (crewcheck.js:85) | P3 | CONFIRMED: the refusal is the app's (seder.js:166-182) | fixed | Node §5 words |
+| 8 | the line under the title broken inside «label: n» (crewcheck.js:47) | P3 | CONFIRMED (the review's probe; this suite's new check) | fixed | browser §15 (with 4); Node §4 «three blocks» |
+| 9 | the men's «never» line has no subject (crewcheck.js:98) | P3 | CONFIRMED | fixed | Node §5 words |
+| 10 | after a row door the way back to the button is the length of the crew screen (crewcheck.js:665) | P3 | CONFIRMED as measured - and as the contract designed it | LEFT | none: the contract allows nothing on the crew screen but the one button at its foot (Out of scope; Entry and navigation), and the review itself names it the owner's or the integrator's to decide - open question 7 |
+| 11 | a slow second touch after the last site's door reopens the check from «בדיקת הצוות» (crewcheck.js:626) | P3 | CONFIRMED: the hold covered `.worker-active-toggle` and «שמור» only | fixed - the review's first option, every control of the two surfaces (`12c8b4b`); its second, the chip's own place on the whole page, was added in `d54fad5` on a misreading of a run and taken out in `69fc168` (below) | browser §13: 350/500/650 ms on «בדיקת הצוות» and «כרטיס אתר» after the last site's door, on «עוד פרטים» and «ביטול» after a form door; every slow trial now also checks that nothing opened but what the door opened and that the crew screen is still the view |
+
+Before and after, on the same new checks: tests/crewcheck.test.mjs **149/175** on `68c7ab7`'s app code with the new
+suite (`fix1/node-before.out`), **175/175** on `12c8b4b`; tests/crewcheck.browser.mjs **510/544** on a copy of `68c7ab7`'s app code with the final suites (`fix1/browser-before.out`: the 33 new checks red, and the copy's own «the origin served this commit», which has no git to read), **544/544** on `69fc168` (`fix1/browser-after.out`).
+
+**What changed** (`js/ui/crewcheck.js`, `css/design.css`; nothing else of the app):
+
+- **«בלי שכר יומי» in the words true of each man.** The reading counts, per `noRate` man, his recorded days whose
+  stamp carries a daily rate (`priced`, from the one `ratesForDay` call the pass already made - a fact, no figure).
+  The men with none keep the contract's sentence; a man with such days - his rate cleared after they were stamped -
+  is told «בלי שכר יומי - ימי עבודה שיירשמו לו מעכשיו לא יחושבו בשכר:», because the sheet prices his stamped days
+  (iron law 2). Two findings of kind `noRate` when both are there, the first sentence first. The kinds are the
+  contract's; the reading's `noRate` entries gain `priced`.
+- **One number per field.** Another country's number, as typed, must be ONE number: no second `+`, and at most 15
+  digits after its prefix (ITU-T E.164: a whole international number, its country code included). Two numbers never
+  fit in 15, so a dual-SIM field is `badPhone` whichever number comes first - mended in one field, as the contract
+  says of two numbers. `CREW_CHECK_ONE_NUMBER_DIGITS = 15`.
+- **What a line may not break inside.** Every typed number in a chip or a sentence (the LTR isolate) and each part of
+  the line under the title is ONE inline block - `.crewcheck-whole` (`display: inline-block; max-width: 100%`,
+  `.report-dates`' rule, css/app.css), the number also `.crewcheck-number` (`direction: ltr`) - so it goes to the next
+  line whole, and wraps inside itself only where no line can hold it (320 px at doubled text, the house's rule,
+  tests/account-view.browser.mjs:157). No size: nothing for css/large.css to say again. `textContent` and every label
+  are the same characters as before.
+- **The account period, said.** `zeroStamped` names what the sheet does: the account period that holds such a day has
+  no accrued, even after a rate is typed - the sheet's own «בלי שכר יומי - הנצבר לא חושב» (reports.js:14).
+- **Namesakes.** A name two or more active men hold carries «(n)», his place among them in the crew list's order, on
+  every chip of his - in the words and read aloud - and «שם כפול …» ends «, ממוספרים לפי הסדר ברשימת העובדים:».
+  The «שם כפול» chips say «(n)» where they said «· n» (which read like a chip's day or count).
+- **The app, not WhatsApp; and a subject.** `otherPhone`: «… - האפליקציה לא תפתח לו / להם הודעה בוואטסאפ:».
+  `never`: «עובד פעיל / עובדים פעילים בלי אף יום עבודה רשום:».
+- **The hold covers what undoes a door.** For the same `DOUBLE_TAP_GUARD_MS` from the chip's own press, the house's
+  `guardFingersOn` now holds every control of the crew screen (`button, input, select, summary` on `#rosterView` -
+  «בדיקת הצוות» itself, the cards' buttons, «עוד ⋯», the switches, the search) and every button, fold and choice of the
+  form (`button, summary, select` on `#workerFormModal` - «שמור», «ביטול», «עוד פרטים»), judged on each press's own
+  time; a keyboard's click is never held, a box to type in is not held, and a press later than 700 ms is what it was.
+  **Tried and taken back out:** `d54fad5` also held a press at the chip's own place on the whole page
+  (`guardFingersOn(document.body, '*', …)`), read off the browser run on `fcd830b`, which had stopped after a slow touch
+  at a site chip's place changed the screen. A probe of the page's own events (`fix1/probe/hold-probe.mjs` and `.out`)
+  showed the suite's fault instead: the new lines had pushed that chip under the dialog's sticky foot, the raw first
+  touch pressed «סגור», no door ran, and the second touch landed on the tab bar. On a phone the top bar is static and
+  scrolls away, and the fixed tab bar lies under the sticky foot, never under a chip the dialog shows, so that hold
+  answered nothing that can happen; `69fc168` takes it out (js/ui/crewcheck.js is `12c8b4b`'s again, byte for byte)
+  and makes every trial bring its chip to the middle of the dialog and find it under the finger before the touch.
+
+**Pinned expectations moved, on purpose, in `12c8b4b`** (its message says each):
+- tests/crewcheck.test.mjs `WITH_FINDINGS` (§4) and §5: the five sentences and two new templates above; the «שם כפול»
+  chips «· n» → «(n)»; the never chips carrying the marks.
+- tests/screens.mjs 'with findings' (and its twin in the Node suite): w13, the second «וליד זועבי», gets
+  `dailyRate = 0`, so that both sentences of «בלי שכר יומי» are drawn for the floors and a namesake is named on three
+  lines. Taken back on closing with the rest, as before.
+- tests/crewcheck.browser.mjs: `w_18` ('דוגמה 18', seeded at 470) has his daily rate cleared after his days were
+  stamped - `noRate` twice in the kinds' order, and the second sentence on the glass. (`12c8b4b` had added a man,
+  `w_21`, instead; run on `68c7ab7`'s app code that moved the rows standing above the sites at full scroll, and the
+  existing trial «site door, on a man's «פעיל» on the glass» found no switch there at any gap - the crew screen's
+  layout, which the fix does not touch. `fcd830b` makes an existing man the case, the crew screen row for row the
+  build round's, and puts «עובדים פעילים: 19» back.)
+
+**New and changed words (PROPOSED, pinned word for word in tests/crewcheck.test.mjs §5):**
+
+| key | words |
+|---|---|
+| `noRateFromNow` (new; 1 / many) | בלי שכר יומי - ימי עבודה שיירשמו לו מעכשיו לא יחושבו בשכר: / בלי שכר יומי - ימי עבודה שיירשמו להם מעכשיו לא יחושבו בשכר: |
+| `sameName` (changed) | שם כפול - ${count} עובדים פעילים בשם ${name}, ממוספרים לפי הסדר ברשימת העובדים: |
+| `otherPhone` (changed; 1 / many) | מספר שאינו נייד ישראלי - האפליקציה לא תפתח לו הודעה בוואטסאפ: / מספרים שאינם ניידים ישראליים - האפליקציה לא תפתח להם הודעה בוואטסאפ: |
+| `zeroStamped` (changed; 1 / many) | ימים שנרשמו לו בלי שכר יומי - בתקופת החשבון שלהם הנצבר לא יחושב, גם אחרי שיוזן שכר: / ימים שנרשמו להם בלי שכר יומי - בתקופת החשבון שלהם הנצבר לא יחושב, גם אחרי שיוזן שכר: |
+| `never` (changed; 1 / many) | עובד פעיל בלי אף יום עבודה רשום: / עובדים פעילים בלי אף יום עבודה רשום: |
+| `twin` (new) | ${name} (${n}) - and with more after it, ${name} (${n}) · ${more} |
+
+The «מה חדש» item for the integrator is unchanged.
 
 ## Files changed against the base
 
+At `69fc168`, the last commit that changes anything but this file (`git diff --stat 6ab193d 69fc168`):
+
 ```
- css/design.css                 |   17 +
+ css/design.css                 |   24 +
  css/large.css                  |    3 +
- features/crewcheck/contract.md |  859 +++++++++++++++++++++++++
+ features/crewcheck/contract.md |  859 ++++++++++++++++++++++
+ features/crewcheck/handoff.md  |  473 ++++++++++++
  index.html                     |   26 +
- js/ui/crewcheck.js             |  742 ++++++++++++++++++++++
+ js/ui/crewcheck.js             |  842 +++++++++++++++++++++
  js/ui/modal.js                 |    2 +
  js/ui/roster.js                |    8 +
  package.json                   |    6 +-
  sw.js                          |    1 +
  tests/README.md                |    2 +
- tests/crewcheck.browser.mjs    |  981 +++++++++++++++++++++++++++++
- tests/crewcheck.test.mjs       | 1359 ++++++++++++++++++++++++++++++++++++++++
- tests/screens.mjs              |   54 ++
- 13 files changed, 4058 insertions(+), 2 deletions(-)
+ tests/crewcheck.browser.mjs    | 1098 +++++++++++++++++++++++++++
+ tests/crewcheck.test.mjs       | 1594 ++++++++++++++++++++++++++++++++++++++++
+ tests/screens.mjs              |   57 ++
+ 14 files changed, 4993 insertions(+), 2 deletions(-)
 ```
 
 One line each:
@@ -43,7 +134,8 @@ One line each:
 - `js/ui/roster.js` - the three lines the contract names, each with its comment: in `renderRoster` the two
   `typeof`-guarded calls (lines 35-36), and `row.dataset.placeId = place.id` in `renderPlaceList` (line 764).
   Nothing else; no rectangle moves (tests/crewcheck.browser.mjs section 10).
-- `css/design.css` - one commented block straight after the day check's (lines 806-822), inside `@media screen`.
+- `css/design.css` - one commented block straight after the day check's (lines 806-829), inside `@media screen`;
+  fix round 1 adds `.crewcheck-whole` and `.crewcheck-number` to it (no size, so nothing to restate).
 - `css/large.css` - block 3, its three sizes restated one for one straight after the day check's (lines 710-712).
 - `tests/crewcheck.test.mjs` (new, `test:crewcheck`, appended to `npm test`) and `tests/crewcheck.browser.mjs`
   (new, `test:crewcheck-browser`, appended to `test:all`).
@@ -52,7 +144,8 @@ One line each:
 - `package.json`, `tests/README.md` - the two scripts and the two rows.
 - `features/crewcheck/contract.md` - the contract.
 
-No expectation of an existing suite was moved.
+No expectation of a suite this track did not write was moved; the pins fix round 1 moved in its own suites and in
+its own two entries of tests/screens.mjs are listed under "Fix round 1".
 
 
 ## Commits (oldest first)
@@ -66,21 +159,30 @@ No expectation of an existing suite was moved.
 - `4d503a7` tests/crewcheck.browser.mjs: each timed trial on its own baseline; a gap the page did not see as asked is void and undone
 - `e92928a` tests/crewcheck.browser.mjs: nothing leaves the phone from the dialog - no door but its names and «סגור», and not on paper
 - `b73550f` tests/crewcheck.browser.mjs: the worker form's own once-a-session probe named, the doors held against the disk it leaves
+- `68c7ab7` features/crewcheck/handoff.md: what was built, what every suite said on b73550f, and what is left
+- `12c8b4b` «בדיקת הצוות», fix round 1: words true of every man named, one number per field, numbers never broken, namesakes told apart, every control held after a door
+- `fcd830b` tests/crewcheck.browser.mjs: the cleared-rate man is an existing one, so the slow-tap trials keep their switches
+- `d54fad5` «בדיקת הצוות»: a slow second touch at the chip's own place is held wherever it lands (taken out again by the next)
+- `69fc168` «בדיקת הצוות»: the same-place hold of d54fad5 taken out; the suite's first touch lands on the chip
+- this file's commit
 
-Every commit after `0a500ec` changes the tests and their wiring only (tests/, package.json, tests/README.md):
-`js/ui/crewcheck.js` and every other file the app serves are as `0a500ec` left them.
+Of the build round's, every commit after `0a500ec` changes the tests and their wiring only. Of fix round 1's,
+`12c8b4b` changes the app (js/ui/crewcheck.js, css/design.css) with its suites; `d54fad5` changed
+js/ui/crewcheck.js and `69fc168` put it back, so the app's bytes at `69fc168` are `12c8b4b`'s exactly
+(`git diff 12c8b4b 69fc168 -- js css index.html sw.js` is empty); `fcd830b` and `69fc168` otherwise change
+tests/crewcheck.browser.mjs and tests/README.md only.
 
 ## The rules, and where each one is read from
 
 | line | tier | exactly when | read from |
 |---|---|---|---|
-| `noRate` | כדאי לבדוק | `(Number(dailyRate) \|\| 0) <= 0` on an active man ('' / 0 / '0' / no field / negative / an hourly rate alone) | the roster as `js/state.js` normalises it |
-| `badPhone` | כדאי לבדוק | a digit typed (`/[0-9٠-٩۰-۹]/`), `sederWaNumber(phone) === ''`, and not another country's as typed | `sederWaNumber` (js/ui/seder.js) |
+| `noRate` | כדאי לבדוק | `(Number(dailyRate) \|\| 0) <= 0` on an active man ('' / 0 / '0' / no field / negative / an hourly rate alone); since fix round 1 in two sentences by `priced`, his recorded days whose stamp carries a daily rate - none: «ימי העבודה שלו…», some: «ימי עבודה שיירשמו לו מעכשיו…» | the roster as `js/state.js` normalises it; `ratesForDay` (money.js) for `priced` |
+| `badPhone` | כדאי לבדוק | a digit typed (`/[0-9٠-٩۰-۹]/`), `sederWaNumber(phone) === ''`, and not another country's as typed - two numbers in one field among them, whichever is first (fix round 1) | `sederWaNumber` (js/ui/seder.js) |
 | `sharedPhone` | כדאי לבדוק | two or more active men on one non-empty `normalisePhone`; a group whose every number opens regrouped by `sederWaNumber`, sub-groups of two or more stand | `normalisePhone` (schema.js), `sederWaNumber` |
 | `sameName` | כדאי לבדוק | two or more active men with the same `name` string | `hasDuplicateName`'s comparison (roster.js) |
 | `idle` | כדאי לבדוק | his last day with a site before the first of the last 25 working days (on or before today) | `dayCheckHasSite`, `dayCheckIsWorkingDay` (daycheck.js) |
 | `idleSites` | כדאי לבדוק | the same for a site: the last day anybody had a site there, or Rima's or יוסף גבס's men were counted on it | `dayCheckHasSite`, `rimaCount`, `yosefGevesCount` (schema.js) |
-| `otherPhone` | לידיעה | a digit, the seder refuses it, and a typed `+` or `00` then a country that is neither 972 nor a 0 | the typed text |
+| `otherPhone` | לידיעה | a digit, the seder refuses it, and a typed `+` or `00` then a country that is neither 972 nor a 0 - and ONE number: no second `+`, at most 15 digits after the prefix (E.164; fix round 1) | the typed text |
 | `noPhone` | לידיעה | no digit typed at all, and he has a day of work that is not idle | as above |
 | `zeroStamped` | לידיעה | an active man's days with a site whose stamp has `daily <= 0` (`stamped: true`) | `ratesForDay` (money.js) - one fact, no figure |
 | `never` | לידיעה | an active man with no day of work at all (absences only included) | `dayCheckHasSite` |
@@ -121,30 +223,34 @@ shut, no byte moved) and the key list at :427. `crewCheckFocusEntry` is held by 
                                screen: no daily rate, a number that will not open, one number or one name on two
                                active rows, 25 working days with no work (men and sites); the rest under
                                «לידיעה», days stamped with no daily rate among them; each name one door that only
-                               navigates, the «פעיל» switches and the form's «שמור» held for 700 ms after it;
-                               writes nothing; every Hebrew word in one block (proposed)
+                               navigates, every control of the crew screen and of the form held for 700 ms
+                               after it; writes nothing; every Hebrew word in one block (proposed)
 
 **A release-entry paragraph** (for docs/releases.md, in its manner; the integrator's to adjust):
 
 > «בדיקת הצוות» (js/ui/crewcheck.js): ONE button at the foot of the crew screen, after the sites - where
 > nothing that was measured before it moves - and ONE dialog that reads the roster against the record:
-> under «כדאי לבדוק» a man with no daily rate, a number written as an Israeli one that will not open in
-> WhatsApp, one number or one name on two active rows, and men and sites with no work in the last 25
+> under «כדאי לבדוק» a man with no daily rate (in the words true of what his recorded days carry: none
+> priced, or priced at their stamp and only the days from now on not), a number written as an Israeli one
+> that will not open in WhatsApp or two numbers in one field, one number or one name on two active rows, and men and sites with no work in the last 25
 > working days (with the day of the last); under «לידיעה», never counted, another country's number, no
 > number for a man working these days, days stamped with no daily rate (iron law 2: nothing mends them),
 > and men and sites with no day of work at all. Each name or site only navigates - the man's form on the
-> field to mend, or his row or the site's row - and for DOUBLE_TAP_GUARD_MS after a door the «פעיל»
-> switches and the form's «שמור» are held (the house's guardFingersOn, on each press's own time). It writes
+> field to mend, or his row or the site's row - and for DOUBLE_TAP_GUARD_MS after a door every control of
+> the crew screen and of the form is held (the house's guardFingersOn, on each press's own time). A typed
+> number is never broken across lines, and two men with one name carry their number on every line. It writes
 > nothing: no record, no key, no preference. Every Hebrew word proposed and pinned (tests/crewcheck.test.mjs);
 > not tried on a real phone.
 
 **Interplay with wave 1 (`payday`)** - a fact about its doors, nothing of wave 1 changed: payday's c («…
 בלי שכר יומי, ולכן הסכום חסר אותם») and f («שעות נוספות בלי שכר שעה») both send the owner to «עובדים
 ואתרים». For c, the check names the man under `noRate` when his roster has no daily rate (the form's door
-mends it: every day recorded with no stamp, and every day from then on, is priced at the rate typed), and
-under `zeroStamped` with how many days when his days were stamped with no daily rate (an hourly-only man):
-those stay without an amount whatever is typed, so c will go on naming him for a period that holds them,
-and the check says why. For f the check says nothing: it reads no hourly rate, and an hourly rate typed in
+mends it: every day recorded with no stamp, and every day from then on, is priced at the rate typed; a man
+whose rate was cleared after days of his were stamped with it is told only of the days from now on - since
+fix round 1 - because c does not name him for the periods his stamped days alone fill), and under
+`zeroStamped` with how many days when his days were stamped with no daily rate (an hourly-only man): the
+account period that holds them stays without an accrued whatever is typed, so c will go on naming him for
+that period, and the check now says so in the sheet's own words. For f the check says nothing: it reads no hourly rate, and an hourly rate typed in
 the form prices only the extra hours recorded after it (the stamp carries the hourly rate too,
 money.js:76-83) - that is for payday's door to say. And `status`'s «שקט» (5 working days) and this check's
 idle site (25) read the same calendar and ask different questions; the release note can say both numbers.
@@ -159,18 +265,20 @@ idle site (25) read the same calendar and ask different questions; the release n
 | `clean` | ✓ לא נמצא בצוות דבר שכדאי לבדוק. |
 | `goForm` / `goRow` / `goSite` (read aloud) | עריכת הפרטים של ${name} / הצג את ${name} ברשימת העובדים / הצג את ${name} ברשימת האתרים |
 | `noRate` (1 / many) | בלי שכר יומי - ימי העבודה שלו לא יחושבו בשכר: / בלי שכר יומי - ימי העבודה שלהם לא יחושבו בשכר: |
+| `noRateFromNow` (1 / many; fix round 1) | בלי שכר יומי - ימי עבודה שיירשמו לו מעכשיו לא יחושבו בשכר: / בלי שכר יומי - ימי עבודה שיירשמו להם מעכשיו לא יחושבו בשכר: |
 | `badPhone` (1 / many) | אין מספר טלפון תקין - המספר שנרשם לו לא ייפתח בוואטסאפ: / אין מספר טלפון תקין - המספרים שנרשמו להם לא ייפתחו בוואטסאפ: |
 | `sharedPhone` | מספר משותף - ${number} רשום אצל ${count} עובדים פעילים: |
-| `sameName` | שם כפול - ${count} עובדים פעילים בשם ${name}: |
+| `sameName` | שם כפול - ${count} עובדים פעילים בשם ${name}, ממוספרים לפי הסדר ברשימת העובדים: (fix round 1) |
 | `idle` (1 / many) | לא עבד ב-25 ימי העבודה האחרונים (מאז ${since}), ועדיין פעיל: / לא עבדו ב-25 ימי העבודה האחרונים (מאז ${since}), ועדיין פעילים: |
 | `archiveIf` (+ the borrowed sentence, one line) | אם מכבים עובד בכפתור «פעיל»: הימים שכבר נרשמו יישמרו, והעובד לא יופיע ברשימה היומית. |
 | `idleSites` (1 / many) | אתר שלא נרשמה בו עבודה ב-25 ימי העבודה האחרונים (מאז ${since}), ועדיין פעיל: / אתרים שלא נרשמה בהם עבודה ב-25 ימי העבודה האחרונים (מאז ${since}), ועדיין פעילים: |
-| `otherPhone` (1 / many) | מספר שאינו נייד ישראלי - אי אפשר לפתוח לו הודעה בוואטסאפ: / מספרים שאינם ניידים ישראליים - אי אפשר לפתוח להם הודעה בוואטסאפ: |
+| `otherPhone` (1 / many; fix round 1) | מספר שאינו נייד ישראלי - האפליקציה לא תפתח לו הודעה בוואטסאפ: / מספרים שאינם ניידים ישראליים - האפליקציה לא תפתח להם הודעה בוואטסאפ: |
 | `noPhone` (1 / many) | בלי טלפון - אי אפשר לפתוח לו הודעה בוואטסאפ: / בלי טלפון - אי אפשר לפתוח להם הודעה בוואטסאפ: |
-| `zeroStamped` (1 / many) | ימים שנרשמו לו בלי שכר יומי יישארו בלי סכום גם אחרי שיוזן שכר: / ימים שנרשמו להם בלי שכר יומי יישארו בלי סכום גם אחרי שיוזן שכר: |
-| `never` (1 / many) | פעיל בלי אף יום עבודה רשום: / פעילים בלי אף יום עבודה רשום: |
+| `zeroStamped` (1 / many; fix round 1) | ימים שנרשמו לו בלי שכר יומי - בתקופת החשבון שלהם הנצבר לא יחושב, גם אחרי שיוזן שכר: / ימים שנרשמו להם בלי שכר יומי - בתקופת החשבון שלהם הנצבר לא יחושב, גם אחרי שיוזן שכר: |
+| `never` (1 / many; fix round 1) | עובד פעיל בלי אף יום עבודה רשום: / עובדים פעילים בלי אף יום עבודה רשום: |
 | `neverSites` (1 / many) | אתר פעיל בלי אף יום עבודה רשום: / אתרים פעילים בלי אף יום עבודה רשום: |
 | `chip`, `oneDay`, `days(n)` | ${name} · ${more} / יום אחד / ${n} ימים |
+| `twin` (fix round 1) | ${name} (${n}) - a namesake's place among the active men of his name, in the crew list's order, on every line he is on |
 
 BORROWED (`CREW_CHECK_REUSED`, each found in its owner by the suite): «כדאי לבדוק», «לידיעה», «הבדיקה רק מראה מה
 כדאי לבדוק. היא לא משנה ולא שומרת דבר.», «סגור» (read from `DAY_CHECK_TEXT`); «אין מספר טלפון תקין» (read from
@@ -192,13 +300,22 @@ BORROWED (`CREW_CHECK_REUSED`, each found in its owner by the suite): «כדאי
   «מה חדש»'s «הראה לי» (held by the browser suite; the integrator's WHATSNEW_GO line is above).
 - js/ui/roster.js has the contract's three lines and a comment above each pair; js/ui/modal.js has the
   one row and a comment above it (two lines).
+- FIX ROUND 1 departs from the contract's words where they were found untrue or incomplete, each said in
+  "Fix round 1" above: `noRate` is two sentences by what a man's recorded days carry (the contract's one sentence
+  was false of a man whose rate was cleared - its own 'with findings' fixture); `otherPhone` is one number of at
+  most 15 digits (the contract's prefix rule filed a dual-SIM field as foreign); `zeroStamped`, `otherPhone` and
+  `never` have new words; the «שם כפול» chips say «(n)» and a namesake carries it on every line; the line under the
+  title and every typed number are drawn as blocks that break whole; the hold after a door covers every control
+  of the crew screen and every button, fold and choice of the form, not the switches and «שמור» alone; and the
+  'with findings' entry of tests/screens.mjs sets w13's daily rate to 0 besides the contract's recipe.
 
-## The suites, one by one
+## The suites, one by one - fix round 1, on `12c8b4b`
 
 ### `npm test`, every suite of the chain run on its own (an `&&` chain stops at the first red, and two reds are expected on a track branch)
 
-107 of 109 green. The two red ones are the contract's expected pair and nothing else - the stamps, which the
-integrator moves:
+Run by `fix1/chain.sh` (in the scratchpad) on `12c8b4bb7afe8777f26b8353691c5b4fdea6ea7b`, the tree clean when it
+started; the one file changed while it ran was this one, which no suite reads. **107 of 109 green**, 1190 s in all.
+The two red ones are the contract's expected pair and nothing else - the stamps, which the integrator moves:
 
 ```
 test:build | exit 1 | 1s | 67/69 checks passed
@@ -206,9 +323,9 @@ test:gate-integrity | exit 1 | 0s | 19/20 checks passed
 ```
 
 ```
-  the stamps were moved by the commit that moved the bytes :: and nothing in the shell has changed since  — 6 changed since 6ab193d6: css/design.css, css/large.css, index.html, js/ui/crewcheck.js, js/ui/modal.js, js/ui/roster.js
-  the stamps were moved by the commit that moved the bytes :: and neither has the worker that names the shelf  — sw.js
-  (gate.integrity) the build stamps describe the bytes a phone would be handed :: no cached file has changed since the three stamps last moved  — 0a500ecf «בדיקת הצוות»: ...
+  FAIL  and nothing in the shell has changed since  — 6 changed since 6ab193d6: css/design.css, css/large.css, index.html, js/ui/crewcheck.js, js/ui/modal.js, js/ui/roster.js
+  FAIL  and neither has the worker that names the shelf  — sw.js
+  FAIL  no cached file has changed since the three stamps last moved  — 12c8b4bb «בדיקת הצוות», fix round 1: words true of every man named, o | 0a500ecf «בדיקת הצוות»: one button at the foot of the crew screen and
 ```
 
 Every line of the chain (suite | exit | seconds | last count):
@@ -218,24 +335,24 @@ test:isolation | exit 0 | 0s | 18/18 checks passed
 test:blobs | exit 0 | 1s | 11/11 checks passed
 test:build | exit 1 | 1s | 67/69 checks passed
 test:poison | exit 0 | 0s | 37/37 checks passed
-test:merge | exit 0 | 0s | 28/28 checks passed
-test:contested | exit 0 | 16s | 73/73 checks passed
-test:held | exit 0 | 3s | 83/83 checks passed
-test:snapshot-stale | exit 0 | 1s | 16/16 checks passed
-test:reports-rules | exit 0 | 2s | 26/26 checks passed
+test:merge | exit 0 | 1s | 28/28 checks passed
+test:contested | exit 0 | 15s | 73/73 checks passed
+test:held | exit 0 | 4s | 83/83 checks passed
+test:snapshot-stale | exit 0 | 2s | 16/16 checks passed
+test:reports-rules | exit 0 | 1s | 26/26 checks passed
 test:finance | exit 0 | 6s | 57/57 checks passed
 test:weekly-range | exit 0 | 0s | 21/21 checks passed
 test:finance-wording | exit 0 | 2s | 12/12 checks passed
 test:weekly-unpriced | exit 0 | 0s | 23/23 checks passed
-test:receipt | exit 0 | 1s | 28/28 checks passed
+test:receipt | exit 0 | 2s | 28/28 checks passed
 test:data | exit 0 | 43s | 1970/1970 checks passed
 test:recovery | exit 0 | 1s | 82/82 checks passed
 test:adversarial | exit 0 | 5s | 116/116 checks passed
 test:probes | exit 0 | 7s | 35/35 checks passed
-test:capacity | exit 0 | 13s | 48/48 checks passed
+test:capacity | exit 0 | 10s | 48/48 checks passed
 test:concurrency | exit 0 | 3s | 46/46 checks passed
 test:exports | exit 0 | 1s | 112/112 checks passed
-test:fence | exit 0 | 3s | 35/35 checks passed
+test:fence | exit 0 | 2s | 35/35 checks passed
 test:fence-ingress | exit 0 | 0s | 43/43 checks passed
 test:fence-legacy | exit 0 | 1s | 21/21 checks passed
 test:money-history | exit 0 | 0s | 9/9 checks passed
@@ -244,140 +361,161 @@ test:money-cloud | exit 0 | 2s | 17/17 checks passed
 test:money-display | exit 0 | 0s | 4/4 checks passed
 test:snapshot-poison | exit 0 | 2s | 82/82 checks passed
 test:samefact | exit 0 | 5s | 37/37 checks passed
-test:wording | exit 0 | 1s | 37/37 checks passed
-test:closure | exit 0 | 25s | 122/122 checks passed
+test:wording | exit 0 | 0s | 37/37 checks passed
+test:closure | exit 0 | 18s | 122/122 checks passed
 test:closure-echo | exit 0 | 1s | 79/79 checks passed
 test:correction | exit 0 | 1s | 33/33 checks passed
-test:quarantine | exit 0 | 2s | 82/82 checks passed
-test:approval | exit 0 | 8s | 72/72 checks passed
-test:repayment | exit 0 | 5s | 240/240 checks passed
+test:quarantine | exit 0 | 1s | 82/82 checks passed
+test:approval | exit 0 | 6s | 72/72 checks passed
+test:repayment | exit 0 | 4s | 240/240 checks passed
 test:ledger-ingress | exit 0 | 1s | 167/167 checks passed
 test:cas | exit 0 | 12s | 88/88 checks passed
-test:status | exit 0 | 7s | 37/37 checks passed
+test:status | exit 0 | 6s | 37/37 checks passed
 test:money | exit 0 | 2s | 40/40 checks passed
 test:money-ingress | exit 0 | 10s | 206/206 checks passed
 test:method | exit 0 | 3s | 51/51 checks passed
 test:restore | exit 0 | 0s | 51/51 checks passed
 test:upgrade | exit 0 | 2s | 48/48 checks passed
 test:vehicles | exit 0 | 2s | 86/86 checks passed
-test:xlsx | exit 0 | 2s | 104/104 checks passed
-test:nonassertions | exit 0 | 0s | 23/23 checks passed
-test:labels | exit 0 | 1s | 23/23 checks passed
+test:xlsx | exit 0 | 1s | 104/104 checks passed
+test:nonassertions | exit 0 | 1s | 23/23 checks passed
+test:labels | exit 0 | 0s | 23/23 checks passed
 test:labelcache | exit 0 | 0s | 32/32 checks passed
 test:restore-ledger | exit 0 | 2s | 26/26 checks passed
-test:roster-upgrade | exit 0 | 6s | 55/55 checks passed
+test:roster-upgrade | exit 0 | 7s | 55/55 checks passed
 test:roster-race | exit 0 | 6s | 63/63 checks passed
 test:exports-proof | exit 0 | 2s | 92/92 checks passed
-test:ledger-truth | exit 0 | 7s | 148/148 checks passed
+test:ledger-truth | exit 0 | 4s | 148/148 checks passed
 test:races | exit 0 | 5s | 109/109 checks passed
-test:overlap-restore | exit 0 | 20s | 117/117 checks passed
-test:refute-roster | exit 0 | 10s | 24/24 checks passed
+test:overlap-restore | exit 0 | 21s | 117/117 checks passed
+test:refute-roster | exit 0 | 9s | 24/24 checks passed
 test:refute-restore | exit 0 | 43s | 25/25 checks passed
 test:gate-integrity | exit 1 | 0s | 19/20 checks passed
-test:queuecost | exit 0 | 7s | 18/18 checks passed
+test:queuecost | exit 0 | 5s | 18/18 checks passed
 test:paycycle | exit 0 | 0s | 43/43 checks passed
-test:paycycle-blockers | exit 0 | 2s | 17/17 checks passed
+test:paycycle-blockers | exit 0 | 3s | 17/17 checks passed
 test:paycycle-completion | exit 0 | 5s | 31/31 checks passed
 test:crew-controls | exit 0 | 1s | 46/46 checks passed
-test:simple-advances | exit 0 | 1s | 66/66 checks passed
-test:worker-deletion | exit 0 | 11s | 86/86 checks passed
-test:calendar | exit 0 | 0s | 58/58 checks passed
+test:simple-advances | exit 0 | 2s | 66/66 checks passed
+test:worker-deletion | exit 0 | 10s | 86/86 checks passed
+test:calendar | exit 0 | 1s | 58/58 checks passed
 test:reminders | exit 0 | 0s | 48/48 checks passed
 test:move-late | exit 0 | 5s | 48/48 checks passed
 test:codex-probes | exit 0 | 1s | 17/17 checks passed
 test:codex2-probes | exit 0 | 1s | 36/36 checks passed
 test:codex3-probes | exit 0 | 3s | 59/59 checks passed
-test:rima | exit 0 | 94s | 496/496 checks passed
-test:yosefgeves | exit 0 | 96s | 562/562 checks passed
-test:seder | exit 0 | 0s | 135/135 checks passed
+test:rima | exit 0 | 92s | 496/496 checks passed
+test:yosefgeves | exit 0 | 92s | 562/562 checks passed
+test:seder | exit 0 | 1s | 135/135 checks passed
 test:bars-stale | exit 0 | 0s | 60/60 checks passed
-test:transport | exit 0 | 2s | 566/566 checks passed
-test:transport-share | exit 0 | 14s | 304/304 checks passed
-test:oracle | exit 0 | 82s | 121/121 checks passed
-test:overpayment | exit 0 | 8s | 105/105 checks passed
+test:transport | exit 0 | 1s | 566/566 checks passed
+test:transport-share | exit 0 | 12s | 304/304 checks passed
+test:oracle | exit 0 | 39s | 121/121 checks passed
+test:overpayment | exit 0 | 5s | 105/105 checks passed
 test:polish | exit 0 | 0s | 73/73 checks passed
-test:daycheck | exit 0 | 8s | 169/169 checks passed
-test:journey | exit 0 | 2s | 233/233 checks passed
-test:workercard | exit 0 | 30s | 180/180 checks passed
-test:monthsummary | exit 0 | 118s | 98/98 checks passed
-test:payslips | exit 0 | 40s | 202/202 checks passed
-test:find | exit 0 | 1s | 91/91 checks passed
+test:daycheck | exit 0 | 6s | 169/169 checks passed
+test:journey | exit 0 | 0s | 233/233 checks passed
+test:workercard | exit 0 | 21s | 180/180 checks passed
+test:monthsummary | exit 0 | 70s | 98/98 checks passed
+test:payslips | exit 0 | 23s | 202/202 checks passed
+test:find | exit 0 | 0s | 91/91 checks passed
 test:whatsnew | exit 0 | 0s | 160/160 checks passed
-test:account-view | exit 0 | 22s | 456/456 checks passed
+test:account-view | exit 0 | 17s | 456/456 checks passed
 test:usual | exit 0 | 1s | 150/150 checks passed
 test:sitecard | exit 0 | 3s | 119/119 checks passed
-test:reportsclarity | exit 0 | 4s | 1119/1119 checks passed
-test:largetext | exit 0 | 0s | 107/107 checks passed
-test:reportnames | exit 0 | 11s | 36/36 checks passed
-test:holiday | exit 0 | 0s | 109/109 checks passed
-test:undo-stale | exit 0 | 2s | 32/32 checks passed
+test:reportsclarity | exit 0 | 2s | 1119/1119 checks passed
+test:largetext | exit 0 | 1s | 107/107 checks passed
+test:reportnames | exit 0 | 9s | 36/36 checks passed
+test:holiday | exit 0 | 1s | 109/109 checks passed
+test:undo-stale | exit 0 | 1s | 32/32 checks passed
 test:auditfix | exit 0 | 2s | 34/34 checks passed
-test:owes | exit 0 | 66s | 190/190 checks passed
-test:weeklyclose | exit 0 | 119s | 146/146 checks passed
-test:reports-speed | exit 0 | 218s | 159/159 checks passed
-test:closeorder | exit 0 | 1s | 22/22 checks passed
+test:owes | exit 0 | 59s | 190/190 checks passed
+test:weeklyclose | exit 0 | 104s | 146/146 checks passed
+test:reports-speed | exit 0 | 167s | 159/159 checks passed
+test:closeorder | exit 0 | 0s | 22/22 checks passed
 test:closuresize | exit 0 | 11s | 13/13 checks passed
 test:closerace | exit 0 | 39s | 29/29 checks passed
-test:advancereset | exit 0 | 47s | 77/77 checks passed
-test:overpaidfix | exit 0 | 0s | 85/85 checks passed
-test:xlsxlook | exit 0 | 9s | 293/293 checks passed
-test:closereminder | exit 0 | 14s | 107/107 checks passed
-test:crewcheck | exit 0 | 24s | 148/148 checks passed
-```
-
-Re-run on `b73550f` exactly:
-
-```
-tests/crewcheck.test.mjs | 148/148 checks passed
-tests/build.test.mjs | 67/69 checks passed
-tests/isolation.test.mjs | 18/18 checks passed
-tests/nonassertions.test.mjs | 23/23 checks passed
-tests/gate.integrity.test.mjs | 19/20 checks passed
-tests/daycheck.test.mjs | 169/169 checks passed
-tests/seder.test.mjs | 135/135 checks passed
-tests/find.test.mjs | 91/91 checks passed
-tests/reportnames.test.mjs | 36/36 checks passed
-tests/largetext.test.mjs | 107/107 checks passed
+test:advancereset | exit 0 | 45s | 77/77 checks passed
+test:overpaidfix | exit 0 | 1s | 85/85 checks passed
+test:xlsxlook | exit 0 | 8s | 293/293 checks passed
+test:closereminder | exit 0 | 12s | 107/107 checks passed
+test:crewcheck | exit 0 | 21s | 175/175 checks passed
 ```
 
 ### Browser suites, each through the slot wrapper
 
-```
-tests/crewcheck.browser.mjs | exit 0 | 421/421 checks passed     (on b73550f)
-largetext.browser.mjs | exit 0 | 3123s | 8335/8335 checks passed
-mobile.test.mjs | exit 0 | 433s | 1397/1397 checks passed
-design.browser.mjs | exit 0 | 12s | 72/72 checks passed
-smoke.mjs | exit 0 | 425s | 1186/1186 checks passed
-roster.browser.mjs | exit 0 | 5s | 42/42 checks passed
-polish.browser.mjs | exit 0 | 24s | 201/201 checks passed
-sitecard.browser.mjs | exit 0 | 20s | 135/135 checks passed
-workercard.browser.mjs | exit 0 | 15s | 116/116 checks passed
-daycheck.browser.mjs | exit 0 | 21s | 122/122 checks passed
-doubletap.browser.mjs | exit 0 | 551s | 359/359 checks passed
-scroll.browser.mjs | exit 0 | 156s | 604/604 checks passed
-```
+| suite | commit | result |
+|---|---|---|
+| tests/crewcheck.browser.mjs | `69fc168` | **544/544**, exit 0 (`fix1/browser-after.out`) |
+| tests/crewcheck.browser.mjs, the same file | a copy of `68c7ab7`'s app code | 510/544, exit 1 - every new check red, as it should be (`fix1/browser-before.out`) |
+| tests/largetext.browser.mjs | `12c8b4b` (the app's bytes of `69fc168`) | **8335/8335**, exit 0, both crew-check entries walked at every phone, scheme and mode (`fix1/largetext-browser.out`) |
 
-(the seconds include the wait for a slot; up to eighteen jobs of other tracks were queued for the two.)
-smoke's own check of the roster's last button now measures this one, and holds:
-`PASS  390x844: the last button on the roster clears the tab bar — {"dayBarShown":false,"clear":true,"reachable":true,"label":"בדיקת הצוות"}`.
-tests/largetext.browser.mjs walked both new screens.mjs entries at every phone, scheme and mode (8335/8335).
+The runs in between, kept for what they showed: on `fcd830b` the suite stopped in THE SLOW SECOND TAP
+(`fix1/browser-fcd830b.out`), and on `d54fad5` it named the fault «the screen is still the crew screen» - "week"
+(`fix1/browser-d54fad5.out`); the probe (`fix1/probe/hold-probe.out`) showed the suite's first touch pressing the
+dialog's sticky «סגור» over a chip pushed under it, and `69fc168` makes every trial find its chip under the finger.
 
-The end of tests/crewcheck.browser.mjs on `b73550f`:
+The end of tests/crewcheck.browser.mjs on `69fc168`:
 
 ```
-  (the gaps the page saw: row/350:346 row/350:337 row/350:329 site/350:337 site/350:348 form/350:343 form/350:344 row/500:485 row/500:493 row/500:489 site/500:492 site/500:489 form/500:485 form/500:492 row/650:642 row/650:637 row/650:642 site/650:627 site/650:640 form/650:649 form/650:642)
-  (one reading at 4x: median 8.8 ms, max 21.4 ms of 15)
-  (a tap to the dialog painted with its list, at 4x: 70 ms)
+  (the gaps the page saw: row/350:334 row/350:329 row/350:332 site/350:333 site/350:332 form/350:351 form/350:348 site/350:336 site/350:344 form/350:345 form/350:336 row/500:501 row/500:477 row/500:460 site/500:495 site/500:487 form/500:492 form/500:493 site/500:490 site/500:490 form/500:491 form/500:484 row/650:640 row/650:625 row/650:632 site/650:612 site/650:639 form/650:645 form/650:632 site/650:647 site/650:635 form/650:633 form/650:649)
+  (under the finger at the chip's own point: row/350: crew-cycle | site/350: roster-details site-details | form/350: field-label | row/500: crew-cycle | site/500: roster-details site-details | form/500: workerFormPhone | row/650: crew-cycle | site/650: roster-details site-details | form/650: workerFormPhone)
+  (one reading at 4x: median 13.2 ms, max 35.6 ms of 15)
+  (a tap to the dialog painted with its list, at 4x: 108 ms)
   PASS  no uncaught error
   PASS  no alert, confirm or prompt
 
-421/421 checks passed
+544/544 checks passed
 ```
 
-Its first run (on `840bddb`'s app bytes) was 414/416; both failures were the suite's and are fixed in
-`b73550f`, its message says how - one of them is a finding about the contract, below.
+What the before-run's reds were, one per line (the copy of `68c7ab7`'s app, the final suite):
 
-## The measured noise and cost, re-run on `b73550f` (printed by tests/crewcheck.test.mjs)
+```
+FAIL  the origin served this commit, byte for byte  — 71 assets; index.html: not tracked | css/app.css: not tracked | css/readability.css: not tracked
+FAIL  every kind, in the order the contract gives them - «בלי שכר יומי» twice, as what the men's days carry tells them apart  — ["noRate","badPhone","sharedPhone","sameName","idle","idleSites","otherP
+FAIL  «בלי שכר יומי»: the men none of whose days is priced, then the man whose days at 470 still are - told of the days from now on  — [["בלי שכר יומי - ימי העבודה שלהם לא יחושבו בשכר:",["דוגמה בלי שכ
+FAIL  site door, 350 ms, on «בדיקת הצוות», under the last site: nothing opened but what the door opened  — ["crewCheckModal"] !== []
+FAIL  site door, 350 ms, on its row's «כרטיס אתר»: nothing opened but what the door opened  — ["siteCardModal"] !== []
+FAIL  form door, 350 ms, on the fold «עוד פרטים» the number is in: the fold is still open, the number in it
+FAIL  form door, 350 ms, on the form's «ביטול»: nothing opened but what the door opened  — [] !== ["workerFormModal"]
+FAIL  site door, 500 ms, on «בדיקת הצוות», under the last site: nothing opened but what the door opened  — ["crewCheckModal"] !== []
+FAIL  site door, 500 ms, on its row's «כרטיס אתר»: nothing opened but what the door opened  — ["siteCardModal"] !== []
+FAIL  form door, 500 ms, on the fold «עוד פרטים» the number is in: the fold is still open, the number in it
+FAIL  form door, 500 ms, on the form's «ביטול»: nothing opened but what the door opened  — [] !== ["workerFormModal"]
+FAIL  site door, 650 ms, on «בדיקת הצוות», under the last site: nothing opened but what the door opened  — ["crewCheckModal"] !== []
+FAIL  site door, 650 ms, on its row's «כרטיס אתר»: nothing opened but what the door opened  — ["siteCardModal"] !== []
+FAIL  form door, 650 ms, on the fold «עוד פרטים» the number is in: the fold is still open, the number in it
+FAIL  form door, 650 ms, on the form's «ביטול»: nothing opened but what the door opened  — [] !== ["workerFormModal"]
+FAIL  320x568 dark: crew - «בדיקת הצוות», calm: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"context","lines":["עובדים פעילים:","14"]}] !== []
+FAIL  320x568 dark: crew - «בדיקת הצוות», with findings: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"number","lines":["03-","5551234"]},{"what":"number","lin
+FAIL  320x568 dark large: crew - «בדיקת הצוות», calm: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"context","lines":["עובדים","פעילים: 14"]}] !== []
+FAIL  320x568 dark large: crew - «בדיקת הצוות», with findings: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"number","lines":["+970 59-","123-4567"]},{"what":"
+FAIL  320x568 light: crew - «בדיקת הצוות», calm: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"context","lines":["עובדים פעילים:","14"]}] !== []
+FAIL  320x568 light: crew - «בדיקת הצוות», with findings: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"number","lines":["03-","5551234"]},{"what":"number","li
+FAIL  320x568 light large: crew - «בדיקת הצוות», calm: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"context","lines":["עובדים","פעילים: 14"]}] !== []
+FAIL  320x568 light large: crew - «בדיקת הצוות», with findings: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"number","lines":["+970 59-","123-4567"]},{"what":
+FAIL  375x667 dark: crew - «בדיקת הצוות», calm: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"context","lines":["אתרים","פעילים: 5"]}] !== []
+FAIL  375x667 dark: crew - «בדיקת הצוות», with findings: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"number","lines":["03-","5551234"]},{"what":"context","li
+FAIL  375x667 dark large: crew - «בדיקת הצוות», calm: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"context","lines":["עובדים פעילים:","14"]}] !== []
+FAIL  375x667 dark large: crew - «בדיקת הצוות», with findings: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"number","lines":["03-","5551234"]},{"what":"number
+FAIL  375x667 light: crew - «בדיקת הצוות», calm: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"context","lines":["אתרים","פעילים: 5"]}] !== []
+FAIL  375x667 light: crew - «בדיקת הצוות», with findings: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"number","lines":["03-","5551234"]},{"what":"context","l
+FAIL  375x667 light large: crew - «בדיקת הצוות», calm: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"context","lines":["עובדים פעילים:","14"]}] !== []
+FAIL  375x667 light large: crew - «בדיקת הצוות», with findings: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"number","lines":["03-","5551234"]},{"what":"numbe
+FAIL  440x956 dark large: crew - «בדיקת הצוות», with findings: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"number","lines":["03-","5551234"]}] !== []
+FAIL  440x956 light large: crew - «בדיקת הצוות», with findings: no typed number is broken across lines, and no «label: n» under the title  — [{"what":"number","lines":["03-","5551234"]}] !== []
+FAIL  and both sentences of «בלי שכר יומי» among them  — ["בלי שכר יומי - ימי העבודה שלהם לא יחושבו בשכר:"] !== ["בלי שכר יומי - ימי העבודה שלו לא יחושבו בשכר:","בלי שכר יומי - ימי עבודה שיירשמו לו מע
+```
+
+The other existing browser suites were not run again in fix round 1: none of them opens the crew check or
+presses its doors, and the app's bytes they would serve differ from `b73550f`'s only in js/ui/crewcheck.js and the
+two classes it alone uses (css/design.css). Their results on `b73550f` (the build round) were:
+smoke 1186/1186, mobile 1397/1397, design-browser 72/72, roster-browser 42/42, polish-browser 201/201,
+sitecard-browser 135/135, workercard-browser 116/116, daycheck-browser 122/122, doubletap-browser 359/359,
+scroll-browser 604/604.
+
+
+## The measured noise and cost, re-run on `12c8b4b` (printed by tests/crewcheck.test.mjs in the chain above)
 
 ```
   SKIP  «מה חדש» does not carry it yet: the integrator adds it with the stamps
@@ -386,16 +524,18 @@ Its first run (on `840bddb`'s app bytes) was 414/416; both failures were the sui
   (the whole record read instead, the app's reading: 1.46 an evening, of them back later 0.0% - by construction)
   (leavers: 40; last day 45+ calendar days before 20/09: 33, named 33, the first time after a median 31 and at most 42 calendar days; out of the window's reach 7, of them named anyway 2)
   (regulars: 208; named 17, each with a run of 25+ working days; never named 191, their longest run 24)
-  (the time-season record, 40 men x 277 day keys, 703 KiB: median 9.6 ms, max 12.9 ms of 25)
-  (60 men x 329 day keys, 1149 KiB: median 22.8 ms, max 36.0 ms of 15)
+  (the time-season record, 40 men x 277 day keys, 703 KiB: median 9.6 ms, max 10.5 ms of 25)
+  (60 men x 329 day keys, 1149 KiB: median 16.8 ms, max 42.3 ms of 15)
 ```
 
 The turnover model's figures are the contract's to the decimal (29.6%, 33 of 33 leavers within 42 days,
-17 of 208 regulars, 0.0% read whole). The day check's seasons are run with its own generator copied line for
+17 of 208 regulars, 0.0% read whole) - unmoved by fix round 1, which counts one more fact per day the pass already
+reads (`priced`) and changes no rule of who is named. The day check's seasons are run with its own generator copied line for
 line (seeds 11-55, both habits, Rima on Fridays or not: 20 seasons, 1,798 evenings) where the contract's probe
 had used a variant without the Friday switch (10 seasons, 898 evenings): 92.3% calm here against its 92.0%,
-the floor held at 85%. In Chromium at 4x CPU the reading of the time-season record is 8.8 ms (median of 15;
-budget 60) and a tap to the dialog painted with its list 70 ms (budget 300).
+the floor held at 85%. In Chromium at 4x CPU, on `69fc168`, the reading of the time-season record is 13.2 ms
+(median of 15, max 35.6; budget 60) and a tap to the dialog painted with its list 108 ms (budget 300) - the build
+round measured 8.8 ms and 70 ms on a quieter machine; both runs shared it with other tracks' browser suites.
 
 ## A finding against the contract's words (criterion 13), kept to its intent
 
@@ -409,7 +549,7 @@ the form opened once the app's own way moves exactly those keys and the record n
 it - six form doors, three row doors, two site doors, the search, a man gone, a double tap, the twenty-one slow
 taps - moves not one byte against the disk as that leaves it. `js/ui/crewcheck.js` writes nothing.
 
-## The conflict table, re-measured on the heads of 19:50
+## The conflict table (the build round's, at 19:50) and fix round 1's trial merges
 
 `git diff -U0 6ab193d <branch>` on the shared files, and `git merge-tree` of this branch with each:
 
@@ -427,12 +567,24 @@ taps - moves not one byte against the disk as that leaves it. `js/ui/crewcheck.j
 `feat-speed` (`a349c31`) touches none of the shared code files; it too conflicts only in package.json and
 tests/README.md. Every insertion line is the contract's, unchanged on these heads.
 
+Fix round 1 inserted no new line in a shared file outside this track's own blocks (css/design.css grows inside
+the crew check's block; tests/screens.mjs inside its own entry). `git merge-tree --write-tree 69fc168 <head>`, read
+only, on the heads of 2026-11-20 00:0x: feat-status `f4cf70b`, feat-payday `b95149a`, feat-yearsummary `9a4b8e7`,
+feat-speed `adb60aa`, feat-history `b54df95` - conflicted in package.json and tests/README.md only; feat-monthboard
+`ff3e9c6` and release-v205 `f9a432b` - in package.json only. No code file conflicts with any of them.
+
 ## Screenshots (synthetic names; JPEG; they assert nothing)
 
-`/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-crewcheck/`:
+Fix round 1, from the green run on `69fc168` (`CREWCHECK_SHOTS`), in
+`/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-crewcheck/fix1/shots/`:
+`dialog-with-findings-440-dark.jpg` (both «בלי שכר יומי» sentences, «03-5551234» whole, «וליד זועבי (1)» / «(2)»),
+`dialog-320-large-dark.jpg` (the line under the title breaking only at «·», the namesake's mark on «בלי שכר יומי»),
+`dialog-440-dark.jpg`, `crew-foot-440-dark.jpg`, `landed-row-440-dark.jpg`.
+
+The build round's, in `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-crewcheck/`:
 `crew-foot-440x956-dark.jpg`, `dialog-calm-440x956-dark.jpg`, `dialog-findings-440x956-dark.jpg`,
-`dialog-findings-end-440x956-dark.jpg`, and the same four `-320x568-large-dark.jpg` (with «תצוגה גדולה»).
-Made by `shots.mjs` beside them, on tests/screens.mjs's seed and its two entries.
+`dialog-findings-end-440x956-dark.jpg`, and the same four `-320x568-large-dark.jpg` (with «תצוגה גדולה»),
+made by `shots.mjs` beside them - they show the words as they were before fix round 1.
 
 ## NOT DONE
 
@@ -452,7 +604,11 @@ Made by `shots.mjs` beside them, on tests/screens.mjs's seed and its two entries
 - The form door focuses a field inside the user's tap, which is what raises the keys on iOS; Chromium cannot
   show whether Safari keeps that focus after a dialog is hidden in the same task.
 - The hold (`guardFingersOn` on `#rosterView` and `#workerFormModal`) is installed once, lazily, at the first
-  door, and stays for the page's life with nothing held outside 700 ms of a door. If another feature later
+  door, and stays for the page's life with nothing held outside 700 ms of a door. Since fix round 1 it holds every
+  control of the crew screen and every button, fold and choice of the form inside those 700 ms - a deliberate tap
+  that fast after a door is held too (the trays' window for "a control of another kind", the same 700 ms). A control
+  outside `#rosterView` and `#workerFormModal` - a banner that appears at the top of the screen at that moment - is
+  not held; on a phone nothing else can be under a chip the dialog shows (see `69fc168`). If another feature later
   calls `guardFingersOn` on either surface, `fingerGuarded` keeps the first install only - this one, or that
   one - and the second predicate is never asked. Today nothing else guards either surface (sheet.js guards
   the assign sheet and the two pickers only).
@@ -471,3 +627,9 @@ Made by `shots.mjs` beside them, on tests/screens.mjs's seed and its two entries
    site's door leads to that very question.
 5. A duplicate identity number - not checked.
 6. Days stamped with no daily rate - named under «לידיעה» for as long as the record holds them (for ever).
+7. (Fix round 1, the review's tenth finding - LEFT.) After a row or site door, the way back to «בדיקת הצוות» is a
+   scroll to the foot of the crew screen: 1.2-3.8 screens at 375x667, 2.4-7.0 at 320x568 with the large display, on
+   the 14-man seed - about three times that on a crew of forty. The contract allows nothing on the crew screen but
+   the one button at its foot (Out of scope; Entry and navigation), so nothing was changed. The review's two
+   options, for the owner or the integrator: a way back on the landed row while its mark stands (e.g. «חזרה לבדיקת
+   הצוות» in the 2.5 s mark), or a sentence in the dialog saying the button is at the end of the screen.
