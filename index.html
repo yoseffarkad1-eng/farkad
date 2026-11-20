@@ -847,6 +847,50 @@
     </div>
 </div>
 
+<!-- «מי עבד איפה»: which man (or everyone) worked where (or everywhere), over which range -
+     the days newest first, with the counts on top. Entered from the finder's door «איפה עבד».
+     A READING drawn and worded by js/ui/history.js: the three choices only change what is
+     read, a day only opens on the day screen, and the text leaves by the day message's own
+     two doors, inside the fold. The choices, the fold and its doors are in the frame (not in
+     the body) so a redraw under the dialog leaves the focus where it was; only the part under
+     the head scrolls, so «סגור» is always in reach. -->
+<div class="modal" id="historyModal">
+    <div class="modal-content history-content">
+        <div class="history-head">
+            <h3 id="historyTitle" tabindex="-1"></h3>
+            <button type="button" class="btn-secondary" id="historyClose" onclick="closeHistory()"></button>
+        </div>
+        <div id="historyScroll" class="history-scroll">
+            <div class="history-choose">
+                <label class="history-field" for="historyMan"><span id="historyManLabel"></span>
+                    <select id="historyMan" onchange="historyChoose('man')"></select></label>
+                <label class="history-field" for="historySite"><span id="historySiteLabel"></span>
+                    <select id="historySite" onchange="historyChoose('site')"></select></label>
+                <label class="history-field" for="historyRange"><span id="historyRangeLabel"></span>
+                    <select id="historyRange" onchange="historyChoose('range')"></select></label>
+                <div id="historyDates" class="history-dates" hidden>
+                    <label class="history-field" for="historyFrom"><span id="historyFromLabel"></span>
+                        <input type="date" id="historyFrom" onchange="historyChoose('dates')"></label>
+                    <label class="history-field" for="historyTo"><span id="historyToLabel"></span>
+                        <input type="date" id="historyTo" onchange="historyChoose('dates')"></label>
+                </div>
+                <strong id="historyRangeNow" class="history-now" role="status" aria-live="polite"></strong>
+            </div>
+            <div id="historyTotals" class="history-totals"></div>
+            <div class="history-fold">
+                <button type="button" class="btn-secondary" id="historyFoldLabel" aria-expanded="false" aria-controls="historyText" onclick="historyToggleText()"></button>
+                <div id="historyFoldBody" class="history-fold-body" hidden>
+                    <textarea id="historyText" rows="10" readonly></textarea>
+                    <button type="button" class="btn-success" id="historySend" onclick="historySend()"></button>
+                    <button type="button" class="btn-secondary" id="historyCopy" onclick="historyCopy()"></button>
+                    <span class="share-status" id="historyStatus" role="status" aria-live="polite"></span>
+                </div>
+            </div>
+            <div id="historyList" class="history-list"></div>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="shareModal">
     <div class="modal-content">
         <h3 id="shareTitle" tabindex="-1">הודעה לוואטסאפ</h3>
@@ -1300,6 +1344,11 @@
      words), monthsummary.js (three of its words) and share.js (the two doors). It runs
      nothing at load; roster.js asks for its entry by name, through typeof, per site row. -->
 <script src="js/ui/sitecard.js"></script>
+<!-- «מי עבד איפה». After everything it reads and calls - the model's readers, sitecolor.js,
+     reports.js's constants and countedIn, monthsummary.js's and sitecard.js's words, share.js's
+     two doors, ask.js and journey.js - and runs nothing at load. The finder below asks for its
+     door by name, through typeof, when it draws a man. -->
+<script src="js/ui/history.js"></script>
 <!-- «חיפוש עובד», the finder at the foot of the day. Runs nothing at load: it calls the
      card, the sheet and the advances screen - all above it - only when a door is pressed,
      and day.js asks for its entry by name when the day is drawn. -->

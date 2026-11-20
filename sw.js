@@ -111,6 +111,7 @@ const SHELL = [
     './js/ui/monthsummary.js',
     './js/ui/yearsummary.js',
     './js/ui/sitecard.js',
+    './js/ui/history.js',
     './js/ui/find.js',
     './js/ui/monthboard.js',
     './js/ui/owes.js',

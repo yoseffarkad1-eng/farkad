@@ -161,11 +161,13 @@ try {
             await page.locator('#findStatus').isVisible(), await page.locator('#findClear').isVisible()],
         [['w_01', 'w_02', 'w_03', 'w_04', 'w_05', 'w_06', 'w_07', 'w_08', 'w_09', 'w_10', 'w_11', 'w_12', 'w_13', 'w_14',
             'w_15', 'w_16'], ['עובדים כבויים (2)'], false, false]);
-    same('a man on the daily list has three doors by their words; a man turned off has two and the badge',
+    // MOVED: «מי עבד איפה» (js/ui/history.js) adds a fourth door, «איפה עבד», LAST on every man
+    // - so «מקדמות» keeps its place under the thumb (features/history/contract.md).
+    same('a man on the daily list has four doors by their words; a man turned off has three and the badge',
         await page.evaluate(() => ['w_01', 'w_15'].map(id => { const row = document.querySelector(`#findList [data-worker-id="${id}"]`);
             return [[...row.querySelectorAll('.find-door')].map(node => node.textContent),
                 [...row.querySelectorAll('.badge')].map(node => node.textContent)]; })),
-        [[['כרטיס עובד', 'שיבוץ להיום', 'מקדמות'], []], [['כרטיס עובד', 'מקדמות'], ['לא פעיל']]]);
+        [[['כרטיס עובד', 'שיבוץ להיום', 'מקדמות', 'איפה עבד'], []], [['כרטיס עובד', 'מקדמות', 'איפה עבד'], ['לא פעיל']]]);
 
     suite('results as it is typed');
     await page.keyboard.type('דוגמה ב');
@@ -248,18 +250,23 @@ try {
     await page.waitForTimeout(200);
     given('Enter on the way in opens it', await isOpen(page));
     const walked = [];
-    for (let step = 0; step < 4; step += 1) {
+    // MOVED: five presses, not four - the first man has four doors now («איפה עבד» last,
+    // js/ui/history.js), and the walk still has to END on the next man's first door to prove
+    // that Tab crosses from one man to the next (features/history/contract.md).
+    for (let step = 0; step < 5; step += 1) {
         await page.keyboard.press('Tab');
         walked.push(await page.evaluate(() => document.activeElement.textContent));
     }
-    same('Tab goes from the field down the first man\'s doors', walked, ['כרטיס עובד', 'שיבוץ להיום', 'מקדמות', 'כרטיס עובד']);
+    same('Tab goes from the field down the first man\'s doors', walked, ['כרטיס עובד', 'שיבוץ להיום', 'מקדמות', 'איפה עבד', 'כרטיס עובד']);
     await page.locator('#findInput').focus();
     await page.keyboard.press('Shift+Tab');
+    // MOVED: the last door of the dialog is «איפה עבד» now, the price of keeping «מקדמות» where
+    // the thumb knows it (features/history/contract.md).
     same('Shift+Tab from the field reaches «סגור», and once more comes round to the last door - never the page behind',
         [await page.evaluate(() => document.activeElement.id), await (async () => { await page.keyboard.press('Shift+Tab');
             return page.evaluate(() => [document.activeElement.textContent,
                 document.getElementById('findModal').contains(document.activeElement)]); })()],
-        ['findClose', ['מקדמות', true]]);
+        ['findClose', ['איפה עבד', true]]);
     await page.mouse.click(3, 420);
     await page.waitForTimeout(250);
     check('a tap on the backdrop closes it', !(await isOpen(page)));
