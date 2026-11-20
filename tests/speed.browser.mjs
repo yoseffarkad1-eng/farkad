@@ -146,6 +146,9 @@ async function measure(page, act, done = 'true', limit = 300000) {
         const began = performance.now();
         // eslint-disable-next-line no-new-func
         new Function(actCode)();
+        // The act's own synchronous call: a cheap draw can be done in under the 50 ms a task needs
+        // to be a long task at all, and then no long task is recorded for it (rows 12 and 14).
+        const sync = performance.now() - began;
         // eslint-disable-next-line no-new-func
         const isDone = new Function(`return (${doneCode})`);
         while (!isDone() && performance.now() < began + limitMs) await new Promise(resolve => setTimeout(resolve, 50));
@@ -156,7 +159,7 @@ async function measure(page, act, done = 'true', limit = 300000) {
         const disk = window.speedDiskAfterWrite;
         const moved = disk === null ? null : JSON.stringify(disk) !== JSON.stringify(window.speedDisk()
             .filter(([key]) => key !== 'farkadPayslipsProgress'));
-        return { longest: Math.max(0, ...tasks), tasks: tasks.length, total: performance.now() - began, finished, moved };
+        return { longest: Math.max(0, ...tasks), sync, tasks: tasks.length, total: performance.now() - began, finished, moved };
     }, [act, done, limit]);
 }
 const SNAPSHOT = "window.speedDiskAfterWrite = window.speedDisk().filter(([key]) => key !== 'farkadPayslipsProgress');";
@@ -171,6 +174,11 @@ function row(name, v204, mine, limit, saying) {
         mine.finished && (v204 === null || v204.finished) && mine.longest <= limit, `${ms(mine.longest)} > ${ms(limit)}`);
     [['this build', mine], ['v204', v204]].forEach(([who, one]) => { if (one && one.moved === true) written.push(`${name}: ${who}`); });
 }
+// For an act that may take under 50 ms: what it cost is its synchronous call, or the longest task
+// after it when that is longer. A long-task observer alone saw nothing of v204's man's page at a
+// load of 3 (0 ms on two men of three, the first run of row 12 on 3e2b867), and nothing of a
+// cheap letter typed into the search.
+const own = one => Object.assign({}, one, { longest: Math.max(one.longest, one.sync) });
 // Several timings of one act as one: the median task, finished only if every one finished, and
 // a disk moved if any of them moved it - so a median never hides a sample that wrote.
 function pooled(list) {
@@ -350,8 +358,8 @@ async function both(act, done, options = {}) {
         pages[tree] = times;
         await context.close();
     }
-    const [man204, manNow] = [pooled(pages.v204), pooled(pages.now)];
-    row('12. season-closed: a man\'s page of «מקדמות», opened from the board (the median of three men)', man204, manNow,
+    const [man204, manNow] = [pooled(pages.v204.map(own)), pooled(pages.now.map(own))];
+    row('12. season-closed: a man\'s page of «מקדמות», opened from the board (its own synchronous draw, the median of three men)', man204, manNow,
         man204.longest * 1.25 + 60, `<= 1.25x v204's + 60 ms (one copy of a 1 MB record at 4x; this build ${manNow.all.join(', ')} / v204 ${man204.all.join(', ')})`);
     same('12. the board\'s memo answered each man\'s page, nothing worked out anew', pages.kept.every(one => one.same && !one.grew), true);
     const closures = await both(`${SNAPSHOT} speedHold(); OWES_PAGE = 'closures'; render();`, 'true',
@@ -375,9 +383,10 @@ async function both(act, done, options = {}) {
         typed[`${tree}Cards`] = await page.evaluate(() => document.querySelectorAll('#advancesView .advance-worker-card').length);
         await context.close();
     }
-    row('14. season-open: the first letter typed into «מקדמות»\'s search', typed.v204[0], typed.now[0], typed.v204[0].longest / 4, '<= 1/4 of v204\'s');
-    const [letter204, letterNow] = [pooled(typed.v204), pooled(typed.now)];
-    row(`14. season-open: the median of ${LETTERS.length} letters`, letter204, letterNow, letter204.longest / 4,
+    row('14. season-open: the first letter typed into «מקדמות»\'s search (its own synchronous call)', own(typed.v204[0]), own(typed.now[0]),
+        own(typed.v204[0]).longest / 4, '<= 1/4 of v204\'s');
+    const [letter204, letterNow] = [pooled(typed.v204.map(own)), pooled(typed.now.map(own))];
+    row(`14. season-open: the median of ${LETTERS.length} letters (each its own synchronous call)`, letter204, letterNow, letter204.longest / 4,
         `<= 1/4 of v204's (this build ${letterNow.all.join(', ')} / v204 ${letter204.all.join(', ')})`);
     same('14. every letter answered by the board\'s memo, nothing worked out anew; the same men listed on both builds',
         [typed.kept.every(one => one.same && !one.grew), typed.nowCards], [true, typed.v204Cards]);
