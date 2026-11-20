@@ -1,6 +1,259 @@
-## v206 — «סיכום שנה», «לוח חודשי», «יום תשלום» and «תמונת מצב»: four readings the owner asked for on 2026-11-19, in one build, and two repairs to v205's update (candidate, not served)
+## v207 — «בדיקת הצוות», «מי עבד איפה» and «דוחות ומקדמות מהירים»: the second wave the owner asked for on 2026-11-19, in one build (candidate, not served)
 
-**NOT SERVED YET.** A candidate on v205 (main, 8b8f807). The release commit moves the three
+**AND THE OWNER'S MONEY PAIR OF 2026-11-20, folded into this build before its stamps (`feat-hourly50`,
+d21bdff, merged as a086541; `features/hourly50/contract.md` and `handoff.md`).** It TOUCHES
+`js/model/money.js` - `ratesForDay` and one constant beside it, nothing else in js/model and nothing
+in js/sync, js/state.js, js/store.js, js/recovery.js or the rules - WITH THE OWNER'S EXPLICIT
+APPROVAL of 2026-11-20 («موافق», after he saw Yosef's card before and after). Yosef's four extra
+hours read «לא נכללו בסכום» because his day was stamped while his hourly rate was 0; he asked for
+50 ₪ an extra hour for everybody, changeable. (1) A stamp whose hourly is 0 or missing is read as
+UNDECIDED for the hourly part only: the day is priced with the stamp's daily rate and the man's
+CURRENT hourly rate. Read-time only - no stamp is written, a stamped hourly above 0 and every stamped
+daily rate never move, and a CLOSED period reads its frozen figures unchanged (tests/hourly50.test.mjs
+H2). (2) «שכר שעה נוספת 50 ₪ לכולם», a button under the crew's workers list drawn only while some man
+has no hourly rate: askConfirm naming how many, then 50 for each such man (active and archived),
+nobody else, through `State.commitRoster` with the refused-commit undo; the new man's form opens at
+50. (3) «מחיקת השינוי האחרון» in the worker form takes back the LAST pay-cycle boundary, only while
+every closed period of his stays a period of his without it (Yosef's mistaken «מ-20/11 שבועי» - he is
+fortnightly from 13/11). (4) The cycle form makes no mess: choosing the cycle that already governs
+that Friday adds nothing, a real change is asked first in plain words naming the man, the Friday and
+the stub, «עכשיו:» says the cycle in force, and a date without a cycle gets a plain sentence.
+WHAT MOVED: on the owner's record, exactly the days stamped hourly 0 that carry extra hours, for a
+man whose card now has an hourly rate (Yosef: 1000 → 1200). No pinned figure of any existing suite
+moved - none of their fixtures has such a day; the second calculator (tests/oracle.mjs) was taught
+the same rule from its text and agrees on its 240 records, with a mutant that goes red. In v207's
+speed layer the kept reading is keyed by the record itself, so the 50 button makes the next reading
+the record's (H8); tests/speed.test.mjs section 11 now names js/model/money.js as the one approved
+model file (MOVED ON PURPOSE). One «מה חדש» item, proposed and pinned. Not tried on a real phone.
+
+**NOT SERVED YET.** A candidate on v206 (main, dd9432b). The release commit moves the three build
+stamps to v207 and adds its «מה חדש» entry at the top of WHATSNEW_BUILDS (proposed): three items,
+one per feature. The owner's request of 2026-11-19 ("real, serious, heavy features") was built in
+two waves; v206 was the first. The three tracks of the second were built at once from v204
+(6ab193d), each against a contract of its own (`features/<track>/contract.md`, revision 2), each
+reviewed adversarially and verified independently on its own branch («בדיקת הצוות» 11 findings,
+«מי עבד איפה» 16, «דוחות ומקדמות מהירים» 10; each confirmed and repaired, or left to the owner
+with a default), and merged onto v206 in this order: `feat-crewcheck` (f696c3b), `feat-history`
+(2171cfd), `feat-speed` (22d22b5). What each reads, every string it adds, every check and what ran
+where are in `features/<track>/handoff.md`.
+
+Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`,
+`firestore.rules` or `functions` (`git diff dd9432b..` names none of them). No key, field path,
+record shape or writer is added. Each of the three writes nothing to the record, the outbox, the
+cloud, a backup, a restore point or the rescue file, and no Store key of its own; the speed layer
+keeps what it worked out in memory only, and it dies with the page. Every new word is proposed and
+pinned; the owner has read none of them.
+
+**THE ROLLOUT.** No rule, and that is the rule for features that only read: none of the three writes
+a byte an older build would drop, refuse or rewrite, so a v206 phone and a v207 phone can be used
+side by side and nothing restored between the two builds loses anything. The one byte a door can
+cause is the journey's own place, `farkadSederJourney`, and only through the journey's own writers
+(«מי עבד איפה»'s day door asks v206's rule, part 4). A phone on v206 takes v207 by itself at its next
+fresh start (v205's rule).
+
+### 1. «בדיקת הצוות» (js/ui/crewcheck.js) - what is worth mending in the crew, from one button
+
+ONE button at the foot of the crew screen, after the sites - where nothing that was measured before
+it moves - and ONE dialog that reads the roster against the record. Under «כדאי לבדוק»: a man with
+no daily rate (in the words true of what his recorded days carry: none priced, or priced at their
+stamp and only the days from now on not), a number written as an Israeli one that will not open in
+WhatsApp or two numbers in one field, one number or one name on two active rows (namesakes carry
+their place in the crew list on every line), and men and sites with no work in the last 25 working
+days, with the day of the last. Under «לידיעה», never counted: another country's number, no number
+for a man working these days, days stamped with no daily rate (iron law 2: nothing mends them), and
+men and sites with no day of work at all. Each name or site only navigates - the man's form on the
+field to mend, or his row or the site's row - and for DOUBLE_TAP_GUARD_MS after a door every control
+of the crew screen and of the form is held (the house's guardFingersOn). A typed number is never
+broken across lines. It writes nothing: no record, no key, no preference. With fewer than 25 working
+days recorded it says so and names nobody idle.
+
+What changed in the app: `js/ui/crewcheck.js` (new); `index.html` (the host `#crewCheckFoot`, the
+frame `#crewCheckModal`, the script); `sw.js` (the shell); `js/ui/modal.js` (one closer);
+`js/ui/roster.js` (two typeof-guarded calls in `renderRoster`, and `data-place-id` on a site's row);
+one block of `css/design.css`, its three sizes restated in `css/large.css`.
+
+**What it does NOT cover.** Not tried on a real phone, and nobody far-sighted has looked at it - the
+slow second tap is held on Chromium's touch events, an iPhone's are not measured. A number shared
+with an ARCHIVED man is not named (the row's own «מספר משותף» still says it); a duplicate identity
+number is not checked. After a row or site door the way back to the check is a scroll to the foot
+of the crew screen (1.2-3.8 screens at 375x667 on the 14-man seed; more on a big crew) - nothing
+was added to the crew screen but the one button (open question 4). The hold covers the crew screen
+and the form only, not a banner that appears at the top at that moment. Under the hold a deliberate
+tap on a «פעיל» switch in those 700 ms is held too. A long-idle man is named whether he left or is
+on leave; the words never say he left. `tests/readability.audit.mjs` was not run on it.
+
+### 2. «מי עבד איפה» (js/ui/history.js) - who worked where, on any day of the record
+
+A man rings - "I worked on the 12th and it was a double" - or a client asks who was billed at a
+site in March. «חיפוש עובד», his name, «איפה עבד» (the fourth door, last, so «מקדמות» keeps its place
+under the thumb): his days over «3 החודשים האחרונים» (over his whole record, «מתחילת הרישום», when he
+has none there - a man who left), newest first, each as the day screen words it, with the counts on
+top. «עובד», «אתר» and «תקופה» change what is read («החודש», «חודש שעבר», «3 החודשים האחרונים»,
+«השנה», «מתחילת הרישום», «תאריכים אחרים»); «כל העובדים» with a site gives the site's billing - with
+Rima's lines, «עובדי יוסף גבס» apart and never in the text - and who worked there. Every count is
+the count an existing report makes of the same days (payrollReport's, invoiceByDate's,
+invoiceWithoutRima's, rimaReport's, yosefGevesReport's), pinned to it on seeded records. The list as
+text in a fold, by the day message's own two doors; a day opens its date on the day screen. A
+READING: no shekel, no gate, no ledger, no key written - the query lives in memory and is gone at a
+close. It reads the live record, so a day corrected after its close reads corrected (the payslip
+keeps what was paid). 200 days are drawn at a time, never past 600; a redraw builds again only what
+moved.
+
+What changed in the app: `js/ui/history.js` (new); `index.html` (the frame `#historyModal`, the
+script); `sw.js` (the shell); `js/app.js` (one line in `render()`); `js/ui/modal.js` (one closer);
+`js/ui/find.js` (the fourth door, its branch, the header); one block of `css/design.css`, restated in
+`css/large.css`.
+
+**What it does NOT cover.** Not tried on a real phone. The 8,000-character bound for a wa.me link
+is a guess, not tried against WhatsApp; on a season-sized record the dialog's own opening view does
+not fit it (one man's three months: 3,015 characters, 14,326 in a link), so where a phone has no
+share sheet the text is selected and the line says to copy it (open question 9). «העתק»'s own
+two-second clear (copyTextOut, every dialog's) can still wipe a refusal pressed within two seconds
+of a copy. The first glass at 375 and 320 holds the counts, not the first days (open question 10).
+A site a day names that the roster has not got is listed but cannot be chosen in «אתר». The fourth
+door costs the finder about half its rows with nothing typed (+56px a man at 375 and 440). What lost
+one tap under load in the track's browser suite was not found; the suite now tells a lost tap from
+a refused one. `tests/readability.audit.mjs` was not run on it.
+
+### 3. «דוחות ומקדמות מהירים» (js/ui/reports.js) - each man's walk worked out once
+
+On a season nobody closed, every reader of a man's account walked every period of his since his
+first advance, and every step of every walk folded and sorted the whole ledger again: v204 took 40 s
+in Node to draw «דוחות», 44 s in one task in Chromium at 4x, and two minutes for «תלוש לכל עובד» or
+the workbook. NO OUTPUT BYTE MOVES.
+
+S1: inside v196's one reading (reportReadOnce) the seven readers of a walk (ledgerEntries,
+foldLedger, advanceHistory, overpaidAdvances, advanceOutstanding, advanceWalk, advancePositionInto)
+answer each question once, for the reading's own record only; an append to a copy of its own
+forgets nothing, anything that can reach the record forgets everything. S2: «שים לב» read after
+paint (owesReadNow, js/ui/owes.js) and «איפוס מקדמות»'s result (one line of js/ui/advancereset.js)
+read the board inside a reading. S3: the answers are kept between readings (REPORT_SHARED_KEPT) under
+the record as text, today and the flags - not the write tick, so a send's receipts do not make the
+next redraw a first reading - and only for the same readers (REPORT_SHARED_DEPENDS). S4: each
+range's pay sheet kept with them and handed to a later reading as rows of its own - not the sheets
+the gate's own plan prices on a record nobody approved. A letter typed into «מקדמות»'s search and a
+figure typed into the closing box are read inside the reading as their pages are. No screen, node,
+string, key, field path, writer or CSS; no file added to the shell.
+
+Merged onto v206, the layer was reconciled with v206's readings (11dfa9e, 124a4b0): «יום תשלום»
+(paydayFacts), «תמונת מצב»'s money (statusMoneyFacts) and «סיכום שנה» (yearSummaryFacts) are three
+more ways in of the speed suites' criterion 8, held byte for byte against v206's served bytes
+(dd9432b, out of Git) - cold, again and after every kind of write; the base of tests/speed.seed.mjs
+is now dd9432b, not v204, so the comparison is exactly reports.js, owes.js and advancereset.js at
+dd9432b against this tree; «יום תשלום»'s row on «מקדמות» is counted as a later track's row
+(LATER_SCREENS); and the timed loops of tests/payday.test.mjs, tests/statusscreen.test.mjs and
+tests/yearsummary.test.mjs start cold (`REPORT_SHARED_KEPT = null`), as on v206.
+
+**What it does NOT cover.** The first reading after a change still walks every man's periods once (≈
+1 s in Node, seconds at 4x on a season nobody closed - an index in js/model is the next lever, the
+owner's to approve). ON A CREW THAT CLOSES ITS WEEKS - the owner's Thursday - the close reminder's
+reading after a pause is v204's time and «סגירת שבוע» opened from its line a little under it (the
+reminder 0.88 and 1.05 of v204's, «סגירת שבוע» 0.48 and 0.82, on season-closed and season-skipped at
+4x): after a write the reading is the model's walk of every man's last period, and the copies of the
+record a close is judged on are planned again at every reading, by rule. A reading that was already
+cheap pays one copy of the whole record as text, two when it works something out: a man's page of
+«מקדמות» opened from the board takes 67-82 ms at 4x on a 1 MB record where v204 takes 44-48. On a
+record nobody approved one draw keeps the plan's walks (26 MB held on season-closed with a man who
+owes and has no daily rate, against v204's 15). `closeAccountFor`'s own last look at the record is
+still bare. The commit, the boot and the gate's plan are untouched. Not tried on a real phone; the
+4x CPU throttle stands in for one.
+
+### 4. The merged tree: «מי עבד איפה»'s day door asks v206's journey rule
+
+v206's integration made every door to the day screen from another screen ask the journey's rule, so
+that no door carries «בניית סידור» to another day; `feat-history` was cut before it. Its day door
+(historyGoDay) now calls journeyLeaveFor(date) before it moves the date (49596de), and asks
+«לצאת מבניית הסידור?» only when the journey holds ANOTHER day at its first station (journeyHoldsDay,
+d6aaca0) - the journey's own day, or a later station, opens with the journey kept. No Hebrew moved.
+
+### «מה חדש»
+
+Three items, proposed, pinned word for word in tests/whatsnew.test.mjs; tests/whatsnew.browser.mjs
+counts v207 among the builds with news and presses each «הראה לי» by its own button:
+- «בדיקת הצוות» - «בסוף מסך הצוות: שכר יומי חסר, טלפון שלא נפתח בוואטסאפ, שם או מספר כפול, ועובד
+  או אתר בלי עבודה ב-25 ימי העבודה האחרונים.» - «צוות ← בדיקת הצוות (בסוף המסך)»; «הראה לי» opens
+  the crew screen and gives the button the keyboard one task later, without pressing it (the new
+  way `crewcheck`, crewCheckFocusEntry). The track's sentence was 154 characters and the block holds
+  every item to 120: it was shortened to 120 with the same findings and the same 25 days, and its pin
+  in tests/crewcheck.test.mjs moved with it.
+- «מי עבד איפה» - «מתי ואיפה עבד עובד, ומי עבד באתר, בכל תקופה - עם הספירה ושליחה כטקסט, ולחיצה על
+  יום פותחת אותו.» - «היום ← חיפוש עובד ← איפה עבד»; «הראה לי» opens the finder (`find`), not the
+  dialog. The track's two sentences were joined into one (the block's rule).
+- «הדוחות והמקדמות נפתחים מהר יותר» - «עמוד הדוחות, עמוד המקדמות, כרטיס העובד והתלושים נפתחים מהר
+  יותר גם כשיש הרבה עובדים ומקדמות, והמספרים עצמם לא השתנו.» - «דוחות ← לפי עובד, וגם מקדמות»;
+  «הראה לי» opens «דוחות» on «לפי עובד» (`payReport`). It promises nothing about «סגירת שבוע» or the
+  close reminder, which are not made much faster (part 3).
+None of them opens a reading or presses the door it shows (a check in tests/whatsnew.test.mjs reads
+the code for openCrewCheck and openHistory).
+
+### Open questions, each with the default built
+
+«בדיקת הצוות»:
+1. The threshold - 25 working days (at least 29 calendar days). 18 names more men who come back;
+   40 names a man who left only after about seven weeks.
+2. «בלי טלפון» under «לידיעה» on a crew that keeps no numbers - shown.
+3. A number shared with an archived man, and a duplicate identity number - not checked.
+4. The way back to the check after a row or site door - a scroll to the foot of the crew screen; the
+   review's options (a «חזרה לבדיקת הצוות» on the landed row's mark, or a sentence in the dialog) are
+   for the owner.
+5. PRE-EXISTING, not changed: archiving a SITE asks with the button «כבה עובד» (togglePlaceActive),
+   and the idle site's door leads to that very question.
+6. Days stamped with no daily rate - named under «לידיעה» for as long as the record holds them.
+
+«מי עבד איפה»:
+7. Is the text, which names men, something he sends a client? Default: his to send.
+8. Is «3 החודשים האחרונים» the right first range, and «מי עבד איפה» / «איפה עבד» his words? Default:
+   yes; a man with no day in it opens on «מתחילת הרישום». A day corrected after its close is not
+   marked. The finder keeps the fourth door at the price of half its rows with nothing typed.
+9. With no share sheet, is «העתק» enough for a long list? Default: the 8,000-character link bound,
+   unmeasured.
+10. What should the first glass hold on the small phones? Default: the counts first, the days below.
+
+«דוחות ומקדמות מהירים»:
+11. Whether to make the owner's Thursday faster by keeping the copies' plans per (record, man)
+    between readings - a change of the contract's rule and of js/model, for the owner to decide.
+    Default: not done.
+
+### NOT DONE, said
+
+- None of the three was tried on a real phone.
+- `npm run test:all`, `test:release` and the emulator suites were not run by the integrator (the
+  full gate is run afterwards, alone); the speed track's own browser suites other than its own were
+  last run on its branch.
+- `tests/readability.audit.mjs` (not a suite) was not run.
+- tests/README.md's opening count of suites is stale and no track updates it.
+- Two checks of suites that are not these tracks' can go red on a loaded machine and are green
+  alone: tests/owes.test.mjs's 1.5x factor and tests/scroll.browser.mjs's «no console error» in its
+  step 14; and tests/payslips.test.mjs's «nothing a man is paid is in it» fails whenever the wall
+  clock's milliseconds contain 800 (`Date.now()` in the stored marks) - an existing suite's
+  pattern, not changed.
+
+### Tests
+
+- New, in `npm test`: `tests/crewcheck.test.mjs`, `tests/history.test.mjs`, `tests/speed.test.mjs`;
+  in `test:all`: `tests/crewcheck.browser.mjs`, `tests/history.browser.mjs`,
+  `tests/speed.season.test.mjs`, `tests/speed.browser.mjs`; the helper `tests/speed.seed.mjs`.
+  `tests/screens.mjs` gains the crew's check twice and «מי עבד איפה» four ways, so
+  tests/largetext.browser.mjs walks them.
+- Moved, each deliberately and said where it is moved:
+  - tests/find.browser.mjs: the finder's doors are four, «איפה עבד» last (three pins).
+  - tests/journey.test.mjs: the doors found gain js/ui/history.js (49596de).
+  - tests/owes.test.mjs: each of the two timed draws starts with nothing kept (REPORT_SHARED_KEPT).
+  - tests/payday.test.mjs, tests/statusscreen.test.mjs, tests/yearsummary.test.mjs: the timed loops
+    start cold (11dfa9e).
+  - tests/speed.seed.mjs and tests/speed.test.mjs: the base is v206 (dd9432b), three more ways in,
+    js/ui/payday.js a later screen, js/ui/roster.js the one other file that differs (11dfa9e);
+    tests/speed.browser.mjs holds the base's origin to the base's own shell (124a4b0).
+  - tests/gate.integrity.test.mjs: `speed.seed.mjs` among the helpers.
+  - tests/crewcheck.test.mjs: the «מה חדש» item shortened to 120 characters (the release commit).
+  - tests/whatsnew.*: the v207 entry, the way `crewcheck` and where it lands, v207 among the builds
+    with news (the release commit).
+
+**Not tried on a real phone.**
+
+## v206 — «סיכום שנה», «לוח חודשי», «יום תשלום» and «תמונת מצב»: four readings the owner asked for on 2026-11-19, in one build, and two repairs to v205's update (served 2026-11-20)
+
+**SERVED on 2026-11-20** (main dd9432b, PR #87, which merged the release commit b23d510; the gates' results on its tree are not recorded here - they were not read from this machine). The note below was written as a candidate on v205 (main, 8b8f807). The release commit moves the three
 build stamps to v206; its «מה חדש» entry was written ahead of them, in the integration commit
 (a9cdb92), and is at the top of WHATSNEW_BUILDS (proposed): four items, one per feature. The owner
 asked on 2026-11-19 (in Arabic) for "real, serious, heavy features that lift the app several

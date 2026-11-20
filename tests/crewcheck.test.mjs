@@ -1306,9 +1306,12 @@ suite('5. names, numbers and dates, and what the words never say');
 // THE «מה חדש» ITEM, handed to the integrator (it goes into WHATSNEW_BUILDS in the commit that
 // moves the build stamps - js/ui/whatsnew.js is not this track's). Pinned here word for word,
 // held to the facts it states, and - once whatsnew.js carries it - held to that copy.
+// MOVED ON PURPOSE (v207's stamp commit): the track's sentence was 154 characters, and
+// tests/whatsnew.test.mjs holds every item to 120 - shortened to 120 with the same five findings
+// and the same 25 working days.
 const NEWS = Object.freeze({
     title: 'בדיקת הצוות',
-    text: 'בסוף מסך הצוות: מה כדאי לסדר בעובדים ובאתרים - שכר יומי חסר, טלפון שלא ייפתח בוואטסאפ, שם או מספר כפול, ועובדים ואתרים בלי עבודה ב-25 ימי העבודה האחרונים.',
+    text: 'בסוף מסך הצוות: שכר יומי חסר, טלפון שלא נפתח בוואטסאפ, שם או מספר כפול, ועובד או אתר בלי עבודה ב-25 ימי העבודה האחרונים.',
     where: 'צוות ← בדיקת הצוות (בסוף המסך)',
     go: 'crewcheck'
 });
