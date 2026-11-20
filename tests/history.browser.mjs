@@ -333,8 +333,11 @@ try {
                     await shot(page, `finder-${width}x${height}-without-door`);
                     await page.evaluate(() => { window.openHistory = window.__openHistory; renderFind(); });
                 }
-                // A tap opens it.
-                await page.locator('#findList [data-worker-id="w02"] [data-find-door="history"]').tap();
+                // A tap opens it - read as every way in is (tapOpens): a tap that opened nothing fails a check
+                // here, and the cell is still measured, where it threw at the tiles below and ended the run.
+                await tapOpens(page, '#findList [data-worker-id="w02"] [data-find-door="history"]',
+                    "document.getElementById('historyModal').style.display === 'flex'", `${tag}: «איפה עבד» on w02 - the dialog`,
+                    [id => findGo('history', id), 'w02'], check);
                 await pause(page, 400);
                 same(`${tag}: a tap shuts the finder and opens the dialog on him, every site, «3 החודשים האחרונים», entered at its title`,
                     await page.evaluate(() => [document.getElementById('findModal').style.display, document.getElementById('historyModal').style.display,
