@@ -50,21 +50,30 @@ process.env.TZ = 'Asia/Jerusalem';
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const source = file => readFileSync(join(ROOT, file), 'utf8');
 
-// v204, the build this track is measured against: origin/main when it was cut.
-export const BASE = '6ab193d68c960e4a56d947673c282b867acd258f';
+// The build this track is measured against. On its branch it was v204 (6ab193d, origin/main
+// when it was cut). MOVED ON PURPOSE in v207's integration: the merged tree is measured against
+// the SERVED v206 (dd9432b, origin/main when v207 was cut), so that the comparison is the
+// speed layer and nothing else - v206's owes.js (payday's row), workercard.js, monthsummary.js,
+// closereminder.js and backup.js are on the base side as they are served. Where a label below
+// says "v204" or "6ab193d", read "the base": this commit.
+export const BASE = 'dd9432b3d1b7b868ff82409a246c02bcf5c56935';
 // The only files of the app this track changes.
 export const CHANGED = ['js/ui/reports.js', 'js/ui/owes.js', 'js/ui/advancereset.js'];
 // The screens a phone in Node is given, beside the harness's data layer: everything that
 // opens the pay sheet's one reading, and what those readings call.
 export const SCREENS = ['js/ui/sitecolor.js', 'js/ui/reports.js', 'js/ui/workercard.js', 'js/ui/seder.js', 'js/ui/payslips.js',
     'js/ui/monthsummary.js', 'js/ui/owes.js', 'js/ui/daycheck.js', 'js/ui/weeklyclose.js', 'js/ui/closereminder.js',
-    'js/ui/advancereset.js', 'js/ui/undo.js'];
+    'js/ui/advancereset.js', 'js/ui/undo.js',
+    // v207's integration: the v206 readings that open the same one reading - «סיכום שנה» and
+    // «תמונת מצב»'s money (criterion 8's ways in, below) - this tree's file on both sides.
+    'js/ui/yearsummary.js', 'js/ui/status.js'];
 // THE FILES OF TRACKS MERGED AFTER THIS ONE that draw on a page compared here with v204, loaded
 // on BOTH sides from this tree (6ab193d has none of them, and its own owes.js never calls
 // them). EMPTY on this branch. The integrator puts 'js/ui/payday.js' here when wave 1 is
 // merged: its row on «מקדמות» is then taken out of the comparison by LATER_ROWS below, and
 // counted.
-export const LATER_SCREENS = [];
+// v207's integration: payday's file, as the line above asks.
+export const LATER_SCREENS = ['js/ui/payday.js'];
 
 export const TODAY = '2026-11-19';
 // The seven readers of a man's walk S1 answers once (js/ui/reports.js), and v196's three.
@@ -507,7 +516,11 @@ export const BOOK_WAYS = [
     ['«איפוס מקדמות»\'s reading', 'return JSON.stringify(advanceResetRead(State.schedule, todayStr()));'],
     // (fix round 1) «מקדמות» drawn and a letter typed into its search: every man listed is his
     // advances read again, at every letter.
-    ['«מקדמות», a letter typed into its search', 'return speedSearch("1");']
+    ['«מקדמות», a letter typed into its search', 'return speedSearch("1");'],
+    // v207's integration (criterion 8): v206's readings of money, each inside the one reading.
+    ['«יום תשלום»', `return JSON.stringify(paydayFacts(todayStr(), '${AT}'));`],
+    ['«תמונת מצב»\'s money', 'OWES_KEPT = null; return JSON.stringify(statusMoneyFacts());'],
+    ['«סיכום שנה»', `return JSON.stringify(yearSummaryFacts(${Number(TODAY.slice(0, 4))}));`]
 ];
 export const BOOK_MAN_WAYS = [
     ['his page of «מקדמות»', id => `return speedAdvances(${JSON.stringify(id)});`],

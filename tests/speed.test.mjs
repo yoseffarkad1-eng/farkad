@@ -198,7 +198,10 @@ const READINGS = [
     let weekly = true;
     try { git(['diff', '--quiet', BASE, '--', 'js/ui/weeklyclose.js']); } catch (error) { weekly = false; }
     check('js/ui/weeklyclose.js is 6ab193d\'s', weekly);
-    same('every other file a phone here loads is 6ab193d\'s bytes, so the v204 side IS v204', baseDiffers(), []);
+    // MOVED ON PURPOSE (v207's integration): measured against the served v206 (BASE), the one
+    // file a phone here loads that the merged tree brought is js/ui/roster.js - crewcheck's
+    // foot button and a site row's data-place-id, no figure; named, so that any other is red.
+    same('every other file a phone here loads is the base\'s bytes but crewcheck\'s roster.js, so the base side IS v206', baseDiffers(), ['js/ui/roster.js']);
 
     const reset = git(['diff', '-U0', BASE, '--', 'js/ui/advancereset.js']).split('\n').filter(line => /^[-+][^-+]/.test(line));
     same('js/ui/advancereset.js differs from 6ab193d\'s in exactly one line', [reset.length, reset[0] && reset[0][0], reset[1] && reset[1][0]], [2, '-', '+']);
