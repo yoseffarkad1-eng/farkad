@@ -20,9 +20,9 @@
 //   17. THE DAY SCREEN. A write on Thursday, the close reminder's reading after its quiet -
 //       exactly once (a spy on weeklyCloseRead) - its line up, its count a fresh count's, and
 //       «סגירת שבוע» opened by pressing that line on the unmoved record. On season-closed and
-//       season-skipped, where the line shows (fix round 1: on season-open «סגירת שבוע» holds
-//       every man and the count is 0 on both builds, so there is no line to press - those rows
-//       stay, as clocks of the reading where it is heaviest).
+//       season-skipped, where the line shows, three fresh pages of each build (fix round 1: on
+//       season-open «סגירת שבוע» holds every man and the count is 0 on both builds, so there is no
+//       line to press - those rows stay, as clocks of the reading where it is heaviest).
 //   18. NOTHING WRITTEN by any reading (tests/census.mjs), and no uncaught error.
 //
 // (fix round 1) Where a row is a reading of a record that did not move, the suite also reads
@@ -171,6 +171,13 @@ function row(name, v204, mine, limit, saying) {
         mine.finished && (v204 === null || v204.finished) && mine.longest <= limit, `${ms(mine.longest)} > ${ms(limit)}`);
     [['this build', mine], ['v204', v204]].forEach(([who, one]) => { if (one && one.moved === true) written.push(`${name}: ${who}`); });
 }
+// Several timings of one act as one: the median task, finished only if every one finished, and
+// a disk moved if any of them moved it - so a median never hides a sample that wrote.
+function pooled(list) {
+    const middle = list.slice().sort((a, b) => a.longest - b.longest)[Math.floor(list.length / 2)];
+    return { longest: middle.longest, finished: list.every(one => one.finished),
+        moved: list.some(one => one.moved === true) ? true : middle.moved, all: list.map(one => Math.round(one.longest)) };
+}
 async function both(act, done, options = {}) {
     const out = {};
     for (const tree of options.only ? [options.only] : ['v204', 'now']) {
@@ -246,39 +253,50 @@ async function both(act, done, options = {}) {
     // their empty week is closed first on a copy). The line is up there; it is pressed. Neither
     // reading is a fraction of v204's: after a write the reading is the model's walk of every
     // man's last period, and the copies of the record are planned again at every reading - so
-    // these rows hold "never slower" and print the fraction (features/speed/handoff.md).
+    // these rows hold "never slower" and print the fraction (features/speed/handoff.md). The two
+    // builds are about level here, so one page of each is a coin toss against any ceiling: the
+    // first run of these rows, at load 10, put season-skipped's reading at 1.28x on one page each
+    // (the review's six pages each: 1.00). So each is THREE fresh pages of each build, alternating
+    // v204 / this build, every page's line, count and press checked, and the medians held.
+    const PAGES = 3;
     for (const kind of ['closed', 'skipped']) {
-        const day = await both(`speedWrite(); ${SNAPSHOT}`, QUIET, { record: SEASON[kind], reminder: true, before: spy, keep: true });
-        row(`5. season-${kind}: a write on Thursday, then the close reminder's reading after its quiet`, day.v204, day.now,
-            day.v204.longest * 1.25 + 30, `<= 1.25x v204's + 30 ms (${(day.now.longest / day.v204.longest).toFixed(2)} of it)`);
-        const press = {};
-        for (const tree of ['v204', 'now']) {
-            const { page, cdp } = day[`${tree}Page`];
-            await page.waitForTimeout(2500);
-            const said = await page.evaluate(() => ({ reads: window.speedReads, kept: CLOSE_REMINDER_KEPT.count,
-                line: Boolean(document.getElementById('closeReminderOpen') && document.getElementById('closeReminderOpen').offsetParent),
-                words: (document.getElementById('closeReminderLine') || {}).textContent || '' }));
-            same(`17. season-${kind}, ${tree}: the reminder read the record exactly once after the write`, said.reads, 1);
-            check(`17. season-${kind}, ${tree}: its line is up, counting ${said.kept} men («${said.words}»)`, said.line === true && said.kept > 0);
-            press[tree] = await measure(page, `${SNAPSHOT} ${tree === 'now' ? 'speedHold();' : ''} document.getElementById('closeReminderOpen').click();`, DIALOG);
-            const dialog = await page.evaluate(() => ({ up: document.getElementById('weeklyCloseModal').style.display === 'flex',
-                men: WEEKLY_CLOSE && WEEKLY_CLOSE.read ? WEEKLY_CLOSE.read.men.filter(man => !man.held).length : -1 }));
-            check(`17. season-${kind}, ${tree}: pressing the line opened «סגירת שבוע», offering ${dialog.men} men`, dialog.up && dialog.men > 0);
-            if (tree === 'now') press.kept = await page.evaluate(() => window.speedKept());
-            await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
-            const fresh = await page.evaluate(() => {
-                if (typeof REPORT_SHARED_KEPT !== 'undefined') REPORT_SHARED_KEPT = null;
-                return closeReminderReadCount(State.schedule, todayStr(), new Date().toISOString());
-            });
-            same(`17. season-${kind}, ${tree}: the line's count (${said.kept}) is a fresh count's`, said.kept, fresh);
-            press[`${tree}Count`] = said.kept;
+        const reading = { v204: [], now: [] };
+        const press = { v204: [], now: [] };
+        const counted = { v204: [], now: [] };
+        const answered = [];
+        for (let round = 1; round <= PAGES; round += 1) {
+            const day = await both(`speedWrite(); ${SNAPSHOT}`, QUIET, { record: SEASON[kind], reminder: true, before: spy, keep: true });
+            for (const tree of ['v204', 'now']) {
+                reading[tree].push(day[tree]);
+                const { page, cdp } = day[`${tree}Page`];
+                await page.waitForTimeout(2500);
+                const said = await page.evaluate(() => ({ reads: window.speedReads, kept: CLOSE_REMINDER_KEPT.count,
+                    line: Boolean(document.getElementById('closeReminderOpen') && document.getElementById('closeReminderOpen').offsetParent),
+                    words: (document.getElementById('closeReminderLine') || {}).textContent || '' }));
+                same(`17. season-${kind}, ${tree}, page ${round}: the reminder read the record exactly once after the write`, said.reads, 1);
+                check(`17. season-${kind}, ${tree}, page ${round}: its line is up, counting ${said.kept} men («${said.words}»)`, said.line === true && said.kept > 0);
+                press[tree].push(await measure(page, `${SNAPSHOT} ${tree === 'now' ? 'speedHold();' : ''} document.getElementById('closeReminderOpen').click();`, DIALOG));
+                const dialog = await page.evaluate(() => ({ up: document.getElementById('weeklyCloseModal').style.display === 'flex',
+                    men: WEEKLY_CLOSE && WEEKLY_CLOSE.read ? WEEKLY_CLOSE.read.men.filter(man => !man.held).length : -1 }));
+                check(`17. season-${kind}, ${tree}, page ${round}: pressing the line opened «סגירת שבוע», offering ${dialog.men} men`, dialog.up && dialog.men > 0);
+                if (tree === 'now') answered.push(await page.evaluate(() => window.speedKept()));
+                await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+                const fresh = await page.evaluate(() => {
+                    if (typeof REPORT_SHARED_KEPT !== 'undefined') REPORT_SHARED_KEPT = null;
+                    return closeReminderReadCount(State.schedule, todayStr(), new Date().toISOString());
+                });
+                same(`17. season-${kind}, ${tree}, page ${round}: the line's count (${said.kept}) is a fresh count's`, said.kept, fresh);
+                counted[tree].push(said.kept);
+                await day[`${tree}Page`].context.close();
+            }
         }
-        same(`17. season-${kind}: both builds count the same men`, press.nowCount, press.v204Count);
-        row(`6. season-${kind}: then «סגירת שבוע» opened from the reminder's line, the record unmoved`, press.v204, press.now,
-            press.v204.longest * 1.25 + 30, `<= 1.25x v204's + 30 ms (${(press.now.longest / press.v204.longest).toFixed(2)} of it)`);
-        same(`6. season-${kind}: the memo the reminder's reading kept answered the dialog`, press.kept.same, true);
-        await day.v204Page.context.close();
-        await day.nowPage.context.close();
+        same(`17. season-${kind}: both builds count the same men, on every page`, counted.now, counted.v204);
+        const [read204, readNow, press204, pressNow] = [pooled(reading.v204), pooled(reading.now), pooled(press.v204), pooled(press.now)];
+        row(`5. season-${kind}: a write on Thursday, then the close reminder's reading after its quiet (the median of ${PAGES} pages each)`, read204, readNow,
+            read204.longest * 1.25 + 30, `<= 1.25x v204's + 30 ms (${(readNow.longest / read204.longest).toFixed(2)} of it; this build ${readNow.all.join(', ')} / v204 ${read204.all.join(', ')})`);
+        row(`6. season-${kind}: then «סגירת שבוע» opened from the reminder's line, the record unmoved (the median of ${PAGES} pages each)`, press204, pressNow,
+            press204.longest * 1.25 + 30, `<= 1.25x v204's + 30 ms (${(pressNow.longest / press204.longest).toFixed(2)} of it; this build ${pressNow.all.join(', ')} / v204 ${press204.all.join(', ')})`);
+        same(`6. season-${kind}: the memo the reminder's reading kept answered the dialog, on every page`, answered.map(one => one.same), answered.map(() => true));
     }
 
     // 7, 8. the closing box of a weekly man; the card of a fortnightly one.
@@ -317,7 +335,6 @@ async function both(act, done, options = {}) {
     // was two, and the copies were most of a man's page: 39 ms on v204, 119 here). Cheap on v204
     // already, so they are held to never being slower than v204 by more than that one copy.
     const BOARD = async () => { showView('advances'); await window.speedSettle(); };
-    const middle = list => list.slice().sort((a, b) => a.longest - b.longest)[Math.floor(list.length / 2)];
     // Three men a page, each opened from the list and the list drawn again after him - the median
     // of the three (one page of each build: a single tap of a few tens of ms is noise).
     const pages = {};
@@ -333,8 +350,9 @@ async function both(act, done, options = {}) {
         pages[tree] = times;
         await context.close();
     }
-    row('12. season-closed: a man\'s page of «מקדמות», opened from the board (the median of three men)', middle(pages.v204), middle(pages.now),
-        middle(pages.v204).longest * 1.25 + 60, '<= 1.25x v204\'s + 60 ms (one copy of a 1 MB record at 4x)');
+    const [man204, manNow] = [pooled(pages.v204), pooled(pages.now)];
+    row('12. season-closed: a man\'s page of «מקדמות», opened from the board (the median of three men)', man204, manNow,
+        man204.longest * 1.25 + 60, `<= 1.25x v204's + 60 ms (one copy of a 1 MB record at 4x; this build ${manNow.all.join(', ')} / v204 ${man204.all.join(', ')})`);
     same('12. the board\'s memo answered each man\'s page, nothing worked out anew', pages.kept.every(one => one.same && !one.grew), true);
     const closures = await both(`${SNAPSHOT} speedHold(); OWES_PAGE = 'closures'; render();`, 'true',
         { record: SEASON.closed, before: BOARD, after: page => page.evaluate(() => window.speedKept()) });
@@ -358,7 +376,9 @@ async function both(act, done, options = {}) {
         await context.close();
     }
     row('14. season-open: the first letter typed into «מקדמות»\'s search', typed.v204[0], typed.now[0], typed.v204[0].longest / 4, '<= 1/4 of v204\'s');
-    row(`14. season-open: the median of ${LETTERS.length} letters`, middle(typed.v204), middle(typed.now), middle(typed.v204).longest / 4, '<= 1/4 of v204\'s');
+    const [letter204, letterNow] = [pooled(typed.v204), pooled(typed.now)];
+    row(`14. season-open: the median of ${LETTERS.length} letters`, letter204, letterNow, letter204.longest / 4,
+        `<= 1/4 of v204's (this build ${letterNow.all.join(', ')} / v204 ${letter204.all.join(', ')})`);
     same('14. every letter answered by the board\'s memo, nothing worked out anew; the same men listed on both builds',
         [typed.kept.every(one => one.same && !one.grew), typed.nowCards], [true, typed.v204Cards]);
 
