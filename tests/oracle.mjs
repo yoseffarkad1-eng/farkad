@@ -283,7 +283,8 @@ function datesIn(record, from, to) {
 //
 // AND IRON LAW 2: the rate is the one STAMPED on the day (`rates: { daily, hourly }`),
 // surviving every later edit. The roster's rate is read only for a day that carries no
-// stamp - a day recorded before stamping existed.
+// stamp - a day recorded before stamping existed - and, since 2026-11-20, for the hourly
+// half of a stamp that says 0.
 //
 // An absence is not a day of work and not a deduction. A record with no site on it
 // (`{ entries: [] }`) is a placeholder, not a day.
@@ -306,7 +307,11 @@ export function dayOf(record, worker, date) {
 
     const stamped = Boolean(held.rates);
     const daily = agorot(stamped ? held.rates.daily : worker.dailyRate);
-    const hourly = agorot(stamped ? held.rates.hourly : worker.hourlyRate);
+    // The owner's ruling of 2026-11-20: an hourly rate of 0 on a stamp is a rate nobody
+    // decided, so the man's hourly rate on the roster prices those hours; a stamped hourly
+    // rate above 0 is never replaced, and the daily half of a stamp never is.
+    const stampedHourly = stamped ? agorot(held.rates.hourly) : 0;
+    const hourly = stamped && stampedHourly > 0 ? stampedHourly : agorot(worker.hourlyRate);
     const units = doubled ? 2 : 1;
 
     return {

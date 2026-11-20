@@ -29,6 +29,7 @@ function renderRoster() {
     renderWorkerList();
     renderPlaceList();
     renderVehicleList();
+    renderHourlyFill();
     // The backup, the restore points and the version live on הגדרות וכלים now - see
     // js/ui/settings.js. This screen is about people and sites; it was also about files,
     // which on a phone meant scrolling past thirty men to reach the backup button.
@@ -1014,7 +1015,8 @@ function showAddWorkerModal() {
     document.getElementById('workerFormId').value = '';
     document.getElementById('workerFormPhone').value = '';
     document.getElementById('workerFormDaily').value = '';
-    document.getElementById('workerFormHourly').value = '';
+    // 50 ₪ an extra hour unless he types another (the owner, 2026-11-20).
+    document.getElementById('workerFormHourly').value = String(DEFAULT_HOURLY_RATE);
     document.getElementById('workerFormError').textContent = '';
     // A fresh form must not inherit a previous worker's unsaved cycle choice.
     document.getElementById('workerFormCycle').value = '';
@@ -1776,6 +1778,156 @@ function renderWorkerCycleHistory(worker) {
     box.textContent = 'רשום: ' + history
         .map(entry => `מ-${entry.from} ${PAY_CYCLE_NAMES[entry.cycle] || entry.cycle}`)
         .join(' · ');
+    // THE LAST CHANGE CAN BE TAKEN BACK (the owner, 2026-11-20). Every attempt at a cycle
+    // was appended, so a Friday typed by mistake stayed on his record for ever and cut a
+    // stub out of the fortnight he meant. Only the LAST boundary, and only while every
+    // period already closed for him is still one of his periods without it.
+    const undo = payCycleUndoOffer(worker);
+    if (undo) {
+        box.appendChild(document.createElement('br'));
+        box.appendChild(button(PAY_CYCLE_UNDO_TEXT.button(undo.last), 'btn-secondary pay-cycle-undo',
+            () => undoLastPayCycle(worker.id)));
+    }
+}
+
+// Every word of the undo, proposed (2026-11-20) and pinned in tests/hourly50.test.mjs.
+const PAY_CYCLE_UNDO_TEXT = {
+    button: last => `מחיקת השינוי האחרון (מ-${shortCycleDate(last.from)} ${PAY_CYCLE_NAMES[last.cycle] || last.cycle})`,
+    title: 'למחוק את שינוי מחזור התשלום האחרון?',
+    message: (name, last, after) => `${name}: השינוי מ-${shortCycleDate(last.from)} `
+        + `ל${PAY_CYCLE_NAMES[last.cycle] || last.cycle} יימחק. ${after} `
+        + 'תקופות שכבר נסגרו לא משתנות.',
+    afterFrom: (from, cycle) => `מ-${shortCycleDate(from)} יחושב ${cycle === 'weekly' ? 'כל שבוע' : 'כל שבועיים'}.`,
+    afterDefault: 'הוא יחושב כל שבועיים, כמו לפני כל שינוי.',
+    ok: 'מחק את השינוי',
+    refused: 'אי אפשר למחוק את השינוי הזה: כבר נסגרה לו תקופה שתלויה בו.',
+    failed: 'לא הצלחנו לשמור במכשיר. שום דבר לא נמחק - נסה שוב.'
+};
+
+function shortCycleDate(value) {
+    return typeof formatShortDate === 'function' ? formatShortDate(parseLocalDate(value)) : value;
+}
+
+// What removing his last boundary leaves, or null when it may not be removed: no history,
+// an unreadable one, or a closed period of his that would stop being one of his periods.
+function payCycleUndoOffer(worker) {
+    if (!worker || typeof payCycleHistory !== 'function') return null;
+    const history = payCycleHistory(worker);
+    if (!history || history.length === 0) return null;
+    // A history read from v113's legacy pair has no list to take an entry off.
+    if (parsePayCycles(worker.payCycles) === null || parsePayCycles(worker.payCycles).length === 0) return null;
+    const last = history[history.length - 1];
+    const rest = history.slice(0, -1);
+    const after = Object.assign({}, worker, { payCycles: formatPayCycles(rest) });
+    const closed = typeof closedPeriods === 'function'
+        ? (closedPeriods(State.schedule, worker.id) || {}) : {};
+    const stays = Object.keys(closed).every(from => {
+        const period = closed[from] || {};
+        const to = period.periodTo !== undefined
+            ? String(period.periodTo) : periodRangeFor(worker, from).to;
+        return isPeriodFor(after, from, to);
+    });
+    if (!stays) return null;
+    const governing = payCycleHistory(after);
+    const prev = governing && governing.length ? governing[governing.length - 1] : null;
+    return { last, rest, payCycles: after.payCycles, prev };
+}
+
+async function undoLastPayCycle(workerId) {
+    const worker = State.worker(workerId);
+    const offer = payCycleUndoOffer(worker);
+    if (!offer) {
+        await askTell({ title: PAY_CYCLE_UNDO_TEXT.title, message: PAY_CYCLE_UNDO_TEXT.refused });
+        return;
+    }
+    const after = offer.prev
+        ? PAY_CYCLE_UNDO_TEXT.afterFrom(offer.prev.from, offer.prev.cycle)
+        : PAY_CYCLE_UNDO_TEXT.afterDefault;
+    const go = await askConfirm({
+        title: PAY_CYCLE_UNDO_TEXT.title,
+        message: PAY_CYCLE_UNDO_TEXT.message(worker.name, offer.last, after),
+        ok: PAY_CYCLE_UNDO_TEXT.ok,
+        danger: true
+    });
+    if (!go) return;
+    // Asked again after the question: another phone may have closed a period meanwhile.
+    const now = State.worker(workerId);
+    const again = payCycleUndoOffer(now);
+    if (!again || again.payCycles !== offer.payCycles) {
+        await askTell({ title: PAY_CYCLE_UNDO_TEXT.title, message: PAY_CYCLE_UNDO_TEXT.refused });
+        return;
+    }
+    const before = now.payCycles;
+    now.payCycles = again.payCycles;
+    if (!State.commitRoster()) {
+        now.payCycles = before;
+        render();
+        await askTell({ title: PAY_CYCLE_UNDO_TEXT.title, message: PAY_CYCLE_UNDO_TEXT.failed });
+        return;
+    }
+    renderWorkerCycleHistory(now);
+    render();
+}
+
+// ---------------------------------------------------------------- the 50 ₪ extra hour
+
+// THE OWNER'S RATE FOR AN EXTRA HOUR (2026-11-20): 50 ₪ for everybody, changeable per man.
+const DEFAULT_HOURLY_RATE = 50;
+
+// Every word, proposed and pinned in tests/hourly50.test.mjs.
+const HOURLY_FILL_TEXT = {
+    line: n => n === 1 ? 'לעובד אחד אין שכר לשעה נוספת.' : `ל-${n} עובדים אין שכר לשעה נוספת.`,
+    button: `שכר שעה נוספת ${DEFAULT_HOURLY_RATE} ₪ לכולם`,
+    title: `שכר לשעה נוספת: ${DEFAULT_HOURLY_RATE} ₪`,
+    message: n => `לקבוע ${DEFAULT_HOURLY_RATE} ₪ לשעה נוספת ${n === 1 ? 'לעובד אחד' : 'ל-' + n + ' עובדים'} שאין להם שכר שעה? `
+        + 'מי שכבר יש לו שכר שעה נשאר כמו שהוא, ואפשר לשנות לכל עובד בפרטים שלו.',
+    ok: 'קבע לכולם',
+    done: n => `נקבע ${DEFAULT_HOURLY_RATE} ₪ לשעה נוספת ${n === 1 ? 'לעובד אחד' : 'ל-' + n + ' עובדים'}.`,
+    failed: 'לא הצלחנו לשמור במכשיר. שום דבר לא השתנה - נסה שוב.'
+};
+
+// The men with no rate for an extra hour, active and archived alike.
+function workersWithoutHourly(schedule) {
+    return ((schedule && schedule.workers) || [])
+        .filter(worker => worker && !((Number(worker.hourlyRate) || 0) > 0));
+}
+
+// The one row on the crew screen, drawn only while somebody still has no rate.
+function renderHourlyFill() {
+    const box = document.getElementById('hourlyFillRow');
+    if (!box) return;
+    clear(box);
+    const missing = workersWithoutHourly(State.schedule);
+    if (missing.length === 0) { box.hidden = true; return; }
+    box.hidden = false;
+    box.appendChild(el('p', 'hint', HOURLY_FILL_TEXT.line(missing.length)));
+    box.appendChild(button(HOURLY_FILL_TEXT.button, 'btn-secondary', fillHourlyRates));
+}
+
+async function fillHourlyRates() {
+    const asked = workersWithoutHourly(State.schedule).length;
+    if (asked === 0) { renderHourlyFill(); return; }
+    const go = await askConfirm({
+        title: HOURLY_FILL_TEXT.title,
+        message: HOURLY_FILL_TEXT.message(asked),
+        ok: HOURLY_FILL_TEXT.ok
+    });
+    if (!go) return;
+    // Read again after the question: a snapshot may have changed the crew meanwhile.
+    const men = workersWithoutHourly(State.schedule);
+    if (men.length === 0) { render(); return; }
+    const before = men.map(worker => [worker, worker.hourlyRate]);
+    men.forEach(worker => { worker.hourlyRate = DEFAULT_HOURLY_RATE; });
+    if (!State.commitRoster()) {
+        before.forEach(([worker, value]) => {
+            if (value === undefined) delete worker.hourlyRate; else worker.hourlyRate = value;
+        });
+        render();
+        await askTell({ title: HOURLY_FILL_TEXT.title, message: HOURLY_FILL_TEXT.failed });
+        return;
+    }
+    render();
+    await askTell({ title: HOURLY_FILL_TEXT.title, message: HOURLY_FILL_TEXT.done(men.length) });
 }
 
 const PAY_CYCLE_NAMES = { weekly: 'שבועי', biweekly: 'דו־שבועי' };

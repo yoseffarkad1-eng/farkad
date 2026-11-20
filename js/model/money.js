@@ -50,12 +50,31 @@ function currentRates(schedule, workerId) {
 // recorded before this carries no stamp and goes on behaving exactly as it did. Stamping
 // those retroactively would be inventing what somebody was paid, which is not a decision
 // this code is allowed to take - see planRateStamping.
+// The owner's ruling of 2026-11-20 as one line, so the suites can read the rule both ways
+// (tests/hourly50.test.mjs, the oracle's mutant). True: a stamp's hourly 0 is undecided.
+const HOURLY_ZERO_STAMP_UNDECIDED = true;
+
 function ratesForDay(schedule, date, workerId, worker) {
     const record = workerDay(schedule, date, workerId, 'actual');
     if (record && record.rates) {
+        // THE HOURLY HALF OF A STAMP THAT SAYS 0 IS A RATE NOBODY DECIDED (2026-11-20).
+        //
+        // A day is stamped with both rates at its first write. A man with a daily rate and
+        // no hourly one yet was stamped {daily, hourly: 0}, and his extra hours on that day
+        // could then never be priced: «לא נכללו בסכום» for ever, however the rate was set
+        // afterwards (the owner, with Yosef's four hours). currentRates already refuses to
+        // freeze "no rate" onto a day; this reads the hourly half by that same rule. A
+        // stamped DAILY rate is never the roster's, and a stamped hourly rate above 0 is
+        // never replaced - only a 0 is read as undecided. Nothing is written: the stamp
+        // stays as it is, and a closed period is read from its own frozen record
+        // (frozenPeriodFor) and never through here.
+        const stampedHourly = Number(record.rates.hourly) || 0;
+        const hourly = stampedHourly > 0 || !HOURLY_ZERO_STAMP_UNDECIDED
+            ? stampedHourly
+            : (Number((worker || {}).hourlyRate) || 0);
         return {
             daily: Number(record.rates.daily) || 0,
-            hourly: Number(record.rates.hourly) || 0,
+            hourly,
             stamped: true
         };
     }
