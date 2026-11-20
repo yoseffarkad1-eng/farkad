@@ -6,9 +6,66 @@
 | Worktree | `/home/user/farkad/.claude/worktrees/feat-crewcheck` (`node_modules` a symlink to `/home/user/farkad/node_modules`) |
 | Base | `6ab193d68c960e4a56d947673c282b867acd258f` (origin/main, stamps v204 - not moved) |
 | Fix round 1 | `12c8b4b` (the fix), `fcd830b`, `d54fad5` and `69fc168` (the browser suite, and a hold tried and taken back out - below) - the eleven findings of the review of `68c7ab7` triaged; ten fixed, each with a check that failed on `68c7ab7`'s app code and passes here; one left for the owner (below, "Fix round 1") |
-| The suites ran on | fix round 1's commits, the tree clean but for this file (which no suite reads): tests/crewcheck.browser.mjs **544/544 on `69fc168`**; the `npm test` chain suite by suite and tests/largetext.browser.mjs (8335/8335) on `12c8b4b`, whose app bytes `69fc168` carries exactly (`git diff 12c8b4b 69fc168 -- js css index.html sw.js` empty); the Node suites that read the test corpus or the changed files again on `69fc168`. Before-and-after runs of the new checks below. Logs in `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-crewcheck/fix1/` (`chain/`, `final/`, `browser-*.out`, `probe/`); the build round's in `feat-crewcheck/` beside it |
-| After it | this file's own commit, which changes this file and nothing else |
-| Contract | `features/crewcheck/contract.md` - revision 2, byte for byte the program's `crewcheck/contract.md` (re-read from disk in fix round 1: unchanged, md5 `20880f09a718e70afedcc4d7e49d28d5`, last written 17:35). Where fix round 1 departs from its words, the departure and its reason are below; the contract itself is the program's and is not edited here |
+| Fix round 2 | the verification of `6c1635d`: ONE finding, P1 «verification failures» - the three stamp-lag checks of tests/build.test.mjs and tests/gate.integrity.test.mjs that the contract's §Base expects, and nothing else red. CONFIRMED and LEFT: its one fix is a commit moving the three stamps, which the round's hard rules and the contract leave to the integrator. No byte of the app, of a suite or of the wiring changed - this file is the round's only change (below, "Fix round 2") |
+| The suites ran on | fix round 2: `6c1635d`, the tree clean when the runs began - the `npm test` chain suite by suite (**107 of 109 green**, 13,063 of 13,066 checks; the two red the stamp lag) and tests/crewcheck.browser.mjs **544/544** through the slot wrapper; and two stamp probes in throwaway clones, one on this branch and one with this branch merged onto `origin/main` `8b8f807` (v205). Logs in `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-crewcheck/fix2/`. The commit that carries this file changes nothing a suite reads or the app serves (every `features/` path a suite names is in a comment, and sw.js caches none), so these are the branch head's results. Fix round 1's runs, on its own commits, are under "Fix round 1"; its logs in `feat-crewcheck/fix1/`, the build round's in `feat-crewcheck/` |
+| After it | this file's own commit (fix round 2), which changes this file and nothing else |
+| Contract | `features/crewcheck/contract.md` - revision 2, byte for byte the program's `crewcheck/contract.md` (re-read from disk in fix rounds 1 and 2: unchanged, md5 `20880f09a718e70afedcc4d7e49d28d5`, last written 2026-11-19 17:35). Where fix round 1 departs from its words, the departure and its reason are below; the contract itself is the program's and is not edited here |
+
+## Fix round 2 - the verification of `6c1635d`
+
+The independent verifier ran the suites on `6c1635d` and reported ONE finding, P1 «verification failures»: three
+checks of two suites, all three the stamp lag, and no protected file touched (`protectedTouched: []`). Triaged in the
+manner of `.claude/skills/triage/SKILL.md`: both suites run again on this tree, and the code of each check read
+(tests/build.test.mjs:482-525 with its `shellMovedSince`, :474-479; tests/gate.integrity.test.mjs:262-334).
+
+| # | finding | sev. | verdict | outcome | the check |
+|---|---|---|---|---|---|
+| 1 | «verification failures» - tests/build.test.mjs «the stamps were moved by the commit that moved the bytes»: «and nothing in the shell has changed since» (6 files since `6ab193d6`: css/design.css, css/large.css, index.html, js/ui/crewcheck.js, js/ui/modal.js, js/ui/roster.js) and «and neither has the worker that names the shelf» (sw.js, its SHELL one line longer); tests/gate.integrity.test.mjs §4 «no cached file has changed since the three stamps last moved» (`0a500ec`, `12c8b4b`, `d54fad5`, `69fc168`) | P1 | CONFIRMED - reproduced on `6c1635d`, the tree clean: build **67/69**, gate-integrity **19/20**, exactly these three red (`fix2/build-head.out`, `fix2/gate-head.out`), and in the whole `npm test` chain nothing else (below). It is the contract's §Base "expected red on this branch, and only this" | LEFT - the integrator's stamp commit | the two stamp probes below: one commit moving the three stamps turns both suites wholly green, on this branch and on this branch merged onto today's `origin/main` |
+
+**Why it is left.** Both checks put a question to git, not to the bytes: which commit last wrote each stamp line
+(`git log -S`), and whether any shell file has changed since that commit (`git diff --name-only`,
+`git log --first-parent`). Neither has an allowlist or a seam in the tree that a branch could use. This branch adds a
+file to the shell, changes five more and makes the worker's SHELL a line longer, and the round may not move the
+stamps, so the answer is "yes" on every commit of it from `0a500ec` on, whatever its code says. The one fix is a commit that moves the three stamps together -
+`<meta name="farkad-build">` (index.html:109), `APP_VERSION` (js/app.js:7), `VERSION` (sw.js:24), iron law 5 - and
+the round's hard rules ("do not move the build stamps ... the integrator does") and the contract's MUST NOT list (the
+three stamps by line; js/app.js altogether) leave it to the integrator, who moves them once for the release that
+ships this track. The two other ways to a green line - taking the feature's bytes back out of the shell, or loosening
+either check - would make the line green and the branch wrong; neither is done, and no test was touched.
+
+**What shows nothing else stands behind it - two stamp probes**, each in a throwaway clone in the scratchpad
+(`git clone --shared --no-checkout` of this worktree, the commit checked out detached, `node_modules` a symlink to
+`/home/user/farkad/node_modules`; a repository of its own - nothing of this one's branches, worktrees or refs written,
+nothing fetched back):
+
+- **A - this branch** (`fix2/stampprobe`): `6c1635d` and ONE commit on it that moves the three stamps v204 -> v205
+  together and changes nothing else (3 files, 3 lines): tests/build.test.mjs **69/69** («nothing since 8d894fc7»),
+  tests/gate.integrity.test.mjs **20/20**, exit 0 both (`fix2/build-stampprobe.out`, `fix2/gate-stampprobe.out`).
+- **B - the tree the integrator will build** (`fix2/stampprobe-main`): `origin/main` has moved since the track was
+  cut - it is `8b8f807` (v205, PR #86). `8b8f807` with `6c1635d` merged onto it: ONE conflict, package.json, one hunk
+  holding `"test"` and `"test:all"`, two additions at one place - v205 appended `test:autoupdate` to `"test"` and left
+  `"test:all"` as it was; this track appended `test:crewcheck` to `"test"` and `test:crewcheck-browser` to
+  `"test:all"` - resolved by keeping both, v205's step first (`fix2/probeB-resolve.mjs`, which refuses unless each
+  side is exactly that; the resolution in `fix2/probeB-resolution.diff`; `"test"` then has 110 steps).
+  index.html, sw.js, css/large.css and tests/README.md merge by themselves. Before a stamp commit: the same three reds
+  (gate-integrity names the merge commit). After ONE commit moving the three stamps **v205 -> v206**: build **69/69**,
+  gate-integrity **20/20**, and the Node suites that read what this track changed - crewcheck **175/175**, largetext
+  **107/107** (css/large.css as text), usual **150/150** (the design layer's blocks), find **91/91**, sitecard
+  **119/119**, workercard **180/180**, polish **73/73**, reportnames **36/36**, holiday **109/109** - and v205's own
+  autoupdate **76/76**; every one exit 0 (`fix2/probeB-*.out`). No browser suite was run on the merged tree: that is
+  the integrator's gate.
+
+**What changed in fix round 2:** this file, and nothing else. No byte of the app, of a suite or of the wiring moved,
+so no check was added: there is no fix for a check to hold, and the two checks that fail are themselves the
+instrument that says what is missing.
+
+**For the integrator:** the stamp commit is all these two suites ask of this track - moved together, after the last
+shell change of the merge, they go green with nothing else changed (probe B). The rest of the release's duties for
+this track are under "For the integrator" below, unchanged. Trial merges of `6c1635d`, read in the throwaway clone
+(`git merge-tree --write-tree`): onto `release-v206` `d2d4710` - conflicts in package.json and tests/README.md only, the
+append-only pair (css/design.css, css/large.css, index.html, js/ui/modal.js, sw.js and tests/screens.mjs merge by
+themselves); onto `v205-followup` `b76c727` and `origin/main` `8b8f807` - package.json only. None of the 46 top-level
+names of js/ui/crewcheck.js is declared by any js file of `d2d4710`.
 
 ## Fix round 1 - the review of `68c7ab7`
 
@@ -164,7 +221,8 @@ its own two entries of tests/screens.mjs are listed under "Fix round 1".
 - `fcd830b` tests/crewcheck.browser.mjs: the cleared-rate man is an existing one, so the slow-tap trials keep their switches
 - `d54fad5` «בדיקת הצוות»: a slow second touch at the chip's own place is held wherever it lands (taken out again by the next)
 - `69fc168` «בדיקת הצוות»: the same-place hold of d54fad5 taken out; the suite's first touch lands on the chip
-- this file's commit
+- `6c1635d` features/crewcheck/handoff.md: fix round 1 - the eleven findings triaged, ten fixed and one left, and what every suite said
+- this file's commit (fix round 2) - the verification's one finding triaged, CONFIRMED and LEFT, and what every suite said; it changes this file only
 
 Of the build round's, every commit after `0a500ec` changes the tests and their wiring only. Of fix round 1's,
 `12c8b4b` changes the app (js/ui/crewcheck.js, css/design.css) with its suites; `d54fad5` changed
@@ -309,134 +367,138 @@ BORROWED (`CREW_CHECK_REUSED`, each found in its owner by the suite): «כדאי
   of the crew screen and every button, fold and choice of the form, not the switches and «שמור» alone; and the
   'with findings' entry of tests/screens.mjs sets w13's daily rate to 0 besides the contract's recipe.
 
-## The suites, one by one - fix round 1, on `12c8b4b`
+## The suites, one by one - fix round 2, on `6c1635d`
 
 ### `npm test`, every suite of the chain run on its own (an `&&` chain stops at the first red, and two reds are expected on a track branch)
 
-Run by `fix1/chain.sh` (in the scratchpad) on `12c8b4bb7afe8777f26b8353691c5b4fdea6ea7b`, the tree clean when it
-started; the one file changed while it ran was this one, which no suite reads. **107 of 109 green**, 1190 s in all.
-The two red ones are the contract's expected pair and nothing else - the stamps, which the integrator moves:
+Run by `fix2/chain.sh` (in the scratchpad) on `6c1635d077aeb206a661da1888f84199c70000fa`, the tree clean when it
+started; when it ended the one file changed was `features/crewcheck/handoff.md` - this one, which no suite reads.
+**107 of 109 green**, 13,063 of 13,066 checks, 1176 s in all. The two red ones are the contract's
+expected pair and nothing else - the stamps, which the integrator moves (fix round 2's finding, above):
 
 ```
-test:build | exit 1 | 1s | 67/69 checks passed
+test:build | exit 1 | 2s | 67/69 checks passed
 test:gate-integrity | exit 1 | 0s | 19/20 checks passed
 ```
 
 ```
   FAIL  and nothing in the shell has changed since  — 6 changed since 6ab193d6: css/design.css, css/large.css, index.html, js/ui/crewcheck.js, js/ui/modal.js, js/ui/roster.js
   FAIL  and neither has the worker that names the shelf  — sw.js
-  FAIL  no cached file has changed since the three stamps last moved  — 12c8b4bb «בדיקת הצוות», fix round 1: words true of every man named, o | 0a500ecf «בדיקת הצוות»: one button at the foot of the crew screen and
+  FAIL  no cached file has changed since the three stamps last moved  — 69fc1680 «בדיקת הצוות»: the same-place hold of d54fad5 taken out; the | d54fad54 «בדיקת הצוות»: a slow second touch at the chip's own place i | 12c8b4bb «בדיקת הצוות», fix round 1: words true of every man named, o | 0a500ecf «בדיקת הצוות»: one button at the foot of the crew screen and
 ```
+
+Fix round 1's run of the same chain, on `12c8b4b` (the app's bytes of `6c1635d`): 107 of 109 green, 13,063 of
+13,066 checks, 1190 s, the same two red.
 
 Every line of the chain (suite | exit | seconds | last count):
 
 ```
 test:isolation | exit 0 | 0s | 18/18 checks passed
 test:blobs | exit 0 | 1s | 11/11 checks passed
-test:build | exit 1 | 1s | 67/69 checks passed
+test:build | exit 1 | 2s | 67/69 checks passed
 test:poison | exit 0 | 0s | 37/37 checks passed
-test:merge | exit 0 | 1s | 28/28 checks passed
-test:contested | exit 0 | 15s | 73/73 checks passed
-test:held | exit 0 | 4s | 83/83 checks passed
+test:merge | exit 0 | 0s | 28/28 checks passed
+test:contested | exit 0 | 16s | 73/73 checks passed
+test:held | exit 0 | 3s | 83/83 checks passed
 test:snapshot-stale | exit 0 | 2s | 16/16 checks passed
-test:reports-rules | exit 0 | 1s | 26/26 checks passed
-test:finance | exit 0 | 6s | 57/57 checks passed
+test:reports-rules | exit 0 | 2s | 26/26 checks passed
+test:finance | exit 0 | 7s | 57/57 checks passed
 test:weekly-range | exit 0 | 0s | 21/21 checks passed
 test:finance-wording | exit 0 | 2s | 12/12 checks passed
 test:weekly-unpriced | exit 0 | 0s | 23/23 checks passed
 test:receipt | exit 0 | 2s | 28/28 checks passed
 test:data | exit 0 | 43s | 1970/1970 checks passed
 test:recovery | exit 0 | 1s | 82/82 checks passed
-test:adversarial | exit 0 | 5s | 116/116 checks passed
+test:adversarial | exit 0 | 6s | 116/116 checks passed
 test:probes | exit 0 | 7s | 35/35 checks passed
-test:capacity | exit 0 | 10s | 48/48 checks passed
+test:capacity | exit 0 | 9s | 48/48 checks passed
 test:concurrency | exit 0 | 3s | 46/46 checks passed
-test:exports | exit 0 | 1s | 112/112 checks passed
+test:exports | exit 0 | 0s | 112/112 checks passed
 test:fence | exit 0 | 2s | 35/35 checks passed
-test:fence-ingress | exit 0 | 0s | 43/43 checks passed
-test:fence-legacy | exit 0 | 1s | 21/21 checks passed
+test:fence-ingress | exit 0 | 1s | 43/43 checks passed
+test:fence-legacy | exit 0 | 0s | 21/21 checks passed
 test:money-history | exit 0 | 0s | 9/9 checks passed
 test:money-units | exit 0 | 0s | 21/21 checks passed
 test:money-cloud | exit 0 | 2s | 17/17 checks passed
 test:money-display | exit 0 | 0s | 4/4 checks passed
 test:snapshot-poison | exit 0 | 2s | 82/82 checks passed
 test:samefact | exit 0 | 5s | 37/37 checks passed
-test:wording | exit 0 | 0s | 37/37 checks passed
-test:closure | exit 0 | 18s | 122/122 checks passed
-test:closure-echo | exit 0 | 1s | 79/79 checks passed
+test:wording | exit 0 | 1s | 37/37 checks passed
+test:closure | exit 0 | 17s | 122/122 checks passed
+test:closure-echo | exit 0 | 0s | 79/79 checks passed
 test:correction | exit 0 | 1s | 33/33 checks passed
 test:quarantine | exit 0 | 1s | 82/82 checks passed
 test:approval | exit 0 | 6s | 72/72 checks passed
 test:repayment | exit 0 | 4s | 240/240 checks passed
-test:ledger-ingress | exit 0 | 1s | 167/167 checks passed
+test:ledger-ingress | exit 0 | 0s | 167/167 checks passed
 test:cas | exit 0 | 12s | 88/88 checks passed
 test:status | exit 0 | 6s | 37/37 checks passed
 test:money | exit 0 | 2s | 40/40 checks passed
-test:money-ingress | exit 0 | 10s | 206/206 checks passed
+test:money-ingress | exit 0 | 9s | 206/206 checks passed
 test:method | exit 0 | 3s | 51/51 checks passed
-test:restore | exit 0 | 0s | 51/51 checks passed
-test:upgrade | exit 0 | 2s | 48/48 checks passed
+test:restore | exit 0 | 1s | 51/51 checks passed
+test:upgrade | exit 0 | 1s | 48/48 checks passed
 test:vehicles | exit 0 | 2s | 86/86 checks passed
-test:xlsx | exit 0 | 1s | 104/104 checks passed
-test:nonassertions | exit 0 | 1s | 23/23 checks passed
-test:labels | exit 0 | 0s | 23/23 checks passed
+test:xlsx | exit 0 | 2s | 104/104 checks passed
+test:nonassertions | exit 0 | 0s | 23/23 checks passed
+test:labels | exit 0 | 1s | 23/23 checks passed
 test:labelcache | exit 0 | 0s | 32/32 checks passed
 test:restore-ledger | exit 0 | 2s | 26/26 checks passed
-test:roster-upgrade | exit 0 | 7s | 55/55 checks passed
-test:roster-race | exit 0 | 6s | 63/63 checks passed
-test:exports-proof | exit 0 | 2s | 92/92 checks passed
+test:roster-upgrade | exit 0 | 6s | 55/55 checks passed
+test:roster-race | exit 0 | 7s | 63/63 checks passed
+test:exports-proof | exit 0 | 1s | 92/92 checks passed
 test:ledger-truth | exit 0 | 4s | 148/148 checks passed
-test:races | exit 0 | 5s | 109/109 checks passed
+test:races | exit 0 | 4s | 109/109 checks passed
 test:overlap-restore | exit 0 | 21s | 117/117 checks passed
 test:refute-roster | exit 0 | 9s | 24/24 checks passed
 test:refute-restore | exit 0 | 43s | 25/25 checks passed
 test:gate-integrity | exit 1 | 0s | 19/20 checks passed
 test:queuecost | exit 0 | 5s | 18/18 checks passed
 test:paycycle | exit 0 | 0s | 43/43 checks passed
-test:paycycle-blockers | exit 0 | 3s | 17/17 checks passed
-test:paycycle-completion | exit 0 | 5s | 31/31 checks passed
+test:paycycle-blockers | exit 0 | 2s | 17/17 checks passed
+test:paycycle-completion | exit 0 | 6s | 31/31 checks passed
 test:crew-controls | exit 0 | 1s | 46/46 checks passed
-test:simple-advances | exit 0 | 2s | 66/66 checks passed
+test:simple-advances | exit 0 | 1s | 66/66 checks passed
 test:worker-deletion | exit 0 | 10s | 86/86 checks passed
 test:calendar | exit 0 | 1s | 58/58 checks passed
 test:reminders | exit 0 | 0s | 48/48 checks passed
 test:move-late | exit 0 | 5s | 48/48 checks passed
-test:codex-probes | exit 0 | 1s | 17/17 checks passed
+test:codex-probes | exit 0 | 0s | 17/17 checks passed
 test:codex2-probes | exit 0 | 1s | 36/36 checks passed
 test:codex3-probes | exit 0 | 3s | 59/59 checks passed
-test:rima | exit 0 | 92s | 496/496 checks passed
-test:yosefgeves | exit 0 | 92s | 562/562 checks passed
-test:seder | exit 0 | 1s | 135/135 checks passed
+test:rima | exit 0 | 91s | 496/496 checks passed
+test:yosefgeves | exit 0 | 93s | 562/562 checks passed
+test:seder | exit 0 | 0s | 135/135 checks passed
 test:bars-stale | exit 0 | 0s | 60/60 checks passed
 test:transport | exit 0 | 1s | 566/566 checks passed
-test:transport-share | exit 0 | 12s | 304/304 checks passed
-test:oracle | exit 0 | 39s | 121/121 checks passed
-test:overpayment | exit 0 | 5s | 105/105 checks passed
+test:transport-share | exit 0 | 11s | 304/304 checks passed
+test:oracle | exit 0 | 38s | 121/121 checks passed
+test:overpayment | exit 0 | 4s | 105/105 checks passed
 test:polish | exit 0 | 0s | 73/73 checks passed
-test:daycheck | exit 0 | 6s | 169/169 checks passed
+test:daycheck | exit 0 | 5s | 169/169 checks passed
 test:journey | exit 0 | 0s | 233/233 checks passed
-test:workercard | exit 0 | 21s | 180/180 checks passed
-test:monthsummary | exit 0 | 70s | 98/98 checks passed
+test:workercard | exit 0 | 20s | 180/180 checks passed
+test:monthsummary | exit 0 | 68s | 98/98 checks passed
 test:payslips | exit 0 | 23s | 202/202 checks passed
 test:find | exit 0 | 0s | 91/91 checks passed
-test:whatsnew | exit 0 | 0s | 160/160 checks passed
-test:account-view | exit 0 | 17s | 456/456 checks passed
+test:whatsnew | exit 0 | 1s | 160/160 checks passed
+test:account-view | exit 0 | 16s | 456/456 checks passed
 test:usual | exit 0 | 1s | 150/150 checks passed
 test:sitecard | exit 0 | 3s | 119/119 checks passed
 test:reportsclarity | exit 0 | 2s | 1119/1119 checks passed
-test:largetext | exit 0 | 1s | 107/107 checks passed
+test:largetext | exit 0 | 0s | 107/107 checks passed
 test:reportnames | exit 0 | 9s | 36/36 checks passed
 test:holiday | exit 0 | 1s | 109/109 checks passed
 test:undo-stale | exit 0 | 1s | 32/32 checks passed
 test:auditfix | exit 0 | 2s | 34/34 checks passed
-test:owes | exit 0 | 59s | 190/190 checks passed
-test:weeklyclose | exit 0 | 104s | 146/146 checks passed
-test:reports-speed | exit 0 | 167s | 159/159 checks passed
+test:owes | exit 0 | 56s | 190/190 checks passed
+test:weeklyclose | exit 0 | 103s | 146/146 checks passed
+test:reports-speed | exit 0 | 170s | 159/159 checks passed
 test:closeorder | exit 0 | 0s | 22/22 checks passed
-test:closuresize | exit 0 | 11s | 13/13 checks passed
-test:closerace | exit 0 | 39s | 29/29 checks passed
-test:advancereset | exit 0 | 45s | 77/77 checks passed
-test:overpaidfix | exit 0 | 1s | 85/85 checks passed
+test:closuresize | exit 0 | 13s | 13/13 checks passed
+test:closerace | exit 0 | 38s | 29/29 checks passed
+test:advancereset | exit 0 | 46s | 77/77 checks passed
+test:overpaidfix | exit 0 | 0s | 85/85 checks passed
 test:xlsxlook | exit 0 | 8s | 293/293 checks passed
 test:closereminder | exit 0 | 12s | 107/107 checks passed
 test:crewcheck | exit 0 | 21s | 175/175 checks passed
@@ -446,6 +508,7 @@ test:crewcheck | exit 0 | 21s | 175/175 checks passed
 
 | suite | commit | result |
 |---|---|---|
+| tests/crewcheck.browser.mjs | `6c1635d` (fix round 2) | **544/544**, exit 0 (`fix2/browser.out`) |
 | tests/crewcheck.browser.mjs | `69fc168` | **544/544**, exit 0 (`fix1/browser-after.out`) |
 | tests/crewcheck.browser.mjs, the same file | a copy of `68c7ab7`'s app code | 510/544, exit 1 - every new check red, as it should be (`fix1/browser-before.out`) |
 | tests/largetext.browser.mjs | `12c8b4b` (the app's bytes of `69fc168`) | **8335/8335**, exit 0, both crew-check entries walked at every phone, scheme and mode (`fix1/largetext-browser.out`) |
@@ -455,13 +518,13 @@ The runs in between, kept for what they showed: on `fcd830b` the suite stopped i
 (`fix1/browser-d54fad5.out`); the probe (`fix1/probe/hold-probe.out`) showed the suite's first touch pressing the
 dialog's sticky «סגור» over a chip pushed under it, and `69fc168` makes every trial find its chip under the finger.
 
-The end of tests/crewcheck.browser.mjs on `69fc168`:
+The end of tests/crewcheck.browser.mjs on `6c1635d` (fix round 2; fix round 1's, on `69fc168`, is in `fix1/browser-after.out`):
 
 ```
-  (the gaps the page saw: row/350:334 row/350:329 row/350:332 site/350:333 site/350:332 form/350:351 form/350:348 site/350:336 site/350:344 form/350:345 form/350:336 row/500:501 row/500:477 row/500:460 site/500:495 site/500:487 form/500:492 form/500:493 site/500:490 site/500:490 form/500:491 form/500:484 row/650:640 row/650:625 row/650:632 site/650:612 site/650:639 form/650:645 form/650:632 site/650:647 site/650:635 form/650:633 form/650:649)
+  (the gaps the page saw: row/350:329 row/350:348 row/350:343 site/350:349 site/350:331 form/350:343 form/350:329 site/350:345 site/350:335 form/350:337 form/350:350 row/500:483 row/500:487 row/500:473 site/500:488 site/500:474 form/500:494 form/500:485 site/500:490 site/500:466 form/500:489 form/500:493 row/650:621 row/650:638 row/650:640 site/650:631 site/650:632 form/650:644 form/650:638 site/650:630 site/650:636 form/650:646 form/650:635)
   (under the finger at the chip's own point: row/350: crew-cycle | site/350: roster-details site-details | form/350: field-label | row/500: crew-cycle | site/500: roster-details site-details | form/500: workerFormPhone | row/650: crew-cycle | site/650: roster-details site-details | form/650: workerFormPhone)
-  (one reading at 4x: median 13.2 ms, max 35.6 ms of 15)
-  (a tap to the dialog painted with its list, at 4x: 108 ms)
+  (one reading at 4x: median 9.7 ms, max 25.8 ms of 15)
+  (a tap to the dialog painted with its list, at 4x: 69 ms)
   PASS  no uncaught error
   PASS  no alert, confirm or prompt
 
@@ -509,13 +572,15 @@ FAIL  and both sentences of «בלי שכר יומי» among them  — ["בלי 
 
 The other existing browser suites were not run again in fix round 1: none of them opens the crew check or
 presses its doors, and the app's bytes they would serve differ from `b73550f`'s only in js/ui/crewcheck.js and the
-two classes it alone uses (css/design.css). Their results on `b73550f` (the build round) were:
+two classes it alone uses (css/design.css). Nor in fix round 2, which changed no byte the app serves; the
+independent verifier's report on `6c1635d` lists no failure but the three stamp checks. Their results on `b73550f`
+(the build round) were:
 smoke 1186/1186, mobile 1397/1397, design-browser 72/72, roster-browser 42/42, polish-browser 201/201,
 sitecard-browser 135/135, workercard-browser 116/116, daycheck-browser 122/122, doubletap-browser 359/359,
 scroll-browser 604/604.
 
 
-## The measured noise and cost, re-run on `12c8b4b` (printed by tests/crewcheck.test.mjs in the chain above)
+## The measured noise and cost, re-run on `6c1635d` (fix round 2; printed by tests/crewcheck.test.mjs in the chain above)
 
 ```
   SKIP  «מה חדש» does not carry it yet: the integrator adds it with the stamps
@@ -524,8 +589,8 @@ scroll-browser 604/604.
   (the whole record read instead, the app's reading: 1.46 an evening, of them back later 0.0% - by construction)
   (leavers: 40; last day 45+ calendar days before 20/09: 33, named 33, the first time after a median 31 and at most 42 calendar days; out of the window's reach 7, of them named anyway 2)
   (regulars: 208; named 17, each with a run of 25+ working days; never named 191, their longest run 24)
-  (the time-season record, 40 men x 277 day keys, 703 KiB: median 9.6 ms, max 10.5 ms of 25)
-  (60 men x 329 day keys, 1149 KiB: median 16.8 ms, max 42.3 ms of 15)
+  (the time-season record, 40 men x 277 day keys, 703 KiB: median 10.0 ms, max 15.6 ms of 25)
+  (60 men x 329 day keys, 1149 KiB: median 17.7 ms, max 21.4 ms of 15)
 ```
 
 The turnover model's figures are the contract's to the decimal (29.6%, 33 of 33 leavers within 42 days,
@@ -533,9 +598,11 @@ The turnover model's figures are the contract's to the decimal (29.6%, 33 of 33 
 reads (`priced`) and changes no rule of who is named. The day check's seasons are run with its own generator copied line for
 line (seeds 11-55, both habits, Rima on Fridays or not: 20 seasons, 1,798 evenings) where the contract's probe
 had used a variant without the Friday switch (10 seasons, 898 evenings): 92.3% calm here against its 92.0%,
-the floor held at 85%. In Chromium at 4x CPU, on `69fc168`, the reading of the time-season record is 13.2 ms
-(median of 15, max 35.6; budget 60) and a tap to the dialog painted with its list 108 ms (budget 300) - the build
-round measured 8.8 ms and 70 ms on a quieter machine; both runs shared it with other tracks' browser suites.
+the floor held at 85%. In Chromium at 4x CPU, on `6c1635d` (fix round 2), the reading of the time-season record is 9.7 ms
+(median of 15, max 25.8; budget 60) and a tap to the dialog painted with its list 69 ms (budget 300) - fix round 1
+measured 13.2 ms and 108 ms on `69fc168`, the build round 8.8 ms and 70 ms; every run shared the machine with other
+tracks' browser suites. Fix round 2's five lines of the noise above are fix round 1's character for character; the two cost lines are
+ceilings and move with the machine's load.
 
 ## A finding against the contract's words (criterion 13), kept to its intent
 
@@ -549,7 +616,7 @@ the form opened once the app's own way moves exactly those keys and the record n
 it - six form doors, three row doors, two site doors, the search, a man gone, a double tap, the twenty-one slow
 taps - moves not one byte against the disk as that leaves it. `js/ui/crewcheck.js` writes nothing.
 
-## The conflict table (the build round's, at 19:50) and fix round 1's trial merges
+## The conflict table (the build round's, at 19:50) and the trial merges of fix rounds 1 and 2
 
 `git diff -U0 6ab193d <branch>` on the shared files, and `git merge-tree` of this branch with each:
 
@@ -573,6 +640,11 @@ only, on the heads of 2026-11-20 00:0x: feat-status `f4cf70b`, feat-payday `b951
 feat-speed `adb60aa`, feat-history `b54df95` - conflicted in package.json and tests/README.md only; feat-monthboard
 `ff3e9c6` and release-v205 `f9a432b` - in package.json only. No code file conflicts with any of them.
 
+Fix round 2 changed no shared file, and those seven heads are the same commits today (read 2026-11-20 02:3x), so the
+trial merges above stand. The branches that are new since were tried in the throwaway clone, `6c1635d` merged onto
+each: `release-v206` `d2d4710` - package.json and tests/README.md; `v205-followup` `b76c727` and `origin/main`
+`8b8f807` (v205) - package.json only (see "Fix round 2", probe B for the last).
+
 ## Screenshots (synthetic names; JPEG; they assert nothing)
 
 Fix round 1, from the green run on `69fc168` (`CREWCHECK_SHOTS`), in
@@ -592,6 +664,9 @@ made by `shots.mjs` beside them - they show the words as they were before fix ro
   SLOW SECOND TAP in particular is held on Chromium's touch events; an iPhone's are not measured.
 - `docs/releases.md`, `js/ui/whatsnew.js`, CLAUDE.md and the three stamps are the integrator's (texts above).
   Until «מה חדש» carries the item, tests/crewcheck.test.mjs prints a SKIP where it would hold the copy.
+- Until the stamps move, tests/build.test.mjs (67/69) and tests/gate.integrity.test.mjs (19/20) are red on this branch
+  BY CONSTRUCTION - the three stamp-lag checks and nothing else (fix round 2). A verification that counts them answers
+  red whatever a fix round of this track does; only the integrator's stamp commit turns them, and the probes show it does.
 - tests/README.md's opening count of suites is stale on the base already and no track updates it; the two new
   rows are added, the count is not touched (a conflict with every other track for a number nobody keeps).
 - The integrator's landing rule for `go: 'crewcheck'` in tests/whatsnew.browser.mjs is not written (that suite
