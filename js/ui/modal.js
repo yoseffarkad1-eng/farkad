@@ -40,6 +40,8 @@ const MODAL_CLOSERS = {
     transportSummaryModal: () => closeTransportSummary(),
     // The day's check (js/ui/daycheck.js). Nothing to clear behind it: it holds no state.
     dayCheckModal: () => closeDayCheck(),
+    // The crew's check (js/ui/crewcheck.js). It holds no state either.
+    crewCheckModal: () => closeCrewCheck(),
     // The report of a period's rides (js/ui/transport.js).
     transportReportModal: () => closeTransportReport(),
     // The month's summary (js/ui/monthsummary.js): closing it forgets which month it was.

@@ -369,6 +369,63 @@ export const SCREENS = [
     { name: 'crew - reorder', scope: ['#reorderPanel'],
         open: async page => { await view('roster')(page); await run(page, () => openReorder()); await pause(page); },
         close: async page => { await run(page, () => closeReorder()); await pause(page, 120); } },
+    // «בדיקת הצוות» (js/ui/crewcheck.js), from its button at the foot of the crew screen. The
+    // seed as it is: 15 working days, so the too-few line, the calm line, and «לידיעה» - two
+    // men with no number, three who never worked.
+    { name: 'crew - «בדיקת הצוות», calm', scope: ['#crewCheckModal'],
+        open: async page => { await view('roster')(page); await run(page, () => openCrewCheck()); await pause(page); },
+        close: page => run(page, () => closeCrewCheck()) },
+    // The same dialog with every line it has (the idle men's note among them, which the large
+    // display's gate must measure): IN MEMORY ONLY, the model's own writers on the live
+    // schedule and nothing committed - w02's rate first, so the day added for him is stamped
+    // with it (his seeded days keep their 410: the man whose rate was cleared); then a typo'd
+    // number, a shared one, another country's, a name twice - the second of them with no rate,
+    // so both sentences of «בלי שכר יומי» are drawn and a namesake is named on three lines -
+    // two sites, and eleven working days before the seed (11/10-22/10, not the Saturday) with
+    // ראמי חורי on the first only. Taken back on closing: the eleven keys deleted, the crew and
+    // the sites put back as they were.
+    { name: 'crew - «בדיקת הצוות», with findings', scope: ['#crewCheckModal'],
+        open: async page => {
+            await view('roster')(page);
+            await run(page, () => {
+                if (!window.__crewCheckKept) {
+                    const S = State.schedule;
+                    window.__crewCheckKept = JSON.stringify({ workers: S.workers, places: S.places });
+                    const w = id => S.workers.find(x => x.id === id);
+                    w('w02').dailyRate = 0;
+                    w('w03').phone = '03-5551234';
+                    w('w05').phone = w('w01').phone;
+                    w('w04').phone = '+970 59-123-4567';
+                    w('w13').name = w('w12').name;
+                    w('w13').dailyRate = 0;
+                    S.places.push({ id: 'p6', name: 'חדרה - בית הספר', active: true }, { id: 'p7', name: 'כפר סבא - מרכז', active: true });
+                    ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-18', '2026-10-19',
+                        '2026-10-20', '2026-10-21', '2026-10-22'].forEach((date, i) => {
+                        if (i === 0) assignPlace(S, date, 'w14', 'actual', 'p6');
+                        else assignPlace(S, date, 'w01', 'actual', 'p1');
+                        if (i === 1) assignPlace(S, date, 'w02', 'actual', 'p1');
+                    });
+                }
+                render();
+                openCrewCheck();
+            });
+            await pause(page);
+        },
+        close: async page => {
+            await run(page, () => {
+                closeCrewCheck();
+                if (window.__crewCheckKept) {
+                    const kept = JSON.parse(window.__crewCheckKept);
+                    window.__crewCheckKept = null;
+                    ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-18', '2026-10-19',
+                        '2026-10-20', '2026-10-21', '2026-10-22'].forEach(date => { delete State.schedule.days[date]; });
+                    State.schedule.workers = kept.workers;
+                    State.schedule.places = kept.places;
+                }
+                render();
+            });
+            await pause(page, 120);
+        } },
 
     { name: 'advances - list', scope: APP,
         open: async page => { await run(page, () => { ADVANCE_WORKER = null; }); await view('advances')(page); } },

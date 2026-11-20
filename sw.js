@@ -103,6 +103,7 @@ const SHELL = [
     './js/ui/seder.js',
     './js/ui/payslips.js',
     './js/ui/daycheck.js',
+    './js/ui/crewcheck.js',
     './js/model/transport.js',
     './js/ui/transport.js',
     './js/ui/transport-share.js',

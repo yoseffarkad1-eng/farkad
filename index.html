@@ -242,6 +242,11 @@
                     <div id="vehicleList"></div>
                 </div>
             </div>
+            <!-- «בדיקת הצוות» (js/ui/crewcheck.js): one button at the foot of the crew screen,
+                 after the sites - the one place where nothing measured before it moves. Empty
+                 here: the button is built once, by that file, the first time the screen is
+                 drawn, and hidden with no men on the crew. -->
+            <div class="crewcheck-row" id="crewCheckFoot" hidden></div>
 
         </section>
 
@@ -982,6 +987,23 @@
     </div>
 </div>
 
+<!-- «בדיקת הצוות»: what in the roster will cause trouble - no daily rate, a number that will
+     not open in WhatsApp, one number or one name on two active rows, men and sites with no
+     work for a month of working days - read off the record. Entered from the one button at
+     the foot of the crew screen. It only shows: nothing in it writes, and a name or a site in
+     it only navigates. The day check's frame, twice; every word is in js/ui/crewcheck.js. -->
+<div class="modal" id="crewCheckModal">
+    <div class="modal-content">
+        <h3 id="crewCheckTitle" tabindex="-1"></h3>
+        <p id="crewCheckContext" class="picker-context"></p>
+        <div id="crewCheckList" class="daycheck-list"></div>
+        <p id="crewCheckLead" class="daycheck-lead"></p>
+        <div class="daycheck-foot">
+            <button type="button" class="btn-secondary" id="crewCheckClose" onclick="closeCrewCheck()"></button>
+        </div>
+    </div>
+</div>
+
 <!-- «סיכום חודש»: one calendar month on one screen - the work per site, the two counts,
      the men, the money, and the step from the month before. Entered from the reports
      screen's «הפקת דוח» menu. A READING: nothing in it writes, the two arrows only change
@@ -1246,6 +1268,10 @@
      readers, the dates, day.js and sheet.js - is above it, and day.js asks for it by name
      only when the day is drawn. -->
 <script src="js/ui/daycheck.js"></script>
+<!-- «בדיקת הצוות». After seder.js and daycheck.js: the words it borrows are read from their
+     blocks at load, and it reads the record through their rules. It runs nothing else at
+     load; roster.js asks for it by name, through typeof, only when the crew screen is drawn. -->
+<script src="js/ui/crewcheck.js"></script>
 <!-- v171, הסעות. After seder.js: it reads the day through sederCrew and takes the seder's
      own rule for a phone number, and its row in the WhatsApp dialog goes under the seder's.
      The engine first - the screen calls it. Neither is part of the sync group, and neither
