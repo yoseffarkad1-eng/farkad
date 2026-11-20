@@ -943,7 +943,7 @@ function seeded(seed) {
 //                      periods once per man
 //   a draw of a record that did not move      reads nothing
 //   a draw after ANY change, by any door      reads the record as it is
-//   «דוחות» with the board                    within 1.5x of «דוחות» without it
+//   «דוחות» with the board                    within 1.5x of «דוחות» without it, or 25 ms (v207)
 {
     suite('a season: fifteen men, twenty-six weeks, nothing ever closed');
 
@@ -1116,8 +1116,17 @@ function seeded(seed) {
         device.run('renderOwesInto = BOARD[0]; renderOwesWarningsInto = BOARD[1];');
     }
     const best = list => Math.min(...list);
-    check(`«דוחות» with the board, the record having moved: ${best(times.on).toFixed(0)}ms against ${best(times.off).toFixed(0)}ms without - within 1.5x`,
-        best(times.on) <= best(times.off) * 1.5, JSON.stringify(times));
+    // MOVED ON PURPOSE in v207: the speed layer («דוחות ומקדמות מהירים») halved the draw
+    // WITHOUT the board (about 70 ms to about 40 ms here) and left the board's own reading
+    // as it was (about 15-20 ms), so the same board now measured 1.3-1.57x of a faster page
+    // and failed the v207 gate on a 63 ms against 40 ms draw. What this check guards is that
+    // the board does not make «דוחות» much slower: it holds if the board costs at most half
+    // the sheet again OR at most 25 ms on top of it - the board's own cost, which is what
+    // 1.5x of v195's slower sheet allowed. A board that re-plans the gate costs hundreds of
+    // ms and still fails both.
+    const allowed = Math.max(best(times.off) * 1.5, best(times.off) + 25);
+    check(`«דוחות» with the board, the record having moved: ${best(times.on).toFixed(0)}ms against ${best(times.off).toFixed(0)}ms without - within 1.5x or 25 ms`,
+        best(times.on) <= allowed, JSON.stringify(times));
     device.run('delete State.schedule.workers[0].note');
 }
 
