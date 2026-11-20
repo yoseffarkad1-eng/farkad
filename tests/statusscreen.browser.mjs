@@ -29,9 +29,11 @@
 //       it), «סגירת שבוע», «מי חייב כסף», a week, «לוח חודשי» where a build has it, a site's
 //       card, ⋯'s cloud and backup. A door to a dialog ends on the new dialog's title; a door to
 //       anything else ends - after setTimeout(0) and the task after it - where the target put
-//       the focus (⋯'s heading, the board's title), never on the door. The other tracks' openers,
-//       stood in for: «יום תשלום» once, in the task that shut this dialog; «לוח חודשי» once,
-//       with (null, null), in a later one.
+//       the focus (⋯'s heading, the board's title), never on the door. The other tracks' openers
+//       - stood in for on the branch, the REAL ones on the merged build of v206, wrapped and
+//       called through: «יום תשלום» once, in the task that shut this dialog, the desk entered at
+//       #paydayTitle; «לוח חודשי» once, with (null, null), in a later one, the focus on
+//       #monthBoardTitle. The fallbacks (the pay sheet, no board door) with the opener taken off.
 //   B17 A COMMIT under the open dialog draws it again where the reader was - the row he was
 //       looking at where it stood on the glass, before the money is read again and after - and
 //       the board is read once, after the draws have stopped for a second and a half; the close
@@ -497,8 +499,22 @@ for (const [width, height] of [[340, 640], [360, 640], [390, 844], [412, 892], [
     await page.evaluate(() => { State.date = '2026-11-03'; render(); });
     same('«פתיחת היום לעריכה»: today on the day screen', [await door('go:today'), await page.evaluate(() => [currentView, State.date === todayStr(), statusIsOpen()])],
         ['פתיחת היום לעריכה', ['day', true, false]]);
-    same('no «יום תשלום» on this build: «דוחות», the pay sheet', [await door('go:payday'), await page.evaluate(() => currentView)],
+    // MOVED ON PURPOSE (v206's integration): the branch was a build without «יום תשלום» and «לוח
+    // חודשי» and held the fallbacks - «דוחות» and no door. This build HAS js/ui/payday.js and
+    // js/ui/monthboard.js, so the doors are the real ones and are held as the contract's table
+    // says: «יום תשלום» a dialog, opened in the task that shut this one and entered at its own
+    // title, giving the keyboard back to the door when it shuts. The fallback is still held, on a
+    // page whose opener is taken off for the press (a build where the file did not load).
+    same('«יום תשלום» on this build: the desk, entered at its own title, over the screen he was on',
+        [await door('go:payday'), await page.evaluate(() => [paydayIsOpen(), document.activeElement.id, statusIsOpen(), currentView])],
+        ['יום תשלום', [true, 'paydayTitle', false, 'day']]);
+    await page.evaluate(() => closePayday());
+    await page.waitForTimeout(150);
+    same('and shut, the keyboard is back on the door', await focusId(page), 'statusDoor');
+    await page.evaluate(() => { window.__realOpenPayday = openPayday; openPayday = undefined; });
+    same('with no «יום תשלום» on the page: «דוחות», the pay sheet', [await door('go:payday'), await page.evaluate(() => currentView)],
         ['דוחות', 'reports']);
+    await page.evaluate(() => { openPayday = window.__realOpenPayday; window.__realOpenPayday = null; });
     same('the reminder\'s line down: no close line, so no door to «סגירת שבוע» here', await page.evaluate(() => {
         closeReminderHide(); openStatus(); const there = Boolean(document.querySelector('[data-status-key="go:close"]')); closeStatus(); return there;
     }), false);
@@ -537,7 +553,26 @@ for (const [width, height] of [[340, 640], [360, 640], [390, 844], [412, 892], [
     await page.waitForTimeout(250);
     same('and still there a moment later', await focusId(page), 'settingsBackups');
     await page.evaluate(() => closeSettings());
-    same('no «לוח חודשי» on this build: no door to it', await page.evaluate(() => { openStatus(); return Boolean(document.querySelector('[data-status-key="go:monthBoard"]')); }), false);
+    // MOVED ON PURPOSE (v206's integration), as «יום תשלום» above: this build has the board, so its
+    // door is under the pulse - pressed and followed in the block below - and the fallback (no
+    // door) is held with the opener taken off the page.
+    same('«לוח חודשי» on this build: its door, in the pulse\'s section, under the weeks', await page.evaluate(() => {
+        openStatus();
+        const node = document.querySelector('#statusBody [data-status-key="go:monthBoard"]');
+        const weeks = [...document.querySelectorAll('#statusBody [data-status-key^="week:"]')];
+        return node ? [node.textContent.trim(), weeks.length > 0 && weeks.every(row => row.closest('section') === node.closest('section')
+            && Boolean(row.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING))] : null;
+    }), ['לוח חודשי', true]);
+    same('with no «לוח חודשי» on the page: no door to it', await page.evaluate(() => {
+        closeStatus();
+        const real = openMonthBoard;
+        openMonthBoard = undefined;
+        openStatus();
+        const there = Boolean(document.querySelector('[data-status-key="go:monthBoard"]'));
+        closeStatus();
+        openMonthBoard = real;
+        return there;
+    }), false);
     await page.evaluate(() => closeStatus());
 
     suite('B21 nothing written: the disk and the record, across opening, every redraw and every door');
@@ -549,7 +584,13 @@ for (const [width, height] of [[340, 640], [360, 640], [390, 844], [412, 892], [
     same('and the record', end.record, after17.record);
     await censusOnly(check, page, end.disk);
 
-    suite('B16 the other tracks\' doors, stood in for: when they are called, with what, and where the focus ends');
+    // MOVED ON PURPOSE (v206's integration): the branch stood in for both openers - a .modal of its
+    // own for «יום תשלום» and a title of its own for «לוח חודשי» - because they were other tracks'.
+    // This build has them, so each REAL opener is wrapped, recorded and called through, and the
+    // focus is read where the real desk and the real board put it: the contract's one check for
+    // the integrator (the board's own title, never the door). What the stand-ins held is held the
+    // same: called once, with what, in which task.
+    suite('B16 the other tracks\' doors, the real ones on this build: when they are called, with what, and where the focus ends');
     await page.evaluate(() => {
         window.__payday = [];
         window.__board = [];
@@ -561,65 +602,47 @@ for (const [width, height] of [[340, 640], [360, 640], [390, 844], [412, 892], [
             setTimeout(() => { window.__shutTask = false; }, 0);
             return window.__closeStatus.apply(this, arguments);
         };
-        // «יום תשלום» is a dialog: a .modal with its title.
-        window.PAYDAY_TEXT = { entry: 'יום תשלום' };
-        window.openPayday = function () {
+        // «יום תשלום» is a dialog: js/ui/payday.js's own, entered at #paydayTitle.
+        window.__openPayday = openPayday;
+        openPayday = function () {
             window.__payday.push({ args: [...arguments], sameTask: window.__shutTask, statusOpen: statusIsOpen() });
-            let modal = document.getElementById('paydayStandIn');
-            if (!modal) {
-                modal = document.createElement('div');
-                modal.className = 'modal';
-                modal.id = 'paydayStandIn';
-                const content = document.createElement('div');
-                content.className = 'modal-content';
-                const title = document.createElement('h3');
-                title.id = 'paydayStandInTitle';
-                title.tabIndex = -1;
-                title.textContent = 'יום תשלום';
-                content.appendChild(title);
-                modal.appendChild(content);
-                document.body.appendChild(modal);
-            }
-            modal.style.display = 'flex';
-            return true;
+            return window.__openPayday.apply(this, arguments);
         };
-        // «לוח חודשי» is not: it gives the focus to a title of its own.
-        window.MONTH_BOARD_TEXT = { door: 'לוח חודשי' };
-        window.openMonthBoard = function (key, placeId) {
+        // «לוח חודשי» is not: js/ui/monthboard.js's board gives the focus to its own title.
+        window.__openMonthBoard = openMonthBoard;
+        openMonthBoard = function (key, placeId) {
             window.__board.push({ args: [key, placeId], sameTask: window.__shutTask, statusOpen: statusIsOpen() });
-            let title = document.getElementById('monthBoardStandIn');
-            if (!title) {
-                title = document.createElement('h3');
-                title.id = 'monthBoardStandIn';
-                title.tabIndex = -1;
-                title.textContent = 'לוח חודשי';
-                document.body.appendChild(title);
-            }
-            title.focus({ preventScroll: true });
-            return true;
+            return window.__openMonthBoard.apply(this, arguments);
         };
     });
     await openNow();
-    same('«יום תשלום»: its own opener, once, IN the task that shut this dialog; the new dialog\'s title focused',
-        [await pressed('go:payday'), await page.evaluate(() => window.__payday)],
-        [{ words: 'יום תשלום', focus: 'paydayStandInTitle', open: false }, [{ args: [], sameTask: true, statusOpen: false }]]);
-    // Shut as modal.js would shut a dialog it watches: the focus back where it was before.
-    await page.evaluate(() => {
-        document.getElementById('paydayStandIn').style.display = 'none';
-        if (focusBeforeModal && document.contains(focusBeforeModal)) focusBeforeModal.focus({ preventScroll: true });
-        focusBeforeModal = null;
-    });
+    same('«יום תשלום»: its own opener, once, IN the task that shut this dialog; the desk\'s own title focused, the desk open',
+        [await pressed('go:payday'), await page.evaluate(() => [window.__payday, paydayIsOpen()])],
+        [{ words: 'יום תשלום', focus: 'paydayTitle', open: false }, [[{ args: [], sameTask: true, statusOpen: false }], true]]);
+    // Shut by its own function: modal.js gives the keyboard back to the door it was opened from.
+    await page.evaluate(() => closePayday());
+    await page.waitForTimeout(150);
+    same('and shut by its own «סגור», the keyboard is back on the door', await focusId(page), 'statusDoor');
     await openNow();
-    same('«לוח חודשי»: under the pulse; its own opener, once, with (null, null), NOT in the task that shut this dialog; the focus on its title, never on the door',
+    same('«לוח חודשי»: under the pulse; its own opener, once, with (null, null), NOT in the task that shut this dialog; the focus on the board\'s own title, never on the door',
         [await pressed('go:monthBoard'), await page.evaluate(() => window.__board)],
-        [{ words: 'לוח חודשי', focus: 'monthBoardStandIn', open: false }, [{ args: [null, null], sameTask: false, statusOpen: false }]]);
+        [{ words: 'לוח חודשי', focus: 'monthBoardTitle', open: false }, [{ args: [null, null], sameTask: false, statusOpen: false }]]);
     await page.waitForTimeout(250);
-    same('and still there a moment later', await focusId(page), 'monthBoardStandIn');
+    same('and still there a moment later, the week tab on this month\'s board of every site',
+        [await focusId(page), await page.evaluate(() => [currentView, weekPhoneMode, MONTH_BOARD_KEY === monthSummaryKeyOf(todayStr()), MONTH_BOARD_PLACE])],
+        ['monthBoardTitle', ['week', 'month', true, null]]);
     await page.evaluate(() => {
         closeStatus = window.__closeStatus;
-        ['paydayStandIn', 'monthBoardStandIn'].forEach(id => { const node = document.getElementById(id); if (node) node.remove(); });
+        openPayday = window.__openPayday;
+        openMonthBoard = window.__openMonthBoard;
+        setWeekPhoneMode('grid');
     });
-    await page.evaluate(() => { delete window.openPayday; delete window.PAYDAY_TEXT; delete window.openMonthBoard; delete window.MONTH_BOARD_TEXT; });
+    // Added with the move: the real desk and the real board write nothing either.
+    const real = await page.evaluate(() => ({
+        disk: JSON.stringify(Object.keys(localStorage).filter(key => key !== 'farkad:openBuilds').sort().map(key => [key, localStorage.getItem(key)])),
+        record: JSON.stringify(State.schedule)
+    }));
+    same('the real «יום תשלום» and «לוח חודשי» opened from here: the disk and the record byte for byte still', [real.disk === after17.disk, real.record === after17.record], [true, true]);
     await context.close();
 }
 
@@ -695,7 +718,9 @@ for (const [width, height] of [[340, 640], [360, 640], [390, 844], [412, 892], [
     const site = keys.find(key => key.startsWith('site:'));
     // «לסגירת שבוע» first: the reminder's line is up by its own function, and the first render
     // after it (a door to a view) takes it down - the record's reminder was put away for the day.
-    for (const key of ['go:close', 'go:payday', 'go:board', week, site, 'go:cloud', 'go:backup']) {
+    // MOVED ON PURPOSE (v206's integration): on this build «יום תשלום» is the real desk, a dialog
+    // shut below with the others, and «לוח חודשי» is a door too - pressed here after the week's.
+    for (const key of ['go:close', 'go:payday', 'go:board', week, 'go:monthBoard', site, 'go:cloud', 'go:backup']) {
         await offered();
         const node = page.locator(`#statusBody [data-status-key="${key}"]`);
         await node.scrollIntoViewIfNeeded();
@@ -707,8 +732,10 @@ for (const [width, height] of [[340, 640], [360, 640], [390, 844], [412, 892], [
         // Back from wherever the door went: the dialog it opened shut, ⋯ shut.
         await page.evaluate(() => {
             if (typeof weeklyCloseIsOpen === 'function' && weeklyCloseIsOpen()) closeWeeklyClose();
+            if (typeof paydayIsOpen === 'function' && paydayIsOpen()) closePayday();
             if (typeof siteCardIsOpen === 'function' && siteCardIsOpen()) closeSiteCard();
             if (typeof settingsOpen !== 'undefined' && settingsOpen) closeSettings();
+            if (typeof weekPhoneMode !== 'undefined' && weekPhoneMode === 'month') setWeekPhoneMode('grid');
         });
         await page.waitForTimeout(200);
     }
