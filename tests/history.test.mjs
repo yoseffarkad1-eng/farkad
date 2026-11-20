@@ -917,9 +917,11 @@ function kindsPhone() {
     // THE DAY'S KIND IS THE DAY'S: at two sites, the sites in a group of their own that takes a
     // whole line, and the kind and the hours after it - history.browser.mjs measures the glass.
     const day = key => device.rowsDrawn().find(row => row.dataset.historyKey === key).querySelectorAll('.history-day')[0];
+    // Read so that a row drawn some other way FAILS here rather than throws - round 1 put the tags
+    // straight into the day, and a throw ended the suite before every check after this one.
+    const siteNames = group => group.children.map(tag => { const name = tag.querySelectorAll('.site-name')[0]; return name ? name.textContent : tag.className; });
     same('a day at two sites: both in a group that takes a line of its own, and the day\'s kind and hours after the group',
-        [day('row:2026-11-05:w_a').children.map(child => child.className),
-            day('row:2026-11-05:w_a').children[0].children.map(tag => tag.querySelectorAll('.site-name')[0].textContent)],
+        [day('row:2026-11-05:w_a').children.map(child => child.className), siteNames(day('row:2026-11-05:w_a').children[0])],
         [['history-sites history-sites-many', 'history-kind history-kind-double', 'history-hours'], ['רמת גן', 'הרצליה']]);
     same('a day at one site: its group is not made a line of its own', day('row:2026-11-04:w_a').children[0].className, 'history-sites');
     same('and a row with its man\'s name says so, so that its day goes under the name on the glass',
@@ -999,8 +1001,10 @@ function kindsPhone() {
     // history.browser.mjs holds the glass). The text keeps dateRange's own spaces.
     const nowNode = device.byId('historyRangeNow');
     const boxes = nowNode.children.map(child => [child.className, plain(child.textContent)]);
+    // A line with no box FAILS here rather than throws (round 1 had none), so the checks after it still run.
+    const rangeBox = nowNode.querySelectorAll('.history-now-range')[0] || { textContent: '' };
     same('the line: the template\'s words, then the range in a box of its own - the dash held to the first date, one space to break at',
-        [boxes, (plain(nowNode.querySelectorAll('.history-now-range')[0].textContent).match(/ /g) || []).length,
+        [boxes, (plain(rangeBox.textContent).match(/ /g) || []).length,
             plain(device.facts().now).endsWith('01/11/2026 - 10/11/2026'), plain(device.text()).split('\n')[1]],
         [[['', `${plain(device.facts().who)} · ${plain(device.facts().where)} · `], ['history-now-range', '01/11/2026\u00a0- 10/11/2026']],
             1, true, '01/11/2026 - 10/11/2026']);

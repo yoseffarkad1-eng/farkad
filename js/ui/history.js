@@ -1151,7 +1151,12 @@ function historySend() {
         }
         return;
     }
-    shareTextOut(text, parts.status, () => { setTimeout(() => { parts.status.textContent = ''; }, 4000); });
+    // The door's own words go after a while - its own, and never what was said after them: an
+    // earlier send's clear wiped the refusal of a long text pressed within its four seconds.
+    shareTextOut(text, parts.status, () => {
+        const said = parts.status.textContent;
+        setTimeout(() => { if (parts.status.textContent === said) parts.status.textContent = ''; }, 4000);
+    });
 }
 
 function historyCopy() {

@@ -384,8 +384,21 @@ try {
             document.getElementById('historyText').value, window.__built]), ['false', true, [0, 0, 0, 0], '', 0]);
         // A DOUBLE TAP on the fold opens it, once: its button stays the same node, which the page's
         // own rule leaves to the surface (js/ui/sheet.js), and the second tap used to shut it again.
-        const foldAt = await page.evaluate(() => { const box = document.getElementById('historyFoldLabel').getBoundingClientRect();
-            return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; });
+        // A person scrolls to the button first, and so does this check - and the point it taps is
+        // checked to BE the button. Aimed by its rectangle as the dialog stood (fix round 1's run
+        // on 71e8303), both taps came down under the scroll box's edge, on the dialog's own padding:
+        // the button's middle was at 644 and the box ended at 638, so the check read «shut» on round
+        // 1 and on the repair alike and said nothing about either.
+        await page.evaluate(() => document.getElementById('historyFoldLabel').scrollIntoView({ block: 'center' }));
+        await pause(page, 150);
+        const foldAt = await page.evaluate(() => {
+            const fold = document.getElementById('historyFoldLabel');
+            const box = fold.getBoundingClientRect();
+            const x = box.left + box.width / 2;
+            const y = box.top + box.height / 2;
+            return { x, y, hit: document.elementFromPoint(x, y) === fold };
+        });
+        check('the point the double tap comes down on is the fold\'s button, on the glass', foldAt.hit, JSON.stringify(foldAt));
         await page.touchscreen.tap(foldAt.x, foldAt.y);
         await page.waitForTimeout(90);
         await page.touchscreen.tap(foldAt.x, foldAt.y);
@@ -609,9 +622,11 @@ try {
         [[400, ['לחיצה על יום פותחת אותו במסך היום.', `מוצגות 400 שורות מתוך ${total}.`, 'הצג עוד 200']], firstNew]);
         await page.locator('#historyList .history-more').tap();
         await pause(page, 500);
+        // MOVED ON PURPOSE (fix round 1): «בחר תקופה קצרה יותר» - the label of the select it means -
+        // for «בחר טווח קצר יותר» (tests/history.test.mjs pins the same sentence).
         same('at 600 there is no «הצג עוד» - the line says to narrow it', await drawn(),
             [600, ['לחיצה על יום פותחת אותו במסך היום.',
-                `מוצגות 600 השורות החדשות ביותר מתוך ${total}. כדי לראות את השאר, בחר טווח קצר יותר, אתר או עובד.`]]);
+                `מוצגות 600 השורות החדשות ביותר מתוך ${total}. כדי לראות את השאר, בחר תקופה קצרה יותר, אתר או עובד.`]]);
         same('and the document holds exactly the days drawn', await page.evaluate(() => document.querySelectorAll('[data-history-key^="row:"]').length), 600);
 
         suite('23. a record moving under the open dialog, with 600 days drawn');
@@ -660,16 +675,16 @@ try {
         // because the rows themselves are part of what a draw compares - and when it is the focused
         // day, its node is built anew and the focus is put back on it by its key. Neither was moved
         // by anything above: each of those moves moved a count, and none touched the focused day.
-        const plainDay = () => page.evaluate(() => {
+        const plainDay = skip => page.evaluate(skip => {
             const facts = historyFacts();
             const drawn = new Set([...document.querySelectorAll('#historyList .history-row')].map(row => row.dataset.historyKey));
             const fit = facts.rows.filter(row => row.kind === 'normal' && row.hours === 0 && row.sites.length === 1
-                && row.date !== todayStr() && drawn.has(`row:${row.date}:${row.workerId}`));
+                && row.date !== todayStr() && drawn.has(`row:${row.date}:${row.workerId}`) && `row:${row.date}:${row.workerId}` !== skip);
             const row = fit[Math.floor(fit.length / 2)];
             const site = Number(row.sites[0].id.slice(2));
             return { key: `row:${row.date}:${row.workerId}`, date: row.date, workerId: row.workerId, from: row.sites[0].id,
                 to: 'p_' + ((site % 5) + 1) };
-        });
+        }, skip || '');
         const sameRate = await plainDay();
         const nowAt = await page.evaluate(key => {
             const node = [...document.querySelectorAll('#historyList .history-row')].find(row => row.dataset.historyKey === key);
@@ -690,7 +705,9 @@ try {
         same('a commit moving the FOCUSED day to another site at the same rate: no count moves, the day is drawn anew saying where he was, the focus back on it, the place kept',
             [JSON.stringify(await tilesNow()) === JSON.stringify(counts1)].concat(afterMove),
             [true, true, true, sameRate.key, siteName(sameRate.to), nowAt, 600]);
-        const otherDay = await plainDay();
+        // Another day than the focused one: the commit's edit of that one is still this phone's
+        // own, unsent, and a snapshot adopted under it is rebased under that edit, as it must be.
+        const otherDay = await plainDay(sameRate.key);
         await page.evaluate(day => {
             const raw = JSON.parse(JSON.stringify(State.schedule));
             raw.updatedAt = new Date(Date.now() + 2000).toISOString();
