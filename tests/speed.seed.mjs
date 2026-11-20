@@ -753,6 +753,11 @@ export async function writesScenario(record, columns, given) {
     let memory = [];
     const mirror = () => {
         const old = phone(A.dump(), filesOf('base'), { today: A.run('todayStr()') });
+        // v207's integration: the base phone is told what A is told about the cloud (A is
+        // connected and synced, the mirror never is). «יום תשלום» says «מסונכרן בין המכשירים»
+        // is missing on a phone that is not shared, so without this the two phones differ by
+        // their sync state and not by a figure (the reading equal on two unconnected phones).
+        old.run('weeklyCloseShared = () => true; 1');
         memory.forEach(code => old.run(code));
         return old;
     };

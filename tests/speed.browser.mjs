@@ -68,9 +68,11 @@ given('the season-open record is a season', SEASON.open.facts.men === 40 && SEAS
 const git = (args, text) => execFileSync('git', ['-C', ROOT, ...args], { maxBuffer: 256 * 1024 * 1024, ...(text ? { encoding: 'utf8' } : {}) });
 const work = mkdtempSync(join(tmpdir(), 'farkad-speed-'));
 const baseRoot = join(work, 'v204');
+const baseNames = [];
 {
     const shell = deployedFromSource(git(['show', `${BASE}:sw.js`], true), `${BASE}:sw.js`);
     git(['ls-tree', '-r', '--name-only', BASE, '--', ...shell], true).split('\n').filter(Boolean).forEach(name => {
+        baseNames.push(name);
         mkdirSync(join(baseRoot, dirname(name)), { recursive: true });
         writeFileSync(join(baseRoot, name), git(['show', `${BASE}:${name}`]));
     });
@@ -78,7 +80,22 @@ const baseRoot = join(work, 'v204');
 const here = await serve(ROOT);
 const there = await serve(baseRoot);
 check('this build\'s origin serves this commit, byte for byte', (await verifyServedAssets(here.url, ROOT, expectedShaFor(ROOT))).ok);
-check('v204\'s origin serves 6ab193d, byte for byte', (await verifyServedAssets(there.url, ROOT, BASE)).ok);
+// MOVED ON PURPOSE (v207's integration): verifyServedAssets reads the shell list off THIS
+// tree's sw.js, and the merged tree's shell names files the base never had (crewcheck.js,
+// history.js) - "not tracked" there, so the check could not pass on any merged tree. The base's
+// origin is held to the base's OWN shell instead: every file of it, fetched, against its blob.
+{
+    const wrong = [];
+    for (const name of baseNames) {
+        try {
+            const response = await fetch(`${there.url.replace(/\/$/, '')}/${name}`);
+            const body = Buffer.from(await response.arrayBuffer());
+            if (!response.ok || !body.equals(git(['show', `${BASE}:${name}`]))) wrong.push(name);
+        } catch (error) { wrong.push(`${name}: ${error.message}`); }
+    }
+    check(`the base's origin serves ${BASE.slice(0, 7)}'s own shell, byte for byte (${baseNames.length} files)`,
+        baseNames.length > 20 && wrong.length === 0, wrong.slice(0, 6).join(' | '));
+}
 const TREES = { v204: there, now: here };
 
 const browser = await launchLocalBrowser(chromium, { executablePath: process.env.CHROME_PATH });
