@@ -240,13 +240,16 @@ try {
     // ------------------------------------------------------------ keyboard, backdrop, focus
     suite('Escape, the backdrop, Tab and the focus');
     const order = [];
-    for (let n = 0; n < 7; n += 1) {
+    // MOVED ON PURPOSE (the year's summary, js/ui/yearsummary.js): the frame gained «סיכום שנת
+    // 2026», the door one step out to the year, in its document place between the body and
+    // the fold - so the walk is one button longer.
+    for (let n = 0; n < 8; n += 1) {
         await page.keyboard.press('Tab');
         order.push(await page.evaluate(() => document.activeElement.id || document.activeElement.tagName));
     }
-    same('Tab walks the arrows, the fold and the three buttons, and comes round inside the dialog', order,
-        ['monthSummaryPrev', 'monthSummaryNext', 'monthSummaryFoldLabel', 'monthSummarySend', 'monthSummaryCopy',
-            'monthSummaryClose', 'monthSummaryPrev']);
+    same('Tab walks the arrows, the year, the fold and the three buttons, and comes round inside the dialog', order,
+        ['monthSummaryPrev', 'monthSummaryNext', 'monthSummaryYear', 'monthSummaryFoldLabel', 'monthSummarySend',
+            'monthSummaryCopy', 'monthSummaryClose', 'monthSummaryPrev']);
     await page.keyboard.press('Escape');
     check('Escape closes it', !(await isOpen(page)));
     same('and it forgets which month it was', await page.evaluate(() => MONTH_SUMMARY_KEY), null);
@@ -390,8 +393,9 @@ try {
         check(`${tag}: neither the page nor the dialog scrolls sideways`, seen.page && seen.sideways, JSON.stringify(seen));
         check(`${tag}: the dialog is wholly on the glass`, seen.inside, JSON.stringify(seen));
         check(`${tag}: nothing in it reaches past its edge`, seen.wide.length === 0, JSON.stringify(seen.wide));
-        check(`${tag}: the two arrows, the fold and the three buttons are 48px both ways`,
-            seen.small.length === 0 && seen.targets === 6, JSON.stringify([seen.small, seen.targets]));
+        // MOVED ON PURPOSE: the year's door is the frame's seventh button (js/ui/yearsummary.js).
+        check(`${tag}: the two arrows, the year, the fold and the three buttons are 48px both ways`,
+            seen.small.length === 0 && seen.targets === 7, JSON.stringify([seen.small, seen.targets]));
         check(`${tag}: no word on it is under 16px, the field included`, seen.tiny.length === 0 && seen.field >= 16,
             JSON.stringify([seen.tiny, seen.field]));
         check(`${tag}: the key numbers are large`, seen.figure >= 28 * scale && seen.count >= 26 * scale, JSON.stringify([seen.figure, seen.count]));

@@ -523,4 +523,96 @@ async function launched(options = {}, before = null) {
     same('a click after the cover is not stopped', after.prevented + after.stopped, 0);
 }
 
+// ================================================================== the fourth review (f9a432b)
+{
+    suite('P3-1 (fourth review): with no worker to ask, «רענן עכשיו» and «בדוק עדכון» reload at the first moment nobody is typing, as v204\'s press did');
+
+    // launchBehind by the dialog path: a dialog under the cover, the handover, the give-up.
+    const behind = async () => {
+        const d = await launched();
+        d.tick(3000);
+        const dialog = d.openModal();
+        d.handover('activated');
+        dialog.style.display = 'none';
+        return d;
+    };
+
+    const d = await behind();
+    given('behind: the cover down, the banner up, nothing reloaded', !d.covered() && d.bannerUp() && d.reloads.length === 0);
+    d.document.activeElement = d.node('count', { tagName: 'INPUT', value: '7' });   // a count typed, not left
+    d.pressBanner('רענן עכשיו');
+    same('the press with a box holding 7: no reload at the press', d.reloads.length, 0);
+    d.tick(5000);
+    same('nor while the box still holds it', d.reloads.length, 0);
+    d.document.activeElement = null;                      // he leaves the box
+    d.tick(500);
+    same('the box left: the reload', d.reloads.length, 1);
+
+    const e = await behind();
+    e.ctx.ADVANCE_ORDER_DRAFT = { order: ['w_01'] };      // the advances' «סידור» draft open
+    e.pressBanner('רענן עכשיו');
+    e.tick(5000);
+    same('the press with the «סידור» draft open: no reload', e.reloads.length, 0);
+    e.ctx.ADVANCE_ORDER_DRAFT = null;
+    e.tick(500);
+    same('the draft saved or cancelled: the reload', e.reloads.length, 1);
+
+    const f = await behind();
+    f.document.activeElement = f.node('count', { tagName: 'INPUT', value: '12' });
+    f.ctx.checkForUpdate();
+    f.tick(5000);
+    same('«בדוק עדכון» with a box holding 12: no reload', f.reloads.length, 0);
+    f.document.activeElement = null;
+    f.tick(500);
+    same('the box left: the reload', f.reloads.length, 1);
+
+    // The 12 s give-up, then the handover: behind the other way.
+    const g = await launched();
+    g.tick(12100);
+    g.handover('activated');
+    g.ctx.ADVANCE_ORDER_DRAFT = { order: [] };
+    g.pressBanner('רענן עכשיו');
+    g.tick(3000);
+    same('behind after the give-up, the draft open: no reload at the press', g.reloads.length, 0);
+    g.ctx.ADVANCE_ORDER_DRAFT = null;
+    g.tick(500);
+    same('closed: the reload', g.reloads.length, 1);
+
+    // The redundant fallback that finds nothing waiting.
+    const h = await launched({}, h => h.press());
+    given('a touched launch: the banner over the waiting build', h.bannerUp());
+    h.fresh.become('redundant');
+    h.registration.waiting = null;
+    h.document.activeElement = h.node('count', { tagName: 'INPUT', value: '3' });
+    h.pressBanner('רענן עכשיו');
+    h.tick(2000);
+    same('the worker in hand redundant and nothing waiting, a box holding 3: no reload at the press', h.reloads.length, 0);
+    h.document.activeElement = null;
+    h.tick(500);
+    same('the box left: the reload', h.reloads.length, 1);
+}
+
+{
+    suite('P3-2 (fourth review): once the reload is asked, the 12 s deadline does not lower the cover over a page still on its way out');
+
+    const d = await launched();
+    d.tick(11000);
+    d.handover('activating');
+    d.tick(950);
+    d.fresh.become('activated');                         // 11.95 s: the reload asked, still in flight
+    same('the reload asked, under the cover', d.reloads.map(r => r.covered), [true]);
+    d.tick(150);                                         // 12.1 s: past the deadline
+    check('past 12 s, the cover is still up', d.covered());
+    check('no banner drawn over the page on its way out', !d.bannerUp());
+    same('the page still hidden from assistive technology', d.dayView.getAttribute('aria-hidden'), 'true');
+    const click = d.event();
+    d.fire(d.bags.window, 'click', click);
+    check('and a click still stopped', click.prevented > 0 && click.stopped > 0);
+    same('one reload asked, not two', d.reloads.length, 1);
+    // A page still here half a minute after its reload was asked never went: the glass is his again.
+    d.tick(30000);
+    check('half a minute on and still here: the cover comes down, the banner offers the update', !d.covered() && d.bannerUp());
+    same('and nothing more is asked by itself', d.reloads.length, 1);
+}
+
 report();

@@ -174,6 +174,12 @@
 @media (max-width: 700px) {
     :root.display-large .week-phone-date { min-height: 58px !important; }
 }
+/* «תמונת מצב» (v206, js/ui/status.js): a site's row. And the door round the sync chip: the
+   floor above makes it 52 tall, and its padding and margin are said again for 52 -
+   (52 - 24) / 2 each - so its line in the strip is still the pill's own (css/app.css,
+   .status-door). */
+:root.display-large .status-site { min-height: 64px !important; }
+:root.display-large .status-door { padding-block: 14px; margin-block: -14px; }
 
 /* ---- 3. THE SIZES, RESTATED --------------------------------------------------------- */
 :root.display-large body { font-size: 20px; line-height: 1.6; }
@@ -698,6 +704,32 @@
 :root.display-large .week-cell .cell-line[data-initial]::before { font-size: 18px; line-height: 1; font-weight: 800; }
 :root.display-large .week-cell .cell-line .site-mark { font-size: 18px; }
 }
+/* «לוח חודשי» (js/ui/monthboard.js), one rule for one rule. The marks keep line-height 1, as
+   the week's copies above do: each is one glyph in a block of a fixed height. */
+:root.display-large #weekView .week-table .corner .month-board-door { font-size: 18px; font-weight: 700; line-height: 1.4; }
+:root.display-large .month-board-back { font-size: 20px; }
+:root.display-large .month-board-title { font-size: 22px; font-weight: 800; line-height: 1.4; }
+:root.display-large .month-board-steps > button,
+:root.display-large .month-board-out > button { font-size: 20px; }
+:root.display-large .month-board-home { font-size: 20px; }
+:root.display-large .month-board-filter { font-size: 20px; font-weight: 700; }
+:root.display-large .month-board-table thead .month-board-corner { font-size: 18px; font-weight: 600; line-height: 1.4; }
+:root.display-large .month-board-day { font-size: 18px; font-weight: 600; line-height: 1.4; }
+:root.display-large .month-board-dd { font-weight: 800; }
+:root.display-large .month-board-who { font-size: 18px; font-weight: 700; line-height: 1.4; }
+:root.display-large .month-board-badge { font-size: 18px; font-weight: 600; }
+:root.display-large .month-board .week-cell .cell-line[data-initial]::before { font-size: 18px; font-weight: 800; line-height: 1; }
+:root.display-large .month-board .week-cell .cell-line .site-mark { font-size: 18px; line-height: 1; }
+:root.display-large .month-board .week-cell .cell-extra::after { font-size: 18px; font-weight: 800; line-height: 1; }
+:root.display-large .month-board .cell-absent { font-size: 0; }
+:root.display-large .month-board .cell-absent::before { font-size: 18px; }
+:root.display-large .month-board-total-head { font-size: 18px; font-weight: 700; line-height: 1.4; }
+:root.display-large .month-board-total { font-size: 20px; font-weight: 800; }
+:root.display-large .month-board-foot-label { font-size: 18px; font-weight: 700; line-height: 1.4; }
+:root.display-large .month-board-count { font-size: 18px; font-weight: 700; }
+:root.display-large .month-board-key-letters { font-size: 18px; font-weight: 800; line-height: 1.4; }
+:root.display-large .month-board-marks { font-size: 18px; line-height: 1.45; }
+:root.display-large .month-board-note { font-size: 18px; line-height: 1.45; }
 :root.display-large .daycheck-entry { font-size: 20px; font-weight: 600; }
 :root.display-large #dayCheckModal .modal-content > h3 { line-height: 1.4; }
 :root.display-large .daycheck-clean { font-size: 20px; line-height: 1.4; font-weight: 650; }
@@ -790,6 +822,26 @@
 :root.display-large .msum-fold textarea { font-size: 20px; }
 :root.display-large #monthSummaryModal .modal-actions button { font-size: 21px; }
 :root.display-large #monthSummaryStatus { font-size: 20px; }
+:root.display-large .msum-year > button { font-size: 21px; font-weight: 650; }
+:root.display-large #yearSummaryModal .modal-content > h3 { line-height: 1.4; }
+:root.display-large .ysum-reading { font-size: 22px; font-weight: 600; }
+:root.display-large #yearSummaryBody .empty-hint { font-size: 22px; }
+:root.display-large .ysum-frame-line { font-size: 20px; line-height: 1.45; }
+:root.display-large .ysum-frame-lead { font-weight: 700; }
+:root.display-large .ysum-lead .msum-tile .msum-value { font-size: 36px; }
+:root.display-large .ysum-month-name { font-size: 22px; font-weight: 800; }
+:root.display-large .ysum-bar-label { font-size: 20px; font-weight: 600; }
+:root.display-large .ysum-bar-count { font-size: 25px; font-weight: 800; }
+:root.display-large .ysum-month-empty { font-size: 22px; font-weight: 800; }
+:root.display-large .ysum-month-tag { font-size: 20px; font-weight: 650; line-height: 1.45; }
+:root.display-large .ysum-month-warn { font-weight: 600; }
+:root.display-large .ysum-pair-label { font-size: 20px; font-weight: 600; }
+:root.display-large .ysum-pair-value { font-size: 22px; font-weight: 800; }
+:root.display-large .ysum-man-name { font-size: 25px; font-weight: 900; }
+:root.display-large .ysum-inactive { font-size: 20px; font-weight: 700; }
+:root.display-large .ysum-span { font-size: 20px; font-weight: 600; }
+:root.display-large #yearSummaryModal .modal-actions button { font-size: 21px; }
+:root.display-large #yearSummaryStatus { font-size: 20px; font-weight: 650; }
 :root.display-large .report-output-actions .payslips-entry { font-size: 20px; }
 :root.display-large #payslipsModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
 :root.display-large .payslips-which button { font-size: 21px; }
@@ -1013,6 +1065,36 @@
 :root.display-large .advance-reset-done-row { font-size: 20px; font-weight: 500; line-height: 1.45; }
 :root.display-large .advance-reset-board { font-size: 21px; font-weight: 800; line-height: 1.45; }
 :root.display-large .advance-reset-closures { font-size: 21px; font-weight: 700; }
+/* «יום תשלום» (js/ui/payday.js), one rule for one rule - after the whole of «סגירת שבוע»'s, as in
+   css/design.css. */
+:root.display-large .payday-entry { font-size: 21px; font-weight: 700; }
+:root.display-large #paydayModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
+:root.display-large .payday-lead { font-size: 21px; line-height: 1.5; }
+:root.display-large .payday-reading { font-size: 22px; font-weight: 600; line-height: 1.45; }
+:root.display-large .payday-section-head { font-size: 22px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-none,
+:root.display-large .payday-nothing { font-size: 21px; line-height: 1.5; }
+:root.display-large .payday-card-head { font-size: 23px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-card-range { font-size: 20px; font-weight: 600; }
+:root.display-large .payday-card-note { font-size: 20px; line-height: 1.45; }
+:root.display-large .payday-figure-label { font-size: 20px; font-weight: 600; }
+:root.display-large .payday-value { font-size: 23px; font-weight: 800; }
+:root.display-large .payday-currency { font-size: 21px; font-weight: 700; }
+:root.display-large .payday-figure-pay .payday-value { font-size: 35px; font-weight: 900; line-height: 1.4; }
+:root.display-large .payday-count { font-size: 20px; font-weight: 700; }
+:root.display-large .payday-card-line { font-size: 20px; line-height: 1.45; }
+:root.display-large .payday-sofar { font-size: 20px; line-height: 1.45; }
+:root.display-large .payday-fold { font-size: 21px; font-weight: 700; }
+:root.display-large .payday-man-name { font-size: 22px; font-weight: 700; }
+:root.display-large .payday-man .payday-value { font-size: 22px; }
+:root.display-large .payday-check-who { font-size: 22px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-check-say { font-size: 21px; font-weight: 600; line-height: 1.45; }
+:root.display-large .payday-check-line { font-size: 20px; font-weight: 500; line-height: 1.45; }
+:root.display-large .payday-door { font-size: 21px; }
+:root.display-large .payday-close-say { font-size: 22px; font-weight: 700; line-height: 1.45; }
+:root.display-large .payday-held-today { font-size: 21px; font-weight: 600; line-height: 1.45; }
+:root.display-large .payday-held-head { font-size: 21px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-held-man { font-size: 20px; font-weight: 500; line-height: 1.45; }
 /* v200: the second pass of the look (css/design.css, its last block) - each size it sets,
    said again in its order, behind its media query, by this block's table. */
 @media (max-width: 700px) {
@@ -1036,6 +1118,36 @@
 :root.display-large .week-table tfoot td { font-size: 18px; }
 :root.display-large .week-table tfoot .name-cell { font-size: 18px; }
 }
+/* v206: «תמונת מצב» (css/design.css, its last block) - each size, weight and line-height it
+   sets, said again in its order by this block's table. */
+:root.display-large .topbar .status-door-words { font-size: 18px; font-weight: 700; }
+:root.display-large .status-sync { font-size: 20px; font-weight: 600; line-height: 1.45; }
+:root.display-large .status-head { font-size: 22px; font-weight: 800; }
+:root.display-large .status-line { font-size: 21px; font-weight: 600; line-height: 1.45; }
+:root.display-large .status-note { font-size: 20px; line-height: 1.45; }
+:root.display-large .status-go { font-size: 21px; font-weight: 650; }
+:root.display-large .status-hero-n { font-size: 51px; font-weight: 900; line-height: 1.4; }
+:root.display-large .status-hero-label { font-size: 21px; font-weight: 700; }
+:root.display-large .status-hero-sites { font-size: 20px; font-weight: 600; }
+:root.display-large .status-today-name { font-size: 21px; font-weight: 700; }
+:root.display-large .status-today-count { font-size: 23px; font-weight: 800; }
+:root.display-large .status-today-rima { font-size: 18px; font-weight: 700; }
+:root.display-large .status-money-label { font-weight: 600; }
+:root.display-large .status-money-amount { font-size: 23px; font-weight: 800; }
+:root.display-large .status-money-count { font-size: 20px; font-weight: 600; }
+:root.display-large .status-grid-head,
+:root.display-large .status-week { font-size: 18px; }
+:root.display-large .status-grid-head { font-weight: 700; }
+:root.display-large .status-week-date { font-size: 18px; font-weight: 700; }
+:root.display-large .status-week-total { font-size: 20px; font-weight: 800; }
+:root.display-large .status-cell { font-size: 18px; font-weight: 700; line-height: 30px; }
+:root.display-large .status-legend-word { font-size: 18px; font-weight: 600; }
+:root.display-large .status-site-name { font-size: 22px; font-weight: 800; }
+:root.display-large .status-site-off { font-size: 18px; font-weight: 700; }
+:root.display-large .status-phase { font-size: 18px; font-weight: 800; }
+:root.display-large .status-site-n { font-size: 29px; font-weight: 900; line-height: 1.4; }
+:root.display-large .status-site-label { font-size: 18px; font-weight: 600; }
+:root.display-large .status-site-rima { font-size: 18px; font-weight: 700; }
 
 /* ---- 4. THE SHAPES ------------------------------------------------------------------ */
 
@@ -1265,6 +1377,19 @@
     :root.display-large .week-cell .cell-line .site-mark { font-size: 18px !important; }
 }
 
+/* ---- «לוח חודשי» -----------------------------------------------------------------------
+   The week's shape above, on every width - the board draws the phone's cell everywhere: a
+   day is 64px both ways, the letter's block 30px, and a name keeps every line it needs (the
+   names' column is the week's, widened above on a phone). Two days and a half across the
+   320px phone with the names pinned; the grid scrolls in its box as before. */
+:root.display-large .month-board td.week-cell { width: 64px !important; min-width: 64px !important; height: 64px !important; }
+:root.display-large .month-board .month-board-date { width: 64px !important; min-width: 64px !important; }
+:root.display-large .month-board .week-cell .cell-line { min-width: 30px !important; height: 30px !important; padding: 0 5px !important; border-radius: 8px !important; margin: 2px auto !important; }
+:root.display-large .month-board .week-cell .cell-line[data-initial]::before { font-size: 18px !important; }
+:root.display-large .month-board .week-cell .cell-line .site-mark { font-size: 18px !important; }
+:root.display-large .month-board-who-name { display: block !important; -webkit-line-clamp: none !important; overflow: visible !important; overflow-wrap: anywhere; }
+:root.display-large .month-board-who { padding: 6px 4px !important; }
+
 /* THE DAY'S HEADER KEEPS ITS AIR HERE (v200). css/design.css took the air out from between the
    day header's lines for everybody (its last block): the top strip's 4px above and below its
    button, the header's 4px inset, the switcher's margin. This mode was measured and reviewed
@@ -1280,5 +1405,12 @@
 /* v205: the launch's cover (css/app.css, .launch-cover): its one line said again, larger and
    heavier, as everything read first is here. */
 :root.display-large .launch-cover { font-size: 24px !important; font-weight: 800 !important; line-height: 1.5 !important; }
+
+/* «יום תשלום» (js/ui/payday.js): on the narrowest phone the card's two smaller figures stand
+   one under the other, each its label over its value, and «לתשלום» under them across the
+   card - two side by side left «נוכה מהשכר» at these sizes a word to a line. */
+@media (max-width: 359px) {
+    :root.display-large .payday-figure { flex-basis: 100% !important; }
+}
 
 }

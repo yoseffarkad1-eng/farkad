@@ -1244,10 +1244,14 @@ const cellOf = (facts, label) => ((facts.pay || []).filter(one => one.label === 
     // day each settle, as they set the date, a follow of the calendar still owed from
     // midnight (dayChosenByHand, js/app.js) - without it the card's own close handed a man
     // who tapped the old today the new one. What is held is unchanged: the same steps, both.
+    // MOVED ON PURPOSE (v206's integration): and each first leaves a «בניית סידור» journey that
+    // stands at its first station on another day (journeyLeaveFor, js/ui/journey.js) - a door
+    // from another screen carried the seder he was building to the day it opened. Still the
+    // same steps, both (tests/journey.test.mjs holds every such door to the rule).
     check('the week screen\'s cell takes the same steps to a day',
-        /const open = \(\) => \{\s+State\.date = date;\s+if \(typeof dayChosenByHand === 'function'\) dayChosenByHand\(\);\s+showView\('day'\);\s+\};/
+        /const open = \(\) => \{\s+if \(typeof journeyLeaveFor === 'function'\) journeyLeaveFor\(date\);\s+State\.date = date;\s+if \(typeof dayChosenByHand === 'function'\) dayChosenByHand\(\);\s+showView\('day'\);\s+\};/
             .test(source('js/ui/week.js'))
-        && /function workerCardGoDay\(date\) \{\s+if \(!isRealDate\(date\)\) return;\s+closeWorkerCard\(\);\s+State\.date = date;\s+if \(typeof dayChosenByHand === 'function'\) dayChosenByHand\(\);\s+showView\('day'\);\s+\}/.test(CARD));
+        && /function workerCardGoDay\(date\) \{\s+if \(!isRealDate\(date\)\) return;\s+closeWorkerCard\(\);\s+if \(typeof journeyLeaveFor === 'function'\) journeyLeaveFor\(date\);\s+State\.date = date;\s+if \(typeof dayChosenByHand === 'function'\) dayChosenByHand\(\);\s+showView\('day'\);\s+\}/.test(CARD));
 }
 
 // ---------------------------------------------------------------- 6. call, and WhatsApp

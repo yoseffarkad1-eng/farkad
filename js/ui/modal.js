@@ -34,6 +34,8 @@ const MODAL_CLOSERS = {
     weeklyCloseModal: () => closeWeeklyClose(),
     // «איפוס מקדמות» (js/ui/advancereset.js): the same, and the same refusal while it writes.
     advanceResetModal: () => closeAdvanceReset(),
+    // «יום תשלום» (js/ui/payday.js): a reading - closing it forgets nothing but what is open.
+    paydayModal: () => closePayday(),
     // The summary of the day's rides (v179, js/ui/transport.js).
     transportSummaryModal: () => closeTransportSummary(),
     // The day's check (js/ui/daycheck.js). Nothing to clear behind it: it holds no state.
@@ -42,10 +44,14 @@ const MODAL_CLOSERS = {
     transportReportModal: () => closeTransportReport(),
     // The month's summary (js/ui/monthsummary.js): closing it forgets which month it was.
     monthSummaryModal: () => closeMonthSummary(),
+    // The year's summary (js/ui/yearsummary.js): closing it forgets which year it was.
+    yearSummaryModal: () => closeYearSummary(),
     // The site's card (js/ui/sitecard.js): closing it forgets which site and which month.
     siteCardModal: () => closeSiteCard(),
     // «מה חדש» (js/ui/whatsnew.js): closing it, by any road, is having seen it.
     whatsNewModal: () => closeWhatsNew(),
+    // «תמונת מצב» (js/ui/status.js): closing it lets go of the money reading still waiting.
+    statusModal: () => closeStatus(),
     migrationModal: () => closeMigrationModal(),
     // The one .modal that had no entry here, so Escape fell through to the bare
     // `display = 'none'` below and never reached closeSignInModal - which exists, and

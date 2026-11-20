@@ -38,8 +38,8 @@
 //   does it): the five main screens still do not scroll sideways.
 //
 //   PAPER AND THE PICTURE: the week laid out for print with the mode on is, box for box, the
-//   week without it; the shared picture of the week, of both reports and of the rides'
-//   summary is the same PNG, byte for byte, with the mode on and off.
+//   week without it; the shared picture of the week, of the month's board (v206), of both
+//   reports and of the rides' summary is the same PNG, byte for byte, with the mode on and off.
 //
 // LARGETEXT_SHOTS=<dir> also writes the JPEG pairs (440x956, dark, mode off / on).
 // Chromium with emulated touch. NOT a real phone, and nobody far-sighted has looked at it.
@@ -797,8 +797,9 @@ for (const [width, height] of PHONES.filter(([width]) => width >= 375)) {
 //
 // The table as a picture (js/ui/printout.js) is drawn on a canvas of its own, in its own
 // sizes, from the WORDS and the site colours it reads off the document - never from how
-// large the document draws them. Held on the bytes: the week, the report and the rides'
-// summary, each drawn with the mode off and with it on, are the same PNG.
+// large the document draws them. Held on the bytes: the week, the month's board («לוח חודשי»,
+// v206), the report and the rides' summary, each drawn with the mode off and with it on, are
+// the same PNG.
 {
     suite('the shared picture: the same PNG with the large display ON and OFF');
     const pictures = async large => {
@@ -816,6 +817,10 @@ for (const [width, height] of PHONES.filter(([width]) => width >= 375)) {
             State.date = todayStr(); showView('week'); setWeekPhoneMode('grid');
             await wait(300);
             seen.week = await print('week');
+            // «לוח חודשי» (v206): the crew's month, read off its own board.
+            openMonthBoard(null, null);
+            await wait(300);
+            seen.month = await print('month');
             REPORT_SECTION = 'workers'; REPORT_CARD_GRID = true; showView('reports');
             await wait(300);
             seen.report = await print('report');
@@ -833,7 +838,7 @@ for (const [width, height] of PHONES.filter(([width]) => width >= 375)) {
     const plain = await pictures(false);
     const large = await pictures(true);
     given('one phone had the mode on and the other did not', plain.out.large === false && large.out.large === true);
-    for (const kind of ['week', 'report', 'sites', 'rides']) {
+    for (const kind of ['week', 'month', 'report', 'sites', 'rides']) {
         given(`${kind}: a picture was drawn`, Boolean(plain.out[kind]) && plain.out[kind][2] > 2000, JSON.stringify(plain.out[kind]));
         same(`${kind}: the same width, height, length and SHA-256`, large.out[kind], plain.out[kind]);
     }

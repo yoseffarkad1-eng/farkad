@@ -1328,6 +1328,118 @@ for (const [width, height] of [[375, 667], [440, 956]]) {
     await context.close();
 }
 
+// ================================================================== a door from another screen (v206)
+//
+// AT THE FIRST STATION THE DAY SCREEN IS THE JOURNEY'S, its date the journey's: the journey follows
+// the date the day screen is put on (the day's own arrows above). A door on ANOTHER screen that put
+// another date there carried the seder he was building to that day with it, its place rewritten
+// to say so (the review of v206: a date of «לוח חודשי», and «לרישום היום» on «יום תשלום» - since
+// the week's cells and the cards, too). Every door that must still open its day now LEAVES the
+// journey first, as «יציאה» does: the day he chose opens with no seder on it, the journey's place
+// is kept, and the dock's «בניית סידור» continues it at its station and on its day. Nothing else
+// is written. A door whose only way is today is withheld instead (tests/statusscreen.browser.mjs
+// B21, tests/payday.browser.mjs B21). And a door to the journey's own day moves nothing.
+{
+    const { page, context, errors } = await open(375, 667, 'light', { before: [['2026-11-09', 'w_01', 'p_01'], ['2026-11-09', 'w_02', 'p_02']] });
+    suite('375x667 light: a door from another screen to another day leaves the journey on its own day, its place kept for the dock');
+    const MONDAY = '2026-11-09';
+    const record = await recordBytes(page);
+    const rest = await diskBut(page, KEY);
+    const onDay = async () => {
+        await page.evaluate(() => {
+            [...document.querySelectorAll('.modal')].filter(node => node.style.display === 'flex').forEach(node => {
+                const close = MODAL_CLOSERS[node.id];
+                if (close) close(); else node.style.display = 'none';
+            });
+            if (typeof weekPhoneMode !== 'undefined' && weekPhoneMode !== 'grid') setWeekPhoneMode('grid');
+        });
+        await page.locator('#tab-day').tap();
+        await page.waitForTimeout(200);
+        // A journey that a door carried to another day - the fault this block is about - is
+        // finished, and the next one started again on tomorrow, so that each door starts alike.
+        if (await page.evaluate(day => journeyStation() !== 0 && journeyDate() !== day, DAY)) {
+            await page.evaluate(() => journeyFinish());
+            await page.waitForTimeout(150);
+        }
+        if (await station(page) !== 1) await start(page);
+        await page.waitForTimeout(200);
+        return page.evaluate(() => [journeyStation(), journeyDate(), State.date, currentView]);
+    };
+    const toWeek = async () => {
+        await page.locator('#tab-week').tap();
+        await page.waitForTimeout(250);
+    };
+    const tapIt = async locator => {
+        await locator.evaluate(node => node.scrollIntoView({ block: 'center' }));
+        await page.waitForTimeout(250);
+        await locator.tap();
+        await page.waitForTimeout(400);
+    };
+    // A man's cell of the week, by the day its spoken name says it opens (the week's cells carry
+    // no date of their own).
+    const weekCell = date => page.locator(`#weekView .week-table tbody td.week-cell[aria-label*="${date.split('-').reverse().join('/')}"]`).first();
+    const doors = [
+        ['a man\'s cell of the week', MONDAY, async () => { await toWeek(); await tapIt(weekCell(MONDAY)); }],
+        ['«פתיחת היום לעריכה» of the week\'s day', MONDAY, async () => {
+            await toWeek();
+            await tapIt(page.locator(`[data-week-preview="${MONDAY}"]`));
+            await tapIt(page.locator('#weekView .week-phone-open'));
+        }],
+        ['a date of «לוח חודשי»', MONDAY, async () => {
+            await toWeek();
+            await tapIt(page.locator('#monthBoardDoor'));
+            await tapIt(page.locator(`th.month-board-date[data-date="${MONDAY}"] .month-board-day`));
+        }],
+        ['a cell of «לוח חודשי»', MONDAY, async () => {
+            await toWeek();
+            await tapIt(page.locator('#monthBoardDoor'));
+            await tapIt(page.locator(`#weekView .month-board-table tbody td.week-cell[data-date="${MONDAY}"]`).first());
+        }],
+        ['a day of a worker\'s card', MONDAY, async () => {
+            await page.evaluate(() => openWorkerCard('w_01'));
+            await page.waitForTimeout(300);
+            await tapIt(page.locator(`#workerCardModal .wcard-cal-day[data-date="${MONDAY}"]`));
+        }],
+        ['a day of a site\'s card', MONDAY, async () => {
+            await page.evaluate(() => openSiteCard('p_01'));
+            await page.waitForTimeout(300);
+            await tapIt(page.locator(`#siteCardModal .scard-cal-day[data-date="${MONDAY}"]`));
+        }],
+        ['the phone\'s reminder, which goes to today', TODAY, async () => {
+            await page.evaluate(() => FarkadReminders.openToday());
+            await page.waitForTimeout(400);
+        }]
+    ];
+    for (const [name, date, press] of doors) {
+        const building = await onDay();
+        given(`${name}: the journey at its first station, building tomorrow on the day screen`, JSON.stringify(building) === JSON.stringify([1, DAY, DAY, 'day']),
+            JSON.stringify(building));
+        await press();
+        same(`${name}: the day screen on the day he chose, with no seder riding on it`,
+            await page.evaluate(() => [currentView, State.date, journeyStation(), journeyDate(), document.body.classList.contains('journey-on')]),
+            ['day', date, 0, null, false]);
+        same(`${name}: the journey's place kept on its own day and station, left on purpose`,
+            await keptOf(page).then(k => k && [k.date, k.station, k.open]), [DAY, 1, false]);
+        same(`${name}: the dock's «בניית סידור» says it is there to continue`, await page.locator('#journeyDockBtn').getAttribute('title'),
+            'המשך בניית הסידור · שלב 1 מתוך 5');
+        same(`${name}: the record and every other key byte for byte`, [await recordBytes(page) === record, await diskBut(page, KEY) === rest], [true, true]);
+        // (A journey a door carried away is still on the screen, its dock row in place of the button.)
+        if (await station(page) === 0) await start(page);
+        same(`${name}: and the dock continues it - its station, its day, the day screen with it`,
+            await page.evaluate(() => [journeyStation(), journeyDate(), State.date]), [1, DAY, DAY]);
+    }
+    // A door to the journey's OWN day: nothing to leave, nothing moved, not a byte.
+    await onDay();
+    const bytes = await page.evaluate(key => localStorage.getItem(key), KEY);
+    await toWeek();
+    await tapIt(weekCell(DAY));
+    same('a door to the journey\'s own day: the journey still at its first station, on its day, its key byte for byte',
+        [await page.evaluate(() => [currentView, State.date, journeyStation(), journeyDate()]), await page.evaluate(key => localStorage.getItem(key), KEY) === bytes],
+        [['day', DAY, 1, DAY], true]);
+    same('nothing went wrong on the page', errors, []);
+    await context.close();
+}
+
 // ================================================================== text at twice its size
 
 for (const [width, height] of [[440, 956], [375, 667]]) {

@@ -703,4 +703,70 @@ await block('every word the journey adds, and no other', async () => {
     check('nor touches the record\'s writers', !/State\.(commit|commitMany|save|persist)\b|FarkadSync\./.test(JOURNEY));
 });
 
+// ================================================================== a door from another screen (v206)
+//
+// AT THE FIRST STATION THE DAY SCREEN IS THE JOURNEY'S, its date the journey's: the journey follows
+// the date the day screen is put on. A door on another screen that put another date there - a
+// date of «לוח חודשי», «לרישום היום» on «יום תשלום» (the review of v206), and since the week's own
+// cells, a worker's and a site's card and the phone's reminder - carried the seder he was
+// building to that day, its place rewritten. The rule is the journey's: journeyHoldsDay says
+// when, journeyLeaveFor leaves it first for a door that must still open its day.
+await block('a door from another screen: the journey holds its day, and is left - its place kept - by a door to another', async () => {
+    const device = crewPhone('d_door');
+    device.State.date = TODAY;
+    same('no journey: no day is held, and a door leaves nothing', [device.call('journeyHoldsDay', TODAY), device.call('journeyLeaveFor', TODAY)],
+        [false, false]);
+    check('and nothing is written for it', device.raw(KEY) === null);
+    device.call('journeyStart');
+    given('the journey at its first station, on tomorrow', device.call('journeyStation') === 1 && device.call('journeyDate') === DAY);
+    same('it holds the day screen against any other day, and never against its own',
+        ['2026-11-09', TODAY, '2026-11-12', DAY].map(date => device.call('journeyHoldsDay', date)), [true, true, true, false]);
+    const bytes = device.raw(KEY);
+    const rest = others(device);
+    same('a door to the journey\'s own day leaves it where it is, writing nothing',
+        [device.call('journeyLeaveFor', DAY), device.call('journeyStation'), device.call('journeyDate'), device.raw(KEY)], [false, 1, DAY, bytes]);
+    same('a door to another day leaves it first', device.call('journeyLeaveFor', TODAY), true);
+    same('no journey on the screen', [device.call('journeyStation'), device.call('journeyHoldsDay', TODAY)], [0, false]);
+    same('its place kept as «יציאה» keeps it: its own day, its station, left on purpose',
+        [kept(device).date, kept(device).station, kept(device).open], [DAY, 1, false]);
+    same('and not a byte of anything else', others(device), rest);
+    const again = reopen(device);
+    same('a reload does not bring it back by itself', [again.call('journeyResume'), again.call('journeyStation')], [false, 0]);
+    again.call('journeyStart');
+    same('the dock\'s «בניית סידור» continues it, at its station and on its day, the day screen with it',
+        [again.call('journeyStation'), again.call('journeyDate'), again.State.date], [1, DAY, DAY]);
+    // Past the first station the day screen is not the journey's editor: no door moves it.
+    again.call('journeyGo', 2);
+    const two = again.raw(KEY);
+    same('at the second station no day is held, and a door to another leaves nothing',
+        [again.call('journeyHoldsDay', TODAY), again.call('journeyLeaveFor', TODAY), again.call('journeyStation'), again.raw(KEY)],
+        [false, false, 2, two]);
+});
+
+// EVERY DOOR TO THE DAY SCREEN FROM ANOTHER SCREEN ASKS THE RULE. Read off the sources: each place
+// that puts a date on State.date and then shows the day screen names journeyLeaveFor (it must
+// still open its day) or one of the two refusals (its only way is today, and it is withheld) -
+// so a door added tomorrow without it fails here. The day screen's own header (js/ui/day.js) is
+// what the journey follows on purpose; the journey moves its own date (js/ui/journey.js).
+await block('every door to the day screen from another screen asks the journey\'s rule', async () => {
+    const { readdirSync } = await import('node:fs');
+    const dir = new URL('../js/ui/', import.meta.url);
+    const files = readdirSync(dir).filter(name => name.endsWith('.js') && !['day.js', 'journey.js'].includes(name)).sort();
+    const asks = /journeyLeaveFor\(|paydayDoorHeld\(|statusTodayMovesJourney\(/;
+    const doors = [];
+    files.forEach(name => {
+        const lines = read(`../js/ui/${name}`).split('\n');
+        lines.forEach((line, at) => {
+            if (!/showView\('day'\)/.test(line)) return;
+            const before = lines.slice(Math.max(0, at - 12), at + 1).join('\n');
+            if (!/State\.date\s*=[^=]/.test(before)) return;
+            doors.push({ where: `js/ui/${name}:${at + 1}`, asks: asks.test(before) });
+        });
+    });
+    same('the doors found, each in its file', doors.map(door => door.where.replace(/:\d+$/, '')),
+        ['js/ui/monthboard.js', 'js/ui/payday.js', 'js/ui/reminders.js', 'js/ui/sitecard.js', 'js/ui/status.js',
+            'js/ui/week.js', 'js/ui/week.js', 'js/ui/workercard.js']);
+    same('every one asks the rule before it moves the date', doors.filter(door => !door.asks).map(door => door.where), []);
+});
+
 report();

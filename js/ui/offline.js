@@ -51,6 +51,12 @@ let launchBehind = false;
 // handover comes (the third review, P3-b: a press made more than 4 s before it was swallowed).
 let updatePressed = false;
 const LAUNCH_WAIT_MS = 12000;
+// Once the reload has been asked, the 12 s deadline no longer lowers the cover: a reload still in
+// flight at 12 s had the cover, the trap and aria-hidden taken off and the banner drawn over a
+// page about to be thrown away (the fourth review, P3-2). Only a page still here this long after
+// the reload was asked - one that never went - gets its glass back.
+let launchReloadAsked = false;
+const LAUNCH_RELOAD_BACKSTOP_MS = 30000;
 // The worker's answer to "is this the only window?" - a worker that was stopped starts
 // first, so this is generous; no answer in time is not an answer, and the launch is off.
 const LAUNCH_ASK_MS = 1000;
@@ -304,17 +310,23 @@ function launchWhenActive(worker) {
 // something while the cover is up (a lost close is told once, and never again), and a reload
 // would take it away unseen (the third review, P3-a). Then the cover comes down instead.
 function launchReload() {
-    if (!launchCovered) return;
+    if (!launchCovered || launchReloadAsked) return;
     if (midEdit()) { launchGiveUp(); return; }
+    launchReloadAsked = true;
+    if (launchDeadline !== null) clearTimeout(launchDeadline);
+    launchDeadline = setTimeout(() => launchGiveUp(true), LAUNCH_RELOAD_BACKSTOP_MS);
     location.reload();
 }
 
 // The launch is over without a reload: the cover comes down and the banner offers the
 // update - bound to the build that is really waiting now, never to a redundant one. If the
 // new build had already taken this page over, the update stays offered (launchBehind): a
-// return shows the banner again, and a press or «בדוק עדכון» reloads. Nothing reloads this
-// page by itself after this. A launch that never asked anything is no launch at all.
-function launchGiveUp() {
+// return shows the banner again, and a press or «בדוק עדכון» reloads at the first moment nobody
+// is typing. Nothing reloads this page by itself after this. A launch that never asked anything
+// is no launch at all.
+function launchGiveUp(afterReload) {
+    // After the reload was asked, nothing but its own backstop lowers the cover.
+    if (launchReloadAsked && afterReload !== true) return;
     if (launchDeadline !== null) { clearTimeout(launchDeadline); launchDeadline = null; }
     if (!launchCovered) return;
     launchCover(false);
@@ -464,8 +476,12 @@ function applyUpdate() {
     if (waitingWorker && waitingWorker.state === 'redundant') {
         waitingWorker = (swRegistration && swRegistration.waiting) || null;
     }
+    // No worker to ask - the new build already took this page over (launchBehind), or the one in
+    // hand was made redundant and nothing waits now: the reload, at the first moment nobody is
+    // typing, exactly as v204's press waited for it (the fourth review, P3-1). Not at the press:
+    // a count typed and not yet left, or the «סידור» draft, would go with it.
     if (!waitingWorker) {
-        location.reload();
+        catchUpWhenSafe();
         return;
     }
     waitingWorker.postMessage('skip-waiting');
@@ -510,7 +526,8 @@ function checkForUpdate() {
 
     // v205: the new build already took this page over (a launch's handover it did not reload
     // for): the press is a yes, and this is not the build that is current.
-    if (launchBehind) { location.reload(); return; }
+    // At the first moment nobody is typing, as a press of the banner (the fourth review, P3-1).
+    if (launchBehind) { catchUpWhenSafe(); return; }
 
     if (!swRegistration) {
         say(`הגרסה הפעילה: ${APP_VERSION}. עדכונים אוטומטיים אינם זמינים כאן - פתח את האתר בדפדפן.`);

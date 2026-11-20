@@ -21,7 +21,7 @@
 // The version string below is the whole update mechanism. Bump it in the same commit as
 // any change to a cached file, or returning visitors keep running the old build.
 
-const VERSION = 'farkad-v205';
+const VERSION = 'farkad-v206';
 
 // A scheduled server push wakes this worker even with every app window closed.
 // Always display a visible notification; neither iOS nor Android needs a page timer.
@@ -108,11 +108,14 @@ const SHELL = [
     './js/ui/transport-share.js',
     './js/ui/journey.js',
     './js/ui/monthsummary.js',
+    './js/ui/yearsummary.js',
     './js/ui/sitecard.js',
     './js/ui/find.js',
+    './js/ui/monthboard.js',
     './js/ui/owes.js',
     './js/ui/weeklyclose.js',
     './js/ui/advancereset.js',
+    './js/ui/payday.js',
     './js/ui/backup.js',
     './js/ui/printout.js',
     './js/ui/migration.js',
@@ -123,6 +126,7 @@ const SHELL = [
     './js/ui/closereminder.js',
     './js/ui/usual.js',
     './js/ui/reminders.js',
+    './js/ui/status.js',
     './js/app.js',
     // The cloud adapter and its configuration. Same-origin, imported at runtime, and
     // therefore exactly as much a part of the offline shell as any other script here -

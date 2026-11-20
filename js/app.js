@@ -4,7 +4,7 @@
 // the version actually RUNNING on this phone - which is the question that cannot
 // otherwise be answered from inside an installed app, and the one that matters when a
 // fix is not showing up.
-const APP_VERSION = 'v205';
+const APP_VERSION = 'v206';
 
 // Is the page in front of us from the same build as these scripts?
 //
@@ -160,6 +160,9 @@ function render() {
     if (typeof renderWorkerCardIfOpen === 'function') renderWorkerCardIfOpen();
     // And for the month's summary (js/ui/monthsummary.js), for the same reason.
     if (typeof renderMonthSummaryIfOpen === 'function') renderMonthSummaryIfOpen();
+    // And for the year's (js/ui/yearsummary.js) - read again, after the frame, only when the
+    // record moved under it.
+    if (typeof renderYearSummaryIfOpen === 'function') renderYearSummaryIfOpen();
     // And for a site's card (js/ui/sitecard.js): every count on it is read off this record.
     if (typeof renderSiteCardIfOpen === 'function') renderSiteCardIfOpen();
     // And for «תלוש לכל עובד» (js/ui/payslips.js): every row is a man's pay and a link that
@@ -170,12 +173,20 @@ function render() {
     if (typeof renderWeeklyCloseIfOpen === 'function') renderWeeklyCloseIfOpen();
     // And for «איפוס מקדמות» (js/ui/advancereset.js), the same way: one line, nothing redrawn.
     if (typeof renderAdvanceResetIfOpen === 'function') renderAdvanceResetIfOpen();
+    // And for «יום תשלום» (js/ui/payday.js): nothing is read here - a record that moved under
+    // it puts the placeholder over its figures at once, and is read once the draws stop.
+    if (typeof renderPaydayIfOpen === 'function') renderPaydayIfOpen();
     // And for the finder (js/ui/find.js): a man added or turned off on another phone is
     // found, or not, as the record has him now.
     if (typeof renderFindIfOpen === 'function') renderFindIfOpen();
     // «תזכורת לסגירת חשבונות» (js/ui/closereminder.js): nothing is read here - its line is
     // taken down at once if it is no longer wanted, and otherwise read once the draws stop.
     if (typeof closeReminderAfterRender === 'function') closeReminderAfterRender();
+    // And for «תמונת מצב» (js/ui/status.js): today, the next day, the pulse and the sites are
+    // read off this record and drawn again; the money, which costs, is read once the draws stop.
+    // After the close reminder, whose line it mirrors: a line this render took down is not
+    // left standing on it.
+    if (typeof renderStatusIfOpen === 'function') renderStatusIfOpen();
 
     // Last, because the two bars it measures have just been shown or hidden by the lines
     // above. See js/ui/bars.js - the page reserves room for what is actually there, not
@@ -250,6 +261,8 @@ function renderSyncChip() {
     chip.textContent = label;
     chip.className = 'sync-chip' + (state ? ' ' + state : '');
     chip.hidden = label === '';
+    // The chip is the door of «תמונת מצב» (v206): the door is named by what the chip says.
+    if (typeof statusDoorSync === 'function') statusDoorSync(chip, label);
 }
 
 function watchSyncNotice() {

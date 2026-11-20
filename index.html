@@ -106,7 +106,7 @@
      does not read. The service worker is what stops that happening; this is what
      notices if it ever does. Bumped with sw.js and js/app.js, and the suite checks all
      three agree. -->
-<meta name="farkad-build" content="v205">
+<meta name="farkad-build" content="v206">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -123,8 +123,18 @@
         </div>
         <!-- The sync state, beside the name: a mirror of #storageNotice, written by
              renderSyncChip (js/app.js) from that line's own words. aria-hidden because
-             the line is the live region; two announcements of one fact is noise. -->
-        <span class="sync-chip" id="syncChip" hidden aria-hidden="true"></span>
+             the line is the live region; two announcements of one fact is noise.
+             v206: the chip is the door of «תמונת מצב» (js/ui/status.js) - the button around
+             it is 44px (52 with «תצוגה גדולה») of hit area round the pill as it was drawn,
+             and none of it is layout: the strip is the height it was on every phone, the
+             pill where it was (css/app.css). Its name is the chip's label after the
+             screen's («תמונת מצב · מסונכרן», statusDoorSync); where the chip has nothing to
+             say (local only) the door shows its own words, so it is worded on every phone.
+             No chevron: beside a long count it widened the door past the room the strip
+             has, and the strip wrapped (tests/statusscreen.browser.mjs, B12). The chip
+             itself is the same span, unchanged. -->
+        <button type="button" class="status-door" id="statusDoor" aria-haspopup="dialog"
+                onclick="typeof openStatus === 'function' && openStatus()"><span class="sync-chip" id="syncChip" hidden aria-hidden="true"></span><span class="status-door-words" hidden></span></button>
 
         <nav class="tabs" role="tablist" aria-label="ניווט ראשי" aria-orientation="horizontal" onkeydown="handleNavigationKey(event)">
             <button type="button" class="tab" id="tab-day" role="tab" aria-controls="dayView" onclick="showView('day')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/><circle cx="12" cy="15.5" r="1.6" fill="currentColor" stroke="none"/></svg></span><span>היום</span></button>
@@ -940,6 +950,22 @@
     </div>
 </div>
 
+<!-- «יום תשלום» (js/ui/payday.js): the moment before he pays - each pay group's next payday
+     and the three figures «דוחות» prints under it, what will stop or distort the close, how
+     many accounts «סגירת שבוע» would close now, and the doors he uses after closing. A
+     READING: nothing in it writes, and every button in it only navigates or opens a screen
+     that keeps its own rules. Entered from «מקדמות», beside «סגירת שבוע». Every word is set
+     by that file from its blocks; this is the frame. -->
+<div class="modal" id="paydayModal">
+    <div class="modal-content modal-wide">
+        <h3 id="paydayTitle" tabindex="-1"></h3>
+        <div id="paydayBody" class="payday-body"></div>
+        <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="paydayClose" onclick="closePayday()"></button>
+        </div>
+    </div>
+</div>
+
 <!-- «בדיקת היום»: what may have been forgotten on the day on screen, read off the record
      and compared with the working day before it. Entered from the one button at the foot
      of the day's list. It only shows: nothing in it writes, and a name or a site in it
@@ -970,6 +996,12 @@
             <strong id="monthSummaryMonth" class="msum-month" role="status" aria-live="polite"></strong>
             <button type="button" class="btn-secondary" id="monthSummaryNext" onclick="monthSummaryStep(1)"></button>
         </div>
+        <!-- «סיכום שנה»'s door: shown and worded for the month's year by js/ui/yearsummary.js
+             (yearSummaryEntryLabel, asked by drawMonthSummary through typeof). A build without
+             that file leaves it hidden. On the month's first screen, straight under its arrows -
+             one step out from the month - and not after the whole month, two to five screens
+             down, where nobody told the year was there found it (fix round 1). -->
+        <div class="msum-year"><button type="button" class="btn-secondary" id="monthSummaryYear" onclick="typeof openYearSummaryFromMonth === 'function' && openYearSummaryFromMonth()" hidden></button></div>
         <div id="monthSummaryBody"></div>
         <div class="msum-fold">
             <button type="button" class="btn-secondary" id="monthSummaryFoldLabel" aria-expanded="false" aria-controls="monthSummaryText" onclick="monthSummaryToggleText()"></button>
@@ -980,6 +1012,30 @@
             <button type="button" class="btn-secondary" id="monthSummaryCopy" onclick="monthSummaryCopy()"></button>
             <button type="button" class="btn-secondary" id="monthSummaryClose" onclick="closeMonthSummary()"></button>
             <span class="share-status" id="monthSummaryStatus" role="status" aria-live="polite"></span>
+        </div>
+    </div>
+</div>
+
+<!-- «סיכום שנה»: one calendar year on one screen - what was WORKED in it as recorded, never
+     what was paid - the months as rows, the men, the sites and «עובדי יוסף גבס» last, and the
+     accountant's workbook of the same. Entered from «סיכום חודש»'s own door. A READING: the
+     arrows change which year is read, a month's row opens «סיכום חודש» on that month, and the
+     export hands a file to the browser. Every word is set by js/ui/yearsummary.js from that
+     file's blocks; this is the frame, and the arrows and buttons are in it (not in the body)
+     so a redraw leaves the focus. -->
+<div class="modal" id="yearSummaryModal">
+    <div class="modal-content modal-wide">
+        <h3 id="yearSummaryTitle" tabindex="-1"></h3>
+        <div class="msum-nav ysum-nav">
+            <button type="button" class="btn-secondary" id="yearSummaryPrev" onclick="yearSummaryStep(-1)"></button>
+            <strong id="yearSummaryYear" class="msum-month" role="status" aria-live="polite"></strong>
+            <button type="button" class="btn-secondary" id="yearSummaryNext" onclick="yearSummaryStep(1)"></button>
+        </div>
+        <div id="yearSummaryBody"></div>
+        <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="yearSummaryExport" onclick="yearSummaryExport()"></button>
+            <button type="button" class="btn-secondary" id="yearSummaryClose" onclick="closeYearSummary()"></button>
+            <span class="share-status" id="yearSummaryStatus" role="status" aria-live="polite"></span>
         </div>
     </div>
 </div>
@@ -1011,6 +1067,22 @@
         </div>
         <div class="modal-actions">
             <button type="button" class="btn-secondary" id="siteCardClose" onclick="closeSiteCard()"></button>
+        </div>
+    </div>
+</div>
+
+<!-- «תמונת מצב» (js/ui/status.js): where the business stands, on one screen - the sync
+     sentence he tapped, today, the next working day, the money, twelve weeks and the sites,
+     and this phone. Opened from the sync chip at the top (#statusDoor). A READING: nothing in
+     it writes, and every button in it only navigates to the screen that owns its line. Every
+     word is set by that file from its block; this is the frame, its close button in it (not in
+     the body) so a redraw leaves the focus. -->
+<div class="modal" id="statusModal">
+    <div class="modal-content modal-wide">
+        <h3 id="statusTitle" tabindex="-1"></h3>
+        <div id="statusBody" class="status-body"></div>
+        <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="statusClose" onclick="closeStatus()"></button>
         </div>
     </div>
 </div>
@@ -1193,6 +1265,11 @@
      constants) and share.js (the two doors its text leaves by). It runs nothing at load;
      reports.js asks for its entry by name, through typeof, when the menu is drawn. -->
 <script src="js/ui/monthsummary.js"></script>
+<!-- «סיכום שנה». After monthsummary.js (the month's own reading, its scope, its words and its
+     drawing helpers, all asked at run time), reports.js (the pay sheet's functions, constants
+     and the workbook's look) and share.js (downloadCsv). It runs nothing at load;
+     monthsummary.js asks for its door's words by name, through typeof, when it draws. -->
+<script src="js/ui/yearsummary.js"></script>
 <!-- «כרטיס אתר». After reports.js (its constants), workercard.js (the calendar's helpers and
      words), monthsummary.js (three of its words) and share.js (the two doors). It runs
      nothing at load; roster.js asks for its entry by name, through typeof, per site row. -->
@@ -1201,6 +1278,12 @@
      card, the sheet and the advances screen - all above it - only when a door is pressed,
      and day.js asks for its entry by name when the day is drawn. -->
 <script src="js/ui/find.js"></script>
+<!-- «לוח חודשי», the crew's month as a third mode of the week tab. After week.js (its rows,
+     its mode and its cell), sitecolor.js, workercard.js (the card a name opens) and
+     monthsummary.js (the month's calendar and words). It runs nothing at load: week.js asks
+     for its door by name, through typeof, when the grid is drawn, and printout.js asks for
+     its picture only when one is wanted. -->
+<script src="js/ui/monthboard.js"></script>
 <!-- «מי חייב כסף», «שים לב» and «סגירות שנרשמו»: readings of the money record. After
      reports.js (the pay sheet's own functions and words, which ask for it by name through
      typeof when «מקדמות» and «דוחות» are drawn) and share.js (the two doors a closure's text
@@ -1216,6 +1299,12 @@
      and its words) and backup.js is below it but asked for only when a button is pressed.
      Runs nothing at load; owes.js asks for its button by name, through typeof. -->
 <script src="js/ui/advancereset.js"></script>
+<!-- «יום תשלום»: after owes.js (the key a reading is kept under, the board's warnings, the
+     row it stands in), weeklyclose.js (its list, its memory scope and its words) and
+     reports.js (the pay sheet's own rows, band and words); closereminder.js's readers, below
+     it, are called only when it is opened. Runs nothing at load; owes.js asks for its button
+     by name, through typeof. -->
+<script src="js/ui/payday.js"></script>
 <script src="js/ui/backup.js"></script>
 <script src="js/ui/printout.js"></script>
 <script src="js/ui/migration.js"></script>
@@ -1234,6 +1323,11 @@
      sheet.js (sheetPickPlace, the one write it borrows); called at render and at a tap. -->
 <script src="js/ui/usual.js"></script>
 <script src="js/ui/reminders.js"></script>
+<!-- «תמונת מצב»: after every reading it reads - the journey, the seder, הסעות, the month's
+     summary, «מי חייב כסף», «סגירת שבוע», the close reminder and backup.js - and after the
+     screens its buttons open; before app.js, whose render() and renderSyncChip ask it by name
+     through typeof. It runs nothing at load. -->
+<script src="js/ui/status.js"></script>
 <script src="js/app.js"></script>
 
 <!-- Cloud sync, live against the farkad-schedule project - see docs/firebase-setup.md.

@@ -73,6 +73,24 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    // v206: the four tracks of 2026-11-19, each in its own track's words. «תמונת מצב»'s place is
+    // its track's corrected one (features/status/handoff.md, fix round 1): the strip draws no app
+    // name on any screen (css/design.css hides .brand), and the door is the strip's top right-hand
+    // corner on every phone and window.
+    { build: 'v206', items: [
+        { title: 'סיכום שנה',
+            text: 'השנה חודש אחר חודש, לפי עובד ולפי אתר, וקובץ Excel לרואה החשבון - לפי מה שנרשם, לא מה ששולם.',
+            where: 'דוחות ← הפקת דוח ← סיכום חודש ← סיכום שנת …', go: 'reportsMenu' },
+        { title: 'לוח חודשי',
+            text: 'כל החודש בטבלה אחת: כל עובד, כל יום והאתר שלו בצבע, עם סינון לפי אתר, הדפסה ותמונה לשיתוף.',
+            where: 'שבוע ← לוח חודשי, בפינת הטבלה', go: 'monthBoard' },
+        { title: 'יום תשלום',
+            text: 'בעמוד המקדמות: כמה לשלם בכל קבוצה ביום התשלום הבא לפי מה שנרשם, ומה כדאי לסדר לפני שסוגרים.',
+            where: 'מקדמות ← יום תשלום', go: 'payday' },
+        { title: 'תמונת מצב',
+            text: 'לחיצה על מצב הסנכרון בפינה העליונה מימין פותחת תמונת מצב: היום, הסידור הבא, הכסף, 12 השבועות האחרונים והאתרים.',
+            where: 'בפינה העליונה מימין ← מצב הסנכרון (או «תמונת מצב»)', go: 'status' }
+    ] },
     { build: 'v205', items: [
         { title: 'עדכון לבד בפתיחה מחדש',
             text: 'כשפותחים את האפליקציה מחדש וגרסה חדשה מחכה היא נכנסת לבד; אם האפליקציה רק חזרה מהרקע, הפס «גרסה חדשה זמינה» נשאר.',
@@ -592,8 +610,36 @@ const WHATSNEW_GO = Object.freeze({
     // v203: «תזכורת לסגירת חשבונות» - its row in ⋯ ← «כללי», opened and shown, the switch NOT
     // pressed (js/ui/closereminder.js): it is on by default, and whether this phone keeps it
     // on is the person's own tap.
-    closeReminder: () => whatsNewSettings('closeReminderCard', 'settingsDaily')
+    closeReminder: () => whatsNewSettings('closeReminderCard', 'settingsDaily'),
+    // v206: «לוח חודשי» - the week tab on its grid, the door in the grid's corner given the
+    // keyboard and NOT pressed (js/ui/monthboard.js): the board opens by his own tap.
+    monthBoard: () => {
+        showView('week');
+        if (typeof weekPhoneMode !== 'undefined' && weekPhoneMode !== 'grid' && typeof setWeekPhoneMode === 'function') setWeekPhoneMode('grid');
+        return whatsNewShowControl('monthBoardDoor');
+    },
+    // v206: «יום תשלום» - «מקדמות» as it opens, its button beside «סגירת שבוע» given the keyboard
+    // and NOT pressed (js/ui/payday.js): the desk is a reading of money, opened by his own tap.
+    payday: () => {
+        if (typeof OWES_PAGE !== 'undefined') OWES_PAGE = null;
+        if (typeof ADVANCE_WORKER !== 'undefined') ADVANCE_WORKER = null;
+        showView('advances');
+        return whatsNewShowControl('paydayEntry');
+    },
+    // v206: «תמונת מצב» - its door, the sync chip at the top of every screen, given the keyboard
+    // and NOT pressed (statusFocusDoor, js/ui/status.js).
+    status: () => (typeof statusFocusDoor === 'function' ? statusFocusDoor() : false)
 });
+
+// A control on the screen just opened, brought onto the glass (centred, clear of the fixed bars)
+// and given the keyboard - never pressed. False when this screen has none to show.
+function whatsNewShowControl(id) {
+    const node = typeof document !== 'undefined' && document.getElementById ? document.getElementById(id) : null;
+    if (!node || node.offsetParent === null) return false;
+    if (node.scrollIntoView) node.scrollIntoView({ block: 'center', behavior: 'instant' });
+    if (node.focus) node.focus({ preventScroll: true });
+    return true;
+}
 
 // The card steps aside first (which is also "seen"), and the settings sheet with it when
 // that is where the card was opened from: one layer at a time. Then, a task later - after

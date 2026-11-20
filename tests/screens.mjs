@@ -225,6 +225,48 @@ function owesRecordBack() {
     render();
 }
 
+// «יום תשלום» on the two records the walk would otherwise never draw it on (the desk's review,
+// 2026-11-19). IN MEMORY ONLY - the model's own writers on the live schedule, nothing committed -
+// and taken back whole on leaving (paydayRecordBack). Both run in the page. (The third state
+// the review named - a period that ends TODAY - needs a Thursday: a pay cycle's boundary is a
+// Friday, so a period ends on a Thursday only, and the walk's clock is Tuesday for every screen.
+// tests/payday.browser.mjs B12 measures that desk on a page of its own, its clock on Thursday.)
+//   'every'      every check of the desk: an earlier week left open with a debt (b), a man with no
+//                daily rate (c), an advance handed back twice (e), extra hours with no hourly rate (f).
+//   'unapproved' the record's carry approval taken off: the plain bands, and «מקדמות»'s own
+//                sentence in place of «לסגירה» and «אחרי הסגירה».
+function paydayRecord(how) {
+    if (window.__paydayKept) return;
+    window.__paydayKept = JSON.stringify(State.schedule);
+    if (how === 'unapproved') {
+        const plan = planCarryMigration(State.schedule);
+        const held = State.schedule.ledger && State.schedule.ledger.migrations;
+        if (held && Object.prototype.hasOwnProperty.call(held, String(plan.id))) delete held[String(plan.id)];
+    } else {
+        addAdvance(State.schedule, 'w06', '2026-10-26', 1500, '');
+        State.schedule.workers[5].payCycles = '2026-08-07=weekly';
+        closePeriodChanges(State.schedule, 'w06', '2026-10-23', '2026-10-29', '2026-10-29T15:40:00.000Z', syncDeviceId(), 300);
+        State.schedule.workers.push({ id: 'w20', name: 'זיאד עמר', active: true, dailyRate: 0, hourlyRate: 0, phone: '' });
+        ['2026-11-09', '2026-11-10'].forEach(date => assignPlace(State.schedule, date, 'w20', 'actual', 'p1'));
+        State.schedule.workers.push({ id: 'w21', name: 'האני חלבי', active: true, dailyRate: 420, hourlyRate: 0, phone: '' });
+        assignPlace(State.schedule, '2026-11-09', 'w21', 'actual', 'p2', 'extra', 2);
+        const made = recordNewAdvance(State.schedule, 'w03', '2026-11-09', 400, '', '2026-11-09T07:00:00.000Z', syncDeviceId(), 'cash');
+        recordAdvanceRepaid(State.schedule, made[0].value.id, 400, '2026-11-10', '', '2026-11-10T08:00:00.000Z', 'd_a', 'cash');
+        recordAdvanceRepaid(State.schedule, made[0].value.id, 400, '2026-11-10', '', '2026-11-10T08:05:00.000Z', 'd_b', 'cash');
+    }
+    OWES_PAGE = null;
+    render();
+}
+
+function paydayRecordBack() {
+    if (!window.__paydayKept) return;
+    State.schedule = JSON.parse(window.__paydayKept);
+    window.__paydayKept = null;
+    OWES_PAGE = null;
+    ADVANCE_WORKER = null;
+    render();
+}
+
 // The pay sheet as it opens: «לפי עובד», the cards, the default range (v189: each group read
 // over its own period). Runs in the page.
 function reportsDefault() {
@@ -238,6 +280,17 @@ async function openWeeklyCloseScreen(page) {
     await view('reports')(page);
     await byText(page, '#reportsView', 'סגירת שבוע');
     await page.waitForFunction(() => typeof WEEKLY_CLOSE !== 'undefined' && WEEKLY_CLOSE && WEEKLY_CLOSE.read !== null);
+    await pause(page);
+}
+
+// «יום תשלום» (js/ui/payday.js), opened by its button in the row on «מקדמות» and read (after a
+// frame), on the record owesRecord leaves in memory. Runs its steps in the page.
+async function openPaydayScreen(page, record = owesRecord, how) {
+    await run(page, record, how);
+    await run(page, () => { ADVANCE_WORKER = null; OWES_PAGE = null; });
+    await view('advances')(page);
+    await byText(page, '#advancesView', 'יום תשלום');
+    await page.waitForFunction(() => typeof PAYDAY !== 'undefined' && PAYDAY && PAYDAY.state === 'shown');
     await pause(page);
 }
 
@@ -286,6 +339,15 @@ export const SCREENS = [
         open: async page => { await home(page); await view('week')(page); await run(page, () => setWeekPhoneMode('grid')); await pause(page); } },
     { name: 'week - days', scope: APP,
         open: async page => { await view('week')(page); await run(page, () => setWeekPhoneMode('days')); await pause(page); },
+        close: page => run(page, () => setWeekPhoneMode('grid')) },
+    // «לוח חודשי» (js/ui/monthboard.js): the crew's month, a third mode of the week tab - every
+    // site, then the one site that has Rima (its own men, Rima and the billed count at the foot).
+    // Opened by its own function, as «מה חדש» opens it; closed back onto the grid.
+    { name: 'week - the month board', scope: APP,
+        open: async page => { await run(page, () => { openMonthBoard(null, null); }); await pause(page, 300); },
+        close: page => run(page, () => setWeekPhoneMode('grid')) },
+    { name: 'week - the month board, one site', scope: APP,
+        open: async page => { await run(page, () => { openMonthBoard(null, 'p1'); }); await pause(page, 300); },
         close: page => run(page, () => setWeekPhoneMode('grid')) },
 
     { name: 'crew', scope: APP, open: view('roster') },
@@ -337,6 +399,30 @@ export const SCREENS = [
         open: async page => { await run(page, owesRecord); await view('advances')(page);
             await run(page, () => owesOpenPage(owesClosures(State.schedule).filter(group => group.items.length > 1)[0].key)); await pause(page); },
         close: page => run(page, owesRecordBack) },
+    // «יום תשלום» (js/ui/payday.js): the desk as it is read on that record, and the same with
+    // every card's «לפי עובד» unfolded. It writes nothing; closing it and taking the record back
+    // leaves the page as it was.
+    { name: 'advances - «יום תשלום», read', scope: ['#paydayModal'],
+        open: async page => { await openPaydayScreen(page); },
+        close: async page => { await run(page, () => closePayday()); await run(page, owesRecordBack); } },
+    { name: 'advances - «יום תשלום», the fold opened', scope: ['#paydayModal'],
+        open: async page => { await openPaydayScreen(page);
+            await run(page, () => document.querySelectorAll('#paydayModal .payday-fold').forEach(node => {
+                if (node.getAttribute('aria-expanded') !== 'true') node.click();
+            }));
+            await pause(page); },
+        close: async page => { await run(page, () => closePayday()); await run(page, owesRecordBack); } },
+    // And the desk on the two records the review found the walk never drew it on: every check of
+    // the desk, and a record nobody approved (paydayRecord). The record is taken back by a
+    // function handed to the page (run(page, fn)): an arrow run there that names a function only
+    // this file holds throws, and the walk forgives a close that throws - the record was left on
+    // for every screen after it.
+    { name: 'advances - «יום תשלום», every check', scope: ['#paydayModal'],
+        open: async page => { await openPaydayScreen(page, paydayRecord, 'every'); },
+        close: async page => { await run(page, () => closePayday()); await run(page, paydayRecordBack); } },
+    { name: 'advances - «יום תשלום», a record nobody approved', scope: ['#paydayModal'],
+        open: async page => { await openPaydayScreen(page, paydayRecord, 'unapproved'); },
+        close: async page => { await run(page, () => closePayday()); await run(page, paydayRecordBack); } },
     { name: 'reports - «שים לב», opened', scope: APP,
         open: async page => { await run(page, reportsDefault); await run(page, owesRecord); await view('reports')(page);
             // The row is read after the page has painted when the record moved since the
@@ -414,6 +500,18 @@ export const SCREENS = [
             if (fold) fold.click();
         }); await pause(page, 350); },
         close: page => run(page, () => closeMonthSummary()) },
+    // «סיכום שנה» (js/ui/yearsummary.js), through «סיכום חודש»'s own door, and measured once it
+    // has read (it paints «מחשב את השנה…» first and reads after the frame).
+    { name: 'reports - the year on one screen', scope: ['#yearSummaryModal'],
+        open: async page => { await view('reports')(page); await run(page, () => { openMonthSummary(); }); await pause(page, 200);
+            await run(page, () => {
+                const door = document.getElementById('monthSummaryYear');
+                if (!door || door.hidden) throw new Error('no «סיכום שנה» door in «סיכום חודש»');
+                door.click();
+            });
+            await page.waitForFunction(() => document.querySelector('#yearSummaryBody .msum-tile, #yearSummaryBody .empty-hint') !== null);
+            await pause(page, 200); },
+        close: page => run(page, () => closeYearSummary()) },
     { name: 'reports - a payslip to each man', scope: ['#payslipsModal'],
         open: async page => { await view('reports')(page); await run(page, () => { openPayslips('current'); }); await pause(page, 350); },
         close: page => run(page, () => closePayslips()) },
@@ -456,6 +554,33 @@ export const SCREENS = [
     { name: 'the close reminder line', scope: ['#closeReminderBanner'],
         open: async page => { await home(page); await run(page, () => closeReminderShow(4)); await pause(page); },
         close: page => run(page, () => closeReminderHide()) },
+    // v206: «תמונת מצב» (js/ui/status.js) - the whole screen, opened by its own opener and read
+    // (the money after a frame); and its door on a phone with no chip to show, where the door
+    // says its own words in the strip. The live sync line is held still while that is measured.
+    { name: 'status - the whole screen', scope: ['#statusModal'],
+        open: async page => {
+            await home(page);
+            await run(page, () => { openStatus(); });
+            await page.waitForFunction(() => statusIsOpen() && !document.querySelector('#statusModal .status-pending'));
+            await pause(page, 300);
+        },
+        close: page => run(page, () => closeStatus()) },
+    { name: 'status - the door with no chip', scope: ['.topbar'],
+        open: async page => {
+            await home(page);
+            await run(page, () => {
+                window.__statusNotice = updateSyncNotice;
+                updateSyncNotice = function () {};
+                document.getElementById('storageNotice').textContent = 'הנתונים נשמרים במכשיר הזה בלבד.';
+                renderSyncChip();
+            });
+            await pause(page);
+        },
+        close: page => run(page, () => {
+            if (window.__statusNotice) { updateSyncNotice = window.__statusNotice; window.__statusNotice = null; }
+            updateSyncNotice();
+            renderSyncChip();
+        }) },
     { name: 'what is new', scope: ['#whatsNewModal'],
         open: async page => { await home(page); await run(page, () => { openWhatsNew('all'); }); await pause(page, 300); },
         close: page => run(page, () => closeWhatsNew()) },
