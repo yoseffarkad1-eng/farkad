@@ -23,7 +23,18 @@ const browser = await launchLocalBrowser(chromium, {executablePath: process.env.
 const page = await browser.newPage({viewport: {width: 375, height: 812}, deviceScaleFactor: SHOTS ? 2 : 1});
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
-const shot = async name => { if (SHOTS) await page.screenshot({path: `${SHOTS}/${name}.png`}); };
+const shot = async name => { if (SHOTS) { await page.waitForTimeout(450); } if (SHOTS) await page.screenshot({path: `${SHOTS}/${name}.png`}); };
+// His card on «דוחות»: the page opens on this week, so his stub of 13/11-19/11 is reached by
+// the sheet's own button for it, and the picture is taken with his name at the top.
+const showCard = async () => {
+    await page.evaluate(() => showView('reports'));
+    await page.waitForTimeout(400);
+    const other = page.getByRole('button', {name: /הצג את החשבון/});
+    if (await other.count()) { await other.first().click(); await page.waitForTimeout(400); }
+    const name = page.locator('#reportsView').getByText('יוסף', {exact: true}).first();
+    if (await name.count()) await name.evaluate(node => node.scrollIntoView({block: 'start'}));
+    await page.evaluate(() => window.scrollBy(0, -16));
+};
 
 const seed = () => page.evaluate(() => {
     todayStr = () => '2026-11-20';
@@ -64,8 +75,7 @@ try {
         return [y.amount, Boolean(y.hoursUnpriced)];
     });
     same('1000, the hours unpriced', await card(), [1000, true]);
-    await page.evaluate(() => { showView('reports'); });
-    await page.waitForTimeout(400);
+    await showCard();
     await shot('1-yosef-before-375-light');
 
     suite('the question, and what it writes');
@@ -86,8 +96,7 @@ try {
 
     suite('Yosef\'s card after');
     same('1000 + 4 × 50 = 1200, nothing unpriced', await card(), [1200, false]);
-    await page.evaluate(() => { showView('reports'); });
-    await page.waitForTimeout(400);
+    await showCard();
     await shot('2-yosef-after-375-light');
 
     suite('the new man\'s form opens at 50');
@@ -116,15 +125,15 @@ try {
     same('his history: 13/11 fortnightly only', await page.evaluate(() => State.worker('w_y').payCycles), '2026-11-13=biweekly');
     same('13/11 opens the whole fortnight', await page.evaluate(() => periodRangeFor(State.worker('w_y'), '2026-11-13')),
         {cycle: 'biweekly', from: '2026-11-13', to: '2026-11-26', transition: false});
-    await page.evaluate(() => { closeWorkerForm(); showView('reports'); });
-    await page.waitForTimeout(400);
+    await page.evaluate(() => { closeWorkerForm(); });
+    await showCard();
     await shot('8-yosef-after-undo-375-light');
 
     await page.evaluate(() => editWorker('w_y'));
     await page.evaluate(() => { document.getElementById('workerFormMore').open = true; });
     await page.selectOption('#workerFormCycle', 'weekly');
     await page.fill('#workerFormCycleFrom', '2026-11-20');
-    await page.evaluate(() => saveWorkerForm());
+    await page.evaluate(() => { saveWorkerForm(); });
     await page.waitForSelector('#askModal', {state: 'visible'});
     same('a real change is asked in plain words', await page.locator('#askMessage').innerText(),
         'מ-20/11 יוסף יקבל כל שבוע. הימים 13/11–19/11 יחושבו כתקופה קצרה לחוד. תקופות שכבר נסגרו לא משתנות.');
