@@ -615,6 +615,9 @@ for (const [width, height] of [[340, 640], [360, 640], [390, 844], [412, 892], [
             return window.__openMonthBoard.apply(this, arguments);
         };
     });
+    // Opened here by its own function, as the door's press leaves it: the keyboard on the door
+    // first (⚙ had it, from closing ⋯ above), so that what modal.js gives back is the door's.
+    await page.evaluate(() => document.getElementById('statusDoor').focus({ preventScroll: true }));
     await openNow();
     same('«יום תשלום»: its own opener, once, IN the task that shut this dialog; the desk\'s own title focused, the desk open',
         [await pressed('go:payday'), await page.evaluate(() => [window.__payday, paydayIsOpen()])],
