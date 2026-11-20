@@ -34,6 +34,8 @@ const MODAL_CLOSERS = {
     weeklyCloseModal: () => closeWeeklyClose(),
     // «איפוס מקדמות» (js/ui/advancereset.js): the same, and the same refusal while it writes.
     advanceResetModal: () => closeAdvanceReset(),
+    // «יום תשלום» (js/ui/payday.js): a reading - closing it forgets nothing but what is open.
+    paydayModal: () => closePayday(),
     // The summary of the day's rides (v179, js/ui/transport.js).
     transportSummaryModal: () => closeTransportSummary(),
     // The day's check (js/ui/daycheck.js). Nothing to clear behind it: it holds no state.

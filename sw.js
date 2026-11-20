@@ -115,6 +115,7 @@ const SHELL = [
     './js/ui/owes.js',
     './js/ui/weeklyclose.js',
     './js/ui/advancereset.js',
+    './js/ui/payday.js',
     './js/ui/backup.js',
     './js/ui/printout.js',
     './js/ui/migration.js',

@@ -680,7 +680,12 @@ function renderOwesInto(root) {
     // «סגירת שבוע» (js/ui/weeklyclose.js): the week closed from here as well as from «דוחות».
     // Its own gate decides whether it is drawn.
     const weekly = typeof weeklyCloseEntryButton === 'function' ? weeklyCloseEntryButton() : null;
-    if (weekly) box.appendChild(weekly);
+    // «יום תשלום» (js/ui/payday.js): beside it, half the width each, in one row; alone at full
+    // width where «סגירת שבוע» is not drawn. A build without that file draws what it drew.
+    const payday = typeof paydayEntryButton === 'function' ? paydayEntryButton() : null;
+    const row = payday ? el('div', 'owes-actions') : box;
+    if (payday) { row.appendChild(payday); box.appendChild(row); }
+    if (weekly) row.appendChild(weekly);
     if (!read || read.rows.length === 0) {
         box.appendChild(el('p', 'owes-none', OWES_TEXT.none));
         root.appendChild(box);

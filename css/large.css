@@ -1059,6 +1059,36 @@
 :root.display-large .advance-reset-done-row { font-size: 20px; font-weight: 500; line-height: 1.45; }
 :root.display-large .advance-reset-board { font-size: 21px; font-weight: 800; line-height: 1.45; }
 :root.display-large .advance-reset-closures { font-size: 21px; font-weight: 700; }
+/* «יום תשלום» (js/ui/payday.js), one rule for one rule - after the whole of «סגירת שבוע»'s, as in
+   css/design.css. */
+:root.display-large .payday-entry { font-size: 21px; font-weight: 700; }
+:root.display-large #paydayModal .modal-content > h3 { font-size: 25px; line-height: 1.4; }
+:root.display-large .payday-lead { font-size: 21px; line-height: 1.5; }
+:root.display-large .payday-reading { font-size: 22px; font-weight: 600; line-height: 1.45; }
+:root.display-large .payday-section-head { font-size: 22px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-none,
+:root.display-large .payday-nothing { font-size: 21px; line-height: 1.5; }
+:root.display-large .payday-card-head { font-size: 23px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-card-range { font-size: 20px; font-weight: 600; }
+:root.display-large .payday-card-note { font-size: 20px; line-height: 1.45; }
+:root.display-large .payday-figure-label { font-size: 20px; font-weight: 600; }
+:root.display-large .payday-value { font-size: 23px; font-weight: 800; }
+:root.display-large .payday-currency { font-size: 21px; font-weight: 700; }
+:root.display-large .payday-figure-pay .payday-value { font-size: 35px; font-weight: 900; line-height: 1.4; }
+:root.display-large .payday-count { font-size: 20px; font-weight: 700; }
+:root.display-large .payday-card-line { font-size: 20px; line-height: 1.45; }
+:root.display-large .payday-sofar { font-size: 20px; line-height: 1.45; }
+:root.display-large .payday-fold { font-size: 21px; font-weight: 700; }
+:root.display-large .payday-man-name { font-size: 22px; font-weight: 700; }
+:root.display-large .payday-man .payday-value { font-size: 22px; }
+:root.display-large .payday-check-who { font-size: 22px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-check-say { font-size: 21px; font-weight: 600; line-height: 1.45; }
+:root.display-large .payday-check-line { font-size: 20px; font-weight: 500; line-height: 1.45; }
+:root.display-large .payday-door { font-size: 21px; }
+:root.display-large .payday-close-say { font-size: 22px; font-weight: 700; line-height: 1.45; }
+:root.display-large .payday-held-today { font-size: 21px; font-weight: 600; line-height: 1.45; }
+:root.display-large .payday-held-head { font-size: 21px; font-weight: 800; line-height: 1.4; }
+:root.display-large .payday-held-man { font-size: 20px; font-weight: 500; line-height: 1.45; }
 /* v200: the second pass of the look (css/design.css, its last block) - each size it sets,
    said again in its order, behind its media query, by this block's table. */
 @media (max-width: 700px) {
@@ -1339,5 +1369,12 @@
 /* v205: the launch's cover (css/app.css, .launch-cover): its one line said again, larger and
    heavier, as everything read first is here. */
 :root.display-large .launch-cover { font-size: 24px !important; font-weight: 800 !important; line-height: 1.5 !important; }
+
+/* «יום תשלום» (js/ui/payday.js): on the narrowest phone the card's two smaller figures stand
+   one under the other, each its label over its value, and «לתשלום» under them across the
+   card - two side by side left «נוכה מהשכר» at these sizes a word to a line. */
+@media (max-width: 359px) {
+    :root.display-large .payday-figure { flex-basis: 100% !important; }
+}
 
 }

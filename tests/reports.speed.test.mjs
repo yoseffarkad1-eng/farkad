@@ -56,7 +56,7 @@ const source = file => readFileSync(join(ROOT, file), 'utf8');
 // The pay sheet as v195 served it: origin/main when this was written.
 const V195 = 'b48ac44';
 const SCREENS = ['js/ui/reports.js', 'js/ui/workercard.js', 'js/ui/seder.js', 'js/ui/payslips.js', 'js/ui/monthsummary.js', 'js/ui/owes.js'];
-const NOW_ONLY = ['js/ui/daycheck.js', 'js/ui/weeklyclose.js'];
+const NOW_ONLY = ['js/ui/daycheck.js', 'js/ui/weeklyclose.js', 'js/ui/payday.js'];
 const NOW = {};
 const OLD = {};
 SCREENS.forEach(file => { NOW[file] = source(file); });
@@ -101,7 +101,8 @@ function opened(storage, flags, files) {
     device.run(source('js/ui/sitecolor.js'));
     SCREENS.forEach(file => device.run(files[file]));
     // v197: «סגירת שבוע» on the build under test - its button in the draw of «דוחות» and of
-    // «מקדמות», and its list read as one more way in. v195 had no such file.
+    // «מקדמות», and its list read as one more way in. v195 had no such file. (v206: and
+    // «יום תשלום», whose button shares that row on «מקדמות» and whose reading is one more way in.)
     if (files === NOW) NOW_ONLY.forEach(file => device.run(source(file)));
     device.run('var currentView = "reports";');
     device.ctx.showView = view => device.run(`currentView = ${JSON.stringify(view)}`);
@@ -233,6 +234,12 @@ function snap(node) {
 // on «לפי עובד» and on top of «מקדמות» exactly when this record may be closed, and nowhere
 // else.
 const WEEKLY_ENTRY = /(^|\s)weekly-close-entry(\s|$)/;
+// v206: «יום תשלום» (js/ui/payday.js) puts its button beside «סגירת שבוע» on «מקדמות», in ONE
+// row (renderOwesInto, js/ui/owes.js) that v195 never drew. The row is taken out of the
+// comparison as one node and COUNTED (device.paydayRows, per draw) - required where the board
+// is drawn and nowhere else - and the «סגירת שבוע» button inside it is counted as it always
+// was (device.weeklyEntries), so the count of where that button stands is unchanged.
+const PAYDAY_ROW = /(^|\s)owes-actions(\s|$)/;
 // v198: THE OWNER MOVED v195'S WARNINGS (2026-11-14): a deduction put off is flagged from ONE
 // period of his ended with nothing taken, not two, and a period closed with less taken than
 // the sheet could take is flagged «ניכוי חלקי». So the board's flags, its count of who needs
@@ -286,6 +293,13 @@ const withoutWeekly = (device, nodes) => nodes.filter(node => {
         device.owesMoved = (device.owesMoved || 0) + 1;
         return false;
     }
+    if (PAYDAY_ROW.test(node.className || '')) {
+        device.paydayRows = (device.paydayRows || 0) + 1;
+        node.children.forEach(child => {
+            if (WEEKLY_ENTRY.test(child.className || '')) device.weeklyEntries = (device.weeklyEntries || 0) + 1;
+        });
+        return false;
+    }
     if (!WEEKLY_ENTRY.test(node.className || '')) return true;
     device.weeklyEntries = (device.weeklyEntries || 0) + 1;
     return false;
@@ -336,18 +350,23 @@ const RANGES = [
 function everything(device, men) {
     const out = {};
     device.weeklyDrawn = [];
+    device.paydayDrawn = [];
     const json = code => device.run(`JSON.stringify(${code})`);
     device.run('REPORT_DEDUCTIONS.clear(); REPORT_WORKERS = null; INVOICE_PLACE = null; REPORT_CARD_GRID = true;');
     RANGES.forEach(([name, set]) => {
         device.run(set);
         device.run('REPORT_SECTION = "workers"; renderReports();');
         device.weeklyEntries = 0;
+        device.paydayRows = 0;
         out[`${name}: «לפי עובד»`] = drawnIn(device, 'reportsView');
         device.weeklyDrawn.push(['workers', device.weeklyEntries]);
+        device.paydayDrawn.push(['workers', device.paydayRows]);
         device.run('REPORT_SECTION = "sites"; renderReports();');
         device.weeklyEntries = 0;
+        device.paydayRows = 0;
         out[`${name}: «לפי אתר»`] = drawnIn(device, 'reportsView');
         device.weeklyDrawn.push(['sites', device.weeklyEntries]);
+        device.paydayDrawn.push(['sites', device.paydayRows]);
         device.run('REPORT_SECTION = "workers";');
         out[`${name}: the pay rows`] = json('payrollRows()');
         out[`${name}: the workbook`] = json('reportSheets()');
@@ -367,13 +386,17 @@ function everything(device, men) {
     });
     device.run('ADVANCE_WORKER = null; OWES_PAGE = null; ADVANCE_ORDER_DRAFT = null; clear(document.getElementById("advancesView")); renderAdvances();');
     device.weeklyEntries = 0;
+    device.paydayRows = 0;
     out['«מקדמות»'] = drawnIn(device, 'advancesView');
     device.weeklyDrawn.push(['advances', device.weeklyEntries]);
+    device.paydayDrawn.push(['advances', device.paydayRows]);
     men.forEach(id => {
         device.run(`ADVANCE_WORKER = ${JSON.stringify(id)}; clear(document.getElementById("advancesView")); renderAdvances();`);
         device.weeklyEntries = 0;
+        device.paydayRows = 0;
         out[`«מקדמות»: ${id}`] = drawnIn(device, 'advancesView');
         device.weeklyDrawn.push(['a man', device.weeklyEntries]);
+        device.paydayDrawn.push(['a man', device.paydayRows]);
         out[`${id}: his card`] = json(`workerCardFacts(${JSON.stringify(id)})`);
     });
     device.run('ADVANCE_WORKER = null;');
@@ -408,7 +431,8 @@ const READINGS = [
 {
     suite('every figure of the pay sheet and the screens that read it is v195\'s, byte for byte');
 
-    const tally = { records: 0, readings: 0, compared: 0, states: {}, closes: 0, repaid: 0, wrong: [], weekly: { may: 0, mayNot: 0 }, weeklyWrong: [] };
+    const tally = { records: 0, readings: 0, compared: 0, states: {}, closes: 0, repaid: 0, wrong: [], weekly: { may: 0, mayNot: 0 }, weeklyWrong: [],
+        payday: 0, paydayWrong: [] };
     const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8];
     for (const seed of SEEDS) {
         const record = seeded(seed, seed % 4 === 0);
@@ -453,6 +477,13 @@ const READINGS = [
                 || !drawn.every(([section, count]) => count === ((section === 'workers' || section === 'advances') && may ? 1 : 0))) {
                 tally.weeklyWrong.push(`seed ${seed}, ${name}: ${JSON.stringify(drawn)}`);
             }
+            // v206: «יום תשלום»'s row - never in v195; in this build once on every draw of the
+            // board on top of «מקדמות», whatever the gate says, and nowhere else.
+            const rows = pair[1].paydayDrawn;
+            tally.payday += rows.filter(([, count]) => count === 1).length;
+            if ((pair[0].paydayRows || 0) !== 0 || !rows.every(([section, count]) => count === (section === 'advances' ? 1 : 0))) {
+                tally.paydayWrong.push(`seed ${seed}, ${name}: ${JSON.stringify(rows)}`);
+            }
         }
     }
     given('the corpus has closes, repayments and every reading of the gate', tally.closes > 10 && tally.repaid > 3
@@ -475,6 +506,8 @@ const READINGS = [
         `${tally.orderRefused} / ${tally.excused.count}`);
     check(`«סגירת שבוע»'s one button: on «לפי עובד» and «מקדמות» once a draw where the record may be closed (${tally.weekly.may} readings), nowhere where it may not (${tally.weekly.mayNot}), never on «לפי אתר» or a man's page - the only thing taken out of the comparison`,
         tally.weekly.may > 0 && tally.weekly.mayNot > 0 && tally.weeklyWrong.length === 0, tally.weeklyWrong.slice(0, 4).join(' | '));
+    check(`v206: «יום תשלום»'s row on «מקדמות» once a draw of the board (${tally.payday} draws, every reading of the gate), never on «דוחות» or a man's page, never in v195 - taken out as one node and counted`,
+        tally.payday === tally.readings && tally.paydayWrong.length === 0, tally.paydayWrong.slice(0, 4).join(' | '));
 }
 
 // ---------------------------------------------------------------- a season
@@ -537,7 +570,10 @@ const WAYS_IN = [
     ['the month', `monthSummaryFacts("${TODAY.slice(0, 7)}");`],
     // v197: «סגירת שבוע»'s list (js/ui/weeklyclose.js) is read inside the same one reading -
     // the same gate answer, kept under the record between draws - with its own scope inside.
-    ['«סגירת שבוע»\'s list', `weeklyCloseRead(State.schedule, todayStr(), "${TODAY}T15:00:00.000Z");`]
+    ['«סגירת שבוע»\'s list', `weeklyCloseRead(State.schedule, todayStr(), "${TODAY}T15:00:00.000Z");`],
+    // v206: «יום תשלום»'s reading (js/ui/payday.js) - every man's account over his own period,
+    // «סגירת שבוע»'s list and the board - in the same one reading, counted like the others.
+    ['«יום תשלום»', `paydayFacts(todayStr(), "${TODAY}T15:00:00.000Z");`]
 ];
 
 // ---------------------------------------------------------------- 2. the questions, counted
