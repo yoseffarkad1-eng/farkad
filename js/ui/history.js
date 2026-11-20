@@ -1183,6 +1183,12 @@ function historyGoDay(date, key) {
     const go = leave => {
         closeHistory();
         if (leave && journeyOpen() && typeof journeyLeave === 'function') journeyLeave();
+        // And the rule every door to the day screen asks (v206, journeyLeaveFor in
+        // js/ui/journey.js): a journey that still holds another day is left before the date
+        // moves. Nothing to do on either path above - none is open, or it was just left - so
+        // this writes nothing today; it keeps the door honest if a path is added without the
+        // question.
+        if (typeof journeyLeaveFor === 'function') journeyLeaveFor(date);
         State.date = date;
         if (typeof dayChosenByHand === 'function') dayChosenByHand();
         showView('day');
