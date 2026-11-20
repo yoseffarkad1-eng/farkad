@@ -1347,6 +1347,30 @@ const YEAR = { range: 'thisYear', from: null, to: null };
             && evening.asked[0].message.indexOf(`«${evening.run('JOURNEY_TEXT.entry')}»`) !== -1);
     }
 
+    // v207's review: the journey's OWN day, tapped from the list while the journey stands on it,
+    // owes no question and leaves nothing - v206's rule (journeyHoldsDay) every other door asks.
+    suite('12. with «בניית סידור» at its first station, its OWN day opens with no question and the journey kept');
+    const own = withHistory(makeDevice({ deviceId: 'd_journey_own' }), { journey: true });
+    own.State.schedule.workers = [{ id: 'w_1', name: 'דוגמה', active: true }];
+    own.State.schedule.places = [{ id: 'p_1', name: 'אתר', active: true }];
+    own.State.save({ silent: true });
+    let ownStarted = null;
+    try { ownStarted = own.run('journeyStart() && journeyStation()'); } catch (error) { ownStarted = String(error && error.message); }
+    check('«בניית סידור» opens at its first station on the device', ownStarted === 1, String(ownStarted));
+    if (ownStarted === 1) {
+        const sederDay = own.run('journeyDate()');
+        const keyBefore = own.raw('farkadSederJourney');
+        own.run('openHistory("w_1")');
+        own.answer = true;
+        let answered = null;
+        own.run(`historyGoDay(${JSON.stringify(sederDay)}, 'row:' + ${JSON.stringify(sederDay)} + ':w_1')`).then(value => { answered = value; });
+        await new Promise(resolve => setTimeout(resolve, 20));
+        same('no question; the day opens; the journey, its station, its day and its key as they were',
+            [answered, own.asked.length, own.State.date, own.run('journeyStation()'), own.run('journeyDate()'),
+                own.raw('farkadSederJourney') === keyBefore, own.views.slice(-1), own.byId('historyModal').style.display],
+            [true, 0, sederDay, 1, sederDay, true, ['day'], 'none']);
+    }
+
     const code = HISTORY_JS.split('\n').filter(line => line.trim().indexOf('//') !== 0)
         .map(line => line.replace(/\s\/\/ .*$/, '')).join('\n');
     const writers = code.match(new RegExp([

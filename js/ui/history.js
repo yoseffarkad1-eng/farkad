@@ -1171,7 +1171,7 @@ function historyCopy() {
 // choice (dayChosenByHand, js/app.js). A day the record no longer holds is still a date and
 // opens empty, as the week's cell does.
 //
-// WHILE «בניית סידור» IS OPEN it asks first (the head of this file says why). «ביטול», Escape
+// WHILE «בניית סידור» HOLDS ANOTHER DAY it asks first (the head of this file says why). «ביטול», Escape
 // or the backdrop change nothing - no date, no key - and the focus goes back to the row that
 // asked; the confirming answer leaves the journey by its own journeyLeave and then opens the
 // day. Asked again after the answer: the journey may have ended meanwhile, and then no
@@ -1194,7 +1194,12 @@ function historyGoDay(date, key) {
         showView('day');
         return true;
     };
-    if (!journeyOpen()) return Promise.resolve(go(false));
+    // The question is owed only where v206's rule says the journey holds ANOTHER day (its first
+    // station, on a date that is not this one): the journey's own day, or a journey at a later
+    // station, opens with the journey kept - as every other door to the day screen does
+    // (journeyHoldsDay, js/ui/journey.js). Asking there named the same day twice and, on a yes,
+    // left the journey for nothing (the review of v207).
+    if (!(journeyOpen() && typeof journeyHoldsDay === 'function' && journeyHoldsDay(date))) return Promise.resolve(go(false));
     // A journey open and no way to ask: nothing opens, rather than the journey moved unasked.
     if (typeof askConfirm !== 'function') return Promise.resolve(false);
     const T = HISTORY_TEXT;
