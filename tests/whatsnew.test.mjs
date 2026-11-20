@@ -87,6 +87,24 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    // v206 (the integration of 2026-11-19): the four tracks' items in their own words - «תמונת
+    // מצב»'s place as its track corrected it (no app name is drawn on any screen; the door is the
+    // strip's top right-hand corner). Written ahead of the stamps: the guard below SKIPs until
+    // js/app.js says v206, and every «הראה לי» of it is asked through whatsNewGo meanwhile.
+    { build: 'v206', items: [
+        { title: 'סיכום שנה',
+            text: 'השנה חודש אחר חודש, לפי עובד ולפי אתר, וקובץ Excel לרואה החשבון - לפי מה שנרשם, לא מה ששולם.',
+            where: 'דוחות ← הפקת דוח ← סיכום חודש ← סיכום שנת …', go: 'reportsMenu' },
+        { title: 'לוח חודשי',
+            text: 'כל החודש בטבלה אחת: כל עובד, כל יום והאתר שלו בצבע, עם סינון לפי אתר, הדפסה ותמונה לשיתוף.',
+            where: 'שבוע ← לוח חודשי, בפינת הטבלה', go: 'monthBoard' },
+        { title: 'יום תשלום',
+            text: 'בעמוד המקדמות: כמה לשלם בכל קבוצה ביום התשלום הבא לפי מה שנרשם, ומה כדאי לסדר לפני שסוגרים.',
+            where: 'מקדמות ← יום תשלום', go: 'payday' },
+        { title: 'תמונת מצב',
+            text: 'לחיצה על מצב הסנכרון בפינה העליונה מימין פותחת תמונת מצב: היום, הסידור הבא, הכסף, 12 השבועות האחרונים והאתרים.',
+            where: 'בפינה העליונה מימין ← מצב הסנכרון (או «תמונת מצב»)', go: 'status' }
+    ] },
     { build: 'v205', items: [
         { title: 'עדכון לבד בפתיחה מחדש',
             text: 'כשפותחים את האפליקציה מחדש וגרסה חדשה מחכה היא נכנסת לבד; אם האפליקציה רק חזרה מהרקע, הפס «גרסה חדשה זמינה» נשאר.',
@@ -473,7 +491,8 @@ await block('the news itself: every build, every item, every word', async () => 
 
     const items = builds.flatMap(entry => entry.items.map(item => ({ build: entry.build, ...item })));
     const ways = Object.keys(device.global('WHATSNEW_GO')).sort();
-    same('the ways «הראה לי» can go', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'version', 'week']);
+    // MOVED ON PURPOSE (v206's integration): «לוח חודשי», «יום תשלום» and «תמונת מצב» each have a way.
+    same('the ways «הראה לי» can go', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'monthBoard', 'payReport', 'payday', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'status', 'version', 'week']);
     check('every item is a title, a sentence and a place, and nothing else',
         items.every(item => Object.keys(item).every(key => ['build', 'title', 'text', 'where', 'go'].includes(key))
             && [item.title, item.text, item.where].every(value => typeof value === 'string' && value.trim() === value && value.length > 0)));
@@ -515,6 +534,10 @@ await block('every word of the line and the card, and no other', async () => {
         !/transportSetEnabled|displaySetLarge|closeReminderSetOff|closeReminderDismiss|journeyStart|journeyGo|sederMarkOpened|FarkadReminders\.enable/.test(code));
     check('nor opens a reading of money for a period by itself, nor a payslip run',
         !/openMonthSummary|openPayslips|payslipsMarkOpened|openWorkerCard/.test(code));
+    // v206: its three new ways show a door and never press it - the desk is a reading of money,
+    // «תמונת מצב» reads the board's, and the board opens by his own tap.
+    check('nor presses the doors v206\'s ways show: «יום תשלום», «תמונת מצב», «לוח חודשי»',
+        !/openPayday|openStatus|openMonthBoard|monthBoardFromWeek/.test(code));
     same('it writes one key and only through Store, optional', [(code.match(/Store\.set\(/g) || []).length,
         /Store\.set\(WHATSNEW_KEY,[^;]*\{ optional: true \}\)/.test(code), /localStorage/.test(code)], [1, true, false]);
     same('whose name is', phone('d_key', 'v186').global('WHATSNEW_KEY'), KEY);

@@ -424,7 +424,8 @@ for (const rides of [false, true]) {
     if (rides) await page.evaluate(() => transportSetEnabled(true));
     given(`הסעות is ${rides ? 'on' : 'off'}`, await page.evaluate(() => transportEnabled()) === rides);
     const ways = await page.evaluate(() => Object.keys(WHATSNEW_GO).sort());
-    same('the ways there are', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'payReport', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'version', 'week']);
+    // MOVED ON PURPOSE (v206's integration): «לוח חודשי», «יום תשלום» and «תמונת מצב» each have a way.
+    same('the ways there are', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'monthBoard', 'payReport', 'payday', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'status', 'version', 'week']);
     const reset = () => page.evaluate(() => {
         [...document.querySelectorAll('.modal')].filter(node => node.style.display === 'flex').forEach(node => {
             const close = MODAL_CLOSERS[node.id];
@@ -444,7 +445,8 @@ for (const rides of [false, true]) {
         journey: typeof journeyStation === 'function' ? journeyStation() : 0,
         menu: Boolean(document.querySelector('#reportsView details.report-output-actions') && document.querySelector('#reportsView details.report-output-actions').open),
         menuRows: [...document.querySelectorAll('#reportsView details.report-output-actions button')].filter(node => node.offsetParent !== null).map(node => node.id).filter(Boolean),
-        section: typeof REPORT_SECTION !== 'undefined' ? REPORT_SECTION : null }));
+        section: typeof REPORT_SECTION !== 'undefined' ? REPORT_SECTION : null,
+        weekMode: typeof weekPhoneMode !== 'undefined' ? weekPhoneMode : null }));
     // Where each way lands. `folds` is asked only where the way goes to the sheet.
     const lands = {
         day: s => s.view === 'day' && s.modals.length === 0 && !s.settings && !s.transport,
@@ -471,7 +473,13 @@ for (const rides of [false, true]) {
         // v198: the row of «איפוס מקדמות», open on the sheet - and the tool NOT opened.
         advanceReset: s => s.settings && s.folds.includes('settingsFoldAdvanceReset') && s.modals.length === 0 && !s.transport,
         // v203: the row of «תזכורת לסגירת חשבונות», open on the sheet - and its switch NOT pressed.
-        closeReminder: s => s.settings && s.folds.includes('closeReminderCard') && s.modals.length === 0 && !s.transport
+        closeReminder: s => s.settings && s.folds.includes('closeReminderCard') && s.modals.length === 0 && !s.transport,
+        // v206: the week on its grid, the board's door in its corner given the keyboard - the
+        // board NOT opened; «מקדמות» as it opens, «יום תשלום» given the keyboard - the desk NOT
+        // opened; the sync chip's door given the keyboard - «תמונת מצב» NOT opened.
+        monthBoard: s => s.view === 'week' && s.weekMode === 'grid' && s.focus === 'monthBoardDoor' && s.modals.length === 0 && !s.settings,
+        payday: s => s.view === 'advances' && s.focus === 'paydayEntry' && s.modals.length === 0 && !s.settings,
+        status: s => s.focus === 'statusDoor' && s.modals.length === 0 && !s.settings
     };
     // Each way once from the card as ⋯ opens it; a first disk reading is taken after the
     // phone has seen the build, so the note is not a difference either.
@@ -502,6 +510,13 @@ for (const rides of [false, true]) {
             const onGlass = await page.evaluate(() => { const box = document.getElementById('journeyDockBtn').getBoundingClientRect(); return box.top >= 0 && box.bottom <= window.innerHeight; });
             check('journeyDock: the button is on the glass - and not pressed: no journey was started',
                 onGlass && await page.evaluate(() => localStorage.getItem('farkadSederJourney')) === null);
+        }
+        if (['monthBoard', 'payday', 'status'].includes(way)) {
+            const id = { monthBoard: 'monthBoardDoor', payday: 'paydayEntry', status: 'statusDoor' }[way];
+            check(`${way}: the control it names is on the glass, given the keyboard and not pressed`, await page.evaluate(name => {
+                const box = document.getElementById(name).getBoundingClientRect();
+                return box.top >= 0 && box.bottom <= window.innerHeight && document.activeElement && document.activeElement.id === name;
+            }, id));
         }
         if (way === 'rides' && !rides) {
             same('rides, with הסעות off: he is shown the row where it is turned on, and it is NOT turned on',

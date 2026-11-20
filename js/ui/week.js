@@ -235,8 +235,10 @@ function renderWeekPhone(dates, workers) {
     });
     panel.appendChild(counts);
     // A day chosen by hand: a follow still owed from midnight is settled by it
-    // (dayChosenByHand, js/app.js).
+    // (dayChosenByHand, js/app.js). A «בניית סידור» journey building another day at its first
+    // station is left first, its place kept for the dock (journeyLeaveFor, js/ui/journey.js).
     panel.appendChild(button('פתיחת היום לעריכה', 'btn-primary week-phone-open', () => {
+        if (typeof journeyLeaveFor === 'function') journeyLeaveFor(chosen);
         State.date = chosen;
         if (typeof dayChosenByHand === 'function') dayChosenByHand();
         showView('day');
@@ -406,8 +408,10 @@ function renderWeekCell(worker, date) {
     const who = `${isolate(worker.name)} · ${hebrewDayName(parseLocalDate(date))} `
         + `${formatFullDate(parseLocalDate(date))}`;
     cell.setAttribute('aria-label', said.length ? `${who} · ${said.join(' · ')}` : who);
-    // A day chosen by hand (dayChosenByHand, js/app.js), as «פתיחת היום לעריכה» above is.
+    // A day chosen by hand (dayChosenByHand, js/app.js), as «פתיחת היום לעריכה» above is - and
+    // a journey building another day left first, as there.
     const open = () => {
+        if (typeof journeyLeaveFor === 'function') journeyLeaveFor(date);
         State.date = date;
         if (typeof dayChosenByHand === 'function') dayChosenByHand();
         showView('day');

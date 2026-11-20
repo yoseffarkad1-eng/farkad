@@ -239,6 +239,27 @@ function closeReminderBusy() {
     return typeof midEdit === 'function' ? Boolean(midEdit()) : false;
 }
 
+// A COUNT READ ELSEWHERE, TAKEN AS THIS LINE'S OWN. «יום תשלום» (js/ui/payday.js) reads «סגירת
+// שבוע»'s own list on this very record at this moment, and counts it with this file's own rule
+// (closeReminderCount): the count it hands over is the one this line would read, under the key it
+// would keep it by (closeReminderKey - the desk's own key is made of it). Taking it costs nothing
+// and makes the line, «תמונת מצב» (which mirrors the line) and the desk say ONE number: after a
+// write on the day screen, which does not make this line read again (the top of this file), the
+// line and «תמונת מצב» said 3 while the desk one tap away said 4 (the review of v206). Nothing is
+// read here, and NO LINE IS PUT UP here: a line already on the glass takes the new count at once,
+// or goes at 0 - behind whatever dialog is open, a number changing and not a line appearing - and
+// a line that is not up waits for this file's own refresh, which finds the count kept and waits
+// for nobody to be typing.
+function closeReminderAdopt(key, today, count) {
+    if (typeof key !== 'string' || today !== todayStr() || !Number.isInteger(count) || count < 0) return false;
+    CLOSE_REMINDER_KEPT = { key, today, count };
+    closeReminderViewRead = closeReminderView();
+    const banner = closeReminderBanner();
+    if (closeReminderShown === null || !banner || banner.style.display === 'none') return true;
+    if (count > 0 && closeReminderWanted(today)) closeReminderShow(count); else closeReminderHide();
+    return true;
+}
+
 // After the frame that paints the page, never in it - and a timer beside it for a window
 // that is given no frame (owesAfterPaint's own pair, js/ui/owes.js). Where there is no frame
 // at all (the suites' devices in Node) it is read in place.

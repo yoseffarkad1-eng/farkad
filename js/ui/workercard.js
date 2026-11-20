@@ -837,10 +837,13 @@ function workerCardStepMonth(months) {
 // screen is a choice in memory; nothing is recorded by looking at a day. And it is HIS
 // choice: a follow of the calendar still owed from midnight is settled by it
 // (dayChosenByHand, js/app.js), or the card's close would hand him the new day instead of
-// the one he tapped.
+// the one he tapped. A «בניית סידור» journey building another day at its first station is left
+// first, its place kept for the dock (journeyLeaveFor, js/ui/journey.js), so the seder stays on
+// its own day.
 function workerCardGoDay(date) {
     if (!isRealDate(date)) return;
     closeWorkerCard();
+    if (typeof journeyLeaveFor === 'function') journeyLeaveFor(date);
     State.date = date;
     if (typeof dayChosenByHand === 'function') dayChosenByHand();
     showView('day');

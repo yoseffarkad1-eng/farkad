@@ -1503,4 +1503,136 @@ await block('P18 the shapes: h the last check, one sentence for cards of one dat
     none.call('closePayday');
 });
 
+// ================================================================== v206's integration
+//
+// «לרישום היום» AND «בניית סידור». At the journey's first station the day screen is the journey's
+// and its date the journey's (js/ui/journey.js follows the day screen's date): check d's door put
+// today on it and carried Friday's seder, built on a Thursday evening, to Thursday - its place
+// rewritten (the review of v206). «תמונת מצב» withholds its own door to today for exactly that.
+// So does the desk now: while a journey stands at its first station on another day the door is
+// not drawn - check d's sentence stays - and a press that reached it anyway does nothing.
+await block('P19 «לרישום היום» is not offered while «בניית סידור» builds another day at its first station, and a press moves nothing', async () => {
+    const m = instrument(reopen(everything({ today: '2026-11-19', until: '2026-11-18' }), OPEN));
+    m.run(source('js/ui/journey.js'));
+    const doors = () => {
+        m.call('openPayday');
+        const out = m.dom.getElementById('paydayBody').querySelectorAll('.payday-door').map(node => bare(node.textContent));
+        m.call('closePayday');
+        return out;
+    };
+    given('no journey: check d offers its door to today', doors().includes('לרישום היום'), j(doors()));
+    // The journey at its first station for Friday 20/11 - where the dock's own button leaves it on
+    // a Thursday evening (journeyDefaultDate).
+    m.run(`journeyLive = { version: 1, date: '2026-11-20', station: 1, at: Date.now(), open: true }; State.date = '2026-11-20'; 1`);
+    given('the journey at its first station, on Friday', m.run('journeyStation()') === 1 && m.run('journeyDate()') === '2026-11-20');
+    const before = disk(m);
+    m.run('__writes = []; __calls = []; __dayChosen = 0; 1');
+    m.views.length = 0;
+    m.call('openPayday');
+    const body = m.dom.getElementById('paydayBody');
+    const d = body.querySelectorAll('.payday-check-endsToday');
+    check('check d is still there, its sentence said', d.length === 1 && /נגמרות היום, והיום עוד לא נרשם להם/.test(bare(d[0].textContent)),
+        d.length ? bare(d[0].textContent) : 'no check d');
+    same('and the desk draws no door to today: check d has no button, and every other door is as before',
+        [d.length ? d[0].querySelectorAll('.payday-door').length : null, body.querySelectorAll('.payday-door').map(node => bare(node.textContent)).includes('לרישום היום')],
+        [0, false]);
+    const door = m.run(`JSON.stringify(PAYDAY_KEPT.facts.checks.filter(check => check.kind === 'endsToday')[0].door)`);
+    same('a press that reached it anyway is refused, and the desk stays open', [m.run(`paydayGo(${door})`), m.call('paydayIsOpen')], [false, true]);
+    await nextTask();
+    same('and nothing moved, now or a task later: the date, the journey, the views, the day chosen, the disk',
+        [m.run('State.date'), m.run('journeyStation()'), m.run('journeyDate()'), m.views.slice(), m.global('__dayChosen'), disk(m) === before],
+        ['2026-11-20', 1, '2026-11-20', [], 0, true]);
+    same('the view\'s own way refuses it too', [m.run(`paydayGoView('day', ['2026-11-19'])`), m.run('State.date'), m.views.slice()], [false, '2026-11-20', []]);
+    m.call('closePayday');
+    // Past the first station the day screen is not the journey's editor; and a journey building
+    // today itself is not moved by today: in both the door is there.
+    m.run('journeyLive.station = 2; 1');
+    check('at the journey\'s second station the door to today is drawn', doors().includes('לרישום היום'));
+    m.run(`journeyLive.station = 1; journeyLive.date = '2026-11-19'; State.date = '2026-11-19'; 1`);
+    check('a journey building today itself: the door to today is drawn', doors().includes('לרישום היום'));
+    check('and the disk after all of it is the disk before', disk(m) === before);
+    m.run('journeyLive = null; 1');
+});
+
+// ONE NUMBER ON THREE SURFACES. The close reminder's line keeps its count after a write on the day
+// screen on a day that ends nobody's period - on purpose, for its cost (js/ui/closereminder.js) -
+// and «תמונת מצב» mirrors that line; the desk reads «סגירת שבוע»'s list itself. So a forgotten
+// day typed on Monday left the line and «תמונת מצב» at 3 while the desk, one tap from «תמונת מצב»,
+// said 4 (the review of v206). The desk now hands its count to the reminder, at no cost: the line,
+// «תמונת מצב» and the desk say one number - and the desk still draws only its own reading.
+await block('P20 after a write on the day screen the desk\'s count is the line\'s and «תמונת מצב»\'s: one number, read once', async () => {
+    const d = phone({ today: '2026-11-16' });          // a Monday: it ends nobody's period
+    d.run(source('js/ui/status.js'));
+    const banner = d.dom.register('closeReminderBanner');
+    banner.style.display = 'none';
+    d.State.schedule.workers = [
+        { id: 'w_f', name: 'פואד', active: true, dailyRate: 500, hourlyRate: 0 },
+        { id: 'w_g', name: 'גסאן', active: true, dailyRate: 450, hourlyRate: 0 },
+        { id: 'w_h', name: 'האני', active: true, dailyRate: 420, hourlyRate: 0 },
+        { id: 'w_s', name: 'סלים', active: true, dailyRate: 400, hourlyRate: 0 }];
+    d.State.schedule.places = PLACES;
+    // Three worked the fortnight that ended Thursday 12/11; סלים only the one before it, which is closed.
+    weekdays('2026-10-16', '2026-11-13').forEach(date => ['w_f', 'w_g', 'w_h'].forEach(id => day(d, id, date)));
+    weekdays('2026-10-16', '2026-10-29').forEach(date => day(d, 'w_s', date));
+    approve(d);
+    ['w_f', 'w_g', 'w_h', 'w_s'].forEach((id, n) => byHand(d, id, '2026-10-16', '2026-10-29', undefined, `2026-10-30T16:0${n}:00.000Z`));
+    kept(d);
+    d.run(`var __reads = 0; (function () { const real = weeklyCloseRead; weeklyCloseRead = function () { __reads += 1; return real.apply(this, arguments); }; })();
+        currentView = "day"; 1`);
+    const fresh = () => d.run('closeReminderCount(weeklyCloseRead(State.schedule, todayStr(), new Date().toISOString()))');
+    const line = () => d.run('closeReminderShown');
+    const status = () => d.run('statusCloseShown()');
+    d.call('closeReminderRefresh', 'boot');
+    given('the reminder read on the day screen: its line says 3, and so does «תמונת מצב»', line() === 3 && status() === 3, j([line(), status()]));
+    // סלים's Wednesday 11/11, forgotten, typed now on the day screen - his one day in that fortnight.
+    day(d, 'w_s', '2026-11-11');
+    kept(d);
+    d.call('closeReminderRefresh', 'draw');
+    given('the line keeps its 3 after the write, on purpose, and «סגירת שבוע» would now offer 4',
+        line() === 3 && fresh() === 4, j([line(), fresh()]));
+    d.run('__reads = 0; 1');
+    const before = disk(d);
+    d.call('openPayday');
+    const say = d.dom.getElementById('paydayBody').querySelectorAll('.payday-close-say').map(node => bare(node.textContent));
+    same('the desk says 4, from its own reading', say, ['יש 4 עובדים שהחשבון שלהם עוד לא נסגר']);
+    same('and the line and «תמונת מצב» say 4 with it', [line(), status(), banner.children.length ? bare(banner.children[0].textContent) : null],
+        [4, 4, 'יש 4 עובדים שהחשבון שלהם עוד לא נסגר']);
+    same('the list read once - the desk\'s own reading; nothing read again for the line', d.global('__reads'), 1);
+    check('nothing written', disk(d) === before);
+    d.call('closePayday');
+    // The other way: the day taken away again. The line keeps its 4; the desk says 3, and so then does it.
+    d.call('clearWorkerDay', d.State.schedule, '2026-11-11', 'w_s', 'actual');
+    kept(d);
+    d.call('closeReminderRefresh', 'draw');
+    given('the day taken off: the list would offer 3', fresh() === 3, j(fresh()));
+    same('and the line keeps the 4 it was given, on purpose', line(), 4);
+    d.call('openPayday');
+    same('the desk says 3, and the line and «תמונת מצב» with it', [d.dom.getElementById('paydayBody').querySelectorAll('.payday-close-say')
+        .map(node => bare(node.textContent)), line(), status()], [['יש 3 עובדים שהחשבון שלהם עוד לא נסגר'], 3, 3]);
+    d.call('closePayday');
+    // The line's own switches still rule it: off, or ✕ today - no line is put up by the desk.
+    d.call('closeReminderDismiss');
+    day(d, 'w_s', '2026-11-11');
+    kept(d);
+    d.call('openPayday');
+    same('✕ pressed today: the desk says 4 and puts no line up', [d.dom.getElementById('paydayBody').querySelectorAll('.payday-close-say')
+        .map(node => bare(node.textContent)), line(), status()], [['יש 4 עובדים שהחשבון שלהם עוד לא נסגר'], null, null]);
+    d.call('closePayday');
+    // A line that is not up is never put up by the desk: the reminder's own refresh puts it up,
+    // and finds the desk's count kept under this record - reading nothing.
+    const fresh2 = phone({ storage: d.dump(), today: '2026-11-16' });
+    fresh2.run(source('js/ui/status.js'));
+    const banner2 = fresh2.dom.register('closeReminderBanner');
+    banner2.style.display = 'none';
+    fresh2.run(`Store.remove(CLOSE_REMINDER_DISMISSED_KEY); var __reads = 0; (function () { const real = weeklyCloseRead;
+        weeklyCloseRead = function () { __reads += 1; return real.apply(this, arguments); }; })(); currentView = "day"; 1`);
+    fresh2.call('openPayday');
+    same('a phone whose reminder has not read yet: the desk says 4 and no line goes up under it',
+        [fresh2.run('closeReminderShown'), banner2.style.display, fresh2.global('__reads')], [null, 'none', 1]);
+    fresh2.call('closePayday');
+    fresh2.call('closeReminderRefresh', 'draw');
+    same('the reminder\'s own refresh puts its line up with the desk\'s count, reading nothing again',
+        [fresh2.run('closeReminderShown'), fresh2.run('statusCloseShown()'), fresh2.global('__reads')], [4, 4, 1]);
+});
+
 report();

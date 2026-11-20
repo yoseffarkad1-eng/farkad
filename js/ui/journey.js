@@ -456,6 +456,36 @@ function journeyAlignDate() {
     State.date = journeyLive.date;
 }
 
+// ================================================================== a door from another screen
+//
+// AT THE FIRST STATION THE DAY SCREEN IS THE JOURNEY'S, and the journey follows the date the day
+// screen is put on (renderJourneyIfOpen) - which is what the day's own header is for. A door on
+// ANOTHER screen that puts another date there - «לרישום היום» on «יום תשלום», «פתיחת היום
+// לעריכה» on «תמונת מצב» or in the week's day panel, a date or a cell of the week or of «לוח
+// חודשי», a day of a worker's or a site's card, the phone's reminder - carried the seder he was
+// building to that day with it, silently, its place rewritten to say so: the check, the rides,
+// the last look and every message for the wrong day (the review of v206 - «תמונת מצב»'s own
+// door was the first found). ONE RULE, which every such door asks:
+//
+//   journeyHoldsDay(date)  - a journey stands at its first station on a day that is not `date`.
+//                            A door whose only way is TODAY is then not offered, and refuses
+//                            if pressed: nothing is written, and his «יציאה» and the day's own
+//                            arrows are the ways out («תמונת מצב», «יום תשלום»).
+//   journeyLeaveFor(date)  - for a door that must still open `date`: a day of a grid or of a
+//                            calendar, where every cell is the way into its day and none can be
+//                            taken away. The journey is LEFT first, exactly as «יציאה» leaves it
+//                            - its place kept, so the dock's «בניית סידור» continues it at its
+//                            station and on its day, and no reload brings it back by itself - and
+//                            the door then opens the day he chose, with no seder riding on it.
+//                            The one byte is the journey's own key, written by journeyLeave.
+function journeyHoldsDay(date) {
+    return Boolean(journeyLive) && journeyLive.station === 1 && journeyLive.date !== date;
+}
+
+function journeyLeaveFor(date) {
+    return journeyHoldsDay(date) ? journeyLeave() : false;
+}
+
 // THE ONE PLACE THE SCREEN IS MADE TO MATCH THE JOURNEY: which of the existing screens is
 // in front, then one render() - which draws the journey's own parts (renderJourneyIfOpen).
 function journeyShow(focus) {

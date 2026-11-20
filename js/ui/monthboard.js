@@ -810,8 +810,13 @@ function monthBoardChoosePlace(value) {
 
 // A date or a cell: the day screen on that date - a day chosen by hand, so a follow still
 // owed from midnight is settled by it (dayChosenByHand, js/app.js), as the week's cell does.
+// A «בניית סידור» journey standing at its first station on another day is LEFT first, its
+// place kept for the dock's button (journeyLeaveFor, js/ui/journey.js): the board's dates and
+// cells are the way into their days and cannot be taken away, and the seder he was building
+// stays on its own day instead of being carried to this one (the review of v206).
 function monthBoardOpenDay(date) {
     if (!isRealDate(date)) return;
+    if (typeof journeyLeaveFor === 'function') journeyLeaveFor(date);
     State.date = date;
     if (typeof dayChosenByHand === 'function') dayChosenByHand();
     showView('day');

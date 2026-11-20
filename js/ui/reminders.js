@@ -160,6 +160,10 @@ const FarkadReminders = (() => {
         const banner = node('pushReminderPending');
         if (banner) banner.hidden = true;
         if (typeof closeSettings === 'function') closeSettings();
+        // The tap is going to today, and it wins - but a «בניית סידור» journey building another
+        // day at its first station is left first, its place kept for the dock, rather than
+        // carried to today with the day screen (journeyLeaveFor, js/ui/journey.js).
+        if (typeof journeyLeaveFor === 'function') journeyLeaveFor(todayStr());
         State.date = todayStr(); showView('day');
     }
     function openPending() {

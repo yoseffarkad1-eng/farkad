@@ -574,13 +574,18 @@ let PAYDAY = null;
 // «דוחות» this session (fix round 1). A choice there («בחירת קיזוז מהשכר» … «הצג בדוח») moves the
 // sheet's figure (payrollRowsOver reads REPORT_DEDUCTIONS) and nothing the record's key knows of:
 // the desk read before it showed the full deduction after it, 200 ₪ from what the sheet said.
-function paydayKey() {
-    const today = todayStr();
-    const record = typeof owesKey === 'function' ? owesKey(State.schedule, today)
+function paydayRecordKey(today) {
+    return typeof owesKey === 'function' ? owesKey(State.schedule, today)
         : `${typeof Store === 'object' && Store ? Store.tick : 0}|${today}|${JSON.stringify(State.schedule)}`;
+}
+
+// `record`: the record's part, when the caller already has it (paydayReadNow hands the same part
+// to the close reminder, and the record is not turned into text twice for it).
+function paydayKey(record) {
+    const base = typeof record === 'string' ? record : paydayRecordKey(todayStr());
     const chosen = typeof REPORT_DEDUCTIONS !== 'undefined' && REPORT_DEDUCTIONS && typeof REPORT_DEDUCTIONS.entries === 'function'
         ? JSON.stringify([...REPORT_DEDUCTIONS.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) : '[]';
-    return `${record}|${chosen}`;
+    return `${base}|${chosen}`;
 }
 
 function paydayParts() {
@@ -593,12 +598,22 @@ function paydayIsOpen() {
     return Boolean(PAYDAY && PAYDAY.open && parts.modal && parts.modal.style.display === 'flex');
 }
 
-// The reading of this moment, kept under the record.
+// The reading of this moment, kept under the record. «לסגירה» is «סגירת שבוע»'s own list at this
+// moment, counted the close reminder's way (paydayClose): the reminder is handed that count, read
+// at no cost of its own, so that its line - and «תמונת מצב», which mirrors the line - say what the
+// desk says (closeReminderAdopt, js/ui/closereminder.js; the review of v206: after a write on the
+// day screen the line said 3 and the desk one tap from «תמונת מצב» said 4). The desk itself reads
+// nothing of the reminder: what it draws is its own reading, whatever the reminder held.
 function paydayReadNow() {
-    const key = paydayKey();
+    const today = todayStr();
+    const record = paydayRecordKey(today);
+    const key = paydayKey(record);
     if (PAYDAY_KEPT && PAYDAY_KEPT.key === key) return PAYDAY_KEPT.facts;
-    const facts = paydayFacts(todayStr(), new Date().toISOString());
+    const facts = paydayFacts(today, new Date().toISOString());
     PAYDAY_KEPT = { key, facts };
+    if (facts.close && Number.isInteger(facts.close.count) && typeof closeReminderAdopt === 'function') {
+        closeReminderAdopt(record, today, facts.close.count);
+    }
     return facts;
 }
 
@@ -872,12 +887,24 @@ function paydayCardNode(card, at) {
     return node;
 }
 
+// THE DOOR TO TODAY («לרישום היום» - check d's, and a held man's whose period ends today) IS NOT
+// DRAWN while a «בניית סידור» journey stands at its first station on another day: the day screen
+// is the journey's then, and the door carried the seder he was building to today with it, its
+// place rewritten to say so (the review of v206). «תמונת מצב»'s own rule for its door to today,
+// and the journey's (journeyHoldsDay, js/ui/journey.js); the sentence stays, and his «יציאה» and
+// the day's own arrows are the ways. Asked at every draw and at the press, never kept in a
+// reading: where the journey is is this phone's state, not the record's.
+function paydayDoorHeld(door) {
+    return Boolean(door) && door.go === 'day' && typeof journeyHoldsDay === 'function'
+        && journeyHoldsDay((door.args || [])[0]);
+}
+
 function paydayCheckNode(check) {
     const node = el('div', `payday-check payday-check-${check.kind}`);
     if (check.who) node.appendChild(el('strong', 'payday-check-who', check.who));
     node.appendChild(el(check.kind === 'unclosed' ? 'strong' : 'p', 'payday-check-say', check.say));
     (check.lines || []).forEach(line => node.appendChild(el('p', 'payday-check-line', line)));
-    if (check.door) {
+    if (check.door && !paydayDoorHeld(check.door)) {
         node.appendChild(paydayDoorButton(check.door,
             `check|${check.kind}|${check.workerId || ''}|${check.door.go}|${JSON.stringify(check.door.args || [])}`));
     }
@@ -970,9 +997,11 @@ function paydayDraw(facts) {
 //     that checkpoint (whatsNewGo's rule, js/ui/whatsnew.js), so that whatever the target
 //     focuses keeps the focus and nothing is left on a node of the shut desk.
 //
-// None writes anything; the payslips write only what their own opener writes.
+// None writes anything; the payslips write only what their own opener writes. A door to today
+// that a journey holds (paydayDoorHeld) is not drawn, and a press that reached it anyway does
+// nothing at all - the desk stays open, the date and the journey where they were.
 function paydayGo(door) {
-    if (!door) return false;
+    if (!door || paydayDoorHeld(door)) return false;
     const args = door.args || [];
     closePayday(true);
     if (door.go === 'weeklyClose' || door.go === 'payslips') return paydayOpenDialog(door.go, args);
@@ -1019,6 +1048,7 @@ function paydayGoView(go, args) {
         showView('roster');
         return true;
     case 'day':
+        if (paydayDoorHeld({ go, args })) return false;
         State.date = args[0];
         if (typeof dayChosenByHand === 'function') dayChosenByHand();
         showView('day');

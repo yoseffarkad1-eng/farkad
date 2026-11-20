@@ -713,6 +713,97 @@ for (const [width, height] of PHONES) {
     await context.close();
 }
 
+// ================================================================== B21 a journey building tomorrow (v206's integration)
+// AT THE JOURNEY'S FIRST STATION THE DAY SCREEN IS THE JOURNEY'S, its date the journey's (js/ui/
+// journey.js). «לרישום היום» put today on it and carried Friday's seder, built on a Thursday
+// evening, to Thursday - its place rewritten to say so (the review of v206); «תמונת מצב» withheld
+// its own door to today for exactly that and led straight here. With the journey standing there
+// the desk draws no door to today - check d's sentence stays - and every door it does draw
+// leaves the journey on its day and the disk as it was.
+{
+    suite('B21 Thursday 12/11 at 19:30, «בניית סידור» building Friday: no «לרישום היום», and no door of the desk moves the journey or writes a byte');
+    const { context, page } = await phone(server.url, { width: 375, height: 667, scheme: 'light' });
+    await page.clock.setSystemTime(new Date(THURSDAY));
+    await page.evaluate(() => {
+        ['updateBanner', 'installBanner', 'whatsNewBanner', 'closeReminderBanner'].forEach(id => {
+            const node = document.getElementById(id);
+            if (node) node.style.display = 'none';
+        });
+        showView('day');
+        window.scrollTo(0, 0);
+    });
+    await page.waitForTimeout(250);
+    // He starts Friday's seder from the dock's own button, as he does - then goes to «מקדמות» by its tab.
+    await tapOn(page, '#journeyDockBtn');
+    await page.waitForTimeout(400);
+    const journey = () => page.evaluate(() => [journeyStation(), journeyDate()]);
+    const building = await journey();
+    given('the journey at its first station, on Friday', building[0] === 1 && building[1] === '2026-11-13', JSON.stringify(building));
+    await page.evaluate(deskRecord);
+    await tapOn(page, '#tab-advances');
+    await page.waitForTimeout(300);
+    same('on «מקדמות» the journey is still his, on Friday', await journey(), building);
+    const before = await disk(page);
+    const record = await page.evaluate(() => JSON.stringify(State.schedule));
+    await openDesk(page);
+    const doors = await page.evaluate(() => [...document.querySelectorAll('#paydayBody .payday-door')].map(node => node.textContent.replace(/[⁦-⁩]/g, '')));
+    same('the desk\'s doors: B15\'s, all but «לרישום היום»', doors, ['הצג את החשבון 30/10 - 05/11', 'עובדים ואתרים',
+        'המקדמות של מוחמד אבו ראס חוסיין', 'עובדים ואתרים', 'מקדמות', 'לסגירת שבוע', '💬 תלוש לכל עובד', 'סגירות שנרשמו']);
+    same('check d is still said, with no door under it', await page.evaluate(() => {
+        const d = document.querySelector('#paydayBody .payday-check-endsToday');
+        return d ? [/נגמרות היום, והיום עוד לא נרשם להם/.test(d.textContent), d.querySelectorAll('button').length] : null;
+    }), [true, 0]);
+    same('a press that reached the door anyway does nothing: the desk open, the day screen\'s date and the journey where they were',
+        await page.evaluate(() => {
+            const door = PAYDAY_KEPT.facts.checks.filter(check => check.kind === 'endsToday')[0].door;
+            return [paydayGo(door), paydayIsOpen(), State.date, journeyStation(), journeyDate()];
+        }), [false, true, '2026-11-13', 1, '2026-11-13']);
+    await page.waitForTimeout(150);
+    same('and a task later still nothing', await page.evaluate(() => [currentView, State.date, journeyStation(), journeyDate()]),
+        ['advances', '2026-11-13', 1, '2026-11-13']);
+    await page.keyboard.press('Escape');
+    const reset = () => page.evaluate(() => {
+        if (typeof closeWeeklyClose === 'function') closeWeeklyClose();
+        if (typeof closePayslips === 'function' && document.getElementById('payslipsModal').style.display === 'flex') closePayslips();
+        REPORT_WORKERS = null; REPORT_PRESET = 'fortnight'; REPORT_RANGE.from = null; REPORT_RANGE.to = null;
+        ADVANCE_WORKER = null; OWES_PAGE = null; showView('advances'); window.scrollTo(0, 0);
+    });
+    const slipsKey = await page.evaluate(() => localStorage.getItem('farkadPayslipsProgress'));
+    for (let n = 0; n < doors.length; n += 1) {
+        await reset();
+        await page.waitForTimeout(150);
+        await openDesk(page);
+        await tapOn(page, `#paydayBody .payday-door >> nth=${n}`);
+        await page.waitForTimeout(300);
+        // The payslips' list keeps its own place (B15's census holds those bytes); every other key is held here.
+        same(`«${doors[n]}»: the journey on Friday, at its first station; the disk and the record byte for byte`,
+            [await journey(), (await disk(page, 'farkadPayslipsProgress')) === before,
+                (await page.evaluate(() => JSON.stringify(State.schedule))) === record], [building, true, true]);
+        await page.evaluate(kept => {
+            if (document.getElementById('payslipsModal').style.display === 'flex') closePayslips();
+            if (kept === null) localStorage.removeItem('farkadPayslipsProgress'); else localStorage.setItem('farkadPayslipsProgress', kept);
+        }, slipsKey);
+    }
+    // Back on the day screen: Friday's seder, where he left it.
+    await reset();
+    await tapOn(page, '#tab-day');
+    await page.waitForTimeout(300);
+    same('back on the day screen: Friday, the journey at its first station', await page.evaluate(() => [State.date, journeyStation(), journeyDate()]),
+        ['2026-11-13', 1, '2026-11-13']);
+    // The journey moved to today by the day's own header: the desk offers the door again, and it moves nothing.
+    await page.evaluate(() => { State.date = todayStr(); render(); });
+    await page.waitForTimeout(200);
+    await toAdvances(page);
+    await openDesk(page);
+    const again = await page.evaluate(() => [...document.querySelectorAll('#paydayBody .payday-door')].map(node => node.textContent.replace(/[⁦-⁩]/g, '')));
+    check('a journey on today itself: «לרישום היום» is offered again', again.includes('לרישום היום'), JSON.stringify(again));
+    await tapOn(page, `#paydayBody .payday-door >> nth=${again.indexOf('לרישום היום')}`);
+    await page.waitForTimeout(300);
+    same('and it opens today with the journey on it, still at its first station, on today', await page.evaluate(() => [currentView, State.date, journeyStation(), journeyDate()]),
+        ['day', '2026-11-12', 1, '2026-11-12']);
+    await context.close();
+}
+
 // ================================================================== B16 the keyboard
 {
     suite('440x956 dark: Escape, the backdrop and «סגור» give the keyboard back; Tab stays inside; «לפי עובד» by the keyboard');

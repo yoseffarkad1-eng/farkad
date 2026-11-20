@@ -565,10 +565,11 @@ function statusCloseShown() {
 // journey to today - silently, writing its place to say so - and the seder would then be checked
 // and sent for the wrong day. So while a journey stands at its first station on another day,
 // this screen offers no door to today: the journey's own «יציאה» is the way out of it, and the
-// day's own arrows the way to move it. Read only; nothing of the journey is touched here.
+// day's own arrows the way to move it. Read only; nothing of the journey is touched here. The
+// rule is the journey's own since v206's integration (journeyHoldsDay, js/ui/journey.js), the
+// one every door to the day screen from another screen asks - «יום תשלום»'s among them.
 function statusTodayMovesJourney(today) {
-    return typeof journeyStation === 'function' && typeof journeyDate === 'function'
-        && journeyStation() === 1 && journeyDate() !== today;
+    return typeof journeyHoldsDay === 'function' && journeyHoldsDay(today);
 }
 
 // EVERYTHING BUT THE BOARD'S MONEY, as plain data and nothing drawn - so the suite can hold
