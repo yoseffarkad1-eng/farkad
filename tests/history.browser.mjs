@@ -67,8 +67,32 @@ const moved = (then, now) => {
 };
 const isOpen = page => page.evaluate(() => document.getElementById('historyModal').style.display === 'flex');
 const pause = (page, ms = 300) => page.waitForTimeout(ms);
+// THE PAGE'S OWN ACCOUNT OF EVERY TAP. Put on each phone before any script of the app runs (the
+// context's init script), so its listeners are the first on the window: they hear every press,
+// release and click before anything of the page can stop one - what each came down on, in the
+// order the page got them. They read and prevent nothing (passive). The way in (tapOpens, below)
+// asks it what became of a tap that opened nothing.
+const TAP_LOG = () => {
+    window.__tapLog = [];
+    const named = target => {
+        const node = target && target.closest
+            ? target.closest('button, a, input, select, textarea, label, [role="button"]') || target : target;
+        if (!node || !node.nodeName) return String(node);
+        if (node.id) return `#${node.id}`;
+        if (node.dataset && node.dataset.findDoor) {
+            const row = node.closest('[data-worker-id]');
+            return `the ${node.dataset.findDoor} door of ${row ? row.dataset.workerId : '?'}`;
+        }
+        const kind = typeof node.className === 'string' ? node.className.trim().split(/\s+/)[0] : '';
+        return node.nodeName.toLowerCase() + (kind ? `.${kind}` : '');
+    };
+    for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel', 'click', 'contextmenu']) {
+        window.addEventListener(type, event => window.__tapLog.push({ type, on: named(event.target), event }), { capture: true, passive: true });
+    }
+};
 const phone = async (width, height, scheme, large, seeded = true, sink = errors) => {
-    const opened = await openApp(browser, server.url, { width, height, scheme, large, seeded });
+    const opened = await openApp(browser, server.url, { width, height, scheme, large, seeded,
+        before: context => context.addInitScript(TAP_LOG) });
     opened.page.on('pageerror', error => sink.push(error.message));
     return opened;
 };
@@ -94,12 +118,74 @@ async function lockUntil(page, when) {
     });
     await page.waitForTimeout(150);
 }
-// The finder, then «איפה עבד» on a man - by a finger, as a person goes.
-async function throughTheDoor(page, workerId) {
+// A TAP THAT OPENS A DIALOG - READ, NEVER PRESUMED. Round 1 tapped, waited 300 ms and tapped the
+// next thing, so a tap that opened nothing came to light as the NEXT tap's thirty-second timeout,
+// and ended the run: the verification of e90616d, at a load of 8-10 on four processors - one tap on
+// «חיפוש עובד» in the floors' last cell opened no finder, and 69 checks were never made. Now:
+//  - the page is let run what it has asked to do before the tap - two of its own frames and a task,
+//    where a scroll's redraws and the bars' measuring fall - so that the finger comes down on the
+//    screen as it stands, as a person's does;
+//  - the dialog is waited for; once it is open, the tap has done its work;
+//  - when it is not, the page's own account of the tap (TAP_LOG) says what became of it. A click
+//    the page got, wherever it came down, and a touch something on the page prevented, are the
+//    page's: a check fails, naming them, every dialog the tap opened instead is shut, and this one
+//    is opened by code - so that the rest of the cell is still measured. A tap the page got no
+//    click of, with nothing preventing one, is a touch the browser made nothing of (a loaded
+//    machine): the app never had it, so it is taken again, as a person would take it, and said in
+//    the log - and a third such tap in a row is a failure too.
+// One tap lost fails one check, or none: it never ends the run. `judge` is where the outcome is
+// told - the runner's check, or (the way in's own suite) a list.
+const WAY_IN_WAIT = 5000;
+async function tapOpens(page, selector, opened, what, byCode, judge) {
+    const lost = [];
+    let came = null;
+    let thrown = '';
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+        await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 0)))));
+        const from = await page.evaluate(() => window.__tapLog.length);
+        thrown = '';
+        await page.locator(selector).tap().catch(error => { thrown = String(error.message).split('\n')[0]; });
+        if (!thrown) {
+            await page.waitForFunction(([from, opened]) => Boolean((0, eval)(opened)) || window.__tapLog.slice(from).some(tap => tap.type === 'click'),
+                [from, opened], { timeout: WAY_IN_WAIT }).catch(() => null);
+        }
+        came = await page.evaluate(([from, opened]) => {
+            const taps = window.__tapLog.slice(from);
+            return { open: Boolean((0, eval)(opened)), taps: taps.map(tap => `${tap.type} on ${tap.on}`),
+                clicked: taps.filter(tap => tap.type === 'click').map(tap => tap.on),
+                prevented: taps.filter(tap => (tap.type === 'pointerdown' || tap.type === 'touchstart') && tap.event.defaultPrevented).map(tap => tap.type),
+                up: [...document.querySelectorAll('.modal')].filter(node => node.style.display === 'flex').map(node => node.id) };
+        }, [from, opened]);
+        if (came.open || thrown || came.clicked.length || came.prevented.length) break;
+        // No click, and nothing of the page in the way of one: the touch the browser made nothing of.
+        lost.push(came.taps);
+        console.log(`      ${what}: the page got no click of tap ${attempt} (${came.taps.join(', ') || 'nothing at all'})${attempt < 3 ? ' - it is taken again' : ''}`);
+    }
+    const told = lost.length ? `after ${lost.length} tap${lost.length === 1 ? '' : 's'} the page got no click of: ${JSON.stringify(lost)}` : '';
+    const why = came.open ? '' : thrown ? `the tap itself failed: ${thrown}`
+        : came.clicked.length ? `the page got a click on ${came.clicked.join(', ')} and opened nothing`
+            : came.prevented.length ? `the touch was prevented (${came.prevented.join(', ')})` : 'three taps in a row and the page got no click of any';
+    judge(`${what} opened under a finger's tap`, came.open,
+        came.open ? told : `${why}; up: ${JSON.stringify(came.up)}; the tap: ${JSON.stringify(came.taps)}${told ? `; ${told}` : ''}`);
+    if (came.open) return;
+    // Whatever the tap opened instead is shut, and this one opened by code: the cell goes on.
+    await page.evaluate(() => Object.keys(MODAL_CLOSERS).forEach(id => {
+        const node = document.getElementById(id);
+        if (node && node.style.display === 'flex') MODAL_CLOSERS[id]();
+    }));
+    await page.evaluate(byCode[0], byCode[1]);
+}
+// The finder, then «איפה עבד» on a man - by a finger, as a person goes: each tap read as above, and
+// the next made no sooner than a person's pace after it (the page's own rule spends a press that
+// comes down where the last one did less than WALK_BOUNCE_MS after it, js/ui/sheet.js).
+async function throughTheDoor(page, workerId, judge = check) {
     await page.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); });
-    await page.locator('#findEntry').tap();
-    await pause(page, 300);
-    await page.locator(`#findList [data-worker-id="${workerId}"] [data-find-door="history"]`).tap();
+    const door = `#findList [data-worker-id="${workerId}"] [data-find-door="history"]`;
+    await tapOpens(page, '#findEntry', `findIsOpen() && Boolean(document.querySelector('${door.replace(/'/g, "\\'")}'))`,
+        `«חיפוש עובד» - the finder, with «איפה עבד» on ${workerId}`, [() => openFind(), null], judge);
+    await pause(page, 350);
+    await tapOpens(page, door, "document.getElementById('historyModal').style.display === 'flex'",
+        `«איפה עבד» on ${workerId} - the dialog`, [id => findGo('history', id), workerId], judge);
     await pause(page, 350);
 }
 // A choice as a person makes it: the field is reached first - a tap on a select focuses it,
@@ -1071,6 +1157,57 @@ try {
             }
         }
         await page.evaluate(() => { closeHistory(); });
+        await context.close();
+    }
+
+    // ============================================================ the way in, when a tap goes astray
+    // What the verification of e90616d met under load, made on purpose (tapOpens says why). First a
+    // touch the page never gets - the first tap on «חיפוש עובד» sent nowhere, the way a loaded
+    // browser made nothing of one - and then a click the page gets and does nothing with: a listener
+    // that swallows it at the window, after the page's own account of it. Round 1's way in met each
+    // with a thirty-second timeout on the next tap, thrown out of the run.
+    {
+        suite('the way in: a tap the page never got is taken again, a click it got and did nothing with fails one check - and neither ends the run');
+        const { context, page } = await phone(375, 667, 'light', false);
+        await home(page);
+        const atRest = await disk(page);
+        const proto = Object.getPrototypeOf(page.locator('html'));
+        const realTap = proto.tap;
+        let lose = 1;
+        proto.tap = async function (...args) {
+            if (lose > 0 && String(this).includes('#findEntry')) { lose -= 1; return undefined; }
+            return realTap.apply(this, args);
+        };
+        const heard = [];
+        let threw = '';
+        try {
+            await throughTheDoor(page, 'w02', (name, pass, detail) => heard.push([name, Boolean(pass), detail]));
+        } catch (error) {
+            threw = String(error.message).split('\n')[0];
+        } finally {
+            proto.tap = realTap;
+        }
+        same('a touch the page never got: the tap taken again, the dialog open on him, nothing failed and nothing thrown',
+            [threw, lose, await isOpen(page), await page.evaluate(() => HISTORY.workerId), heard.map(([, pass]) => pass)],
+            ['', 0, true, 'w02', [true, true]]);
+        check('and the finder\'s tap says it came after one the page got no click of', heard.length > 0
+            && heard[0][2] === 'after 1 tap the page got no click of: [[]]', JSON.stringify(heard));
+        await home(page);
+        await pause(page, 400);
+        await page.evaluate(() => window.addEventListener('click', event => { event.stopImmediatePropagation(); event.preventDefault(); },
+            { capture: true, once: true }));
+        const judged = [];
+        threw = '';
+        try {
+            await throughTheDoor(page, 'w02', (name, pass, detail) => judged.push([name, Boolean(pass), detail]));
+        } catch (error) {
+            threw = String(error.message).split('\n')[0];
+        }
+        same('a click the page got and did nothing with: one check failed - the finder\'s - never a tap taken again, and the run goes on into the dialog',
+            [threw, judged.map(([, pass]) => pass), await isOpen(page), await page.evaluate(() => HISTORY.workerId)], ['', [false, true], true, 'w02']);
+        check('and that failure names the click and where it came down', judged.length > 0
+            && judged[0][2].startsWith('the page got a click on #findEntry and opened nothing;'), JSON.stringify(judged));
+        check('and nothing was written by either', await disk(page) === atRest);
         await context.close();
     }
 
