@@ -7,9 +7,82 @@
 | Base | `6ab193d68c960e4a56d947673c282b867acd258f` (origin/main, stamps v204 - not moved) |
 | Fix round 1 | `12c8b4b` (the fix), `fcd830b`, `d54fad5` and `69fc168` (the browser suite, and a hold tried and taken back out - below) - the eleven findings of the review of `68c7ab7` triaged; ten fixed, each with a check that failed on `68c7ab7`'s app code and passes here; one left for the owner (below, "Fix round 1") |
 | Fix round 2 | the verification of `6c1635d`: ONE finding, P1 «verification failures» - the three stamp-lag checks of tests/build.test.mjs and tests/gate.integrity.test.mjs that the contract's §Base expects, and nothing else red. CONFIRMED and LEFT: its one fix is a commit moving the three stamps, which the round's hard rules and the contract leave to the integrator. No byte of the app, of a suite or of the wiring changed - this file is the round's only change (below, "Fix round 2") |
-| The suites ran on | fix round 2: `6c1635d`, the tree clean when the runs began - the `npm test` chain suite by suite (**107 of 109 green**, 13,063 of 13,066 checks; the two red the stamp lag) and tests/crewcheck.browser.mjs **544/544** through the slot wrapper; and two stamp probes in throwaway clones, one on this branch and one with this branch merged onto `origin/main` `8b8f807` (v205). Logs in `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-crewcheck/fix2/`. The commit that carries this file changes nothing a suite reads or the app serves (every `features/` path a suite names is in a comment, and sw.js caches none), so these are the branch head's results. Fix round 1's runs, on its own commits, are under "Fix round 1"; its logs in `feat-crewcheck/fix1/`, the build round's in `feat-crewcheck/` |
-| After it | this file's own commit (fix round 2), which changes this file and nothing else |
-| Contract | `features/crewcheck/contract.md` - revision 2, byte for byte the program's `crewcheck/contract.md` (re-read from disk in fix rounds 1 and 2: unchanged, md5 `20880f09a718e70afedcc4d7e49d28d5`, last written 2026-11-19 17:35). Where fix round 1 departs from its words, the departure and its reason are below; the contract itself is the program's and is not edited here |
+| Fix round 3 | the verification of `d96b4d8`: ONE finding, P1 «verification failures», naming five checks of four suites - the same three stamp-lag checks (CONFIRMED and LEFT, as in fix round 2: the integrator's stamp commit), and two that went red only in the verifier's parallel run and green when it ran them again alone: tests/owes.test.mjs's 1.5x factor and tests/scroll.browser.mjs's «no console error» at 440x894. Those two are NOT REPRODUCIBLE: each passes alone on this tree (and the owes factor on the base too), neither runs a line of this track's code, and a probe makes the scroll suite's window deterministic and shows it is the suite's own, identical on the base. No byte of the app, of a suite or of the wiring changed - this file is the round's only change (below, "Fix round 3") |
+| The suites ran on | fix round 3: `d96b4d8`, the tree clean when the runs began - the `npm test` chain suite by suite (**107 of 109 green**, 13,063 of 13,066 checks; the two red the stamp lag), tests/crewcheck.browser.mjs **544/544** through the slot wrapper, and the finding's two load-only suites alone: tests/owes.test.mjs **190/190** (and **190/190** on the base `6ab193d`), tests/scroll.browser.mjs **604/604** through the slot wrapper; the probe of the scroll suite's window on this branch and on the base. Logs in `/tmp/claude-0/-home-user-farkad/d6a64352-db1a-5c3b-b54d-5c09103f2419/scratchpad/feat-crewcheck/fix3/`. The commit that carries this file changes nothing a suite reads or the app serves (every `features/` path a suite names is in a comment, and sw.js caches none), so these are the branch head's results. Fix rounds 1 and 2's runs, on their own commits, are under their sections; their logs in `feat-crewcheck/fix1/` and `feat-crewcheck/fix2/`, the build round's in `feat-crewcheck/` |
+| After it | this file's own commit (fix round 3), which changes this file and nothing else |
+| Contract | `features/crewcheck/contract.md` - revision 2, byte for byte the program's `crewcheck/contract.md` (re-read from disk in fix rounds 1, 2 and 3: unchanged, md5 `20880f09a718e70afedcc4d7e49d28d5`, last written 2026-11-19 17:35). Where fix round 1 departs from its words, the departure and its reason are below; the contract itself is the program's and is not edited here |
+
+## Fix round 3 - the verification of `d96b4d8`
+
+The independent verifier ran the suites on `d96b4d8` and reported ONE finding, P1 «verification failures», naming five
+checks of four suites and no protected file touched (`protectedTouched: []`): the same three stamp-lag checks as in
+fix round 2, and two that went red only in the verifier's parallel run (a load average of about 12 on 4 CPUs, two
+browser lanes and other agents' work beside it) and green when the verifier ran them again alone. Triaged in the
+manner of `.claude/skills/triage/SKILL.md`: the code of each check opened, each suite run again on this tree, the two
+load-only ones alone, and the one race a probe could make deterministic made so - on this branch and on the base.
+
+| # | check | suite | sev. | verdict | outcome | the evidence |
+|---|---|---|---|---|---|---|
+| 1 | «the stamps were moved by the commit that moved the bytes» :: «and nothing in the shell has changed since» | tests/build.test.mjs | P1 | CONFIRMED - reproduced on `d96b4d8`, the tree clean: **67/69**, these two red (`fix3/build-head.out`; the chain run's `fix3/chain/test:build.out` the same) | LEFT - the integrator's stamp commit | the six files it names are this track's; the check asks git (`shellMovedSince`, tests/build.test.mjs:475-479, :506-515), with no seam a branch could use |
+| 2 | the same :: «and neither has the worker that names the shelf» | tests/build.test.mjs | P1 | CONFIRMED - sw.js, its SHELL one line longer (the same run) | LEFT - the same commit | :517-524 |
+| 3 | §4 «no cached file has changed since the three stamps last moved» | tests/gate.integrity.test.mjs | P1 | CONFIRMED - **19/20** (`fix3/gate-head.out`): `69fc168`, `d54fad5`, `12c8b4b`, `0a500ec` | LEFT - the same commit | :301-334 (`git log -S <the stamp line>`, then `git log <that commit>..HEAD -- <the shell>`) |
+| 4 | ««דוחות» with the board, the record having moved: within 1.5x» | tests/owes.test.mjs | P1 as reported | NOT REPRODUCIBLE - alone on `d96b4d8`: **190/190**, 118 ms against 95 ms (1.24x); alone on the base `6ab193d`: **190/190**, 118 ms against 93 ms (1.27x); and in this round's chain run, the machine at a load of 9-10: 115 ms against 96 ms (`fix3/owes-alone.out`, `fix3/owes-alone-base.out`, `fix3/chain/test:owes.out`) | discarded - load | the timed draw (tests/owes.test.mjs:1099-1116: «דוחות» ← «לפי עובד» with the board and without, the best of three each) runs not one line of this track's code: the suite's devices run js/ui/sitecolor.js, reports.js and owes.js over the harness's files (tests/harness.mjs:22-52), never js/ui/crewcheck.js, and `render()` reaches roster.js's two guarded lines on the crew screen only (js/app.js:131) |
+| 5 | «chromium 440x894: a commit elsewhere under a Rima box holding typed digits: no console error» | tests/scroll.browser.mjs | P1 as reported | NOT REPRODUCIBLE - alone through the slot wrapper on `d96b4d8`: **604/604**, exit 0, all fifteen «no console error» checks PASS (`fix3/scroll-alone.out`) | discarded - load: a window of the suite's own, as old as the base; reported for the suite's owner (below) | the probe below |
+
+**Why 1-3 are left.** Nothing has changed since fix round 2. Both checks put a question to git - which commit wrote
+each stamp line, and whether a shell file has changed since - and this branch adds a file to the shell, changes five
+more and makes the worker's SHELL a line longer, while the round's hard rules ("do not move the build stamps ... the
+integrator does") and the contract's MUST NOT list leave the one fix, a commit moving the three stamps together, to the
+integrator. Fix round 2's two stamp probes (this branch plus one stamp commit: build 69/69, gate-integrity 20/20; and
+merged onto `origin/main` `8b8f807` plus one stamp commit: the same, with nine Node suites green) still describe this
+tree: nothing but this file has changed since (`git diff --stat 6c1635d d96b4d8` is features/crewcheck/handoff.md
+alone), and `origin/main` is still `8b8f807`.
+
+**Why 4 is load.** The check takes the best of three timed draws with the board and the best of three without, each on
+a record that moved, and asks for 1.5x. Under the verifier's load one "without" sample came out quick among slow ones
+(on `[206, 494, 191]`, off `[298, 98, 129]`: 191 against 98). Alone it is 1.24x here and 1.27x on the base - the same,
+within the noise - and the draw it times executes nothing this track wrote. The track touches neither js/ui/owes.js,
+js/ui/reports.js nor tests/owes.test.mjs.
+
+**Why 5 is load, and what the window is - a probe** (`fix3/probe/late-import.mjs` and `late-import.out`; it asserts
+nothing). The four console lines the verifier saw - three «Failed to load resource: net::ERR_FAILED» and «Sync error:
+TypeError: Failed to fetch dynamically imported module: …/js/sync/firebase-adapter.js» - are the app's boot-time cloud
+import (`connectCloudLater`, js/app.js:759-798, called last in `boot()`) failing because the suite's own route aborts
+every host that is not this machine (tests/scroll.browser.mjs:82-86) - here the three Firebase SDK files from gstatic that
+the adapter imports - and reported by `FarkadSync.fail` (js/sync/status.js:301-302, `console.error('Sync error:', …)`).
+They come once per page, 95-130 ms after 'load', and the step clears `page.__console` (:843) 140-170 ms after them -
+unless the Node process that answers the route answers late, when they land inside the one step that asks for none. The
+probe replays that step at 440x894 with the suite's own fixture, `open()` seed, route and step, and changes one thing:
+the route's abort of a host that is not this machine is answered at once, or held until the step has cleared the
+console - a starved Node's late answer, made deterministic:
+
+| tree | the abort | 'load' to the last of the four lines | the four lines to the step's clear | «no console error» |
+|---|---|---|---|---|
+| this branch, `d96b4d8` | at once (two pages) | 128 ms, 118 ms | 140 ms, 168 ms | PASS, PASS |
+| this branch, `d96b4d8` | held into the step (two pages) | - | 30 ms, 28 ms AFTER it, inside the step's 240 ms | **FAIL (4)**, **FAIL (4)** - the verifier's four lines |
+| the base `6ab193d` (`git archive`, no js/ui/crewcheck.js) | at once (two pages) | 95 ms, 122 ms | 145 ms, 158 ms | PASS, PASS |
+| the base `6ab193d` | held into the step (two pages) | - | 39 ms, 26 ms AFTER it | **FAIL (4)**, **FAIL (4)** - the same four lines |
+
+The window is the suite's, the same on the base, and this branch neither opens it nor widens it: js/ui/crewcheck.js is
+one more classic script parsed before 'load', it runs nothing at load but its frozen word blocks, and the boot draws
+the day screen, where none of its code is reached - the margin between the four lines and the step's clear is the same
+on both trees, and so is the time a page takes to reach 'load' (`fix3/probe/boot-time.mjs` + `boot-time.out`, the
+suite's own context and route, two fresh browsers per tree taken in turn, three pages each: the first page of each
+browser 339 and 358 ms on the base, 367 and 315 ms here; all twelve 272-589 ms). (A first probe with a fixed delay of
+600 or 1500 ms put the lines after the step's check, not inside it: `fix3/probe/late-import-head.out` - which is why
+the deterministic hold was used.)
+
+**For the suite's owner, not done here.** tests/scroll.browser.mjs is not this track's to change - the contract lists it
+under "stay green with no expectation moved", and alone it is. `open()` could wait for the boot-time import to have
+reported before a scenario takes the page - for instance `await page.waitForFunction(() => typeof FarkadSync !==
+'undefined' && FarkadSync.status !== 'off')` after the seed: the suite's route always aborts the SDK, so the status
+always leaves 'off' (the probe reads 'error' after the four lines and 'off' before them). That moves no expectation and
+weakens no check - the step is still asked for no console error, of its own.
+
+**What changed in fix round 3:** this file, and nothing else - no byte of the app, of a suite or of the wiring. No check
+was added: no defect of this branch was found for one to hold. The two load-only failures pass alone, here and (the
+owes factor) on the base, and the three stamp-lag checks are themselves the instrument that says what the integrator's
+commit must do.
 
 ## Fix round 2 - the verification of `6c1635d`
 
@@ -222,7 +295,8 @@ its own two entries of tests/screens.mjs are listed under "Fix round 1".
 - `d54fad5` «בדיקת הצוות»: a slow second touch at the chip's own place is held wherever it lands (taken out again by the next)
 - `69fc168` «בדיקת הצוות»: the same-place hold of d54fad5 taken out; the suite's first touch lands on the chip
 - `6c1635d` features/crewcheck/handoff.md: fix round 1 - the eleven findings triaged, ten fixed and one left, and what every suite said
-- this file's commit (fix round 2) - the verification's one finding triaged, CONFIRMED and LEFT, and what every suite said; it changes this file only
+- `d96b4d8` features/crewcheck/handoff.md: fix round 2 - the verification's one finding, the stamp lag, confirmed and left for the integrator (this file only)
+- this file's commit (fix round 3) - the verification's five checks triaged: the stamp lag CONFIRMED and LEFT, the two load-only reds NOT REPRODUCIBLE alone, the scroll suite's window probed on this branch and on the base, and what every suite said; it changes this file only
 
 Of the build round's, every commit after `0a500ec` changes the tests and their wiring only. Of fix round 1's,
 `12c8b4b` changes the app (js/ui/crewcheck.js, css/design.css) with its suites; `d54fad5` changed
@@ -313,6 +387,12 @@ the form prices only the extra hours recorded after it (the stamp carries the ho
 money.js:76-83) - that is for payday's door to say. And `status`'s «שקט» (5 working days) and this check's
 idle site (25) read the same calendar and ask different questions; the release note can say both numbers.
 
+**Two reds a loaded machine can show, neither this track's** (fix round 3): tests/owes.test.mjs's 1.5x factor and
+tests/scroll.browser.mjs's «no console error» in its step 14 went red in the verifier's parallel run of `d96b4d8` and are
+green alone - here, and (the factor) on the base; the scroll suite's window is the same on the base (the probe under "Fix
+round 3"). The gate, run alone, is where they are read; if one goes red there, it is worth one more run alone before it
+is believed, as this round's hard rules say of every timing check.
+
 ## Every new string (PROPOSED; `CREW_CHECK_TEXT`, pinned word for word in tests/crewcheck.test.mjs section 5)
 
 | key | words |
@@ -367,17 +447,18 @@ BORROWED (`CREW_CHECK_REUSED`, each found in its owner by the suite): «כדאי
   of the crew screen and every button, fold and choice of the form, not the switches and «שמור» alone; and the
   'with findings' entry of tests/screens.mjs sets w13's daily rate to 0 besides the contract's recipe.
 
-## The suites, one by one - fix round 2, on `6c1635d`
+## The suites, one by one - fix round 3, on `d96b4d8`
 
 ### `npm test`, every suite of the chain run on its own (an `&&` chain stops at the first red, and two reds are expected on a track branch)
 
-Run by `fix2/chain.sh` (in the scratchpad) on `6c1635d077aeb206a661da1888f84199c70000fa`, the tree clean when it
-started; when it ended the one file changed was `features/crewcheck/handoff.md` - this one, which no suite reads.
-**107 of 109 green**, 13,063 of 13,066 checks, 1176 s in all. The two red ones are the contract's
-expected pair and nothing else - the stamps, which the integrator moves (fix round 2's finding, above):
+Run by `fix3/chain.sh` (in the scratchpad) on `d96b4d804c098b7bc6d846ef197f7d583c85e89c`, the tree clean when it
+started and when it ended. **107 of 109 green**, 13,063 of 13,066 checks, 1643 s in all (the machine shared: other
+agents' browser suites raised the load average to 9-10 for the last third of it - the owes factor among the suites run
+then, green at 115 ms against 96 ms). The two red ones are the contract's expected pair and nothing else - the stamps,
+which the integrator moves (fix rounds 2 and 3, above):
 
 ```
-test:build | exit 1 | 2s | 67/69 checks passed
+test:build | exit 1 | 1s | 67/69 checks passed
 test:gate-integrity | exit 1 | 0s | 19/20 checks passed
 ```
 
@@ -387,34 +468,34 @@ test:gate-integrity | exit 1 | 0s | 19/20 checks passed
   FAIL  no cached file has changed since the three stamps last moved  — 69fc1680 «בדיקת הצוות»: the same-place hold of d54fad5 taken out; the | d54fad54 «בדיקת הצוות»: a slow second touch at the chip's own place i | 12c8b4bb «בדיקת הצוות», fix round 1: words true of every man named, o | 0a500ecf «בדיקת הצוות»: one button at the foot of the crew screen and
 ```
 
-Fix round 1's run of the same chain, on `12c8b4b` (the app's bytes of `6c1635d`): 107 of 109 green, 13,063 of
-13,066 checks, 1190 s, the same two red.
+Fix round 2's run of the same chain, on `6c1635d` (the app's bytes of `d96b4d8`): 107 of 109 green, 13,063 of 13,066
+checks, 1176 s, the same two red; fix round 1's, on `12c8b4b`: the same, 1190 s.
 
 Every line of the chain (suite | exit | seconds | last count):
 
 ```
 test:isolation | exit 0 | 0s | 18/18 checks passed
 test:blobs | exit 0 | 1s | 11/11 checks passed
-test:build | exit 1 | 2s | 67/69 checks passed
+test:build | exit 1 | 1s | 67/69 checks passed
 test:poison | exit 0 | 0s | 37/37 checks passed
-test:merge | exit 0 | 0s | 28/28 checks passed
-test:contested | exit 0 | 16s | 73/73 checks passed
-test:held | exit 0 | 3s | 83/83 checks passed
+test:merge | exit 0 | 1s | 28/28 checks passed
+test:contested | exit 0 | 15s | 73/73 checks passed
+test:held | exit 0 | 4s | 83/83 checks passed
 test:snapshot-stale | exit 0 | 2s | 16/16 checks passed
 test:reports-rules | exit 0 | 2s | 26/26 checks passed
-test:finance | exit 0 | 7s | 57/57 checks passed
-test:weekly-range | exit 0 | 0s | 21/21 checks passed
+test:finance | exit 0 | 8s | 57/57 checks passed
+test:weekly-range | exit 0 | 1s | 21/21 checks passed
 test:finance-wording | exit 0 | 2s | 12/12 checks passed
 test:weekly-unpriced | exit 0 | 0s | 23/23 checks passed
 test:receipt | exit 0 | 2s | 28/28 checks passed
-test:data | exit 0 | 43s | 1970/1970 checks passed
-test:recovery | exit 0 | 1s | 82/82 checks passed
-test:adversarial | exit 0 | 6s | 116/116 checks passed
+test:data | exit 0 | 44s | 1970/1970 checks passed
+test:recovery | exit 0 | 2s | 82/82 checks passed
+test:adversarial | exit 0 | 5s | 116/116 checks passed
 test:probes | exit 0 | 7s | 35/35 checks passed
-test:capacity | exit 0 | 9s | 48/48 checks passed
+test:capacity | exit 0 | 13s | 48/48 checks passed
 test:concurrency | exit 0 | 3s | 46/46 checks passed
-test:exports | exit 0 | 0s | 112/112 checks passed
-test:fence | exit 0 | 2s | 35/35 checks passed
+test:exports | exit 0 | 1s | 112/112 checks passed
+test:fence | exit 0 | 3s | 35/35 checks passed
 test:fence-ingress | exit 0 | 1s | 43/43 checks passed
 test:fence-legacy | exit 0 | 0s | 21/21 checks passed
 test:money-history | exit 0 | 0s | 9/9 checks passed
@@ -422,38 +503,38 @@ test:money-units | exit 0 | 0s | 21/21 checks passed
 test:money-cloud | exit 0 | 2s | 17/17 checks passed
 test:money-display | exit 0 | 0s | 4/4 checks passed
 test:snapshot-poison | exit 0 | 2s | 82/82 checks passed
-test:samefact | exit 0 | 5s | 37/37 checks passed
-test:wording | exit 0 | 1s | 37/37 checks passed
-test:closure | exit 0 | 17s | 122/122 checks passed
-test:closure-echo | exit 0 | 0s | 79/79 checks passed
+test:samefact | exit 0 | 6s | 37/37 checks passed
+test:wording | exit 0 | 0s | 37/37 checks passed
+test:closure | exit 0 | 24s | 122/122 checks passed
+test:closure-echo | exit 0 | 1s | 79/79 checks passed
 test:correction | exit 0 | 1s | 33/33 checks passed
-test:quarantine | exit 0 | 1s | 82/82 checks passed
-test:approval | exit 0 | 6s | 72/72 checks passed
-test:repayment | exit 0 | 4s | 240/240 checks passed
-test:ledger-ingress | exit 0 | 0s | 167/167 checks passed
-test:cas | exit 0 | 12s | 88/88 checks passed
+test:quarantine | exit 0 | 2s | 82/82 checks passed
+test:approval | exit 0 | 9s | 72/72 checks passed
+test:repayment | exit 0 | 6s | 240/240 checks passed
+test:ledger-ingress | exit 0 | 1s | 167/167 checks passed
+test:cas | exit 0 | 13s | 88/88 checks passed
 test:status | exit 0 | 6s | 37/37 checks passed
-test:money | exit 0 | 2s | 40/40 checks passed
+test:money | exit 0 | 3s | 40/40 checks passed
 test:money-ingress | exit 0 | 9s | 206/206 checks passed
 test:method | exit 0 | 3s | 51/51 checks passed
-test:restore | exit 0 | 1s | 51/51 checks passed
-test:upgrade | exit 0 | 1s | 48/48 checks passed
+test:restore | exit 0 | 0s | 51/51 checks passed
+test:upgrade | exit 0 | 2s | 48/48 checks passed
 test:vehicles | exit 0 | 2s | 86/86 checks passed
 test:xlsx | exit 0 | 2s | 104/104 checks passed
-test:nonassertions | exit 0 | 0s | 23/23 checks passed
-test:labels | exit 0 | 1s | 23/23 checks passed
+test:nonassertions | exit 0 | 1s | 23/23 checks passed
+test:labels | exit 0 | 0s | 23/23 checks passed
 test:labelcache | exit 0 | 0s | 32/32 checks passed
 test:restore-ledger | exit 0 | 2s | 26/26 checks passed
-test:roster-upgrade | exit 0 | 6s | 55/55 checks passed
-test:roster-race | exit 0 | 7s | 63/63 checks passed
-test:exports-proof | exit 0 | 1s | 92/92 checks passed
-test:ledger-truth | exit 0 | 4s | 148/148 checks passed
-test:races | exit 0 | 4s | 109/109 checks passed
-test:overlap-restore | exit 0 | 21s | 117/117 checks passed
-test:refute-roster | exit 0 | 9s | 24/24 checks passed
+test:roster-upgrade | exit 0 | 7s | 55/55 checks passed
+test:roster-race | exit 0 | 6s | 63/63 checks passed
+test:exports-proof | exit 0 | 2s | 92/92 checks passed
+test:ledger-truth | exit 0 | 6s | 148/148 checks passed
+test:races | exit 0 | 5s | 109/109 checks passed
+test:overlap-restore | exit 0 | 20s | 117/117 checks passed
+test:refute-roster | exit 0 | 10s | 24/24 checks passed
 test:refute-restore | exit 0 | 43s | 25/25 checks passed
 test:gate-integrity | exit 1 | 0s | 19/20 checks passed
-test:queuecost | exit 0 | 5s | 18/18 checks passed
+test:queuecost | exit 0 | 7s | 18/18 checks passed
 test:paycycle | exit 0 | 0s | 43/43 checks passed
 test:paycycle-blockers | exit 0 | 2s | 17/17 checks passed
 test:paycycle-completion | exit 0 | 6s | 31/31 checks passed
@@ -463,51 +544,53 @@ test:worker-deletion | exit 0 | 10s | 86/86 checks passed
 test:calendar | exit 0 | 1s | 58/58 checks passed
 test:reminders | exit 0 | 0s | 48/48 checks passed
 test:move-late | exit 0 | 5s | 48/48 checks passed
-test:codex-probes | exit 0 | 0s | 17/17 checks passed
+test:codex-probes | exit 0 | 1s | 17/17 checks passed
 test:codex2-probes | exit 0 | 1s | 36/36 checks passed
 test:codex3-probes | exit 0 | 3s | 59/59 checks passed
 test:rima | exit 0 | 91s | 496/496 checks passed
-test:yosefgeves | exit 0 | 93s | 562/562 checks passed
+test:yosefgeves | exit 0 | 94s | 562/562 checks passed
 test:seder | exit 0 | 0s | 135/135 checks passed
 test:bars-stale | exit 0 | 0s | 60/60 checks passed
 test:transport | exit 0 | 1s | 566/566 checks passed
-test:transport-share | exit 0 | 11s | 304/304 checks passed
-test:oracle | exit 0 | 38s | 121/121 checks passed
-test:overpayment | exit 0 | 4s | 105/105 checks passed
+test:transport-share | exit 0 | 12s | 304/304 checks passed
+test:oracle | exit 0 | 54s | 121/121 checks passed
+test:overpayment | exit 0 | 6s | 105/105 checks passed
 test:polish | exit 0 | 0s | 73/73 checks passed
-test:daycheck | exit 0 | 5s | 169/169 checks passed
-test:journey | exit 0 | 0s | 233/233 checks passed
-test:workercard | exit 0 | 20s | 180/180 checks passed
-test:monthsummary | exit 0 | 68s | 98/98 checks passed
-test:payslips | exit 0 | 23s | 202/202 checks passed
-test:find | exit 0 | 0s | 91/91 checks passed
+test:daycheck | exit 0 | 7s | 169/169 checks passed
+test:journey | exit 0 | 1s | 233/233 checks passed
+test:workercard | exit 0 | 29s | 180/180 checks passed
+test:monthsummary | exit 0 | 108s | 98/98 checks passed
+test:payslips | exit 0 | 37s | 202/202 checks passed
+test:find | exit 0 | 1s | 91/91 checks passed
 test:whatsnew | exit 0 | 1s | 160/160 checks passed
-test:account-view | exit 0 | 16s | 456/456 checks passed
-test:usual | exit 0 | 1s | 150/150 checks passed
-test:sitecard | exit 0 | 3s | 119/119 checks passed
-test:reportsclarity | exit 0 | 2s | 1119/1119 checks passed
+test:account-view | exit 0 | 36s | 456/456 checks passed
+test:usual | exit 0 | 3s | 150/150 checks passed
+test:sitecard | exit 0 | 6s | 119/119 checks passed
+test:reportsclarity | exit 0 | 6s | 1119/1119 checks passed
 test:largetext | exit 0 | 0s | 107/107 checks passed
-test:reportnames | exit 0 | 9s | 36/36 checks passed
+test:reportnames | exit 0 | 17s | 36/36 checks passed
 test:holiday | exit 0 | 1s | 109/109 checks passed
-test:undo-stale | exit 0 | 1s | 32/32 checks passed
+test:undo-stale | exit 0 | 2s | 32/32 checks passed
 test:auditfix | exit 0 | 2s | 34/34 checks passed
-test:owes | exit 0 | 56s | 190/190 checks passed
-test:weeklyclose | exit 0 | 103s | 146/146 checks passed
-test:reports-speed | exit 0 | 170s | 159/159 checks passed
+test:owes | exit 0 | 101s | 190/190 checks passed
+test:weeklyclose | exit 0 | 163s | 146/146 checks passed
+test:reports-speed | exit 0 | 293s | 159/159 checks passed
 test:closeorder | exit 0 | 0s | 22/22 checks passed
-test:closuresize | exit 0 | 13s | 13/13 checks passed
-test:closerace | exit 0 | 38s | 29/29 checks passed
-test:advancereset | exit 0 | 46s | 77/77 checks passed
-test:overpaidfix | exit 0 | 0s | 85/85 checks passed
-test:xlsxlook | exit 0 | 8s | 293/293 checks passed
-test:closereminder | exit 0 | 12s | 107/107 checks passed
-test:crewcheck | exit 0 | 21s | 175/175 checks passed
+test:closuresize | exit 0 | 23s | 13/13 checks passed
+test:closerace | exit 0 | 39s | 29/29 checks passed
+test:advancereset | exit 0 | 74s | 77/77 checks passed
+test:overpaidfix | exit 0 | 1s | 85/85 checks passed
+test:xlsxlook | exit 0 | 19s | 293/293 checks passed
+test:closereminder | exit 0 | 22s | 107/107 checks passed
+test:crewcheck | exit 0 | 41s | 175/175 checks passed
 ```
 
 ### Browser suites, each through the slot wrapper
 
 | suite | commit | result |
 |---|---|---|
+| tests/crewcheck.browser.mjs | `d96b4d8` (fix round 3) | **544/544**, exit 0, 163 s, the load average 7.9 when it began (`fix3/browser.out`, `fix3/browser.meta`) |
+| tests/scroll.browser.mjs, alone - the finding's fifth check | `d96b4d8` (fix round 3) | **604/604**, exit 0, 164 s, every «no console error» PASS (`fix3/scroll-alone.out`) |
 | tests/crewcheck.browser.mjs | `6c1635d` (fix round 2) | **544/544**, exit 0 (`fix2/browser.out`) |
 | tests/crewcheck.browser.mjs | `69fc168` | **544/544**, exit 0 (`fix1/browser-after.out`) |
 | tests/crewcheck.browser.mjs, the same file | a copy of `68c7ab7`'s app code | 510/544, exit 1 - every new check red, as it should be (`fix1/browser-before.out`) |
@@ -518,13 +601,13 @@ The runs in between, kept for what they showed: on `fcd830b` the suite stopped i
 (`fix1/browser-d54fad5.out`); the probe (`fix1/probe/hold-probe.out`) showed the suite's first touch pressing the
 dialog's sticky «סגור» over a chip pushed under it, and `69fc168` makes every trial find its chip under the finger.
 
-The end of tests/crewcheck.browser.mjs on `6c1635d` (fix round 2; fix round 1's, on `69fc168`, is in `fix1/browser-after.out`):
+The end of tests/crewcheck.browser.mjs on `d96b4d8` (fix round 3; fix round 2's, on `6c1635d`, is in `fix2/browser.out`, fix round 1's, on `69fc168`, in `fix1/browser-after.out`):
 
 ```
-  (the gaps the page saw: row/350:329 row/350:348 row/350:343 site/350:349 site/350:331 form/350:343 form/350:329 site/350:345 site/350:335 form/350:337 form/350:350 row/500:483 row/500:487 row/500:473 site/500:488 site/500:474 form/500:494 form/500:485 site/500:490 site/500:466 form/500:489 form/500:493 row/650:621 row/650:638 row/650:640 site/650:631 site/650:632 form/650:644 form/650:638 site/650:630 site/650:636 form/650:646 form/650:635)
+  (the gaps the page saw: row/350:341 row/350:341 row/350:339 site/350:328 site/350:332 form/350:337 form/350:340 site/350:334 site/350:345 form/350:336 form/350:339 row/500:500 row/500:488 row/500:500 site/500:487 site/500:495 form/500:501 form/500:495 site/500:492 site/500:495 form/500:471 form/500:497 row/650:639 row/650:622 row/650:630 site/650:652 site/650:642 form/650:626 form/650:634 site/650:640 site/650:628 form/650:638 form/650:653)
   (under the finger at the chip's own point: row/350: crew-cycle | site/350: roster-details site-details | form/350: field-label | row/500: crew-cycle | site/500: roster-details site-details | form/500: workerFormPhone | row/650: crew-cycle | site/650: roster-details site-details | form/650: workerFormPhone)
-  (one reading at 4x: median 9.7 ms, max 25.8 ms of 15)
-  (a tap to the dialog painted with its list, at 4x: 69 ms)
+  (one reading at 4x: median 12.8 ms, max 34.9 ms of 15)
+  (a tap to the dialog painted with its list, at 4x: 72 ms)
   PASS  no uncaught error
   PASS  no alert, confirm or prompt
 
@@ -580,7 +663,7 @@ sitecard-browser 135/135, workercard-browser 116/116, daycheck-browser 122/122, 
 scroll-browser 604/604.
 
 
-## The measured noise and cost, re-run on `6c1635d` (fix round 2; printed by tests/crewcheck.test.mjs in the chain above)
+## The measured noise and cost, re-run on `d96b4d8` (fix round 3; printed by tests/crewcheck.test.mjs in the chain above)
 
 ```
   SKIP  «מה חדש» does not carry it yet: the integrator adds it with the stamps
@@ -589,20 +672,22 @@ scroll-browser 604/604.
   (the whole record read instead, the app's reading: 1.46 an evening, of them back later 0.0% - by construction)
   (leavers: 40; last day 45+ calendar days before 20/09: 33, named 33, the first time after a median 31 and at most 42 calendar days; out of the window's reach 7, of them named anyway 2)
   (regulars: 208; named 17, each with a run of 25+ working days; never named 191, their longest run 24)
-  (the time-season record, 40 men x 277 day keys, 703 KiB: median 10.0 ms, max 15.6 ms of 25)
-  (60 men x 329 day keys, 1149 KiB: median 17.7 ms, max 21.4 ms of 15)
+  (the time-season record, 40 men x 277 day keys, 703 KiB: median 19.2 ms, max 41.7 ms of 25)
+  (60 men x 329 day keys, 1149 KiB: median 30.1 ms, max 67.3 ms of 15)
 ```
 
-The turnover model's figures are the contract's to the decimal (29.6%, 33 of 33 leavers within 42 days,
-17 of 208 regulars, 0.0% read whole) - unmoved by fix round 1, which counts one more fact per day the pass already
-reads (`priced`) and changes no rule of who is named. The day check's seasons are run with its own generator copied line for
-line (seeds 11-55, both habits, Rima on Fridays or not: 20 seasons, 1,798 evenings) where the contract's probe
-had used a variant without the Friday switch (10 seasons, 898 evenings): 92.3% calm here against its 92.0%,
-the floor held at 85%. In Chromium at 4x CPU, on `6c1635d` (fix round 2), the reading of the time-season record is 9.7 ms
-(median of 15, max 25.8; budget 60) and a tap to the dialog painted with its list 69 ms (budget 300) - fix round 1
-measured 13.2 ms and 108 ms on `69fc168`, the build round 8.8 ms and 70 ms; every run shared the machine with other
-tracks' browser suites. Fix round 2's five lines of the noise above are fix round 1's character for character; the two cost lines are
-ceilings and move with the machine's load.
+The turnover model's figures are the contract's to the decimal (29.6%, 33 of 33 leavers within 42 days, 17 of 208
+regulars, 0.0% read whole) - unmoved by fix round 1, which counts one more fact per day the pass already reads
+(`priced`) and changes no rule of who is named. The day check's seasons are run with its own generator copied line for
+line (seeds 11-55, both habits, Rima on Fridays or not: 20 seasons, 1,798 evenings) where the contract's probe had
+used a variant without the Friday switch (10 seasons, 898 evenings): 92.3% calm here against its 92.0%, the floor held
+at 85%. In Chromium at 4x CPU, on `d96b4d8` (fix round 3), the reading of the time-season record is 12.8 ms (median of
+15, max 34.9; budget 60) and a tap to the dialog painted with its list 72 ms (budget 300) - fix round 2 measured 9.7
+ms and 69 ms on `6c1635d`, fix round 1 13.2 ms and 108 ms on `69fc168`, the build round 8.8 ms and 70 ms; every run
+shared the machine with other tracks' browser suites. Fix round 3's five lines of the noise above are fix rounds 1 and
+2's character for character. The two cost lines are ceilings and move with the machine's load: this round's (19.2 ms
+and 30.1 ms, against budgets of 30 and 120) were printed at the end of the chain run, with other agents' browser
+suites holding the load average at 9-10; fix round 2's, on the same app bytes, were 10.0 ms and 17.7 ms.
 
 ## A finding against the contract's words (criterion 13), kept to its intent
 
@@ -616,7 +701,7 @@ the form opened once the app's own way moves exactly those keys and the record n
 it - six form doors, three row doors, two site doors, the search, a man gone, a double tap, the twenty-one slow
 taps - moves not one byte against the disk as that leaves it. `js/ui/crewcheck.js` writes nothing.
 
-## The conflict table (the build round's, at 19:50) and the trial merges of fix rounds 1 and 2
+## The conflict table (the build round's, at 19:50) and the trial merges of fix rounds 1, 2 and 3
 
 `git diff -U0 6ab193d <branch>` on the shared files, and `git merge-tree` of this branch with each:
 
@@ -645,6 +730,15 @@ trial merges above stand. The branches that are new since were tried in the thro
 each: `release-v206` `d2d4710` - package.json and tests/README.md; `v205-followup` `b76c727` and `origin/main`
 `8b8f807` (v205) - package.json only (see "Fix round 2", probe B for the last).
 
+Fix round 3 changed no shared file either. Of the heads read on 2026-11-20 05:0x, `release-v206` `d2d4710`,
+`v205-followup` `b76c727` and `origin/main` `8b8f807` are fix round 2's; two have moved - `feat-history` (now `da37404`)
+and `feat-speed` (now `7af295a`). `d96b4d8` merged onto each of the five in a throwaway clone (`git clone --shared
+--no-checkout` in the scratchpad; `git merge-tree --write-tree --name-only`, `fix3/mergetree-*.out`): feat-history,
+feat-speed and release-v206 - package.json and tests/README.md only; v205-followup and origin/main - package.json only.
+`feat-speed` now also changes tests/owes.test.mjs (two `REPORT_SHARED_KEPT = null` lines before the cost of the two
+draws, not the 1.5x factor) - nothing of this track's. None of the 46 top-level names of js/ui/crewcheck.js is declared
+by any js file of feat-history, feat-speed, release-v206 or origin/main.
+
 ## Screenshots (synthetic names; JPEG; they assert nothing)
 
 Fix round 1, from the green run on `69fc168` (`CREWCHECK_SHOTS`), in
@@ -665,8 +759,14 @@ made by `shots.mjs` beside them - they show the words as they were before fix ro
 - `docs/releases.md`, `js/ui/whatsnew.js`, CLAUDE.md and the three stamps are the integrator's (texts above).
   Until «מה חדש» carries the item, tests/crewcheck.test.mjs prints a SKIP where it would hold the copy.
 - Until the stamps move, tests/build.test.mjs (67/69) and tests/gate.integrity.test.mjs (19/20) are red on this branch
-  BY CONSTRUCTION - the three stamp-lag checks and nothing else (fix round 2). A verification that counts them answers
-  red whatever a fix round of this track does; only the integrator's stamp commit turns them, and the probes show it does.
+  BY CONSTRUCTION - the three stamp-lag checks and nothing else (fix rounds 2 and 3). A verification that counts them
+  answers red whatever a fix round of this track does; only the integrator's stamp commit turns them, and the probes show
+  it does.
+- Two checks of suites that are not this track's can go red when the machine is loaded, and are green alone (fix round
+  3): tests/owes.test.mjs's 1.5x factor (the best of three timed draws, nothing of this track in them) and
+  tests/scroll.browser.mjs's «no console error» in its step 14, where the boot-time cloud import's four lines can land
+  when the Node process answering the suite's route is starved - the same on the base (fix round 3's probe). The hardening
+  of the scroll suite's `open()` sketched under "Fix round 3" is its owner's to make or not; nothing here touches it.
 - tests/README.md's opening count of suites is stale on the base already and no track updates it; the two new
   rows are added, the count is not touched (a conflict with every other track for a number nobody keeps).
 - The integrator's landing rule for `go: 'crewcheck'` in tests/whatsnew.browser.mjs is not written (that suite
