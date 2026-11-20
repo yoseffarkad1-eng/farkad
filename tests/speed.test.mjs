@@ -191,17 +191,22 @@ const READINGS = [
 {
     section('11. the source: nothing of the model, the sync, the state or the store; the key and its readers');
 
-    let untouched = true;
-    try { git(['diff', '--quiet', BASE, '--', 'js/model', 'js/sync', 'js/state.js', 'js/store.js', 'js/recovery.js', 'firestore.rules', 'functions']); }
-    catch (error) { untouched = false; }
-    check('no file of js/model, js/sync, js/state.js, js/store.js, js/recovery.js, firestore.rules or functions differs from 6ab193d', untouched);
+    // MOVED ON PURPOSE (v207 with hourly50): the owner approved, on 2026-11-20, ONE change in
+    // js/model - ratesForDay in js/model/money.js reads a stamped hourly 0 at the man's hourly
+    // rate now. That file is named, so that any other file of these is red. Both sides of every
+    // comparison here load the merged tree's money.js (only CHANGED comes from the base).
+    const touched = git(['diff', '--name-only', BASE, '--', 'js/model', 'js/sync', 'js/state.js', 'js/store.js', 'js/recovery.js', 'firestore.rules', 'functions'])
+        .split('\n').filter(Boolean);
+    same('no file of js/model, js/sync, js/state.js, js/store.js, js/recovery.js, firestore.rules or functions differs from the base but the owner-approved js/model/money.js', touched, ['js/model/money.js']);
     let weekly = true;
     try { git(['diff', '--quiet', BASE, '--', 'js/ui/weeklyclose.js']); } catch (error) { weekly = false; }
     check('js/ui/weeklyclose.js is 6ab193d\'s', weekly);
     // MOVED ON PURPOSE (v207's integration): measured against the served v206 (BASE), the one
     // file a phone here loads that the merged tree brought is js/ui/roster.js - crewcheck's
     // foot button and a site row's data-place-id, no figure; named, so that any other is red.
-    same('every other file a phone here loads is the base\'s bytes but crewcheck\'s roster.js, so the base side IS v206', baseDiffers(), ['js/ui/roster.js']);
+    // MOVED ON PURPOSE again (hourly50 folded into v207): js/model/money.js joins it - the owner's
+    // ratesForDay rule, loaded alike on both sides.
+    same('every other file a phone here loads is the base\'s bytes but money.js (hourly50) and roster.js (crewcheck, hourly50), so the base side IS v206', baseDiffers(), ['js/model/money.js', 'js/ui/roster.js']);
 
     const reset = git(['diff', '-U0', BASE, '--', 'js/ui/advancereset.js']).split('\n').filter(line => /^[-+][^-+]/.test(line));
     same('js/ui/advancereset.js differs from 6ab193d\'s in exactly one line', [reset.length, reset[0] && reset[0][0], reset[1] && reset[1][0]], [2, '-', '+']);
