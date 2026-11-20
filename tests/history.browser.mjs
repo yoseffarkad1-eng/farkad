@@ -76,6 +76,20 @@ const home = page => page.evaluate(() => {
     showView('day');
     window.scrollTo(0, 0);
 });
+// The phone locked, the clock moved on, the phone unlocked - as the page sees it
+// (tests/midnight.browser.mjs's own steps).
+async function lockUntil(page, when) {
+    await page.evaluate(() => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await page.clock.setSystemTime(new Date(when));
+    await page.evaluate(() => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+        document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await page.waitForTimeout(150);
+}
 // The finder, then «איפה עבד» on a man - by a finger, as a person goes.
 async function throughTheDoor(page, workerId) {
     await page.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); });
@@ -247,8 +261,16 @@ try {
                 console.log(`      ${tag}: the tiles - ${tiles.count}, ${tiles.columns} a line; the first ends at ${tiles.firstBottom}, the last at ${tiles.lastBottom}, the glass at ${tiles.glass}`);
                 if (!(width === 320 && large)) check(`${tag}: as it opens, the first tile is on the glass`, tiles.first, JSON.stringify(tiles));
                 if ((width === 375 && !large) || width === 440) check(`${tag}: and the whole block of tiles`, tiles.whole, JSON.stringify(tiles));
-                same(`${tag}: two tiles a line at 320 and three from 375, by the grid alone`, tiles.columns, width === 320 ? 2 : 3);
-                if (SHOTS && ((width === 440 && scheme === 'dark' && !large) || (width === 320 && large && scheme === 'dark'))) {
+                // MOVED ON PURPOSE (fix round 1): a track is never narrower than a five-figure count in
+                // the figure's size and the tile's padding (css/design.css), so with the large display
+                // three to a line at 375 left a count of a year of forty men less than its padding -
+                // there it is two. Elsewhere, as before.
+                same(`${tag}: two tiles a line at 320, three from 375 - and two at 375 with the large display - by the grid alone`,
+                    tiles.columns, width === 320 || (width === 375 && large) ? 2 : 3);
+                // And 375x667 as it opens: the owner's question of what the first glass holds (the review
+                // of round 1 - no day on it at 375 and 320).
+                if (SHOTS && ((width === 440 && scheme === 'dark' && !large) || (width === 320 && large && scheme === 'dark')
+                    || (width === 375 && scheme === 'light' && !large))) {
                     await shot(page, `${width}x${height}-${scheme}${large ? '-large' : ''}-one-man`);
                 }
                 await context.close();
@@ -360,8 +382,20 @@ try {
             document.getElementById('historyFoldLabel').getAttribute('aria-expanded'), document.getElementById('historyFoldBody').hidden,
             ['historyFoldBody', 'historyText', 'historySend', 'historyCopy'].map(id => document.getElementById(id).getClientRects().length),
             document.getElementById('historyText').value, window.__built]), ['false', true, [0, 0, 0, 0], '', 0]);
-        await page.locator('#historyFoldLabel').tap();
+        // A DOUBLE TAP on the fold opens it, once: its button stays the same node, which the page's
+        // own rule leaves to the surface (js/ui/sheet.js), and the second tap used to shut it again.
+        const foldAt = await page.evaluate(() => { const box = document.getElementById('historyFoldLabel').getBoundingClientRect();
+            return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; });
+        await page.touchscreen.tap(foldAt.x, foldAt.y);
+        await page.waitForTimeout(90);
+        await page.touchscreen.tap(foldAt.x, foldAt.y);
         await pause(page);
+        same('a double tap on «הרשימה כטקסט» opens the fold and leaves it open - one tap, not two',
+            await page.evaluate(() => [document.getElementById('historyFoldLabel').getAttribute('aria-expanded'), HISTORY.textOpen,
+                document.getElementById('historyFoldBody').getClientRects().length > 0]), ['true', true, true]);
+        // Where it did not (round 1 shut it again), one more tap opens it, so that the walk below is
+        // still made and says what it finds.
+        if (!(await painted(page, 'historyFoldBody'))) { await page.locator('#historyFoldLabel').tap(); await pause(page); }
         same('opened, the field holds the text the facts hold, built at that moment',
             await page.evaluate(() => [document.getElementById('historyFoldLabel').getAttribute('aria-expanded'),
                 document.getElementById('historyText').value === historyText(historyFacts()), window.__built > 0,
@@ -382,18 +416,29 @@ try {
         await choose(page, 'historyRange', 'thisYear');
         await page.locator('#historySend').tap();
         await pause(page);
-        same('a long one - a year of everyone - is put in no link: the field selected, the line saying to copy it',
-            await page.evaluate(() => {
-                const field = document.getElementById('historyText');
-                return [window.__opened.length, encodeURIComponent(field.value).length > 8000, document.activeElement === field,
-                    field.selectionStart === 0 && field.selectionEnd === field.value.length,
-                    document.getElementById('historyStatus').textContent];
-            }), [1, true, true, true, '⚠️ הרשימה ארוכה מדי לקישור של וואטסאפ - השתמש בהעתק ושלח ידנית']);
+        const refusal = () => page.evaluate(() => {
+            const field = document.getElementById('historyText');
+            const status = document.getElementById('historyStatus');
+            const box = status.getBoundingClientRect();
+            const scroll = document.getElementById('historyScroll').getBoundingClientRect();
+            return [window.__opened.length, encodeURIComponent(field.value).length > 8000, document.activeElement === field,
+                field.selectionStart === 0 && field.selectionEnd === field.value.length, status.textContent,
+                box.height > 0 && box.top >= scroll.top - 1 && box.bottom <= Math.min(scroll.bottom, innerHeight) + 1,
+                parseFloat(getComputedStyle(status).fontSize) >= 16];
+        });
+        const refusedLine = [1, true, true, true, '⚠️ הרשימה ארוכה מדי לקישור של וואטסאפ - השתמש בהעתק ושלח ידנית', true, true];
+        same('a long one - a year of everyone - is put in no link: the field selected, the line saying to copy it ON THE GLASS, at 16px',
+            await refusal(), refusedLine);
+        // Not a sentence that goes by itself: it stays until the next door, choice or fold.
+        await page.clock.fastForward(7000);
+        await pause(page, 100);
+        same('and seven seconds later it is still there, on the glass', await refusal(), refusedLine);
         await page.locator('#historyCopy').tap();
         await pause(page);
-        same('«העתק» puts the text on the clipboard and says so; the dialog stays', await page.evaluate(() => [window.__copied.length,
+        same('«העתק» puts the text on the clipboard and says so, at the dialog\'s 16px; the dialog stays', await page.evaluate(() => [window.__copied.length,
             window.__copied[0] === document.getElementById('historyText').value, document.getElementById('historyStatus').textContent,
-            document.getElementById('historyModal').style.display]), [1, true, '✔️ הועתק', 'flex']);
+            parseFloat(getComputedStyle(document.getElementById('historyStatus')).fontSize),
+            document.getElementById('historyModal').style.display]), [1, true, '✔️ הועתק', 16, 'flex']);
         check('nothing on the dialog says «נשלח»', await page.evaluate(() => document.getElementById('historyModal').textContent.indexOf('נשלח') === -1
             && document.getElementById('historyText').value.indexOf('נשלח') === -1));
         await page.locator('#historyFoldLabel').tap();
@@ -496,6 +541,40 @@ try {
         await context.close();
     }
 
+    // ============================================================ 19. across midnight
+    // The day's follow waits for every open dialog (js/app.js). Left open overnight, a row of the
+    // old today tapped in the morning opens the day he tapped: the close's own follow, a moment
+    // later in the same turn, does not take it from him (dayChosenByHand - a day chosen by hand, as
+    // the site card's day is, the review of the hotfix, R1). Shut by its «סגור» instead, no day is
+    // chosen and the day follows to the morning, as it always did.
+    {
+        suite('19. left open across midnight: a day of the old today, tapped in the morning, is the day he gets');
+        for (const how of ['a row of the old today', 'its «סגור»']) {
+            const { context, page } = await phone(375, 667, 'light', false);
+            await home(page);
+            await throughTheDoor(page, 'w02');
+            given(`${how}: it is open on the evening of ${TODAY}`, await isOpen(page)
+                && await page.evaluate(today => State.date === today, TODAY));
+            await lockUntil(page, '2026-11-11T07:10:00+02:00');
+            same(`${how}: unlocked in the morning with it open, the day under it is still the evening's`,
+                await page.evaluate(() => [todayStr(), State.date, document.getElementById('historyModal').style.display]),
+                ['2026-11-11', TODAY, 'flex']);
+            if (how === 'a row of the old today') {
+                await page.locator(`#historyList [data-history-key="row:${TODAY}:w02"]`).tap();
+                await pause(page, 400);
+                same(`${how}: tapped, the day screen is on ${TODAY}, the dialog shut - and stays there`,
+                    await page.evaluate(() => [currentView, State.date, document.getElementById('historyModal').style.display]),
+                    ['day', TODAY, 'none']);
+            } else {
+                await page.locator('#historyClose').tap();
+                await pause(page, 400);
+                same(`${how}: shut by it, the day follows to the morning`, await page.evaluate(() => [currentView, State.date]),
+                    ['day', '2026-11-11']);
+            }
+            await context.close();
+        }
+    }
+
     // ============================================================ 20, 23, 22: a season
     {
         const { context, page } = await phone(375, 667, 'dark', false, false);
@@ -566,6 +645,56 @@ try {
             await page.evaluate(() => [document.getElementById('historyScroll').scrollTop, document.activeElement.dataset.historyKey,
                 [...document.querySelectorAll('#historyList .history-row')].find(row => row.dataset.historyKey === `row:${todayStr()}:w_02`)
                     .getAttribute('aria-label').endsWith('נעדר')]), [place.top, place.key, true]);
+        // A MOVE NO COUNT SEES, ON THE FOCUSED DAY ITSELF. A day moved to another site at the same rate
+        // changes no tile, no month's count and no number of rows - the list is drawn again only
+        // because the rows themselves are part of what a draw compares - and when it is the focused
+        // day, its node is built anew and the focus is put back on it by its key. Neither was moved
+        // by anything above: each of those moves moved a count, and none touched the focused day.
+        const plainDay = () => page.evaluate(() => {
+            const facts = historyFacts();
+            const drawn = new Set([...document.querySelectorAll('#historyList .history-row')].map(row => row.dataset.historyKey));
+            const fit = facts.rows.filter(row => row.kind === 'normal' && row.hours === 0 && row.sites.length === 1
+                && row.date !== todayStr() && drawn.has(`row:${row.date}:${row.workerId}`));
+            const row = fit[Math.floor(fit.length / 2)];
+            const site = Number(row.sites[0].id.slice(2));
+            return { key: `row:${row.date}:${row.workerId}`, date: row.date, workerId: row.workerId, from: row.sites[0].id,
+                to: 'p_' + ((site % 5) + 1) };
+        });
+        const sameRate = await plainDay();
+        const nowAt = await page.evaluate(key => {
+            const node = [...document.querySelectorAll('#historyList .history-row')].find(row => row.dataset.historyKey === key);
+            node.focus({ preventScroll: true });
+            window.__movedNode = node;
+            return document.getElementById('historyScroll').scrollTop;
+        }, sameRate.key);
+        const counts1 = await tilesNow();
+        await page.evaluate(day => State.commit(setWorkerDay(State.schedule, day.date, day.workerId, 'actual', { entries: [makeEntry(day.to)] })), sameRate);
+        await pause(page, 600);
+        const afterMove = await page.evaluate(day => {
+            const node = [...document.querySelectorAll('#historyList .history-row')].find(row => row.dataset.historyKey === day.key);
+            return [document.activeElement === node, node !== window.__movedNode, document.activeElement.dataset.historyKey,
+                node.querySelector('.tag-place .site-name').textContent, document.getElementById('historyScroll').scrollTop,
+                document.querySelectorAll('#historyList .history-row').length];
+        }, sameRate);
+        const siteName = id => `אתר ${id.slice(2)}`;
+        same('a commit moving the FOCUSED day to another site at the same rate: no count moves, the day is drawn anew saying where he was, the focus back on it, the place kept',
+            [JSON.stringify(await tilesNow()) === JSON.stringify(counts1)].concat(afterMove),
+            [true, true, true, sameRate.key, siteName(sameRate.to), nowAt, 600]);
+        const otherDay = await plainDay();
+        await page.evaluate(day => {
+            const raw = JSON.parse(JSON.stringify(State.schedule));
+            raw.updatedAt = new Date(Date.now() + 2000).toISOString();
+            raw.updatedBy = 'other-device';
+            setWorkerDay(raw, day.date, day.workerId, 'actual', { entries: [makeEntry(day.to)] });
+            FarkadSync.receive(raw);
+        }, otherDay);
+        await pause(page, 600);
+        same('an adopted snapshot moving another drawn day the same way: no count moves, and that day says where he was now',
+            [JSON.stringify(await tilesNow()) === JSON.stringify(counts1), await page.evaluate(key =>
+                [...document.querySelectorAll('#historyList .history-row')].find(row => row.dataset.historyKey === key)
+                    .querySelector('.tag-place .site-name').textContent, otherDay.key),
+                await page.evaluate(() => document.activeElement.dataset.historyKey)],
+            [true, siteName(otherDay.to), sameRate.key]);
         const quiet = await page.evaluate(() => new Promise(resolve => {
             let seen = 0;
             const watch = new MutationObserver(list => { seen += list.length; });
@@ -670,11 +799,71 @@ try {
         await context.close();
     }
 
+    // ============================================================ 25. a season's counts, whole in their tiles
+    // At twice the text a tile of round 1 stayed 96px and its figure 48px: «9037» ran 34px into the
+    // tile beside it, which painted over its first digit - «ימי נוכחות 037» (the review of round
+    // 1). The ruler below never saw it: a tile is not a control and nothing hides its overflow, so a
+    // count painted over is neither cut nor spilled. So here, on a season of forty men - four and
+    // five figures under «השנה» and «מתחילת הרישום» - every figure is held inside its own tile's
+    // padding, at every phone, with the text as it is, with the large display and at twice the
+    // text; and the figures of one line of tiles stand on one line, whatever their labels wrap to.
+    for (const [width, height] of PHONES) {
+        suite(`25. a season's counts, whole in their tiles - ${width}x${height}`);
+        const { context, page } = await phone(width, height, 'light', false, false);
+        await page.evaluate(seedSeason);
+        await page.evaluate(() => { openHistory(null); });
+        await pause(page, 300);
+        for (const mode of ['as it is', 'large display', 'text doubled']) {
+            if (mode === 'large display') await page.evaluate(() => document.documentElement.classList.add('display-large'));
+            if (mode === 'text doubled') {
+                await page.evaluate(() => document.documentElement.classList.remove('display-large'));
+                given(`${width}x${height}: the cascade is doubled`, await doubleEveryFontSize(page) > 100);
+            }
+            for (const range of ['thisYear', 'all']) {
+                await page.evaluate(range => { const field = document.getElementById('historyRange'); field.value = range;
+                    field.dispatchEvent(new Event('change', { bubbles: true })); }, range);
+                await pause(page, 200);
+                const read = await page.evaluate(() => {
+                    const tiles = [...document.querySelectorAll('#historyTotals .history-tile')];
+                    const first = tiles[0].getBoundingClientRect();
+                    return { columns: tiles.filter(tile => Math.abs(tile.getBoundingClientRect().top - first.top) < 1).length,
+                        tiles: tiles.map(tile => {
+                            const box = tile.getBoundingClientRect();
+                            const cs = getComputedStyle(tile);
+                            const value = tile.querySelector('.history-tile-value');
+                            const range = document.createRange();
+                            range.selectNodeContents(value);
+                            const words = range.getBoundingClientRect();
+                            return { value: value.textContent, top: Math.round(box.top), bottom: Math.round(words.bottom),
+                                inside: words.left >= box.left + parseFloat(cs.paddingLeft) - 1 && words.right <= box.right - parseFloat(cs.paddingRight) + 1 };
+                        }) };
+                });
+                const lines = {};
+                read.tiles.forEach(tile => { (lines[tile.top] = lines[tile.top] || []).push(tile.bottom); });
+                const longest = Math.max(...read.tiles.map(tile => tile.value.length));
+                console.log(`      ${width}x${height}, ${mode}, ${range}: ${read.columns} a line; ${read.tiles.map(tile => tile.value).join(' / ')}`);
+                check(`${width}x${height}, ${mode}, ${range}: every figure - up to ${longest} digits - inside its own tile`,
+                    longest >= 4 && read.tiles.every(tile => tile.inside), JSON.stringify(read.tiles.filter(tile => !tile.inside)));
+                check(`${width}x${height}, ${mode}, ${range}: and the figures of one line of tiles on one line`,
+                    Object.values(lines).every(bottoms => Math.max(...bottoms) - Math.min(...bottoms) <= 1), JSON.stringify(lines));
+            }
+        }
+        if (SHOTS && width === 375) await shot(page, `375x667-light-doubled-season-tiles`);
+        await context.close();
+    }
+
     // ============================================================ 25. the floors
+    // Fix round 1 added the four views the ruler had never seen: a day at two sites, with no site
+    // and under one of them (the two-sites sentence, «2 אתרים»); a list longer than one chunk (how
+    // many of how many, «הצג עוד»); and the line under the text's doors, which is empty - and so
+    // not drawn - in every other view: here it holds the refusal, which stays until the next door.
     const FLOOR_VIEWS = [
         ['one man, every site', [['historyMan', 'w02']]],
+        ['one man at a site, a day at two', [['historyMan', 'w02'], ['historySite', 'p2'], ['historyRange', 'last3']]],
         ['everyone at p1, with Rima', [['historyMan', ''], ['historySite', 'p1'], ['historyRange', 'thisMonth']]],
         ['everyone at p2, with יוסף גבס', [['historyMan', ''], ['historySite', 'p2'], ['historyRange', 'thisMonth']]],
+        ['everyone, more than one chunk', [['historyMan', ''], ['historySite', ''], ['historyRange', 'last3']]],
+        ['the text, refused for a link', [['historyMan', ''], ['historySite', ''], ['historyRange', 'last3']], true, 'refuse'],
         ['two dates and the text', [['historyMan', 'w02'], ['historySite', ''], ['historyRange', 'custom']], true],
         ['the chosen names', [['historyMan', 'w99'], ['historySite', 'p1'], ['historyRange', 'last3']]]
     ];
@@ -690,18 +879,29 @@ try {
         await page.evaluate(() => {
             State.schedule.workers.push({ id: 'w99', name: 'עבד אל-רחמן אבו חוסיין', active: false });
             State.schedule.places.find(place => place.id === 'p1').active = false;
+            // THE CRITIC'S DAY on עלי חסן: 3 extra hours at תל אביב - רוטשילד, first, and a double at
+            // פתח תקווה - and September and October before the seed's first day for the crew, so that
+            // «כל העובדים» over three months is more than one chunk of 200. In memory only, too.
+            setWorkerDay(State.schedule, '2026-11-04', 'w02', 'actual', { entries: [makeEntry('p2', 'extra', 3), makeEntry('p5', 'double')] });
+            for (const day = new Date(2026, 8, 1, 12); toLocalDateStr(day) < '2026-10-23'; day.setDate(day.getDate() + 1)) {
+                if (day.getDay() === 6) continue;
+                State.schedule.workers.slice(0, 11).forEach((worker, i) => assignPlace(State.schedule, toLocalDateStr(day), worker.id, 'actual', 'p' + (2 + (i % 4))));
+            }
             render();
         });
         if (doubled) given(`${tag}: the cascade is doubled`, await doubleEveryFontSize(page) > 100);
         await home(page);
         await throughTheDoor(page, 'w02');
         given(`${tag}: it is open`, await isOpen(page));
-        for (const [name, choices, fold] of FLOOR_VIEWS) {
+        for (const [name, choices, fold, then] of FLOOR_VIEWS) {
             for (const [id, value] of choices) await page.evaluate(([id, value]) => { const field = document.getElementById(id);
                 field.value = value; field.dispatchEvent(new Event('change', { bubbles: true })); }, [id, value]);
             if (fold && await page.evaluate(() => document.getElementById('historyFoldBody').hidden)) await page.evaluate(() => historyToggleText());
             if (!fold && await page.evaluate(() => !document.getElementById('historyFoldBody').hidden)) await page.evaluate(() => historyToggleText());
             await page.evaluate(() => { document.getElementById('historyScroll').scrollTop = 0; });
+            if (then === 'refuse') {
+                await page.evaluate(() => { Object.defineProperty(navigator, 'share', { configurable: true, value: undefined }); historySend(); });
+            }
             await pause(page, 250);
             // The picture as it opens - its top - before the last control is scrolled to.
             if (SHOTS && !doubled && ((width === 440 && scheme === 'dark' && !large) || (width === 320 && large && scheme === 'dark'))) {
@@ -744,21 +944,62 @@ try {
                 return { ok: box.bottom <= Math.min(scroll.bottom, innerHeight) + 1 && box.top >= scroll.top - 1, what: node.id || node.dataset.historyKey || node.className };
             });
             check(`${tag} · ${name}: the last control can be brought onto the glass`, last.ok, JSON.stringify(last));
-            // THE RANGE IS ONE WORD: a line that wraps breaks before its dates, never between
-            // them - broken after the dash, a right-to-left line drew «… · - 01/11/2026» over
-            // «10/11/2026» (440px, everyone at «הרצליה - מגדל הים»). Not at doubled text at 320
-            // and 375, where the range alone is wider than the line and is broken anywhere.
+            // THE RANGE IS A BOX OF ITS OWN: a line that wraps breaks before its dates and never
+            // between them - broken after the dash, a right-to-left line drew «… · - 01/11/2026» over
+            // «10/11/2026» (440px, everyone at «הרצליה - מגדל הים») - and where twice the text makes
+            // the range itself wider than a line, it breaks after its dash and nowhere else: round 1
+            // glued the whole range into one word and the line's overflow-wrap broke it inside a date,
+            // «01/09/2026 - 10/11/» over «2026», at 320, 375 and 440 (the review of round 1).
+            const dates = await page.evaluate(() => {
+                // The range's own box - or, on a build that has none, the line itself (so that this
+                // reads, and fails, on round 1's bytes too).
+                const node = (document.querySelector('#historyRangeNow .history-now-range') || document.getElementById('historyRangeNow')).firstChild;
+                const text = node.textContent;
+                const lineOf = (start, end) => { const range = document.createRange(); range.setStart(node, start); range.setEnd(node, end);
+                    return [...new Set([...range.getClientRects()].filter(rect => rect.width > 0).map(rect => Math.round(rect.top)))]; };
+                const at = [...text.matchAll(/\d\d\/\d\d\/\d{4}/g)].map(found => found.index);
+                const dash = text.indexOf('-');
+                return { dates: at.map(start => lineOf(start, start + 10)), dash: lineOf(dash, dash + 1) };
+            });
+            check(`${tag} · ${name}: no date of the line is split across two lines, and its dash stays with the first date`,
+                dates.dates.length === 2 && dates.dates.every(tops => tops.length === 1) && dates.dash.length === 1
+                && Math.abs(dates.dash[0] - dates.dates[0][0]) <= 2, JSON.stringify(dates));
             if (!doubled) {
-                const dates = await page.evaluate(() => {
-                    const node = document.getElementById('historyRangeNow').firstChild;
-                    const at = [...node.textContent.matchAll(/\d\d\/\d\d\/\d{4}/g)].map(found => found.index);
-                    const top = start => { const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + 10);
-                        return Math.round(range.getBoundingClientRect().top); };
-                    const box = document.getElementById('historyRangeNow').getBoundingClientRect();
-                    return { tops: at.map(top), lines: Math.round(box.height / parseFloat(getComputedStyle(node.parentNode).lineHeight || 20)) };
+                check(`${tag} · ${name}: the line's two dates stand on one line`, dates.dates.length === 2
+                    && Math.abs(dates.dates[0][0] - dates.dates[1][0]) <= 2, JSON.stringify(dates));
+            }
+            if (name === 'one man, every site') {
+                const rows = await page.evaluate(() => {
+                    const all = [...document.querySelectorAll('#historyList .history-row')];
+                    const critic = all.find(row => row.dataset.historyKey === 'row:2026-11-04:w02');
+                    const box = node => node.getBoundingClientRect();
+                    const tags = [...critic.querySelectorAll('.tag-place')].map(box);
+                    const kind = box(critic.querySelector('.history-kind'));
+                    const hours = box(critic.querySelector('.history-hours'));
+                    return { tags: tags.length, kindBelow: tags.every(tag => kind.top >= tag.bottom - 1),
+                        hoursBeside: Math.abs(hours.top - kind.top) <= 4,
+                        shapes: [...new Set(all.map(row => box(row.querySelector('.history-day')).top >= box(row.querySelector('.history-when')).bottom - 2
+                            ? 'under' : 'beside'))], rows: all.length };
                 });
-                check(`${tag} · ${name}: the line's two dates stand on one line`, dates.tops.length === 2 && Math.abs(dates.tops[0] - dates.tops[1]) <= 2,
-                    JSON.stringify(dates));
+                // THE DAY'S KIND IS THE DAY'S: at two sites the tags have a line of their own and the
+                // kind and the hours stand under both, never beside the second only - where «יום כפול
+                // +3 ש׳» read as פתח תקווה's, and the hours were worked at תל אביב (the review of round 1).
+                same(`${tag}: a day at two sites - both sites, and under them the day's kind with its hours, beside neither alone`,
+                    [rows.tags, rows.kindBelow, rows.hoursBeside], [2, true, true]);
+                // ONE SHAPE: every day of his has its day beside its date, or every one under it - a
+                // short weekday and a long one no longer break differently (they zigzagged at 375).
+                same(`${tag}: and every row of his has one shape, its day ${rows.shapes[0] || ''} the date (${rows.rows} rows)`,
+                    rows.shapes.length, 1);
+            }
+            if (name === 'everyone, more than one chunk') {
+                const foot = await page.evaluate(() => [...document.querySelectorAll('#historyList .history-foot > *')].map(node => node.textContent));
+                check(`${tag}: more days than one chunk - the line that says how many of how many, and «הצג עוד 200», both measured above`,
+                    foot.length === 3 && /^מוצגות 200 שורות מתוך \d+\.$/.test(foot[1]) && foot[2] === 'הצג עוד 200', JSON.stringify(foot));
+            }
+            if (name === 'the text, refused for a link') {
+                same(`${tag}: the line under the doors holds the refusal, measured above`, await page.evaluate(() =>
+                    [document.getElementById('historyStatus').textContent, document.getElementById('historyStatus').getClientRects().length > 0]),
+                ['⚠️ הרשימה ארוכה מדי לקישור של וואטסאפ - השתמש בהעתק ושלח ידנית', true]);
             }
             if (name === 'everyone at p1, with Rima') {
                 same(`${tag}: p1 this month draws Rima's two lines and their note`, await page.evaluate(() =>

@@ -82,8 +82,10 @@ const HISTORY_TEXT = Object.freeze({
     // The fold that holds the text and its two doors.
     asText: 'הרשימה כטקסט',
     // With everyone and every site: this «ימי עובד־אתר» is his men's, and must not be read as
-    // the invoice's total, which counts Rima's men in.
-    noRima: 'עובדי רימא לא נספרים כאן. כדי לראות גם אותם, בחר אתר.',
+    // the invoice's total, which counts Rima's men in. The fact, and - on the screen only - what
+    // to do about it: the text is read by whoever it is sent to, who has no «אתר» to choose.
+    noRima: 'עובדי רימא לא נספרים כאן.',
+    noRimaHow: 'כדי לראות גם אותם, בחר אתר.',
     // A man's dates at one site, under «מי עבד באתר».
     dayOne: 'יום אחד',
     dayMany: 'ימים',
@@ -99,10 +101,13 @@ const HISTORY_TEXT = Object.freeze({
     rowName: (when, name, sites, kind) => [when, name, sites, kind].filter(part => part !== '').join(' · '),
     shown: (n, total) => `מוצגות ${n} שורות מתוך ${total}.`,
     more: n => `הצג עוד ${n}`,
-    capped: (n, total) => `מוצגות ${n} השורות החדשות ביותר מתוך ${total}. כדי לראות את השאר, בחר טווח קצר יותר, אתר או עובד.`,
+    // The screen's cap. It names the three choices by their own labels - «תקופה», «אתר», «עובד».
+    capped: (n, total) => `מוצגות ${n} השורות החדשות ביותר מתוך ${total}. כדי לראות את השאר, בחר תקופה קצרה יותר, אתר או עובד.`,
     // The text's first line.
     textHead: (who, where) => `📄 ${who} · ${where}`,
-    textCut: (n, total) => `ההודעה כוללת רק את ${n} השורות החדשות ביותר מתוך ${total}, כי כל הרשימה ארוכה מדי להודעה אחת. כדי לקבל את כולן, בחר טווח קצר יותר, אתר או עובד.`,
+    // The text's own cap: the fact only. Whoever receives it cannot narrow anything, and the
+    // sender is told how on the screen - a text this long is always more than the screen's 600.
+    textCut: (n, total) => `ההודעה כוללת רק את ${n} השורות החדשות ביותר מתוך ${total}, כי כל הרשימה ארוכה מדי להודעה אחת.`,
     // The share door's own sentence (js/ui/share.js), its first half changed: with no share
     // sheet the text would travel inside a link, and a long one is not put in a link at all.
     tooLongForLink: '⚠️ הרשימה ארוכה מדי לקישור של וואטסאפ - השתמש בהעתק ושלח ידנית',
@@ -379,17 +384,19 @@ function historyRead(schedule, query, today) {
 // What the screen and the text say, read once per draw: the reading of the record as it
 // stands, and the words for it. The one function here that reads State.
 
-// The dates of the line under the choices as ONE word. A line that wraps inside the range lays
-// it out, right to left, as «… · - 01/11/2026» over «10/11/2026»: the two dates apart and the
-// dash beside the separator, a range that seems to start with a dash (measured at 440px with
-// «כל העובדים» and a site named «הרצליה - מגדל הים»). No-break spaces round its dash, and a
-// word joiner after the dash - a line may still break after a hyphen that a no-break space
-// follows (Unicode line breaking, LB12a; measured: 22 of 60 lines did) - so the line breaks
-// BEFORE the range and the range goes down whole; one wider than the line itself (twice the
-// text at 320px) is still broken by the line's `overflow-wrap: anywhere`, never cut. The text
-// keeps dateRange's own spaces: a message is not laid out here.
+// The dates of the line under the choices, drawn in a box of their own (historyDrawNow). A line
+// that wrapped inside the range laid it out, right to left, as «… · - 01/11/2026» over
+// «10/11/2026»: the two dates apart and the dash beside the separator, a range that seemed to
+// start with a dash (measured at 440px with «כל העובדים» and a site named «הרצליה - מגדל הים»).
+// So the range is ONE inline box: the line breaks before it, and it goes down whole. It breaks
+// inside itself only where it is wider than a whole line - twice the text, on every phone -
+// and then in one place only: a no-break space holds the dash to the first date, the space
+// after the dash is the one break, and a date is never split - it reads «01/09/2026 -» over
+// «10/11/2026», on lines of its own. (Round 1 glued the whole range into one word, and at twice
+// the text the line's `overflow-wrap: anywhere` broke it inside a date: «01/09/2026 - 10/11/»
+// over «2026».) The text keeps dateRange's own spaces: a message is not laid out here.
 function historyRangeWhole(range) {
-    return String(range).replace(' - ', '\u00a0-\u2060\u00a0');
+    return String(range).replace(' - ', '\u00a0- ');
 }
 
 function historyFacts() {
@@ -437,7 +444,8 @@ function historyFacts() {
         who,
         where,
         rangeText,
-        now: HISTORY_TEXT.now(who, where, historyRangeWhole(rangeText)),
+        // The choice in words. The screen draws its range in a box of its own (historyDrawNow).
+        now: HISTORY_TEXT.now(who, where, rangeText),
         names,
         manOptions: listed(workers, R.allMen),
         siteOptions: listed(places, R.allSites)
@@ -453,13 +461,16 @@ function historyTileLabel(id) {
 
 // The sentences under the tiles, each only when it applies: worker-site days are not days of
 // attendance (a man at two sites in a day), and - with everyone and every site - Rima's men
-// are not in this count.
-function historyNotes(facts) {
+// are not in this count. `forText`: the text's words, which say the fact and not what to
+// choose - whoever reads the message has nothing to choose.
+function historyNotes(facts, forText) {
     const notes = [];
     if (facts.placeId !== null) return notes;
     const value = id => (facts.tiles.find(tile => tile.id === id) || { value: 0 }).value;
     if (value('siteDays') !== value('attendance')) notes.push(HISTORY_REUSED.twoSites);
-    if (facts.workerId === null && facts.rimaInRange > 0) notes.push(HISTORY_TEXT.noRima);
+    if (facts.workerId === null && facts.rimaInRange > 0) {
+        notes.push(forText ? HISTORY_TEXT.noRima : `${HISTORY_TEXT.noRima} ${HISTORY_TEXT.noRimaHow}`);
+    }
     return notes;
 }
 
@@ -529,7 +540,7 @@ function historyTextHead(facts) {
     const T = HISTORY_TEXT;
     const lines = [T.textHead(facts.who, facts.where), facts.rangeText, ''];
     facts.tiles.forEach(tile => lines.push(`${historyTileLabel(tile.id)}: ${tile.value}`));
-    historyNotes(facts).forEach(note => lines.push(note));
+    historyNotes(facts, true).forEach(note => lines.push(note));
     if (facts.site) {
         lines.push(`${SITE_CARD_REUSED.billing} ${isolate(facts.site.name)}`);
         historySiteLines(facts.site).filter(line => !line.apart).forEach(line => {
@@ -544,9 +555,12 @@ function historyTextHead(facts) {
     return lines;
 }
 
+// With everyone, the man ends at a colon and not at a dash: a site is often named «city -
+// project», and «• שני 09/11 - דוד כהן - הרצליה - מגדל הים» left whoever read it to guess where
+// the name stopped - the isolates that hold each name together are invisible.
 function historyRowLine(row, facts) {
     const words = historyRowWords(row, facts);
-    const who = facts.workerId === null ? `${isolate(words.name)} - ` : '';
+    const who = facts.workerId === null ? `${isolate(words.name)}: ` : '';
     if (row.kind === 'absent') return `• ${words.when} - ${who}${words.kind}`;
     const where = row.sites.map(site => isolate(site.name)).join(' + ');
     return `• ${words.when} - ${who}${where} · ${[words.kind].concat(words.marks).join(' · ')}`;
@@ -657,7 +671,20 @@ function historyDrawChoices(facts) {
         historySetAttribute(parts.to, 'min', facts.from);
         historySetAttribute(parts.to, 'max', facts.today);
     }
-    historySay(parts.now, facts.now);
+    historyDrawNow(parts.now, facts);
+}
+
+// The line under the choices: the template's words around its range, and the range in an
+// inline box of its own (historyRangeWhole says why). Built again only when its words moved.
+function historyDrawNow(node, facts) {
+    if (!node) return;
+    const range = historyRangeWhole(facts.rangeText);
+    const [before, after] = HISTORY_TEXT.now(facts.who, facts.where, '\u0000').split('\u0000');
+    if (node.textContent === before + range + after && node.children.length > 0) return;
+    clear(node);
+    if (before) node.appendChild(el('span', null, before));
+    node.appendChild(el('span', 'history-now-range', range));
+    if (after) node.appendChild(el('span', null, after));
 }
 
 function historyTile(tile) {
@@ -707,23 +734,32 @@ function historyDrawTotals(facts) {
 function historyRowNode(row, facts) {
     const words = historyRowWords(row, facts);
     const key = `row:${row.date}:${row.workerId}`;
-    const node = button('', 'btn-secondary history-row', () => historyGoDay(row.date, key), words.label);
+    // The man only when everyone is chosen: with one man his name is on the line under the
+    // choices, and in every row's name. A named row puts its day on a line of its own, under
+    // the date and the man, whatever the name's length - so every row of the list has one shape.
+    const everyone = facts.workerId === null;
+    const node = button('', everyone ? 'btn-secondary history-row history-row-everyone' : 'btn-secondary history-row',
+        () => historyGoDay(row.date, key), words.label);
     node.dataset.historyKey = key;
     node.dataset.date = row.date;
     node.appendChild(el('span', 'history-when', words.when));
-    // The man only when everyone is chosen: with one man his name is on the line under the
-    // choices, and in every row's name.
-    if (facts.workerId === null) node.appendChild(el('strong', 'history-name', words.name));
+    if (everyone) node.appendChild(el('strong', 'history-name', words.name));
     const day = el('span', 'history-day');
     if (row.kind === 'absent') {
         day.appendChild(el('span', 'tag tag-absent', words.kind));
     } else {
+        // The sites in a group of their own. Two or more take a whole line, so the day's kind
+        // and hours below them stand under ALL of them: drawn in one wrapping row, the first
+        // site filled its line and the kind went down beside the second, and «יום כפול +3 ש׳»
+        // read as that site's - when the 3 hours were worked at the first.
+        const sites = el('span', row.sites.length > 1 ? 'history-sites history-sites-many' : 'history-sites');
         row.sites.forEach(site => {
             const tag = el('span', 'tag tag-place');
             appendSiteName(tag, site.id, site.name);
             paintSite(tag, site.id);
-            day.appendChild(tag);
+            sites.appendChild(tag);
         });
+        day.appendChild(sites);
         // A WORD, never only a colour: a double day may be heavier, and still says what it is.
         day.appendChild(el('span', row.kind === 'double' ? 'history-kind history-kind-double' : 'history-kind', words.kind));
         if (row.hours > 0) day.appendChild(el('span', 'history-hours', HISTORY_REUSED.hours(row.hours)));
@@ -864,9 +900,13 @@ function historyIsOpen() {
 
 // Opened on one man (the finder's door) or on everyone: every site, «3 החודשים האחרונים» - on
 // the first of a month «החודש» would open on nothing, and three months cover the last pay
-// periods of both cycles. A man who left the record between the list and the tap opens
-// nothing. The dialog enters at its own heading, by hand: js/ui/modal.js enters at a heading
-// only when it stands directly in .modal-content, and this one stands beside «סגור».
+// periods of both cycles. BUT A MAN WITH NO DAY IN THEM opens on «מתחילת הרישום»: the door is
+// on the men turned off too, because a dispute about a man who left is the commonest one, and
+// a man who left in August opened on three empty months - five tiles of 0 and «לא נמצא אף
+// יום», read as a record that had lost his days. A man who left the record between the list
+// and the tap opens nothing. The dialog enters at its own heading, by hand: js/ui/modal.js
+// enters at a heading only when it stands directly in .modal-content, and this one stands
+// beside «סגור».
 function openHistory(workerId) {
     const parts = historyParts();
     if (!parts.modal) return false;
@@ -898,7 +938,12 @@ function openHistory(workerId) {
     historyShowText(false);
     if (parts.text) parts.text.value = '';
 
-    historyDraw();
+    let facts = historyFacts();
+    if (man && facts.rows.length === 0) {
+        HISTORY.range = 'all';
+        facts = historyFacts();
+    }
+    historyDraw(facts);
     if (parts.scroll) parts.scroll.scrollTop = 0;
     parts.modal.style.display = 'flex';
     // Forced into effect first: an element that was display:none a line ago cannot focus.
@@ -977,6 +1022,8 @@ function historyChoose(which) {
         return;
     }
     HISTORY.shown = HISTORY_CHUNK;
+    // A new question: what the line under the doors said was about the text of the old one.
+    historySay(parts.status, '');
     historyDraw();
 }
 
@@ -1039,24 +1086,59 @@ function historyFillText(facts) {
     return text;
 }
 
+// A DOUBLE TAP ON THE FOLD IS ONE TAP. The fold's button stays the same node when it opens, so
+// the page's own rule (js/ui/sheet.js) leaves its second press alone - a control that stays
+// where it was is each surface's own to guard - and the second tap of a double tap shut what
+// the first had just opened: a flash, the button shut, and «שלח» and «העתק», which live only
+// inside the fold, never reached. So a finger's press less than WALK_BOUNCE_MS after the last
+// press LET THROUGH, on the presses' own clock, does nothing; a deliberate tap after it is a
+// tap, and a keyboard's press and a call from code have no finger and act at once.
+let HISTORY_FOLD_PRESS = null;
+
+function historyFoldTooSoon() {
+    const press = typeof openPress === 'function' ? openPress() : null;
+    if (!press) return false;
+    const bounce = typeof WALK_BOUNCE_MS === 'number' ? WALK_BOUNCE_MS : 300;
+    const before = HISTORY_FOLD_PRESS;
+    if (before && press.stamp - before.stamp >= 0 && press.stamp - before.stamp < bounce) return true;
+    HISTORY_FOLD_PRESS = press;
+    return false;
+}
+
 function historyToggleText() {
-    if (!historyIsOpen()) return;
+    if (!historyIsOpen() || historyFoldTooSoon()) return;
     HISTORY.textOpen = !HISTORY.textOpen;
     historyShowText(HISTORY.textOpen);
+    // What the line under the doors said was about the text as it stood: it goes with it.
+    historySay(historyParts().status, '');
     const field = historyParts().text;
     if (HISTORY.textOpen) historyFillText(HISTORY_FACTS || historyFacts());
     else if (field) field.value = '';
 }
 
-// The two doors any composed text leaves by (js/ui/share.js), each with the text built at the
-// press. The dialog stays open behind the share sheet: it is a screen being read, not a
-// message being written. Neither door answers while the fold is shut.
+// The two doors any composed text leaves by (js/ui/share.js). The dialog stays open behind the
+// share sheet: it is a screen being read, not a message being written. Neither door answers
+// while the fold is shut.
+//
+// WHAT LEAVES IS WHAT IS ON THE SCREEN: the text of the reading the screen was drawn from, built
+// at the press. Read afresh at the press, it was not always that reading - a dialog left open
+// across midnight is not drawn again (the day's follow waits for every dialog, js/app.js), and
+// «העתק» in the morning copied a range ending on a day the screen did not show, with the seder
+// typed for it the evening before, under a field and a line that still said the evening's.
+function historyShownFacts() {
+    return HISTORY_FACTS || historyFacts();
+}
+
 function historySend() {
     if (!historyIsOpen() || !HISTORY.textOpen) return;
     const parts = historyParts();
-    const text = historyFillText(historyFacts());
+    const text = historyFillText(historyShownFacts());
     // With no share sheet the whole text would be put in a wa.me link. A long one is not: the
-    // field is shown with the text selected and the line says to copy it.
+    // field is shown with the text selected, and the line under the doors says to copy it - on
+    // the glass, where the press can see it (the doors are under a field ten lines tall, and
+    // the line under them was off the glass of every phone held upright), and until the next
+    // door, choice or fold: a sentence that goes by itself after six seconds left a man looking
+    // at a selected text with no reason given.
     const sheet = typeof navigator !== 'undefined' && navigator && navigator.share;
     if (!sheet && encodeURIComponent(text).length > HISTORY_LINK_MAX) {
         if (parts.text) {
@@ -1065,7 +1147,7 @@ function historySend() {
         }
         if (parts.status) {
             parts.status.textContent = HISTORY_TEXT.tooLongForLink;
-            setTimeout(() => { if (parts.status.textContent === HISTORY_TEXT.tooLongForLink) parts.status.textContent = ''; }, 6000);
+            if (typeof parts.status.scrollIntoView === 'function') parts.status.scrollIntoView({ block: 'nearest' });
         }
         return;
     }
@@ -1075,7 +1157,7 @@ function historySend() {
 function historyCopy() {
     if (!historyIsOpen() || !HISTORY.textOpen) return;
     const parts = historyParts();
-    historyFillText(historyFacts());
+    historyFillText(historyShownFacts());
     copyTextOut(parts.text, parts.status);
 }
 

@@ -1219,11 +1219,20 @@ body.journey-on #sederModal { z-index: 60; }
    EACH LABEL ABOVE ITS FIELD, at every width and with no query: a name in a closed select has
    the whole width (measured: «עבד אל-רחמן אבו חוסיין · לא פעיל» fits at 320 without the mode),
    and the choice is written again as words under the three, where it is never cut.
-   THE TILES are the worker card's pairs, as many to a line as fit - two at 320, three from
-   375 - by the grid alone. A DAY is a tonal row, as the site card's men are: its date, the man,
-   and his day - each site in its own colour with its name (the day screen's tag, raised from
-   13px and freed of its fixed 28px), the kind as a word and a double heavier, and the day
-   screen's «2 אתרים» raised from 11px, as the finder raises its badge.
+   THE TILES are the worker card's pairs, as many to a line as fit, by the grid alone - and a
+   track is never narrower than a five-figure count in the figure's own size, with the tile's
+   padding: calc(4.4em + 20px), in the em the text size sets. Two at 320 and three from 375;
+   with «תצוגה גדולה» two at 375; at twice the text one a line, or two at 440. Round 1's 96px
+   stayed 96px at twice the text, and «9037» ran 34px into the next tile, which painted over
+   its first digit: «ימי נוכחות 037». Each figure stands at its tile's foot, so a row of
+   them reads on one line whatever its labels wrap to. A DAY is a tonal row, as the site
+   card's men are, and every row of the list has ONE shape: the date in a column of its own
+   width, so a short weekday and a long one break the same way; the man, with everyone, beside
+   the date and his day on a line of its own under them; and the day - each site in its own
+   colour with its name (the day screen's tag, raised from 13px and freed of its fixed 28px),
+   two or more sites on a line of their own so the kind below is the day's and not the last
+   site's, the kind as a word and a double heavier, and the day screen's «2 אתרים» raised from
+   11px, as the finder raises its badge.
    It stands inside the slice tests/payslips.test.mjs reads, and keeps that slice's limits: no
    media query, no fixed height, every size between 16px and 30px - a figure here is 24px. */
 #historyModal { align-items: flex-start; }
@@ -1240,10 +1249,13 @@ body.journey-on #sederModal { z-index: 60; }
    later, the two dates are as tall as the three selects over them. */
 .history-field input[type="date"] { min-height: 48px; }
 .history-now { display: block; margin-top: 10px; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+/* The range in a box of its own: the line breaks before it, never inside it - but where it is
+   wider than a whole line, and then only after its dash (js/ui/history.js, historyRangeWhole). */
+.history-now-range { display: inline-block; max-width: 100%; overflow-wrap: break-word; }
 .history-totals { margin-top: 12px; }
-.history-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
-.history-tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
-.history-tile-label { color: var(--ink-2); font-size: 16px; overflow-wrap: anywhere; }
+.history-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(4.4em + 20px), 1fr)); gap: 8px; }
+.history-tile { display: flex; flex-direction: column; justify-content: space-between; gap: 2px; min-width: 0; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.history-tile-label { color: var(--ink-2); font-size: 16px; overflow-wrap: break-word; }
 .history-tile-value { font-size: 24px; font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .history-note { margin: 8px 0 0; color: var(--ink-2); font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
 .history-site-head { margin: 0 0 4px; font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
@@ -1263,12 +1275,19 @@ body.journey-on #sederModal { z-index: 60; }
 #historyModal .history-fold-body textarea { margin: 0; font-size: 16px; }
 .history-fold-body button { min-height: 48px; font-size: 16px; }
 .history-fold-body .share-status:empty { display: none; }
+/* The line under the doors - «✔️ הועתק», and a refusal of this dialog's own - at the dialog's
+   16px: the app's .share-status is 14px (css/app.css), as the site card and the month's summary
+   found before it (#siteCardStatus, #monthSummaryStatus). */
+#historyStatus { font-size: 16px; }
 .history-list { margin-top: 12px; }
 .history-month { margin: 16px 0 6px; font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
 #historyList .history-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; width: 100%; min-height: 48px; margin: 0 0 6px; padding: 8px 12px; font-size: 16px; text-align: start; white-space: normal; }
-.history-when { flex: 0 0 auto; font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.history-when { flex: 0 0 6.5em; font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .history-name { flex: 1 1 auto; min-width: 0; font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
-.history-day { display: flex; flex: 1 1 12em; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.history-day { display: flex; flex: 1 1 10em; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.history-row-everyone .history-day { flex-basis: 100%; }
+.history-sites { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.history-sites-many { flex: 1 1 100%; }
 .history-day .tag { height: auto; min-height: 30px; max-width: 100%; font-size: 16px; white-space: normal; overflow-wrap: anywhere; }
 .history-kind { font-size: 16px; font-weight: 600; }
 .history-kind-double { font-weight: 800; }

@@ -140,6 +140,8 @@ function withHistory(device, options = {}) {
     device.focused = [];
     const title = dom.getElementById('historyTitle');
     title.focus = () => { device.focused.push('historyTitle'); };
+    // The text's field selects its text when a link is refused (historySend); this DOM has none.
+    dom.getElementById('historyText').select = () => { device.focused.push('historyText selected'); };
     device.setToday(options.today || TODAY);
     device.read = (query, today = options.today || TODAY, schedule = 'State.schedule') => JSON.parse(device.run(
         `JSON.stringify(historyRead(${schedule}, ${JSON.stringify(query)}, ${JSON.stringify(today)}))`));
@@ -726,8 +728,12 @@ function kindsPhone() {
     const device = kindsPhone();
     device.run('openHistory(null)');
     device.choose('range', 'thisMonth');
-    const drawn = () => device.rowsDrawn().map(row => [row.dataset.historyKey,
-        row.querySelectorAll('.history-day')[0].children.map(child => plain(child.textContent))]);
+    // A row's day, part by part: each site of its group (two or more stand on a line of their
+    // own, so the kind under them is the day's - history.browser.mjs measures it), then the
+    // kind, the hours and «2 אתרים».
+    const parts = row => row.querySelectorAll('.history-day')[0].children
+        .reduce((all, child) => all.concat(child.classList.contains('history-sites') ? child.children : [child]), []);
+    const drawn = () => device.rowsDrawn().map(row => [row.dataset.historyKey, parts(row).map(child => plain(child.textContent))]);
     const L6 = JSON.parse(device.run('JSON.stringify(RATE_LABELS)'));
     same('every site of his day by name, the day\'s kind, and the hours the pay counts',
         drawn(), [
@@ -786,17 +792,19 @@ function kindsPhone() {
             'שעות נוספות: 6',
             'נעדר: 1',
             'עובד בשני אתרים נספר פעם אחת בכל אתר; ימי עובד־אתר אינם ימי נוכחות ואינם ימי שכר — אין לצפות שהסכומים יתאימו.',
-            'עובדי רימא לא נספרים כאן. כדי לראות גם אותם, בחר אתר.',
+            // MOVED ON PURPOSE (fix round 1): the fact, and no «בחר אתר» - whoever the text is sent
+            // to has no «אתר» to choose; the screen still says it (below).
+            'עובדי רימא לא נספרים כאן.',
             '',
             'נובמבר 2026 · 7 ימי נוכחות',
-            `• שישי 06/11 - ${I('סלים חורי')} - ${I('נתניה')} · רגיל`,
-            `• חמישי 05/11 - ${I('אחמד נסאר')} - ${I('רמת גן')} + ${I('הרצליה')} · יום כפול · ${PLUS(3)} ש׳`,
-            `• רביעי 04/11 - ${I('אחמד נסאר')} - ${I('הרצליה')} · שעות נוספות`,
-            `• רביעי 04/11 - ${I('יוסי כהן')} - ${I('רמת גן')} · רגיל · ${PLUS(1)} ש׳`,
-            `• שלישי 03/11 - ${I('אחמד נסאר')} - ${I('רמת גן')} + ${I('הרצליה')} · יום כפול`,
-            `• שלישי 03/11 - ${I('יוסי כהן')} - נעדר`,
-            `• שני 02/11 - ${I('אחמד נסאר')} - ${I('רמת גן')} · רגיל`,
-            `• שני 02/11 - ${I('יוסי כהן')} - ${I('רמת גן')} · שעות נוספות · ${PLUS(2)} ש׳`]);
+            `• שישי 06/11 - ${I('סלים חורי')}: ${I('נתניה')} · רגיל`,
+            `• חמישי 05/11 - ${I('אחמד נסאר')}: ${I('רמת גן')} + ${I('הרצליה')} · יום כפול · ${PLUS(3)} ש׳`,
+            `• רביעי 04/11 - ${I('אחמד נסאר')}: ${I('הרצליה')} · שעות נוספות`,
+            `• רביעי 04/11 - ${I('יוסי כהן')}: ${I('רמת גן')} · רגיל · ${PLUS(1)} ש׳`,
+            `• שלישי 03/11 - ${I('אחמד נסאר')}: ${I('רמת גן')} + ${I('הרצליה')} · יום כפול`,
+            `• שלישי 03/11 - ${I('יוסי כהן')}: נעדר`,
+            `• שני 02/11 - ${I('אחמד נסאר')}: ${I('רמת גן')} · רגיל`,
+            `• שני 02/11 - ${I('יוסי כהן')}: ${I('רמת גן')} · שעות נוספות · ${PLUS(2)} ש׳`]);
     same('and the screen says the same counts', device.byId('historyTotals').querySelectorAll('.history-tile')
         .map(tile => [tile.dataset.tile, tile.children.map(child => child.textContent)]),
     [['attendance', ['ימי נוכחות', '7']], ['siteDays', ['ימי עובד־אתר', '9']], ['doubleDays', ['כפולים', '2']],
@@ -831,11 +839,11 @@ function kindsPhone() {
             `${I('יוסי כהן')} · 2 ימים`,
             '',
             'נובמבר 2026',
-            `• חמישי 05/11 - ${I('אחמד נסאר')} - ${I('רמת גן')} · שעות נוספות · ${PLUS(3)} ש׳ · 2 אתרים`,
-            `• רביעי 04/11 - ${I('יוסי כהן')} - ${I('רמת גן')} · רגיל · ${PLUS(1)} ש׳`,
-            `• שלישי 03/11 - ${I('אחמד נסאר')} - ${I('רמת גן')} · יום כפול · 2 אתרים`,
-            `• שני 02/11 - ${I('אחמד נסאר')} - ${I('רמת גן')} · רגיל`,
-            `• שני 02/11 - ${I('יוסי כהן')} - ${I('רמת גן')} · שעות נוספות · ${PLUS(2)} ש׳`]);
+            `• חמישי 05/11 - ${I('אחמד נסאר')}: ${I('רמת גן')} · שעות נוספות · ${PLUS(3)} ש׳ · 2 אתרים`,
+            `• רביעי 04/11 - ${I('יוסי כהן')}: ${I('רמת גן')} · רגיל · ${PLUS(1)} ש׳`,
+            `• שלישי 03/11 - ${I('אחמד נסאר')}: ${I('רמת גן')} · יום כפול · 2 אתרים`,
+            `• שני 02/11 - ${I('אחמד נסאר')}: ${I('רמת גן')} · רגיל`,
+            `• שני 02/11 - ${I('יוסי כהן')}: ${I('רמת גן')} · שעות נוספות · ${PLUS(2)} ש׳`]);
     device.choose('man', 'w_b');
     device.choose('site', '');
     device.choose('range', 'last3');
@@ -866,6 +874,95 @@ function kindsPhone() {
     device.run('closeHistory()');
 }
 
+// ================================================================== 9. what a draw keeps, and what leaves
+//
+// Fix round 1. The list is built again only where it moved (historyDrawList), so whatever a row
+// says must be in what it is kept by - or a row kept from the draw before goes on saying what
+// the record no longer says. Each check below fails on a mutant that the suites of round 1 let
+// pass: the man's name on every row, a row kept without its name or without whether names are
+// shown, the rows left out of what a draw compares, the Rima sentence with no Rima.
+{
+    suite('9. the rows, the names and the notes say what the record says - after a choice, a rename or a move');
+
+    const device = kindsPhone();
+    const names = () => device.rowsDrawn().map(row => row.querySelectorAll('.history-name').map(node => plain(node.textContent)).join('|'));
+    const labelOf = key => plain(device.rowsDrawn().find(row => row.dataset.historyKey === key).getAttribute('aria-label'));
+    device.run('openHistory("w_a")');
+    device.choose('range', 'thisMonth');
+    same('one man: no name on any of his rows - his name is on the line under the choices', names(), ['', '', '', '']);
+    device.choose('man', '');
+    check('everyone: every row carries its man\'s name, his four among them', names().every(name => name !== '')
+        && names().filter(name => name === 'אחמד נסאר').length === 4, JSON.stringify(names()));
+    device.choose('man', 'w_a');
+    same('and him alone again: no name on any row - a row kept from the draw before is not kept with its name', names(), ['', '', '', '']);
+    device.choose('man', '');
+    device.State.schedule.workers.find(worker => worker.id === 'w_a').name = 'אחמד נסאר חדש';
+    device.run('renderHistoryIfOpen()');
+    same('a man renamed under the open dialog: every row of his says the new name, drawn and in its name',
+        [names().filter(name => name.indexOf('אחמד') === 0), device.rowsDrawn().map(row => plain(row.getAttribute('aria-label')))
+            .filter(label => label.indexOf('אחמד') !== -1).map(label => label.indexOf('אחמד נסאר חדש') !== -1)],
+        [['אחמד נסאר חדש', 'אחמד נסאר חדש', 'אחמד נסאר חדש', 'אחמד נסאר חדש'], [true, true, true, true]]);
+
+    // A move no count sees: 02/11 from רמת גן to הרצליה at the same rate - no tile, no month's
+    // count and no number of rows moves, so only the rows themselves tell a draw it is stale.
+    const tiles = JSON.stringify(device.facts().tiles);
+    given('on 02/11 he was at רמת גן', labelOf('row:2026-11-02:w_a').indexOf('רמת גן') !== -1, labelOf('row:2026-11-02:w_a'));
+    device.run("State.schedule.days['2026-11-02'].actual.w_a = { entries: [makeEntry('p_2')] };");
+    device.run('renderHistoryIfOpen()');
+    same('a day moved to another site at the same rate under the open dialog: no count moves, and its row says where he was now',
+        [JSON.stringify(device.facts().tiles) === tiles, labelOf('row:2026-11-02:w_a').indexOf('הרצליה') !== -1
+            && labelOf('row:2026-11-02:w_a').indexOf('רמת גן') === -1],
+        [true, true]);
+
+    // THE DAY'S KIND IS THE DAY'S: at two sites, the sites in a group of their own that takes a
+    // whole line, and the kind and the hours after it - history.browser.mjs measures the glass.
+    const day = key => device.rowsDrawn().find(row => row.dataset.historyKey === key).querySelectorAll('.history-day')[0];
+    same('a day at two sites: both in a group that takes a line of its own, and the day\'s kind and hours after the group',
+        [day('row:2026-11-05:w_a').children.map(child => child.className),
+            day('row:2026-11-05:w_a').children[0].children.map(tag => tag.querySelectorAll('.site-name')[0].textContent)],
+        [['history-sites history-sites-many', 'history-kind history-kind-double', 'history-hours'], ['רמת גן', 'הרצליה']]);
+    same('a day at one site: its group is not made a line of its own', day('row:2026-11-04:w_a').children[0].className, 'history-sites');
+    same('and a row with its man\'s name says so, so that its day goes under the name on the glass',
+        device.rowsDrawn().every(row => row.className.split(' ').indexOf('history-row-everyone') !== -1), true);
+    device.choose('man', 'w_a');
+    same('his rows alone do not', device.rowsDrawn().every(row => row.className.split(' ').indexOf('history-row-everyone') === -1), true);
+
+    // THE RIMA SENTENCE: only with a Rima count in the range; and the text says the fact only.
+    device.choose('man', '');
+    device.choose('range', 'custom');
+    device.dates('2026-10-29', '2026-10-29');
+    const notes = () => device.byId('historyTotals').querySelectorAll('.history-note').map(node => node.textContent);
+    same('everyone, every site, a range with no Rima count: no Rima sentence, on the screen or in the text',
+        [device.facts().rimaInRange, notes(), plain(device.text()).indexOf('רימא')], [0, [], -1]);
+    device.dates('2026-11-01', '2026-11-10');
+    same('and over one with a count: the screen says the fact and what to choose, the text the fact alone',
+        [notes().filter(note => note.indexOf('רימא') !== -1), plain(device.text()).split('\n').filter(line => line.indexOf('רימא') !== -1)],
+        [['עובדי רימא לא נספרים כאן. כדי לראות גם אותם, בחר אתר.'], ['עובדי רימא לא נספרים כאן.']]);
+    device.run('closeHistory()');
+
+    suite('9. what leaves is what is on the screen - after midnight too, with nothing drawn since');
+
+    // The day's follow waits for every open dialog (js/app.js), and no timer draws the dialog
+    // again: left open overnight, it still shows the evening's reading in the morning. «העתק» and
+    // «שלח» read the record afresh at the press, and sent a range ending on a day the screen did not
+    // show, with the seder typed for it the evening before.
+    const night = kindsPhone();
+    night.run('openHistory(null)');
+    night.run('historyToggleText()');
+    const fieldThen = night.byId('historyText').value;
+    const lineThen = plain(night.byId('historyRangeNow').textContent);
+    night.setToday(TOMORROW);
+    night.run('historyCopy()');
+    night.run('historySend()');
+    const [copied, sent] = night.shared.slice(-2);
+    same('«העתק» and «שלח» in the morning send the text the field and the line show - the evening\'s, not a range ending on a day the screen does not show',
+        [copied[0], sent[0], copied[1] === fieldThen, sent[1] === fieldThen, plain(copied[1]).split('\n')[1],
+            plain(copied[1]).indexOf('11/11') === -1, lineThen.replace(/\s/g, ' ').endsWith('01/09/2026 - 10/11/2026')],
+        ['copy', 'share', true, true, '01/09/2026 - 10/11/2026', true, true]);
+    night.run('closeHistory()');
+
+}
+
 // ================================================================== 7. nothing after today
 {
     suite('7. nothing after today: tomorrow\'s typed seder is in no row, count, block or line');
@@ -892,15 +989,21 @@ function kindsPhone() {
     device.choose('range', 'custom');
     device.dates('2026-11-01', '2026-12-31');
     same('a custom range ending after today is read to today, the field written back and the line saying it',
-        [device.byId('historyTo').value, plain(device.byId('historyRangeNow').textContent).slice(-24), device.facts().to],
-        [TODAY, '01/11/2026\u00a0-\u2060\u00a010/11/2026', TODAY]);
-    // The line's dates are ONE word - no-break spaces round the dash and a word joiner after it,
-    // so a wrapping line breaks before the range and never inside it - while the text keeps
-    // dateRange's own spaces.
-    same('the line holds its range as one word; the text\'s range line is dateRange\'s own',
-        [/\d \- \d/.test(plain(device.byId('historyRangeNow').textContent)), plain(device.facts().now).endsWith('01/11/2026\u00a0-\u2060\u00a010/11/2026'),
-            plain(device.text()).split('\n')[1]],
-        [false, true, '01/11/2026 - 10/11/2026']);
+        [device.byId('historyTo').value, plain(device.byId('historyRangeNow').textContent).slice(-23), device.facts().to],
+        [TODAY, '01/11/2026\u00a0- 10/11/2026', TODAY]);
+    // MOVED ON PURPOSE (fix round 1): the line's dates are an inline box of their own, so a
+    // wrapping line breaks BEFORE them and they go down whole - and inside the box, where twice
+    // the text makes it wider than a line, there is ONE break: after the dash, a no-break space
+    // holding the dash to the first date. Round 1 glued the whole range into one word, and the
+    // line's overflow-wrap broke it inside a date («01/09/2026 - 10/11/» over «2026»,
+    // history.browser.mjs holds the glass). The text keeps dateRange's own spaces.
+    const nowNode = device.byId('historyRangeNow');
+    const boxes = nowNode.children.map(child => [child.className, plain(child.textContent)]);
+    same('the line: the template\'s words, then the range in a box of its own - the dash held to the first date, one space to break at',
+        [boxes, (plain(nowNode.querySelectorAll('.history-now-range')[0].textContent).match(/ /g) || []).length,
+            plain(device.facts().now).endsWith('01/11/2026 - 10/11/2026'), plain(device.text()).split('\n')[1]],
+        [[['', `${plain(device.facts().who)} · ${plain(device.facts().where)} · `], ['history-now-range', '01/11/2026\u00a0- 10/11/2026']],
+            1, true, '01/11/2026 - 10/11/2026']);
     device.run('closeHistory()');
 }
 
@@ -1009,10 +1112,13 @@ const YEAR = { range: 'thisYear', from: null, to: null };
     const cut = lines[lines.length - 1];
     same('a year of everyone: within 60,000 characters, ending with the line that says how many rows of how many',
         [text.length <= 60000, cut, lines[lines.length - 2]],
-        [true, `ההודעה כוללת רק את ${rowLines.length} השורות החדשות ביותר מתוך ${facts.rows.length}, כי כל הרשימה ארוכה מדי להודעה אחת. כדי לקבל את כולן, בחר טווח קצר יותר, אתר או עובד.`, '']);
+        // MOVED ON PURPOSE (fix round 1): the fact only - whoever reads the message cannot narrow
+        // anything, and the sender is told how by the screen, whose cap (600) is always passed first.
+        [true, `ההודעה כוללת רק את ${rowLines.length} השורות החדשות ביותר מתוך ${facts.rows.length}, כי כל הרשימה ארוכה מדי להודעה אחת.`, '']);
     check('it holds whole rows only, and almost all the room - one more row would not have fit',
         rowLines.length > 900 && rowLines.length < facts.rows.length && text.length > 59000
-        && rowLines.every(line => / - .+ · (רגיל|שעות נוספות|יום כפול)|- נעדר$/.test(plain(line))), `${rowLines.length} rows, ${text.length}`);
+        && rowLines.every(line => /^• \S+ \d\d\/\d\d - [^:]+: .+ · (רגיל|שעות נוספות|יום כפול)|^• \S+ \d\d\/\d\d - [^:]+: נעדר$/.test(plain(line))),
+        `${rowLines.length} rows, ${text.length}`);
     const screenKeys = season.rowsDrawn().map(row => row.dataset.historyKey);
     const firstLines = JSON.parse(season.run(`(function () { const facts = historyFacts();
         return JSON.stringify(facts.rows.slice(0, 200).map(row => historyRowLine(row, facts))); })()`));
@@ -1038,7 +1144,8 @@ const YEAR = { range: 'thisYear', from: null, to: null };
         season.rowsDrawn().slice(0, 200).every((node, at) => node === firstChunk[at]));
     season.run('historyMore()');
     same('up to 600 - and there no «הצג עוד», the line that says to narrow it', [season.rowsDrawn().length, foot().slice(1)],
-        [600, [`מוצגות 600 השורות החדשות ביותר מתוך ${total}. כדי לראות את השאר, בחר טווח קצר יותר, אתר או עובד.`]]);
+        // MOVED ON PURPOSE (fix round 1): «תקופה», the label of the select it means, for «טווח».
+        [600, [`מוצגות 600 השורות החדשות ביותר מתוך ${total}. כדי לראות את השאר, בחר תקופה קצרה יותר, אתר או עובד.`]]);
     season.run('historyMore()');
     same('and once more is nothing more', [season.rowsDrawn().length, season.run('HISTORY.shown')], [600, 600]);
     same('the drawn rows are the reading\'s first 600, in its order', season.rowsDrawn().map(row => row.dataset.historyKey),
@@ -1052,6 +1159,36 @@ const YEAR = { range: 'thisYear', from: null, to: null };
     same('and none with a site', season.byId('historyList').querySelectorAll('.history-month').map(node => plain(node.textContent)).slice(0, 2),
         ['נובמבר 2026', 'אוקטובר 2026']);
     same('a new choice starts again at 200', season.rowsDrawn().length, 200);
+    season.run('closeHistory()');
+}
+
+// ================================================================== 9. the link's bound, on the season
+{
+    suite('9. with no share sheet, the link\'s bound is counted in what the link carries');
+
+    // 8,000 ENCODED characters: a Hebrew letter is six of them in a link, so a man's three months
+    // on a season - a text well under 8,000 characters - is a link of over 13,000 (measured by the
+    // review of round 1: the dialog's own opening view does not fit; the owner is told).
+    season.run('openHistory("w_05")');
+    season.run('historyToggleText()');
+    const field = season.byId('historyText').value;
+    given('one man over three months on the season: a text shorter than 8,000 characters, its link longer',
+        field.length < 8000 && encodeURIComponent(field).length > 8000, `${field.length} / ${encodeURIComponent(field).length}`);
+    console.log(`      a man's three months on the season: ${field.length} characters, ${encodeURIComponent(field).length} in a link`);
+    const shareSheet = season.ctx.navigator;
+    season.ctx.navigator = {};
+    const handed = season.shared.length;
+    season.run('historySend()');
+    same('so with no share sheet nothing is put in a link, and the line under the doors says to copy it',
+        [season.shared.length - handed, season.byId('historyStatus').textContent],
+        [0, '⚠️ הרשימה ארוכה מדי לקישור של וואטסאפ - השתמש בהעתק ושלח ידנית']);
+    season.choose('range', 'thisMonth');
+    season.choose('site', 'p_6');
+    const short = season.byId('historyText').value;
+    given('a text whose link is inside the bound', encodeURIComponent(short).length <= 8000, String(encodeURIComponent(short).length));
+    same('the choice put the line away, and a short text goes', [season.byId('historyStatus').textContent, (() => {
+        season.run('historySend()'); return season.shared.slice(-1)[0][1] === short; })()], ['', true]);
+    season.ctx.navigator = shareSheet;
     season.run('closeHistory()');
 }
 
@@ -1083,6 +1220,26 @@ const YEAR = { range: 'thisYear', from: null, to: null };
         [device.byId('findModal').style.display, device.byId('historyModal').style.display, device.run('HISTORY')], ['none', 'none', null]);
     same('and openHistory itself refuses a man the record has not got', [device.run('openHistory("w_nobody")'),
         device.byId('historyModal').style.display], [false, 'none']);
+
+    // FIX ROUND 1: the door is on the men turned off because a dispute about a man who left is the
+    // commonest one - and a man who left in the summer opened on three empty months, five tiles of
+    // 0 and «לא נמצא אף יום»: read as a record that had lost his days. A man with no day in them
+    // opens on «מתחילת הרישום».
+    const summer = seeded(11);
+    const gone = summer.State.schedule.workers.find(worker => worker.active === false);
+    summer.State.date = TODAY;
+    summer.run('openFind()');
+    summer.run(`findGo("history", ${JSON.stringify(gone.id)})`);
+    const his = summer.facts();
+    const lastDay = his.rows.length ? his.rows[0].date : '';
+    same('a man turned off in the summer, through his door: opened on «מתחילת הרישום», on his days - the last of them in August',
+        [summer.run('HISTORY.range'), summer.byId('historyRange').value, his.rows.length > 100, his.rows.every(row => row.workerId === gone.id),
+            lastDay <= '2026-08-31' && lastDay >= '2026-08-01'],
+        ['all', 'all', true, true, true]);
+    summer.run('closeHistory()');
+    summer.run(`openHistory(${JSON.stringify(summer.State.schedule.workers[0].id)})`);
+    same('while a man with days in the last three months opens on them, as before', summer.run('HISTORY.range'), 'last3');
+    summer.run('closeHistory()');
 
     const base = withHistory(makeDevice({ deviceId: 'd_base' }), { history: false });
     base.State.schedule.workers = [{ id: 'w_1', name: 'דוגמה', active: true }, { id: 'w_2', name: 'כבוי', active: false }];
@@ -1119,10 +1276,17 @@ const YEAR = { range: 'thisYear', from: null, to: null };
         device.run('historyMore(); historyToggleText(); historySend(); historyCopy(); renderHistoryIfOpen(); historyToggleText();');
         device.run('closeHistory()');
     });
+    // A follow owed from midnight is settled by the day he chose (dayChosenByHand, js/app.js, which
+    // is not loaded here - its stand-in counts the call; history.browser.mjs walks the morning).
+    const chosen = [];
+    device.ctx.dayChosenByHand = () => { chosen.push(device.State.date); };
     device.run('openHistory(null)');
     device.run(`historyGoDay(${JSON.stringify('2026-10-05')}, 'row:2026-10-05:w_1')`);
     same('a row\'s door closes the dialog and puts the day screen on that date - nothing else', [device.byId('historyModal').style.display,
         device.State.date, device.views.slice(-1)], ['none', '2026-10-05', ['day']]);
+    same('and says that day was chosen by hand, once, once it is set - so a follow owed from midnight does not take it from him',
+        chosen, ['2026-10-05']);
+    delete device.ctx.dayChosenByHand;
     check('not one write reached the disk', touched.length === 0, touched.slice(0, 5).join(', '));
     check('every key holds the bytes it held', JSON.stringify(device.dump()) === disk);
     check('the record in memory is the record it was', JSON.stringify(device.State.schedule) === record);
@@ -1202,10 +1366,12 @@ const YEAR = { range: 'thisYear', from: null, to: null };
 
     const device = withHistory(makeDevice({ deviceId: 'd_words' }));
     const T = key => device.run(`HISTORY_TEXT.${key}`);
-    same('the plain words', ['title', 'door', 'man', 'site', 'last3', 'thisYear', 'all', 'asText', 'noRima', 'dayOne', 'dayMany',
-        'empty', 'tooLongForLink', 'leaveTitle', 'leaveOk'].map(T), [
+    // MOVED ON PURPOSE (fix round 1): the Rima sentence in two - the fact, which the text says too,
+    // and what to choose, which only the screen says (the screen's words are as they were).
+    same('the plain words', ['title', 'door', 'man', 'site', 'last3', 'thisYear', 'all', 'asText', 'noRima', 'noRimaHow', 'dayOne',
+        'dayMany', 'empty', 'tooLongForLink', 'leaveTitle', 'leaveOk'].map(T), [
         'מי עבד איפה', 'איפה עבד', 'עובד', 'אתר', '3 החודשים האחרונים', 'השנה', 'מתחילת הרישום', 'הרשימה כטקסט',
-        'עובדי רימא לא נספרים כאן. כדי לראות גם אותם, בחר אתר.', 'יום אחד', 'ימים', 'לא נמצא אף יום שמתאים לבחירה.',
+        'עובדי רימא לא נספרים כאן.', 'כדי לראות גם אותם, בחר אתר.', 'יום אחד', 'ימים', 'לא נמצא אף יום שמתאים לבחירה.',
         '⚠️ הרשימה ארוכה מדי לקישור של וואטסאפ - השתמש בהעתק ושלח ידנית', 'לצאת מבניית הסידור?', 'צא ופתח את היום']);
     same('and the templates', [
         device.run('HISTORY_TEXT.now("אחמד", "כל האתרים", "01/09/2026 - 19/11/2026")'),
@@ -1220,13 +1386,13 @@ const YEAR = { range: 'thisYear', from: null, to: null };
         'אחמד · כל האתרים · 01/09/2026 - 19/11/2026', 'נובמבר 2026 · 3 ימי נוכחות', 'נובמבר 2026', 'אחמד · 3 ימים',
         'יום שני 12/10/2026 · אחמד · רמת גן · רגיל', 'יום שני 12/10/2026 · אחמד · נעדר',
         'מוצגות 200 שורות מתוך 9412.', 'הצג עוד 200',
-        'מוצגות 600 השורות החדשות ביותר מתוך 9412. כדי לראות את השאר, בחר טווח קצר יותר, אתר או עובד.',
+        'מוצגות 600 השורות החדשות ביותר מתוך 9412. כדי לראות את השאר, בחר תקופה קצרה יותר, אתר או עובד.',
         '📄 כל העובדים · רמת גן',
-        'ההודעה כוללת רק את 1072 השורות החדשות ביותר מתוך 9412, כי כל הרשימה ארוכה מדי להודעה אחת. כדי לקבל את כולן, בחר טווח קצר יותר, אתר או עובד.',
+        'ההודעה כוללת רק את 1072 השורות החדשות ביותר מתוך 9412, כי כל הרשימה ארוכה מדי להודעה אחת.',
         'כדי לפתוח את יום שני 12/10/2026 צריך לצאת מבניית הסידור ליום שישי 20/11/2026. אפשר לחזור אליה אחר כך מ«בניית סידור».',
         'כדי לפתוח את יום שני 12/10/2026 צריך לצאת מבניית הסידור ליום שישי 20/11/2026.']);
     same('and those are all it adds', device.run('Object.keys(HISTORY_TEXT).join()'),
-        'title,door,man,site,last3,thisYear,all,now,asText,noRima,dayOne,dayMany,empty,month,who,rowName,shown,more,capped,textHead,textCut,tooLongForLink,leaveTitle,leaveMessage,leaveOk');
+        'title,door,man,site,last3,thisYear,all,now,asText,noRima,noRimaHow,dayOne,dayMany,empty,month,who,rowName,shown,more,capped,textHead,textCut,tooLongForLink,leaveTitle,leaveMessage,leaveOk');
     check('the block is frozen', device.run('Object.isFrozen(HISTORY_TEXT) && Object.isFrozen(HISTORY_REUSED)'));
     same('the constants', JSON.parse(device.run('JSON.stringify([HISTORY_CHUNK, HISTORY_SHOWN_MAX, HISTORY_TEXT_MAX, HISTORY_LINK_MAX])')),
         [200, 600, 60000, 8000]);

@@ -856,6 +856,7 @@
 :root.display-large .history-fold > button { font-size: 20px; }
 :root.display-large #historyModal .history-fold-body textarea { font-size: 20px; }
 :root.display-large .history-fold-body button { font-size: 20px; }
+:root.display-large #historyStatus { font-size: 20px; }
 :root.display-large .history-month { font-size: 22px; font-weight: 800; }
 :root.display-large #historyList .history-row { font-size: 20px; }
 :root.display-large .history-when { font-size: 20px; font-weight: 700; }
