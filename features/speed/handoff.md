@@ -1575,6 +1575,25 @@ Fix round 1 moved no expectation of an existing suite: every check it changed is
     kept, so a plan asked again after a send's receipt needs no sheet: 192 ms instead of the first draw's
     5.9 s) against v204's 14.7.
 
+## Fix round 2 (on `602c1a8`)
+
+One finding, from the independent verifier's run on `602c1a8`: «verification failures», P1. Triaged:
+CONFIRMED as described, and LEFT, because it is the contract's own expected red (contract, "Existing suites
+touched": "Expected red on this branch, and only this").
+
+- `tests/build.test.mjs` «the stamps were moved by the commit that moved the bytes :: and nothing in the
+  shell has changed since» - re-run here on `602c1a8`: 68/69, the one red naming js/ui/advancereset.js,
+  js/ui/owes.js, js/ui/reports.js changed since 6ab193d6.
+- `tests/gate.integrity.test.mjs` §4 «no cached file has changed since the three stamps last moved» - re-run
+  here: 19/20, the one red naming ea92a194, 77e63e22, 07532505, 90a34820, f9bc05b8.
+
+Both say one fact: three cached files changed and the three stamps did not move. The only fix is to move the
+stamps (index.html:108, js/app.js:7, sw.js:24), which the hard rules give to the integrator alone; weakening
+either check is not a fix. No code changed in this round, so no other suite was re-run (the verifier ran 107 of
+109 npm test steps green, 34 browser runs and the season suite green, on this same commit). `npm test` is a
+chain of `&&` and stops at test:build, so on this branch it exits 1 until the integrator moves the stamps; the
+integrator re-runs the whole of it after the stamps move, as "For the integrator" says.
+
 ## For the integrator
 
 **«מה חדש» (PROPOSED; fix round 1 replaces the contract's Revision 2 item, which repeated v196's own almost
