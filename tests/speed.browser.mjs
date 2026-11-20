@@ -18,9 +18,18 @@
 //   16. THE SAME PICTURE. sharePrintout('report') through a recorder: the same PNG bytes
 //       drawn shared and drawn afresh.
 //   17. THE DAY SCREEN. A write on Thursday, the close reminder's reading after its quiet -
-//       exactly once (a spy on weeklyCloseRead) - its count a fresh count's, and «סגירת שבוע»
-//       opened after it on the unmoved record.
+//       exactly once (a spy on weeklyCloseRead) - its line up, its count a fresh count's, and
+//       «סגירת שבוע» opened by pressing that line on the unmoved record. On season-closed and
+//       season-skipped, where the line shows (fix round 1: on season-open «סגירת שבוע» holds
+//       every man and the count is 0 on both builds, so there is no line to press - those rows
+//       stay, as clocks of the reading where it is heaviest).
 //   18. NOTHING WRITTEN by any reading (tests/census.mjs), and no uncaught error.
+//
+// (fix round 1) Where a row is a reading of a record that did not move, the suite also reads
+// off the page that the memo kept before it is the memo that answered it (REPORT_SHARED_KEPT,
+// this build only) - so a row that only a missing S3, or a tick back in its key, would slow
+// down cannot pass by the clock alone. And three rows the review timed by hand: a man's page
+// of «מקדמות» opened from the board, «סגירות שנרשמו» from it, and letters typed into its search.
 //
 // The rows where v204's own task takes minutes in Node (the payslips) are held to an
 // absolute ceiling instead. While a row other than the reminder's is measured, the reminder's
@@ -48,7 +57,7 @@ const ms = value => `${Math.round(value)}`;
 
 // ---------------------------------------------------------------- the records and the trees
 const SEASON = {};
-for (const kind of ['open', 'closed']) {
+for (const kind of ['open', 'closed', 'skipped']) {
     const began = Date.now();
     SEASON[kind] = seasonDisk(kind);
     console.log(`season-${kind}: ${JSON.stringify(SEASON[kind].facts)} - seeded in ${((Date.now() - began) / 1000).toFixed(1)} s`);
@@ -105,6 +114,17 @@ async function freshPage(tree, record, options = {}) {
             return State.commit(assignPlace(State.schedule, todayStr(), id, 'actual', site, 'normal')) !== false;
         };
         ['updateBanner', 'installBanner', 'whatsNewBanner'].forEach(id => { const node = document.getElementById(id); if (node) node.style.display = 'none'; });
+        // The memo S3 keeps (this build; v204 has none): held before an act, and asked after it
+        // whether that very memo answered the act, and whether anything was worked out anew.
+        const memoNow = () => (typeof REPORT_SHARED_KEPT === 'undefined' || !REPORT_SHARED_KEPT ? null : REPORT_SHARED_KEPT.memo);
+        const sizeOf = memo => (memo ? (memo.entries ? 1 : 0) + (memo.fold ? 1 : 0) + (memo.history ? 1 : 0) + memo.overpaid.size
+            + memo.outstanding.size + memo.walks.size + memo.positions.size : -1);
+        window.speedHold = () => { window.speedHeld = memoNow(); window.speedHeldSize = sizeOf(window.speedHeld); };
+        window.speedKept = () => ({ same: Boolean(window.speedHeld) && memoNow() === window.speedHeld,
+            grew: sizeOf(memoNow()) !== window.speedHeldSize });
+        window.speedSettle = async () => {
+            for (let n = 0; n < 2400 && document.querySelector('.owes-pending'); n += 1) await new Promise(resolve => setTimeout(resolve, 50));
+        };
     });
     if (!options.reminder) await page.evaluate(() => { window.speedReminderAfterRender = closeReminderAfterRender; closeReminderAfterRender = () => {}; });
     await page.waitForTimeout(300);
@@ -170,8 +190,14 @@ async function both(act, done, options = {}) {
     row('1. a write, then «דוחות» opened', first.v204, first.now, first.v204.longest / 4, '<= 1/4 of v204\'s');
     for (const [name, act] of [['«לפי אתר»', "REPORT_SECTION = 'sites'; render();"], ['«לפי עובד»', "REPORT_SECTION = 'workers'; render();"]]) {
         const v204 = await measure(first.v204Page.page, `${SNAPSHOT} ${act}`, AFTER_PAINT);
-        const mine = await measure(first.nowPage.page, `${SNAPSHOT} ${act}`, AFTER_PAINT);
-        row(`2. then ${name} redrawn, the record unmoved`, v204, mine, first.v204.longest / 10, '<= 1/10 of v204\'s row 1');
+        const mine = await measure(first.nowPage.page, `${SNAPSHOT} speedHold(); ${act}`, AFTER_PAINT);
+        const kept = await first.nowPage.page.evaluate(() => window.speedKept());
+        // (fix round 1) v204's row 1 alone could not catch a redraw that kept nothing: this build's
+        // own first reading is under a tenth of v204's. So also a quarter of THIS build's row 1,
+        // in this same page - and the memo row 1 kept, answering the redraw.
+        row(`2. then ${name} redrawn, the record unmoved`, v204, mine, Math.min(first.v204.longest / 10, first.now.longest / 4),
+            `<= 1/10 of v204's row 1 and <= 1/4 of this build's own (${ms(first.now.longest)} ms)`);
+        same(`2. ${name}: the memo «דוחות» kept answered the redraw, and nothing was worked out anew`, kept, { same: true, grew: false });
     }
     await first.v204Page.context.close();
     await first.nowPage.context.close();
@@ -185,36 +211,75 @@ async function both(act, done, options = {}) {
     row('4. «שים לב» read after paint, the record moved', fourth.v204, fourth.now, fourth.v204.longest / 2, '<= 1/2 of v204\'s');
 
     // 5, 6, 17. a write on Thursday; the reminder's reading after its quiet - exactly once -
-    // its count a fresh count's; then «סגירת שבוע» opened after it, the record unmoved.
+    // its line, its count a fresh count's; then «סגירת שבוע» opened after it, the record unmoved.
     const spy = () => {
         window.speedReads = 0;
         const real = weeklyCloseRead;
         weeklyCloseRead = function () { window.speedReads += 1; return real.apply(this, arguments); };
     };
-    const fifth = await both(`speedWrite(); ${SNAPSHOT}`, 'window.speedReads >= 1 && closeReminderQuiet === null && !closeReminderSoon',
-        { reminder: true, before: spy, keep: true });
-    row('5. a write on Thursday, then the close reminder\'s reading after its quiet', fifth.v204, fifth.now, fifth.v204.longest * 0.7, '<= 0.7 of v204\'s');
+    const QUIET = 'window.speedReads >= 1 && closeReminderQuiet === null && !closeReminderSoon';
+    const DIALOG = 'typeof WEEKLY_CLOSE !== "undefined" && WEEKLY_CLOSE && WEEKLY_CLOSE.read';
+    // On season-open: the reading where it is heaviest. «סגירת שבוע» holds every man there (an
+    // earlier open period a debt ran through), so the count is 0 on both builds and no line is up:
+    // the dialog is opened by the function the line's button calls.
+    const fifth = await both(`speedWrite(); ${SNAPSHOT}`, QUIET, { reminder: true, before: spy, keep: true });
+    row('5. season-open: a write on Thursday, then the close reminder\'s reading after its quiet', fifth.v204, fifth.now, fifth.v204.longest * 0.7, '<= 0.7 of v204\'s');
     const opened = {};
     for (const tree of ['v204', 'now']) {
-        const { page, cdp } = fifth[`${tree}Page`];
+        const { page } = fifth[`${tree}Page`];
         await page.waitForTimeout(2500);
         const said = await page.evaluate(() => ({ reads: window.speedReads, kept: CLOSE_REMINDER_KEPT.count,
             line: Boolean(document.getElementById('closeReminderOpen') && document.getElementById('closeReminderOpen').offsetParent) }));
-        same(`17. ${tree}: the reminder read the record exactly once after the write`, said.reads, 1);
-        const act = `${SNAPSHOT} ${said.line ? "document.getElementById('closeReminderOpen').click();" : 'openWeeklyClose();'}`;
-        opened[tree] = await measure(page, act, 'typeof WEEKLY_CLOSE !== "undefined" && WEEKLY_CLOSE && WEEKLY_CLOSE.read');
-        opened[`${tree}Line`] = said.line;
-        await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
-        const fresh = await page.evaluate(() => {
-            if (typeof REPORT_SHARED_KEPT !== 'undefined') REPORT_SHARED_KEPT = null;
-            return closeReminderReadCount(State.schedule, todayStr(), new Date().toISOString());
-        });
-        same(`17. ${tree}: the line's count (${said.kept}) is a fresh count's`, said.kept, fresh);
+        same(`17. season-open, ${tree}: the reminder read the record exactly once after the write`, said.reads, 1);
+        same(`season-open, ${tree}: every man held, so a count of 0 and no line - the dialog opened by the function the line calls`, [said.kept, said.line], [0, false]);
+        opened[tree] = await measure(page, `${SNAPSHOT} ${tree === 'now' ? 'speedHold();' : ''} openWeeklyClose();`, DIALOG);
+        if (tree === 'now') opened.kept = await page.evaluate(() => window.speedKept());
     }
-    row(`6. then «סגירת שבוע» opened ${opened.nowLine ? 'from the reminder\'s line' : '(no man to offer, so no line: by the function the line calls)'}, the record unmoved`,
+    row('6. season-open: then «סגירת שבוע» opened (no line: by the function the line calls), the record unmoved',
         opened.v204, opened.now, opened.v204.longest / 3, '<= 1/3 of v204\'s same act');
+    same('6. season-open: the memo the reminder\'s reading kept answered the dialog', opened.kept.same, true);
     await fifth.v204Page.context.close();
     await fifth.nowPage.context.close();
+
+    // (fix round 1) THE OWNER'S THURSDAY: season-closed (the crew closed in order, a third of the
+    // men's last period open) and season-skipped (and some weekly men missed the week before, so
+    // their empty week is closed first on a copy). The line is up there; it is pressed. Neither
+    // reading is a fraction of v204's: after a write the reading is the model's walk of every
+    // man's last period, and the copies of the record are planned again at every reading - so
+    // these rows hold "never slower" and print the fraction (features/speed/handoff.md).
+    for (const kind of ['closed', 'skipped']) {
+        const day = await both(`speedWrite(); ${SNAPSHOT}`, QUIET, { record: SEASON[kind], reminder: true, before: spy, keep: true });
+        row(`5. season-${kind}: a write on Thursday, then the close reminder's reading after its quiet`, day.v204, day.now,
+            day.v204.longest * 1.25 + 30, `<= 1.25x v204's + 30 ms (${(day.now.longest / day.v204.longest).toFixed(2)} of it)`);
+        const press = {};
+        for (const tree of ['v204', 'now']) {
+            const { page, cdp } = day[`${tree}Page`];
+            await page.waitForTimeout(2500);
+            const said = await page.evaluate(() => ({ reads: window.speedReads, kept: CLOSE_REMINDER_KEPT.count,
+                line: Boolean(document.getElementById('closeReminderOpen') && document.getElementById('closeReminderOpen').offsetParent),
+                words: (document.getElementById('closeReminderLine') || {}).textContent || '' }));
+            same(`17. season-${kind}, ${tree}: the reminder read the record exactly once after the write`, said.reads, 1);
+            check(`17. season-${kind}, ${tree}: its line is up, counting ${said.kept} men («${said.words}»)`, said.line === true && said.kept > 0);
+            press[tree] = await measure(page, `${SNAPSHOT} ${tree === 'now' ? 'speedHold();' : ''} document.getElementById('closeReminderOpen').click();`, DIALOG);
+            const dialog = await page.evaluate(() => ({ up: document.getElementById('weeklyCloseModal').style.display === 'flex',
+                men: WEEKLY_CLOSE && WEEKLY_CLOSE.read ? WEEKLY_CLOSE.read.men.filter(man => !man.held).length : -1 }));
+            check(`17. season-${kind}, ${tree}: pressing the line opened «סגירת שבוע», offering ${dialog.men} men`, dialog.up && dialog.men > 0);
+            if (tree === 'now') press.kept = await page.evaluate(() => window.speedKept());
+            await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+            const fresh = await page.evaluate(() => {
+                if (typeof REPORT_SHARED_KEPT !== 'undefined') REPORT_SHARED_KEPT = null;
+                return closeReminderReadCount(State.schedule, todayStr(), new Date().toISOString());
+            });
+            same(`17. season-${kind}, ${tree}: the line's count (${said.kept}) is a fresh count's`, said.kept, fresh);
+            press[`${tree}Count`] = said.kept;
+        }
+        same(`17. season-${kind}: both builds count the same men`, press.nowCount, press.v204Count);
+        row(`6. season-${kind}: then «סגירת שבוע» opened from the reminder's line, the record unmoved`, press.v204, press.now,
+            press.v204.longest * 1.25 + 30, `<= 1.25x v204's + 30 ms (${(press.now.longest / press.v204.longest).toFixed(2)} of it)`);
+        same(`6. season-${kind}: the memo the reminder's reading kept answered the dialog`, press.kept.same, true);
+        await day.v204Page.context.close();
+        await day.nowPage.context.close();
+    }
 
     // 7, 8. the closing box of a weekly man; the card of a fortnightly one.
     const seventh = await both(`${SNAPSHOT} openWorkerSettlement('w_01');`, 'true');
@@ -235,14 +300,67 @@ async function both(act, done, options = {}) {
     const eleventh = {};
     for (const tree of ['v204', 'now']) {
         const { context, page } = await freshPage(tree, SEASON.open);
-        await measure(page, "speedWrite(); showView('reports');", AFTER_PAINT);
+        eleventh[`${tree}First`] = await measure(page, "speedWrite(); showView('reports');", AFTER_PAINT);
         const tick = await page.evaluate(() => { const before = Store.tick; Store.set('farkad:prov:sent:advance:speed_row11', '1'); return [before, Store.tick]; });
         given(`${tree}: the provenance key moved the tick`, tick[1] !== tick[0], JSON.stringify(tick));
-        eleventh[tree] = await measure(page, `${SNAPSHOT} render();`, AFTER_PAINT);
+        eleventh[tree] = await measure(page, `${SNAPSHOT} ${tree === 'now' ? 'speedHold();' : ''} render();`, AFTER_PAINT);
+        if (tree === 'now') eleventh.kept = await page.evaluate(() => window.speedKept());
         await context.close();
     }
     row('11. a write, «דוחות», a send\'s provenance key (the tick moved, the record not), «דוחות» redrawn', eleventh.v204, eleventh.now,
-        first.v204.longest / 10, '<= 1/10 of v204\'s row 1');
+        Math.min(first.v204.longest / 10, eleventh.nowFirst.longest / 4), `<= 1/10 of v204's row 1 and <= 1/4 of this page's own first draw (${ms(eleventh.nowFirst.longest)} ms)`);
+    same('11. the memo the first draw kept answered the redraw across the tick (S3 holds no tick), nothing worked out anew', eleventh.kept, { same: true, grew: false });
+
+    // (fix round 1) A HAND ON A DRAWN PAGE, as the review timed it. A man's page of «מקדמות»
+    // opened from the board, and «סגירות שנרשמו» from it, on season-closed: both read only what
+    // the board's reading already answered, and since fix round 1 pay ONE copy of the record (it
+    // was two, and the copies were most of a man's page: 39 ms on v204, 119 here). Cheap on v204
+    // already, so they are held to never being slower than v204 by more than that one copy.
+    const BOARD = async () => { showView('advances'); await window.speedSettle(); };
+    const middle = list => list.slice().sort((a, b) => a.longest - b.longest)[Math.floor(list.length / 2)];
+    // Three men a page, each opened from the list and the list drawn again after him - the median
+    // of the three (one page of each build: a single tap of a few tens of ms is noise).
+    const pages = {};
+    for (const tree of ['v204', 'now']) {
+        const { context, page } = await freshPage(tree, SEASON.closed);
+        await page.evaluate(BOARD);
+        const times = [];
+        for (const id of ['w_03', 'w_17', 'w_25']) {
+            times.push(await measure(page, `${SNAPSHOT} ${tree === 'now' ? 'speedHold();' : ''} showWorkerAdvances(${JSON.stringify(id)});`, 'true'));
+            if (tree === 'now') pages.kept = (pages.kept || []).concat([await page.evaluate(() => window.speedKept())]);
+            await page.evaluate(async () => { ADVANCE_WORKER = null; render(); await window.speedSettle(); });
+        }
+        pages[tree] = times;
+        await context.close();
+    }
+    row('12. season-closed: a man\'s page of «מקדמות», opened from the board (the median of three men)', middle(pages.v204), middle(pages.now),
+        middle(pages.v204).longest * 1.25 + 60, '<= 1.25x v204\'s + 60 ms (one copy of a 1 MB record at 4x)');
+    same('12. the board\'s memo answered each man\'s page, nothing worked out anew', pages.kept.every(one => one.same && !one.grew), true);
+    const closures = await both(`${SNAPSHOT} speedHold(); OWES_PAGE = 'closures'; render();`, 'true',
+        { record: SEASON.closed, before: BOARD, after: page => page.evaluate(() => window.speedKept()) });
+    row('13. season-closed: «סגירות שנרשמו», opened from the board', closures.v204, closures.now, closures.v204.longest / 2, '<= 1/2 of v204\'s');
+    same('13. the board\'s memo answered it', closures.nowAfter.same, true);
+    // Letters typed into «מקדמות»'s search on season-open: each letter is every listed man's
+    // advances read again - outside the reading until fix round 1 (850 ms a letter on both builds).
+    const LETTERS = ['ע', 'עו', 'עוב', 'עובד', 'עובד ', 'עובד 1'];
+    const typed = {};
+    for (const tree of ['v204', 'now']) {
+        const { context, page } = await freshPage(tree, SEASON.open);
+        await page.evaluate(BOARD);
+        const times = [];
+        for (const text of LETTERS) {
+            times.push(await measure(page, `${SNAPSHOT} ${tree === 'now' ? 'speedHold();' : ''} const field = document.querySelector('#advancesView input[type=search]');
+                field.value = ${JSON.stringify(text)}; field.dispatchEvent(new Event('input'));`, 'true'));
+            if (tree === 'now') typed.kept = (typed.kept || []).concat([await page.evaluate(() => window.speedKept())]);
+        }
+        typed[tree] = times;
+        typed[`${tree}Cards`] = await page.evaluate(() => document.querySelectorAll('#advancesView .advance-worker-card').length);
+        await context.close();
+    }
+    row('14. season-open: the first letter typed into «מקדמות»\'s search', typed.v204[0], typed.now[0], typed.v204[0].longest / 4, '<= 1/4 of v204\'s');
+    row(`14. season-open: the median of ${LETTERS.length} letters`, middle(typed.v204), middle(typed.now), middle(typed.v204).longest / 4, '<= 1/4 of v204\'s');
+    same('14. every letter answered by the board\'s memo, nothing worked out anew; the same men listed on both builds',
+        [typed.kept.every(one => one.same && !one.grew), typed.nowCards], [true, typed.v204Cards]);
 
     // The day screen's own write: reported, with no budget (the commit is js/state.js's).
     const day = await both(`speedWrite();`, 'true');

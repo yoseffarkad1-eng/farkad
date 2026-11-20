@@ -825,7 +825,8 @@ const COUNT_WAYS = (device, men) => waysOf(device, men, { ranges: [RANGE_NAMES[0
     const kept = now.run('REPORT_SHARED_KEPT === null ? -1 : REPORT_SHARED_KEPT.sheets.size');
     given(`the gate's plan priced the sheets of his fortnights inside the draw: ${priced}`, priced > 1000, String(priced));
     check(`and the reading kept ${kept} sheets: the ranges the draw itself read, none of the plan's`, kept >= 1 && kept <= 60, String(kept));
-    same('the draw is v204\'s', `ok:${draw.out}`, outcome(old, PAGE_WAYS[0][1]));
+    const drawn = `ok:${draw.out}`;
+    same('the draw is v204\'s', drawn, outcome(old, PAGE_WAYS[0][1]));
     // A send's provenance key: the tick moves, the gate's kept answer with it, and the gate is asked
     // again - planned from the walks that were kept, which need no sheet.
     now.run('Store.set("farkad:prov:sent:advance:speed_plan", "1"); 1');
