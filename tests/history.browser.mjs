@@ -1191,7 +1191,7 @@ try {
             proto.tap = realTap;
         }
         same('a touch the page never got: the tap taken again, the dialog open on him, nothing failed and nothing thrown',
-            [threw, lose, await isOpen(page), await page.evaluate(() => HISTORY.workerId), heard.map(([, pass]) => pass)],
+            [threw, lose, await isOpen(page), await page.evaluate(() => (HISTORY ? HISTORY.workerId : null)), heard.map(([, pass]) => pass)],
             ['', 0, true, 'w02', [true, true]]);
         check('and the finder\'s tap says it came after one the page got no click of', heard.length > 0
             && heard[0][2] === 'after 1 tap the page got no click of: [[]]', JSON.stringify(heard));
@@ -1207,7 +1207,7 @@ try {
             threw = String(error.message).split('\n')[0];
         }
         same('a click the page got and did nothing with: one check failed - the finder\'s - never a tap taken again, and the run goes on into the dialog',
-            [threw, judged.map(([, pass]) => pass), await isOpen(page), await page.evaluate(() => HISTORY.workerId)], ['', [false, true], true, 'w02']);
+            [threw, judged.map(([, pass]) => pass), await isOpen(page), await page.evaluate(() => (HISTORY ? HISTORY.workerId : null))], ['', [false, true], true, 'w02']);
         check('and that failure names the click and where it came down', judged.length > 0
             && judged[0][2].startsWith('the page got a click on #findEntry and opened nothing;'), JSON.stringify(judged));
         check('and nothing was written by either', await disk(page) === atRest);
