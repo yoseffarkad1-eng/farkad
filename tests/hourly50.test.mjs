@@ -13,6 +13,8 @@
 //   H5  the last cycle boundary taken back, and refused where a closed period depends on it
 //   H6  every word, pinned
 
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { makeDevice } from './harness.mjs';
 import { suite, check, same, given, report } from './runner.mjs';
 
@@ -276,5 +278,24 @@ suite('H6: every word of the button, pinned');
     same('one man', t.message(1), 'לקבוע 50 ₪ לשעה נוספת לעובד אחד שאין להם שכר שעה? מי שכבר יש לו שכר שעה נשאר כמו שהוא, ואפשר לשנות לכל עובד בפרטים שלו.');
     same('done, one man', t.done(1), 'נקבע 50 ₪ לשעה נוספת לעובד אחד.');
 }
+
+// ---------------------------------------------------------------- H8 (v207: with the speed layer)
+
+suite('H8: the kept reading of «דוחות» (v207\'s speed layer) forgets at the 50 button');
+await (async () => {
+    const d = crew();
+    // The pay sheet's one reading lives in js/ui/reports.js, which the harness does not load:
+    // it is run into this device's context as the page runs it, after the model.
+    vm.runInContext(readFileSync(new URL('../js/ui/reports.js', import.meta.url), 'utf8'), d.ctx,
+        { filename: 'js/ui/reports.js' });
+    work(d, 'w_y', '2026-11-16', 4);
+    const read = () => d.call('reportReadOnce', () => d.call('payrollRowsOver', '2026-11-13', '2026-11-19', true)
+        .find(r => r.workerId === 'w_y').amount);
+    same('read once and kept: 1000', [read(), read()], [1000, 1000]);
+    check('the reading is kept between draws', d.global('REPORT_SHARED_KEPT') !== null);
+    d.answer = true;
+    await d.call('fillHourlyRates');
+    same('after the 50 button the next reading is the record\'s: 1200', read(), 1200);
+})();
 report();
 });
