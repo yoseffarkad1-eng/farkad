@@ -47,6 +47,10 @@ const server = await serve(root);
 check('the browser is served the named tree', (await verifyServedAssets(server.url, root, expectedShaFor(root))).ok);
 const browser = await launchLocalBrowser(chromium, { executablePath: process.env.CHROME_PATH });
 const errors = [];
+// The one error the test page itself makes (criterion 19 says why), and how many of it the page
+// counted where it was thrown.
+const BLOCKED_WORKER = "Cannot read properties of undefined (reading 'update')";
+let blockedWorkerRaised = 0;
 const SHOTS = process.env.HISTORY_SHOTS || '';
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 
@@ -571,14 +575,18 @@ try {
             // THE TEST PAGE'S OWN FAULT, SET APART. tests/screens.mjs blocks the service worker, so
             // the registration js/ui/offline.js keeps for the phone's return never came, and its
             // listener reads `update` of nothing on the return made here (tests/midnight.browser.mjs
-            // allows the worker and never meets it). That error only, across the return only; any
-            // other still counts below.
-            const held = errors.length;
+            // allows the worker and never meets it). What the return raised is counted IN THE PAGE,
+            // where it is thrown - Playwright hands each error to this file later, and on a loaded
+            // machine two of them came after a window of 100 ms had closed (the run on ef85afe) -
+            // and exactly that many of that one message are taken off at the end. Any other error,
+            // and any more of that one, still counts.
+            await page.evaluate(() => { window.__raised = []; window.addEventListener('error', event => window.__raised.push(String(event.message))); });
             await lockUntil(page, '2026-11-11T07:10:00+02:00');
             await pause(page, 100);
-            const raised = errors.splice(held);
+            const raised = await page.evaluate(() => window.__raised);
             check(`${how}: the return raised nothing but the blocked worker's own read of a registration that never came`,
-                raised.every(message => message === "Cannot read properties of undefined (reading 'update')"), JSON.stringify(raised));
+                raised.every(message => message.endsWith(BLOCKED_WORKER)), JSON.stringify(raised));
+            blockedWorkerRaised += raised.length;
             same(`${how}: unlocked in the morning with it open, the day under it is still the evening's`,
                 await page.evaluate(() => [todayStr(), State.date, document.getElementById('historyModal').style.display]),
                 ['2026-11-11', TODAY, 'flex']);
@@ -1089,7 +1097,11 @@ try {
     }
 
     suite('26. and nothing threw');
-    check('no uncaught browser errors', errors.length === 0, JSON.stringify(errors.slice(0, 5)));
+    // But the blocked worker's own errors that the midnight walk's returns raised, counted in the
+    // page there (criterion 19) - whenever they were handed over. Not one more, and nothing else.
+    let excused = blockedWorkerRaised;
+    const counted = errors.filter(message => !(message === BLOCKED_WORKER && excused-- > 0));
+    check('no uncaught browser errors', counted.length === 0, JSON.stringify(counted.slice(0, 5)));
 } finally {
     await browser.close();
     await server.close();
