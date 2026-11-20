@@ -89,8 +89,9 @@ async function block(name, body) {
 const EXPECTED = [
     // v206 (the integration of 2026-11-19): the four tracks' items in their own words - «תמונת
     // מצב»'s place as its track corrected it (no app name is drawn on any screen; the door is the
-    // strip's top right-hand corner). Written ahead of the stamps: the guard below SKIPs until
-    // js/app.js says v206, and every «הראה לי» of it is asked through whatsNewGo meanwhile.
+    // strip's top right-hand corner). Written ahead of the stamps (a9cdb92); since the release
+    // commit js/app.js says v206, the guard below holds this entry, and tests/whatsnew.browser.mjs
+    // presses every «הראה לי» of it by its own button.
     { build: 'v206', items: [
         { title: 'סיכום שנה',
             text: 'השנה חודש אחר חודש, לפי עובד ולפי אתר, וקובץ Excel לרואה החשבון - לפי מה שנרשם, לא מה ששולם.',

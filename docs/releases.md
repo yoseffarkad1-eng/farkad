@@ -1,6 +1,415 @@
-## v205 — a waiting build takes itself at the next launch of the app (candidate, not served)
+## v206 — «סיכום שנה», «לוח חודשי», «יום תשלום» and «תמונת מצב»: four readings the owner asked for on 2026-11-19, in one build, and two repairs to v205's update (candidate, not served)
 
-**NOT SERVED YET.** A candidate on v204 (main, 6ab193d). The release commit moves the three
+**NOT SERVED YET.** A candidate on v205 (main, 8b8f807). The release commit moves the three
+build stamps to v206; its «מה חדש» entry was written ahead of them, in the integration commit
+(a9cdb92), and is at the top of WHATSNEW_BUILDS (proposed): four items, one per feature. The owner
+asked on 2026-11-19 (in Arabic) for "real, serious, heavy features that lift the app several
+levels". Four tracks were built at once from v204 (6ab193d), each against a contract of its own
+(`features/<track>/contract.md`, revision 2, after a critic), each reviewed adversarially on its
+own branch («סיכום שנה» 17 findings, «לוח חודשי» 19, «יום תשלום» 17, «תמונת מצב» 15; every one
+confirmed, then repaired, in whole or in part, or left to the owner with a default) and verified
+independently there. They were merged onto v205 in this order: the v205 follow-up (part 6),
+«סיכום שנה», «לוח חודשי», «יום תשלום», «תמונת מצב». The merged tree was reviewed once more (six
+findings, on d2d4710) and repaired in a9cdb92 (part 5). What each track reads, every string it
+adds, every check and what ran where are in `features/<track>/handoff.md`.
+
+Nothing in `js/sync`, `js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`,
+`firestore.rules` or `functions` (`git diff 8b8f807..` names none of them), and nothing in
+`js/ui/reports.js`. No key, field path, record shape or writer is added. Each of the four is a
+READING: it writes nothing to the record, the outbox, the cloud, a backup, a restore point or the
+rescue file, and no Store key of its own, and it prices nothing itself - every figure is the answer
+of a function an existing screen already asks, pointed at the year, the month, the payday or today.
+Every new word is proposed and pinned; the owner has read none of them.
+
+**THE ROLLOUT.** No rule, and that is the rule for features that only read: none of the four
+writes a byte an older build would drop, refuse or rewrite, so a v205 phone and a v206 phone can
+be used side by side, and nothing restored between the two builds loses anything. The one byte any
+of them can cause is the journey's own place, `farkadSederJourney` - a per-phone preference, never
+synced - and only through the journey's own writers: «תמונת מצב»'s door to the next working day is
+the dock's `journeyStart()`, and a door into a day from another screen leaves a journey standing at
+its first station on another day exactly as «יציאה» does (part 5). A phone on v205 takes v206 by
+itself at its next fresh start, or by one tap (v205's rule). The two repairs to the update (part 6)
+hold from v206 on: the step from v205 to v206 is still made by v205's own code (law 7).
+
+### 1. «סיכום שנה» (js/ui/yearsummary.js) - the year as it was worked, and the accountant's workbook
+
+**Why.** The year ends in six weeks, and in January the accountant asks for it. Until now the only
+way was a custom-range export over 01/01-31/12, whose «לתשלום» reads easily as "paid".
+
+**What changed in the app:** `js/ui/yearsummary.js` (new); `index.html` (the door, the frame
+`#yearSummaryModal`, the script); `sw.js` (the shell); one line in `render()` (`js/app.js`); one
+closer (`js/ui/modal.js`); `css/design.css`, `css/large.css`; and in `js/ui/monthsummary.js` one
+extraction (`monthSummaryReadRange`, the month's body moved unchanged - tests/yearsummary.test.mjs
+holds `monthSummaryRead` equal to v204's out of Git, byte for byte, every month, both gates) and
+one hook line.
+
+**What he sees.** In «סיכום חודש», under its arrows, one button: «סיכום שנת 2026» - the year of the
+month on screen, on an empty month too. It shuts the month and opens the year at its heading,
+«מחשב את השנה…» painted before anything is read. Then, in this order: two sentences that say what
+the figures are - «נצבר לפי הרישום: כל יום עבודה בשנה, לפי השכר שנרשם ליום הזה. זה לא מה ששולם
+בפועל.» and how an account period across 1 January is split, by its days - and on a year that has
+not ended «השנה עוד לא נגמרה»; «השנה במספרים»: «נצבר» and «מקדמות שניתנו» first and larger (and,
+with the gate open, the cash handed back and the corrections), «נצבר»'s own sentences under them,
+then the days (working days, attendance, men, worker-site days, his own and Rima's); «חודש אחר
+חודש» - twelve rows, each one button into «סיכום חודש» on that month, each exactly what that
+month's summary says, its caveats included («החודש עוד לא נגמר.», the men its «נצבר» leaves out),
+a bar in the accent for his own men's worker-site days with the number beside it; «העובדים בשנה» -
+a man's name the heaviest thing on his row, and beside «מקדמות שניתנו» what a «תיקון טעות» of an
+advance took back; «האתרים בשנה» with the months each was billed in; «עובדי יוסף גבס» in its own
+table, last. The arrows walk the years. The export and «סגור» stay under the thumb wherever he is;
+a month's row and that month's door bring him back to where he was.
+
+**What it never says.** «לתשלום», «שולם», a deduction, a balance carried or left at 31/12. A year is
+never anybody's pay period, so the sheet reads it the plain way under either gate. The year's own
+line is read over the year and NEVER added up from the months: a man with ONE worked day that has
+no daily rate has no wage for the whole range (money.js), so he is out of the year's «נצבר» and
+only out of that one month's. He is named by the sheet's own sentence, on the screen and in the
+file, and where such a man was priced in some month one more sentence says why the year is smaller
+than its months - decided from the unpriced lists, never from a sum of shekels.
+
+**The workbook.** «📊 יצוא השנה» hands `farkad-year_2026.xlsx` to the browser (the vendored
+SheetJS, same origin): «סיכום» (the frame first, the money first, «נצבר»'s sentences in the rows
+right under it), «חודשים» (its count headed with what it counts; the months whose «נצבר» leaves a man
+out named under it), «עובדים» (the name cell the bare name; «—» for a wage the year cannot price, and
+one row after the last man naming them; «מצב» where somebody is switched off), «אתרים», and «עובדי
+יוסף גבס» last; right to left, money in v202's format, counts as counts, the look never costing the
+file, the CSV files when the library is missing. Every sentence in it is set right to left by its
+own marks (U+200F at each end). The hand-over is exportReports' own title and words, less the
+sentence that sends him to «🖼️ שיתוף כתמונה» - this dialog has no picture - and «שמירה חוזרת»
+exports the year again; a second press while the first file is being made is nothing.
+
+**The cost**, measured on the track's branch. A season year of 40 men is read only after a paint has
+shown «מחשב את השנה…»: in Node read in 310, 220, 220 ms (median 220; budget 500), and in Chromium at
+4x CPU on the glass 626 ms after the tap (budget 3,000), its workbook handed over in 22 ms (budget
+1,500). A redraw under the open dialog never reads: a moved record is marked at once - dimmed, the
+export shut, «מחשב את השנה…» in the foot - and read again ONCE, when the draws have stopped for
+1.5 s, where the reader is.
+
+### 2. «לוח חודשי» (js/ui/monthboard.js) - the crew's month on one board, on paper and as a picture
+
+**What changed in the app:** `js/ui/monthboard.js` (new); `js/ui/week.js` (three hooks: the mode
+`'month'`, the board drawn in the week's place, the door in the grid's corner); `js/ui/printout.js`
+(two dispatch lines of `printoutImage`); `index.html` (the script); `sw.js` (the shell);
+`css/design.css`, `css/large.css`, and the board's paper in `css/app.css`.
+
+**What it is.** A third mode of the week tab, entered from the week grid's corner cell - «לוח
+חודשי» where «עובדים / ימים» stood, the words kept for paper, the header row no taller. One row per
+man (every active man, and a man not active only in a month he worked, marked «לא פעיל»), one
+column per date of the calendar month (a Saturday only when something was recorded on it), each
+cell the week's own cell - the site's colour, its letter in white (on this board two letters where
+two of its sites share one), ● a doubled day, + extra hours, «נעדר» an absence - his «נוכחות» at the
+row's end, «סה"כ עובדים» per date at the foot, and «רישום לרימא» and «עובדי יוסף גבס» each apart,
+with its note, in no total. «חודש קודם» / «חודש הבא» walk the months and never move («החודש», off
+this month, ends the site's row); «אתר» narrows it to one site, the foot then the invoice's own
+rows for it («בלי עובדי רימא» on the screen only, «רישום לרימא», «סה״כ ימי עובד־אתר») and יוסף גבס
+apart, and the last column his days there, «ימים באתר». A cell or a date opens that day; a name
+opens his card on the board's month. The door opens the month most of the week on screen is in
+(the week of today: this month). It opens on today's column (on a Saturday nothing was recorded
+on, the Friday before it), no day half under the names, and a commit or a snapshot adopted from
+another phone leaves the reader where he was - the grid's scroll, the page's and the focus. Two
+sites that read alike in two letters («תל אביב - …») take the letters where their names part.
+
+**A reading.** It writes no key and no record; the month and the site are memory, and leaving the
+tab - or an update's reload - puts the week back on its grid. It prices nothing: every count is an
+existing function's - `weekWorkers`, the week cell's own rule, `payrollReport`'s attendanceDays
+(pinned equal, but for a closure recorded with no periodTo that starts on the month's first day,
+where the board shows the live record), the week's foot rule, `rimaReport`, `yosefGevesReport`,
+`invoiceWithoutRima`, `invoiceByDate`. It names every man, so it is not paper for a client (the
+owner has not been asked).
+
+**Paper and the picture.** «🖨️ הדפסה» prints it on A4 landscape (the week's own
+body.week-print-layout): one page for a crew of 12; 25 and 40 men ran to two pages each, the dates'
+header repeated and no man cut (Chromium's PDFs; not printed on a printer). «🖼️ שיתוף כתמונה»
+shares it as a picture read off the board's DOM (2664x3922 for 40 men). «בלי עובדי רימא» is on
+neither (the owner's v167 ruling). A month not over carries on both the day they were made («נכון
+ל־…»).
+
+**The cost.** The board redraws on every commit and adopted snapshot, as the week does: about 55 ms
+a draw for a 40-man month (under 300 at 4x CPU).
+
+### 3. «יום תשלום» (js/ui/payday.js) - the moment before he pays, on one screen
+
+**Why.** His money pain is the one the app keeps answering piece by piece - periods nobody closed,
+deductions not taken, advances forgotten. What did not exist is the moment BEFORE he pays: on
+Wednesday night or Thursday morning he found each group's band at the bottom of its cards in
+«דוחות», and found out what would stop the close only when he pressed it.
+
+**What changed in the app:** `js/ui/payday.js` (new); `js/ui/owes.js` (the weekly button's row in
+`renderOwesInto`); `js/ui/modal.js` (one closer); `js/app.js` (one line in `render()`); `index.html`
+(the frame and the script); `sw.js` (the shell); `css/design.css`, `css/large.css`.
+
+**What he sees.** One button, «יום תשלום», beside «סגירת שבוע» on top of «מקדמות» (half the row
+each; alone at full width where «סגירת שבוע» is not drawn - a record nobody approved - and then the
+board moves down by that row, 62px, 66 with «תצוגה גדולה»). It opens ONE dialog: «יום התשלום הבא» -
+a card per pay group with its payday's date and the three figures «דוחות» prints under that group
+(`payrollRowsOver`, `payrollBandTotals`, `deductionColumnName`), each man's figure one tap away;
+«לפני שסוגרים» - what will stop or distort the close, each finding an existing function's answer in
+its owner's words, each with one button that only navigates - every man «סגירת שבוע» would hold
+among them, and whether this phone may close now asked each time the desk is drawn; «לסגירה» - how
+many «סגירת שבוע» would close now and who it holds and why, each reason said once, read by the desk
+itself; «אחרי הסגירה» - the payslips and the closes on record. A figure is never broken across
+lines, whatever the size of the letters; a deduction chosen on «דוחות» is in the desk's figures the
+moment it is chosen. Its last line, quiet: «המסך הזה רק מראה - שום דבר לא נרשם ממנו.»
+
+**A reading.** It works no money out (the one thing it adds up is a count of men), writes nothing,
+closes nothing and opens nothing by itself; a weekly payday is never added to a fortnightly one. It
+reads inside the pay sheet's one reading (`reportReadOnce`) and «סגירת שבוע»'s memory
+(`weeklyCloseOnce`), after the dialog has painted «מחשב את החשבונות…», kept under the record
+(`owesKey`) and the deductions chosen on the sheet; a record that moves under it puts the
+placeholder over its figures at once - on the glass, wherever the dialog is scrolled to - and is
+read again when the draws stop. While it is open `midEdit()` is true, so v205's update at the next
+launch waits for it. Since the integration it hands the close count it read to the close reminder,
+and draws no «לרישום היום» while «בניית סידור» stands at its first station on another day (part 5).
+
+**The cost**, measured on the track's branch: about 3-3.7 s for a season nobody closed (636
+advances), under «מחשב את החשבונות…»; inside the budget, not optimised.
+
+### 4. «תמונת מצב» (js/ui/status.js) - where the business stands, on one screen, from the sync chip
+
+**Why.** The screen he will open first: ONE screen that answers "where does my business stand right
+now" - today, the next working day, the money, the last twelve weeks and the sites - every line one
+tap from the screen that owns it.
+
+**What changed in the app:** `js/ui/status.js` (new); in `index.html` the sync chip put, unchanged,
+inside `button#statusDoor`, the frame `#statusModal` and the script; `sw.js` (the shell); two hooks
+in `js/app.js` (`renderStatusIfOpen()` in `render()` after the close reminder's, `statusDoorSync` at
+the end of `renderSyncChip`); one closer; in `js/ui/backup.js` the backup's age split out of its row
+(`backupAgeDays`, `backupAgeSentence` - the row byte for byte v204's on every age); `css/app.css`
+(the door's hit area), `css/design.css` (the ramp `--pulse-1..5` and the look), `css/large.css`.
+
+**The door.** The sync chip at the top of every screen, made a button: 44px of hit area (52 with
+«תצוגה גדולה») around the pill as it was drawn, and none of it layout - the strip is the height it
+was on every phone width with every chip and with none (tests/statusscreen.browser.mjs, B12). Its
+name is «תמונת מצב · <the chip's label>»; where the chip has nothing to say (local only) the door
+shows «תמונת מצב». No chevron: beside a long count it widened the door past the strip's room.
+
+**What he reads**, top to bottom, every section ending in a button that only navigates to the
+screen that owns it:
+- the sync sentence he tapped, verbatim;
+- «היום» - how many men are on a site and on how many («עובדים היום», «ב-… אתרים»), the day's
+  «שובצו: … · לא נרשמו: … · נעדרים: …», a bar of each site's count in its colour and a line per site
+  with «רימא …», and «פתיחת היום לעריכה»;
+- the next working day (never "tomorrow" on a Friday evening): its crew, «הסעות: …» where הסעות is
+  on, and how many of the per-man messages were opened, with «בניית סידור»'s own way in;
+- «חשבונות ומקדמות» - «יום התשלום הבא: …» and «עבדו בתקופה: שבועי … · דו־שבועי …» (the men who
+  WORKED in that period up to today, each cycle named, dates and counts only), the close reminder's
+  line exactly as the banner says it while it is up, and the board's total read after the dialog
+  has painted, with «יום תשלום», «לסגירת שבוע» and «מי חייב כסף»;
+- «12 השבועות האחרונים» - a heat map of men per day, a row per week in one hue, the accent's (no
+  site's colour), its caption («בממוצע … עובדים ביום עבודה בארבעת השבועות האחרונים, ו-… בארבעת
+  השבועות שלפניהם.»), a week opening that week, and «לוח חודשי» under it;
+- «האתרים» - every site worked in the last eight weeks: this month's worker-site days so far, Rima
+  beside it, an eight-week strip and one word when it is «בעלייה», «בירידה», «חדש» or «שקט» (the
+  rule's constants pinned, and said in one sentence under the list); a site opens its card;
+  «עובדי יוסף גבס» apart, in no other number;
+- «המכשיר הזה» - the backup's age, and «ענן וסנכרון» and «גיבוי».
+
+**A reading.** No key, no record, no preference. The money is read once, after paint, inside
+`reportReadOnce` and `weeklyCloseOnce`, and kept under the record (`OWES_KEPT`); the close count is
+MIRRORED from the reminder's line and never read here; a redraw keeps the row he was looking at
+where it stood, and the money's place keeps its height while it waits. The door to today is not
+drawn while «בניית סידור» stands at its first station on another day (part 5's rule).
+
+**The cost**, measured on the track's branch at 4x CPU in Chromium on a season nobody closed (41
+men, 649 advances): painted 120 ms after the tap, the board's lines 961 ms after that paint.
+
+### 5. The merged tree, reviewed: a door from another screen never carries «בניית סידור» to another day; one close count on three screens
+
+The review of the merged tree (d2d4710) sent six findings. Each was triaged against the code; the
+repairs are a9cdb92, each with a check that was red on d2d4710. Besides `js/ui/monthboard.js`,
+`js/ui/payday.js` and `js/ui/status.js` they touch `js/ui/journey.js`, `js/ui/closereminder.js`,
+`js/ui/week.js`, `js/ui/workercard.js`, `js/ui/sitecard.js`, `js/ui/reminders.js` and
+`js/ui/whatsnew.js`, and no string of the app but the four «מה חדש» items:
+- **P1 (two findings, one fault).** «לרישום היום» on «יום תשלום», and a date or a cell of «לוח
+  חודשי», put another date on the day screen while a «בניית סידור» journey stood at its first
+  station building tomorrow - and the journey follows the day screen's date there, so Friday's
+  seder became Thursday's and `farkadSederJourney` was rewritten to say so. The same was true, since
+  v184-v189, of the week's own cells and «פתיחת היום לעריכה», a day of a worker's or a site's card,
+  and the phone's reminder - all one tap from «תמונת מצב» now. ONE RULE, in js/ui/journey.js:
+  `journeyHoldsDay(date)` - the journey at its first station on another day - and
+  `journeyLeaveFor(date)`, which leaves it first exactly as «יציאה» does: its place kept, the dock's
+  «בניית סידור» continuing it, no reload bringing it back. A door whose only way is today is not
+  drawn while the journey holds another day («לרישום היום» on «יום תשלום», «פתיחת היום לעריכה» on
+  «תמונת מצב»); a door that must still open its day - a date or a cell of «לוח חודשי» or of the
+  week, the week's day panel, a day of a worker's or a site's card, the reminder's tap to today -
+  leaves the journey first and opens the day he chose with no seder on it. Checks:
+  tests/journey.test.mjs (the rule's two functions, and a scan of js/ui: every place that puts a date
+  on State.date and shows the day screen asks the rule - seven of eight did not),
+  tests/journey.browser.mjs (the seven doors on the glass), tests/payday.test.mjs P19,
+  tests/payday.browser.mjs B21.
+- **P3.** After a write on the day screen the close reminder keeps its count, on purpose; «תמונת
+  מצב» mirrors the line; «יום תשלום», one tap away, read its own - 3 against 4. The desk now hands
+  the count it read to the reminder (`closeReminderAdopt`, js/ui/closereminder.js; memory, nothing
+  read again), so the three say one number: a line on the glass takes the new count, or goes at 0,
+  and the desk never puts a line up. Check: tests/payday.test.mjs P20.
+- **P3 (two findings, one fault).** «מה חדש» was not ready for v206: the item computed for «תמונת
+  מצב» pointed at «ליד שם האפליקציה», which no screen draws, and three of the four items had no way
+  to go. The entry was written then, ahead of the stamps, with three new ways (below).
+- **NOT FIXED (P3, the owner's to choose).** At 320x568 with «תצוגה גדולה» the year's door under
+  «סיכום חודש»'s arrows - put there so the year is found - pushes the month's first figure below the
+  first screen; every other width keeps it on the first. Moving the door again trades one P3 for the
+  other.
+
+The merges themselves resolved every conflict by keeping both sides whole (package.json's chains,
+css/large.css's two blocks, tests/README.md's rows), and tests/usual.test.mjs's block order was
+written for the merged tree: «סגירת שבוע», then «יום תשלום», then «תמונת מצב», each position exact.
+On the merged build tests/statusscreen.browser.mjs reaches the REAL desk and the REAL board where its
+branch had stand-ins (2d62ab4, d2d4710), and tests/workercard.test.mjs's step-for-step reading of the
+week's cell and the card's day holds the journey's new first step in both (0ef9106).
+
+### 6. Two found after v205 was built, repaired in this build
+
+Branch `v205-followup`, cut from f9a432b. A fourth adversarial review of v205 (f9a432b) confirmed
+no P1 or P2 and these two P3s, both in `js/ui/offline.js`; v205 shipped without them, and this
+build carries the repairs:
+
+- **A press with no worker to ask no longer reloads over typing.** After a launch's handover that
+  the page did not reload for (the update kept offered), and when the worker in hand had been made
+  redundant with nothing else waiting, «רענן עכשיו» and «בדוק עדכון» reloaded at the press without
+  asking `midEdit()`: a count typed into a site's box and not yet left, or the advances' «סידור»
+  draft, was thrown away. v204's press always went through the handover and waited for the typing
+  to end. Both now reload through `catchUpWhenSafe()` - at once when nobody is typing, else at the
+  first moment nobody is - exactly as v204's press did.
+- **The cover stays up over a reload in flight.** A launch that had asked for its reload left the
+  12-second deadline armed, so a reload still in flight at 12 s had the cover, the window's input
+  trap and the page's aria-hidden taken off, and the banner drawn over a page about to be thrown
+  away. Once the reload is asked the deadline is cleared and the give-up does nothing; only a page
+  still there 30 seconds later - one whose reload never went - gets its glass back.
+
+Tests: `tests/autoupdate.test.mjs`, «P3-1 (fourth review)» and «P3-2 (fourth review)» - a press
+with a box holding digits and with the «סידור» draft open, on both ways into the kept offer and the
+redundant fallback, and «בדוק עדכון» likewise; and a reload asked at 11.95 s still covered at 12.1 s.
+Each new check fails on f9a432b's offline.js (85/95) and passes here (95/95). Nothing in `js/sync`,
+`js/model`, `js/state.js`, `js/store.js`, `js/recovery.js`, `firestore.rules` or `functions`; no
+string changed; no stamp moved on the branch (the build that merges it moves them, and until then
+`tests/build.test.mjs` reports `js/ui/offline.js` as changed since the v205 stamp commit - its one
+check that does not pass on the branch by itself).
+
+### «מה חדש»
+
+Four items, proposed, each in its own track's words and pinned word for word in
+tests/whatsnew.test.mjs; tests/whatsnew.browser.mjs counts v206 among the builds with news and
+presses each «הראה לי» by its own button:
+- «סיכום שנה» - «השנה חודש אחר חודש, לפי עובד ולפי אתר, וקובץ Excel לרואה החשבון - לפי מה שנרשם,
+  לא מה ששולם.» - «דוחות ← הפקת דוח ← סיכום חודש ← סיכום שנת …»; «הראה לי» opens «הפקת דוח», the
+  v187 item's own way (`reportsMenu`).
+- «לוח חודשי» - «כל החודש בטבלה אחת: כל עובד, כל יום והאתר שלו בצבע, עם סינון לפי אתר, הדפסה ותמונה
+  לשיתוף.» - «שבוע ← לוח חודשי, בפינת הטבלה»; «הראה לי» puts the week on its grid and gives the
+  board's door the keyboard, without pressing it (`monthBoard`).
+- «יום תשלום» - «בעמוד המקדמות: כמה לשלם בכל קבוצה ביום התשלום הבא לפי מה שנרשם, ומה כדאי לסדר
+  לפני שסוגרים.» - «מקדמות ← יום תשלום»; «הראה לי» opens «מקדמות» and gives «יום תשלום» the keyboard,
+  without pressing it (`payday`).
+- «תמונת מצב» - «לחיצה על מצב הסנכרון בפינה העליונה מימין פותחת תמונת מצב: היום, הסידור הבא,
+  הכסף, 12 השבועות האחרונים והאתרים.» - «בפינה העליונה מימין ← מצב הסנכרון (או «תמונת מצב»)»;
+  «הראה לי» gives the door the keyboard, without pressing it (`status`). Its place is its track's
+  corrected one: the strip draws no app name on any screen (css/design.css hides `.brand`), so the
+  first proposal, «ליד שם האפליקציה», named nothing.
+None of them opens a reading of money or presses the door it shows (a check in
+tests/whatsnew.test.mjs reads the code).
+
+### Open questions, each with the default built
+
+«סיכום שנה»:
+- At 320x568 with «תצוגה גדולה» the year's first screen holds no figure: the frame's three
+  sentences come first, by the contract. One line with the rest a tap away would add a control and
+  words he has not seen. Default: as built.
+- Escape or «סגור» in a month opened from the year lands on «דוחות», not back on the year
+  (`closeMonthSummary`); the month's own door brings him back to his place. Default: as built.
+- The refused-download notice is `downloadRefusedNotice`'s words less the clause that sends him to
+  «🖼️ שיתוף כתמונה», which this dialog has not. Default: keep.
+- The year's last day reads whole - no «השנה עוד לא נגמרה» on 31 December - as «סיכום חודש»'s last
+  day does. Default: keep.
+- The door's place (part 5, not fixed). Default: under the arrows.
+
+«לוח חודשי»:
+- Is the board narrowed to one site something he hands a client? It names his men. Default: no -
+  it is his and the accountant's; nothing on it says «לקוח».
+- «בלי עובדי רימא» on this board's paper? Default: no - his v167 ruling for that figure is the
+  screen and the workbook.
+- Should v205's update carry the board's month and site across its reload? Default: no; the reload
+  lands on the week's grid.
+- The month's name again between the arrows, as «סיכום חודש» has it? Default: no - once, in the
+  title, and spoken from the arrows.
+- The header at 320 with the mode, the dates row that scrolls away, «נוכחות» a swipe away (its
+  review's findings 13, 12 and 14)? Default: as built - a compact header, dates that stick and a
+  total beside the names are each a change of layout he should see first.
+- Shade the days after today on paper and in the picture? Default: no - the date in the title
+  says it.
+
+«יום תשלום»:
+- Where «סגירת שבוע» is not drawn the desk's button stands alone and the board moves down 62px (66
+  with the mode). Default: kept - its plain bands are what he pays from.
+- The morning after payday the desk shows the NEXT payday, and the period just ended is reached
+  through «לסגירה». Default: kept.
+- On a payday still ahead the deduction keeps the sheet's own column name, «נוכה מהשכר». Default:
+  kept.
+- The sheet's sentence «…לפני המעבר לתשלום שבועי.» (`groupPeriodNote`, js/ui/reports.js) is said of
+  ANY period a boundary cut short, untrue for a man returning to fortnightly pay; the desk says it
+  only of a stub weekly pay follows, so the two word that card differently. Default: the sheet
+  untouched - pre-existing, a decision of its own.
+- A re-read under a stream of commits waits for 1.5 s of quiet, with no cap. Default: kept.
+
+«תמונת מצב»:
+- Read the close count here when the reminder's line is down? Default: no - mirrored only, never a
+  second 1.5 s reading. On a record where nobody has closed for weeks «סגירת שבוע» holds every man,
+  so the count, the reminder's line and this screen's close line are all absent there; «שים לב» on
+  «מקדמות» and «דוחות» is where that is said.
+- On a window 701-768px wide (768-844 with the mode) with no chip, the door's own words cost the
+  strip the line a chip costs it there. Default: the words kept (v122: an unexplained icon was the
+  complaint); a shorter word is his.
+
+### NOT DONE, said
+
+- **Nothing of it has been tried on a real phone** - none of the four, nor the two repairs: Chromium
+  with emulated touch only, and not WebKit at all (the board's paper uses `display: contents` in its
+  date row, repaired for Chromium's repeated header and measured there only).
+- «סיכום שנה»: the workbook was not opened in a real Excel (read back by SheetJS, and opened in
+  LibreOffice 24.2). At doubled text on the 320px phone (the 375px with «תצוגה גדולה») a seven-figure
+  «נצבר» is wider than any line the dialog has and is broken inside its tile; the check names it.
+  «סיכום חודש»'s own tiles break a six-figure «נצבר» the same way, untouched. While a moved record is
+  read again the year is dimmed below 4.5:1 for those 1.5 s (longer under a run of writes from
+  another phone). Shutting the dialog while the library loads still hands the file over.
+- «לוח חודשי»: the dates row scrolls away with the page, and «נוכחות» is a long swipe away on a
+  phone; at 320x568 with «תצוגה גדולה» the header fills about two thirds of the first screen (one man
+  of fourteen at opening); the days after today are not shaded on paper or in the picture; the paper
+  was not printed on a printer (Chromium's PDFs only); colour blindness is not simulated on the board
+  (the letter, the legend and the spoken name carry the site, never colour alone).
+- «יום תשלום»: its review's findings 13 and 14c - the morning after payday, and the tense of «נוכה
+  מהשכר» - are the owner's to rule on (defaults above).
+- «תמונת מצב»: opened in the first moments after a start, before the reminder has read, it has no
+  close line, and the reminder does not read while this dialog is open; colour blindness is not
+  simulated for the ramp, only its contrast measured; a phone slower than 4x a desktop core is slower
+  than measured.
+
+### Tests
+
+- New, in `npm test`: `tests/yearsummary.test.mjs`, `tests/monthboard.test.mjs`,
+  `tests/payday.test.mjs` and `tests/statusscreen.test.mjs` (not `tests/status.test.mjs`, which is
+  the sync line's own); in `test:all`: their four browser suites. `tests/screens.mjs` gains the year,
+  the board and the one-site board, the desk four ways (read, its fold opened, every check, a record
+  nobody approved), «תמונת מצב» and its door with no chip - so tests/largetext.browser.mjs walks them.
+- Moved, each deliberately and said where it is moved:
+  - tests/monthsummary.browser.mjs: the frame's Tab walk gains the year's door (8 steps), and its
+    48px count of the frame's buttons is 7.
+  - tests/largetext.browser.mjs: the month's picture with the large display off and on, held the
+    same PNG.
+  - tests/usual.test.mjs: the screen layer's last dashed blocks are «סגירת שבוע», «יום תשלום»,
+    «תמונת מצב».
+  - tests/reports.speed.test.mjs: «יום תשלום»'s row on «מקדמות» is taken out of the v195 comparison
+    as one node and counted - once a draw of the board, nowhere else - and its reading is one more
+    way in.
+  - tests/statusscreen.browser.mjs: the real desk and board on the merged build (2d62ab4, d2d4710).
+  - tests/workercard.test.mjs: the week's cell and the card's day take the journey's new first step
+    (0ef9106).
+  - tests/whatsnew.*: the v206 entry, the three new ways and where they land (a9cdb92); v206 among
+    the builds with news (the release commit).
+  - tests/autoupdate.test.mjs: the follow-up's two checks (part 6).
+
+**Not tried on a real phone.**
+
+## v205 — a waiting build takes itself at the next launch of the app
+
+**SERVED on 2026-11-20** (main 8b8f807, PR #86; both gates exited 0 on f9a432b, whose tree it is). Written as a candidate on v204 (main, 6ab193d). A fourth review found two P3s in its update path after it was built; v206 repairs them (v206, part 6). The release commit moves the three
 build stamps to v205, and its «מה חדש» entry is at the top of WHATSNEW_BUILDS (proposed). The
 owner asked on 2026-11-19: «هل بامكانك تخلي التحديث اتوماتيكي ما في داعي اكبس على التحديث لوحده
 يعمل تحديث» - make the update automatic, no need to press it.
