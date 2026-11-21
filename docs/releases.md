@@ -1,4 +1,61 @@
-## v207 — «בדיקת הצוות», «מי עבד איפה» and «דוחות ומקדמות מהירים»: the second wave the owner asked for on 2026-11-19, in one build (candidate, not served)
+## v208 — «לפי אתר»: the dates-by-sites grid on the screen, with «כולל עובדי רימא» / «ללא עובדי רימא» (candidate, not served)
+
+**NOT SERVED YET.** A candidate on v207 (main, 000dde8); `feat-sitegrid` (code e6ae04d, b653544,
+cf59ba0; `features/sitegrid/handoff.md`), then this release commit, which moves the three build
+stamps to v208 and adds one «מה חדש» item (proposed). The owner has been sent the pictures.
+
+**What he asked, and what he chose.** On 2026-11-21 he asked for a separate page of the client's
+account as a table - dates down, sites across, a switch for Rima's men, counts only. He was shown
+that «דוחות» ← «לפי אתר» already holds those figures (the invoice and «בלי עובדי רימא»), and chose
+to improve that page in place ("2"). No new page, no new arithmetic.
+
+**What is on the screen now.** Straight under the bars of «לפי אתר», one block (`renderSiteGrid`,
+js/ui/reports.js):
+
+- a two-state switch, «כולל עובדי רימא» / «ללא עובדי רימא» (the owner's words), `aria-pressed`, 44px
+  (52px in «תצוגה גדולה»), opening on «כולל» at every load - memory only (`SITE_GRID_WITH_RIMA`), no
+  Store key;
+- one line saying what is shown;
+- a table: a row per date that has work, a column per site, «סה״כ יומי» last, and the foot
+  «סה״כ ימי עובד־אתר». «כולל» is `invoiceByDate`; «ללא» is `invoiceWithoutRima`. A cell at nought is
+  blank, as on the paper. No name of a man and no shekel;
+- the date column stays at the inline start while the sites scroll sideways inside the block; the
+  page itself never scrolls sideways.
+
+A site chosen in the picker narrows the grid to that site in both states; an empty range has no
+switch and no grid. «בלי עובדי רימא»'s old section stays in the document, whole, and is put away on
+the screen by one CSS rule - the workbook and the suites that read it are not moved. «רישום לרימא»,
+the bars and «עובדי יוסף גבס» are as they were.
+
+**What leaves the phone: nothing moved.** The block is not a `.report-table` and is `display: none`
+in print. tests/sitegrid.browser.mjs holds, against v207's tree out of Git served beside this one,
+in BOTH states, for every site and for one client: the printed PDF's text, what the picture reads,
+the picture's PNG by SHA-256, and every sheet and cell of the workbook. The owner's ruling that
+«בלי עובדי רימא» is for the screen and the workbook only stands.
+
+**No rollout rule.** Nothing is written and nothing new is stored. Nothing in js/model, js/sync,
+js/state.js, js/store.js, js/recovery.js or the rules.
+
+**Pinned expectations moved on purpose**, each because a second table now lives inside
+`.report-invoice`: tests/smoke.mjs (eleven selectors now name `.invoice-grid`, the paper's grid;
+no expected value changed); tests/rima.browser.mjs (the «בלי עובדי רימא» section is "in the
+document, whole, and put away on the screen"); tests/reports.speed.test.mjs, tests/speed.seed.mjs
+with tests/speed.test.mjs, and tests/speed.browser.mjs (the comparisons with an older build take
+the one new block out, count it and require it); tests/screens.mjs (one more screen, the «ללא»
+state). «מה חדש» gains a way, `siteReport` - the reports on «לפי אתר», nothing pressed.
+
+**NOT DONE, and said.**
+- **The header row does not stick.** The box that scrolls sideways is the header's scroll box; a
+  sticky header would need a second, vertical scroll inside the page. Only the date column sticks.
+- **A finger's drag is untested.** The sideways scroll is SET in the suite, not dragged.
+- **Not tried on a real phone.** Nobody far-sighted has looked at it.
+
+**Hebrew.** «כולל עובדי רימא» and «ללא עובדי רימא» are the owner's. Proposed and pinned
+(tests/sitegrid.test.mjs, tests/sitegrid.browser.mjs, tests/whatsnew.test.mjs): «עובדי רימא בטבלה»,
+«כל העובדים בכל אתר, כולל עובדי רימא - כמו בחיוב.», «העובדים שלך בלבד, בלי עובדי רימא.», «תאריך»,
+«סה״כ יומי», and the news item «חיוב: עם רימא או בלי, בטבלה אחת».
+
+## v207 — «בדיקת הצוות», «מי עבד איפה» and «דוחות ומקדמות מהירים»: the second wave the owner asked for on 2026-11-19, in one build (served 2026-11-21)
 
 **AND THE OWNER'S MONEY PAIR OF 2026-11-20, folded into this build before its stamps (`feat-hourly50`,
 d21bdff, merged as a086541; `features/hourly50/contract.md` and `handoff.md`).** It TOUCHES
@@ -26,7 +83,7 @@ speed layer the kept reading is keyed by the record itself, so the 50 button mak
 the record's (H8); tests/speed.test.mjs section 11 now names js/model/money.js as the one approved
 model file (MOVED ON PURPOSE). One «מה חדש» item, proposed and pinned. Not tried on a real phone.
 
-**NOT SERVED YET.** A candidate on v206 (main, dd9432b). The release commit moves the three build
+**SERVED on 2026-11-21** (main 000dde8, PR #88; both gates exited 0 on 877f613, whose tree it is). Written as a candidate on v206 (main, dd9432b). The release commit moves the three build
 stamps to v207 and adds its «מה חדש» entry at the top of WHATSNEW_BUILDS (proposed): three items,
 one per feature. The owner's request of 2026-11-19 ("real, serious, heavy features") was built in
 two waves; v206 was the first. The three tracks of the second were built at once from v204

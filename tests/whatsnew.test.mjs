@@ -87,6 +87,12 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    // v208: the grid under «לפי אתר» and its switch (the owner's option 2, 2026-11-21).
+    { build: 'v208', items: [
+        { title: 'חיוב: עם רימא או בלי, בטבלה אחת',
+            text: 'בדוחות ← לפי אתר: טבלת תאריכים ואתרים עם מתג «כולל עובדי רימא» / «ללא עובדי רימא», ועמודת התאריך נשארת בגלילה הצידה.',
+            where: 'דוחות ← לפי אתר', go: 'siteReport' }
+    ] },
     // v207 (the second wave of 2026-11-19): the three tracks' items, two of them made to keep this
     // block's rules - «בדיקת הצוות»'s sentence shortened from 154 characters to 120 (and its pin in
     // tests/crewcheck.test.mjs with it), «מי עבד איפה»'s two sentences joined into one.
@@ -511,7 +517,8 @@ await block('the news itself: every build, every item, every word', async () => 
     const ways = Object.keys(device.global('WHATSNEW_GO')).sort();
     // MOVED ON PURPOSE (v206's integration): «לוח חודשי», «יום תשלום» and «תמונת מצב» each have a way.
     // MOVED ON PURPOSE (v207): and «בדיקת הצוות» one, 'crewcheck'.
-    same('the ways «הראה לי» can go', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'crewcheck', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'monthBoard', 'payReport', 'payday', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'status', 'version', 'week']);
+    // MOVED ON PURPOSE (v208): and «לפי אתר» one, 'siteReport'.
+    same('the ways «הראה לי» can go', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'crewcheck', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'monthBoard', 'payReport', 'payday', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'siteReport', 'status', 'version', 'week']);
     check('every item is a title, a sentence and a place, and nothing else',
         items.every(item => Object.keys(item).every(key => ['build', 'title', 'text', 'where', 'go'].includes(key))
             && [item.title, item.text, item.where].every(value => typeof value === 'string' && value.trim() === value && value.length > 0)));

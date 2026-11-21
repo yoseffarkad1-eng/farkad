@@ -58,7 +58,7 @@ const SINCE = 'מה שנוסף מאז העדכון האחרון שראית, מה
 const ALL = 'כל מה שנוסף לאחרונה, מהחדש לישן.';
 const SHOW = 'הראה לי';
 // The builds that have news, newest first (tests/whatsnew.test.mjs pins the block).
-const NEWS = [207, 206, 205, 204, 203, 202, 201, 200, 199, 198, 197, 196, 195, 194, 192, 191, 190, 189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
+const NEWS = [208, 207, 206, 205, 204, 203, 202, 201, 200, 199, 198, 197, 196, 195, 194, 192, 191, 190, 189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
 
 // SYNTHETIC. Fourteen invented men on three invented sites.
 const NAMES = ['אחמד', 'מוחמד', 'יוסי', 'סמיר', 'עלי', 'Ali Hassan', 'ראמי', 'דוד', 'עבד אל-רחמן', 'מחמוד', 'חאלד', 'נביל', 'זיאד', 'כרים'];
@@ -426,7 +426,8 @@ for (const rides of [false, true]) {
     const ways = await page.evaluate(() => Object.keys(WHATSNEW_GO).sort());
     // MOVED ON PURPOSE (v206's integration): «לוח חודשי», «יום תשלום» and «תמונת מצב» each have a way.
     // MOVED ON PURPOSE (v207): and «בדיקת הצוות» one, 'crewcheck'.
-    same('the ways there are', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'crewcheck', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'monthBoard', 'payReport', 'payday', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'status', 'version', 'week']);
+    // MOVED ON PURPOSE (v208): and «לפי אתר» one, 'siteReport'.
+    same('the ways there are', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'crewcheck', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'monthBoard', 'payReport', 'payday', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'siteReport', 'status', 'version', 'week']);
     const reset = () => page.evaluate(() => {
         [...document.querySelectorAll('.modal')].filter(node => node.style.display === 'flex').forEach(node => {
             const close = MODAL_CLOSERS[node.id];
@@ -463,6 +464,8 @@ for (const rides of [false, true]) {
         reportsMenu: s => s.view === 'reports' && s.menu && s.menuRows.includes('monthSummaryOpen') && s.modals.length === 0,
         // The pay sheet as it opens: on «לפי עובד», its menu shut, nothing pressed.
         payReport: s => s.view === 'reports' && s.section === 'workers' && !s.menu && s.modals.length === 0 && !s.settings,
+        // v208: the reports on «לפי אתר», nothing pressed.
+        siteReport: s => s.view === 'reports' && s.section === 'sites' && !s.menu && s.modals.length === 0 && !s.settings,
         payslipsMenu: s => s.view === 'reports' && s.section === 'workers' && s.menu && s.menuRows.includes('payslipsEntry') && s.modals.length === 0,
         find: s => s.view === 'day' && s.modals.join() === 'findModal' && s.focus === 'findInput',
         advances: s => s.view === 'advances' && s.modals.length === 0 && !s.settings,
@@ -490,6 +493,9 @@ for (const rides of [false, true]) {
     for (const way of ways) {
         await reset();
         await page.waitForTimeout(120);
+        // The reset leaves the reports on «לפי אתר» so that payReport proves its move; siteReport
+        // starts from the other side for the same reason.
+        if (way === 'siteReport') await page.evaluate(() => { REPORT_SECTION = 'workers'; });
         const disk = await diskBut(page);
         await page.evaluate(() => openWhatsNew('all'));
         // By its button, with a finger, wherever this build's card has an item that goes
