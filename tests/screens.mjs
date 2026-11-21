@@ -564,6 +564,10 @@ export const SCREENS = [
     { name: 'reports - by site', scope: APP,
         open: async page => { await run(page, () => { REPORT_SECTION = 'sites'; }); await view('reports')(page); },
         close: page => run(page, () => { REPORT_SECTION = 'workers'; }) },
+    // v208: the same page with the grid's switch on «ללא עובדי רימא».
+    { name: 'reports - by site, «ללא עובדי רימא»', scope: APP,
+        open: async page => { await run(page, () => { REPORT_SECTION = 'sites'; SITE_GRID_WITH_RIMA = false; }); await view('reports')(page); },
+        close: page => run(page, () => { REPORT_SECTION = 'workers'; SITE_GRID_WITH_RIMA = true; }) },
     { name: 'reports - the «הפקת דוח» menu', scope: APP,
         open: async page => { await run(page, () => { REPORT_SECTION = 'workers'; REPORT_CARD_GRID = true; }); await view('reports')(page);
             await run(page, () => { const menu = document.querySelector('#reportsView details.report-output-actions'); if (menu) menu.open = true; }); await pause(page); },

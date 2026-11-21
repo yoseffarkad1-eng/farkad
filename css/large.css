@@ -1446,4 +1446,17 @@
     :root.display-large .payday-figure { flex-basis: 100% !important; }
 }
 
+/* טבלת האתרים (v208, css/app.css): every size it sets, said again. */
+:root.display-large .client-grid-toggle button { min-height: 52px; font-size: 18px; }
+:root.display-large .client-grid-says { font-size: 18px; line-height: 1.5; font-weight: 500; }
+:root.display-large .client-grid-table th,
+:root.display-large .client-grid-table td { font-size: 20px; line-height: 1.3; }
+:root.display-large .client-grid-table thead th { font-size: 18px; font-weight: 700; }
+:root.display-large .client-grid-table td.num { font-weight: 700; }
+:root.display-large .client-grid-table .client-grid-date { font-weight: 700; }
+:root.display-large .client-grid-table .client-grid-sum { font-weight: 800; }
+:root.display-large .client-grid-table tfoot th,
+:root.display-large .client-grid-table tfoot td { font-weight: 800; }
+:root.display-large .client-grid-table tfoot .client-grid-date { font-size: 18px; }
+
 }
