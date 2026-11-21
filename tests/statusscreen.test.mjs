@@ -1478,7 +1478,8 @@ await block('S11 what it costs: the facts on a season, the board once, the close
         statusFacts: 0, drawStatus: 0, statusMoneyFacts: 0, statusMoneyLater: 0, statusSyncSentence: 0 });
 
     // The board with nothing kept, on the season nobody closed.
-    b.run('OWES_KEPT = null; REPORT_GATE_KEPT = null;');
+    // v207's integration (the speed track): and its readings kept between readings, so this is cold.
+    b.run("OWES_KEPT = null; REPORT_GATE_KEPT = null; if (typeof REPORT_SHARED_KEPT !== 'undefined') REPORT_SHARED_KEPT = null;");
     resetSpy(b);
     let began = performance.now();
     const open = JSON.parse(b.run('JSON.stringify(statusMoneyFacts())'));

@@ -73,6 +73,24 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
+    // v207: the three tracks of 2026-11-19's second wave, each in its own track's words. Every
+    // «איפה» checked against the merged tree: «בדיקת הצוות» is the last thing on the crew screen
+    // (#crewCheckFoot after .roster-columns); «איפה עבד» is the fourth door, last, on each man
+    // «חיפוש עובד» lists; the speed layer moves no node, so its item names the pages it speeds.
+    { build: 'v207', items: [
+        { title: 'בדיקת הצוות',
+            text: 'בסוף מסך הצוות: שכר יומי חסר, טלפון שלא נפתח בוואטסאפ, שם או מספר כפול, ועובד או אתר בלי עבודה ב-25 ימי העבודה האחרונים.',
+            where: 'צוות ← בדיקת הצוות (בסוף המסך)', go: 'crewcheck' },
+        { title: 'מי עבד איפה',
+            text: 'מתי ואיפה עבד עובד, ומי עבד באתר, בכל תקופה - עם הספירה ושליחה כטקסט, ולחיצה על יום פותחת אותו.',
+            where: 'היום ← חיפוש עובד ← איפה עבד', go: 'find' },
+        { title: 'הדוחות והמקדמות נפתחים מהר יותר',
+            text: 'עמוד הדוחות, עמוד המקדמות, כרטיס העובד והתלושים נפתחים מהר יותר גם כשיש הרבה עובדים ומקדמות, והמספרים עצמם לא השתנו.',
+            where: 'דוחות ← לפי עובד, וגם מקדמות', go: 'payReport' },
+        { title: 'שכר שעה נוספת',
+            text: 'כפתור בתחתית רשימת העובדים קובע 50 ₪ לשעה נוספת למי שאין לו, ושעות שנרשמו בלי שכר שעה נספרות לפי השכר שבכרטיס.',
+            where: 'צוות ← מתחת לרשימת העובדים', go: 'roster' }
+    ] },
     // v206: the four tracks of 2026-11-19, each in its own track's words. «תמונת מצב»'s place is
     // its track's corrected one (features/status/handoff.md, fix round 1): the strip draws no app
     // name on any screen (css/design.css hides .brand), and the door is the strip's top right-hand
@@ -570,6 +588,14 @@ const WHATSNEW_GO = Object.freeze({
     },
     dayCheck: () => { whatsNewDay(); return typeof openDayCheck === 'function' ? openDayCheck() : false; },
     roster: () => { showView('roster'); return true; },
+    // v207: «בדיקת הצוות» - the crew screen, and the button at its foot brought to the middle and
+    // given the keyboard one task later, once the screen is drawn - NOT pressed
+    // (crewCheckFocusEntry, js/ui/crewcheck.js); with nobody on the crew, the screen alone.
+    crewcheck: () => {
+        showView('roster');
+        setTimeout(() => { if (typeof crewCheckFocusEntry === 'function') crewCheckFocusEntry(); }, 0);
+        return true;
+    },
     // The reports screen with its «הפקת דוח» menu OPEN, the rows it holds on the glass. The
     // row itself is not pressed: «סיכום חודש» and «תלוש לכל עובד» each open a reading of
     // money for a period, and which period is his to choose.

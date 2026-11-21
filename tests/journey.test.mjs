@@ -763,8 +763,10 @@ await block('every door to the day screen from another screen asks the journey\'
             doors.push({ where: `js/ui/${name}:${at + 1}`, asks: asks.test(before) });
         });
     });
+    // MOVED ON PURPOSE (v207's integration): «מי עבד איפה» (js/ui/history.js, cut before this
+    // rule) is one more door - a day of its list opens that date - and it asks the rule too.
     same('the doors found, each in its file', doors.map(door => door.where.replace(/:\d+$/, '')),
-        ['js/ui/monthboard.js', 'js/ui/payday.js', 'js/ui/reminders.js', 'js/ui/sitecard.js', 'js/ui/status.js',
+        ['js/ui/history.js', 'js/ui/monthboard.js', 'js/ui/payday.js', 'js/ui/reminders.js', 'js/ui/sitecard.js', 'js/ui/status.js',
             'js/ui/week.js', 'js/ui/week.js', 'js/ui/workercard.js']);
     same('every one asks the rule before it moves the date', doors.filter(door => !door.asks).map(door => door.where), []);
 });

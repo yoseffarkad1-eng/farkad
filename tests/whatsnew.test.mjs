@@ -87,6 +87,23 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    // v207 (the second wave of 2026-11-19): the three tracks' items, two of them made to keep this
+    // block's rules - «בדיקת הצוות»'s sentence shortened from 154 characters to 120 (and its pin in
+    // tests/crewcheck.test.mjs with it), «מי עבד איפה»'s two sentences joined into one.
+    { build: 'v207', items: [
+        { title: 'בדיקת הצוות',
+            text: 'בסוף מסך הצוות: שכר יומי חסר, טלפון שלא נפתח בוואטסאפ, שם או מספר כפול, ועובד או אתר בלי עבודה ב-25 ימי העבודה האחרונים.',
+            where: 'צוות ← בדיקת הצוות (בסוף המסך)', go: 'crewcheck' },
+        { title: 'מי עבד איפה',
+            text: 'מתי ואיפה עבד עובד, ומי עבד באתר, בכל תקופה - עם הספירה ושליחה כטקסט, ולחיצה על יום פותחת אותו.',
+            where: 'היום ← חיפוש עובד ← איפה עבד', go: 'find' },
+        { title: 'הדוחות והמקדמות נפתחים מהר יותר',
+            text: 'עמוד הדוחות, עמוד המקדמות, כרטיס העובד והתלושים נפתחים מהר יותר גם כשיש הרבה עובדים ומקדמות, והמספרים עצמם לא השתנו.',
+            where: 'דוחות ← לפי עובד, וגם מקדמות', go: 'payReport' },
+        { title: 'שכר שעה נוספת',
+            text: 'כפתור בתחתית רשימת העובדים קובע 50 ₪ לשעה נוספת למי שאין לו, ושעות שנרשמו בלי שכר שעה נספרות לפי השכר שבכרטיס.',
+            where: 'צוות ← מתחת לרשימת העובדים', go: 'roster' }
+    ] },
     // v206 (the integration of 2026-11-19): the four tracks' items in their own words - «תמונת
     // מצב»'s place as its track corrected it (no app name is drawn on any screen; the door is the
     // strip's top right-hand corner). Written ahead of the stamps (a9cdb92); since the release
@@ -493,7 +510,8 @@ await block('the news itself: every build, every item, every word', async () => 
     const items = builds.flatMap(entry => entry.items.map(item => ({ build: entry.build, ...item })));
     const ways = Object.keys(device.global('WHATSNEW_GO')).sort();
     // MOVED ON PURPOSE (v206's integration): «לוח חודשי», «יום תשלום» and «תמונת מצב» each have a way.
-    same('the ways «הראה לי» can go', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'monthBoard', 'payReport', 'payday', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'status', 'version', 'week']);
+    // MOVED ON PURPOSE (v207): and «בדיקת הצוות» one, 'crewcheck'.
+    same('the ways «הראה לי» can go', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'crewcheck', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'monthBoard', 'payReport', 'payday', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'status', 'version', 'week']);
     check('every item is a title, a sentence and a place, and nothing else',
         items.every(item => Object.keys(item).every(key => ['build', 'title', 'text', 'where', 'go'].includes(key))
             && [item.title, item.text, item.where].every(value => typeof value === 'string' && value.trim() === value && value.length > 0)));
@@ -539,6 +557,10 @@ await block('every word of the line and the card, and no other', async () => {
     // «תמונת מצב» reads the board's, and the board opens by his own tap.
     check('nor presses the doors v206\'s ways show: «יום תשלום», «תמונת מצב», «לוח חודשי»',
         !/openPayday|openStatus|openMonthBoard|monthBoardFromWeek/.test(code));
+    // v207: «בדיקת הצוות»'s way gives its button the keyboard and never opens the dialog, and
+    // «מי עבד איפה»'s is the finder's own - the dialog is his tap on «איפה עבד».
+    check('nor presses the doors v207\'s items show: «בדיקת הצוות», «מי עבד איפה»',
+        !/openCrewCheck|openHistory/.test(code));
     same('it writes one key and only through Store, optional', [(code.match(/Store\.set\(/g) || []).length,
         /Store\.set\(WHATSNEW_KEY,[^;]*\{ optional: true \}\)/.test(code), /localStorage/.test(code)], [1, true, false]);
     same('whose name is', phone('d_key', 'v186').global('WHATSNEW_KEY'), KEY);

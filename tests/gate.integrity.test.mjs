@@ -39,7 +39,10 @@ const HELPERS = ['network-guard.mjs', 'census.mjs', 'emulator-host.mjs', 'export
     'weeklyclose.seed.mjs',
     // v202: the workbook's crew and exporting phone for tests/xlsxlook.test.mjs, and the
     // before/after files written from it for the pictures (asserts nothing).
-    'xlsxlook.seed.mjs', 'xlsxlook.render.mjs'];
+    'xlsxlook.seed.mjs', 'xlsxlook.render.mjs',
+    // v206: the speed track's records, phones and instruments for tests/speed.test.mjs,
+    // tests/speed.season.test.mjs and tests/speed.browser.mjs (asserts nothing).
+    'speed.seed.mjs'];
 
 // Suites that are RED ON PURPOSE and therefore in no gate: each one proves, on fixtures,
 // a case where the app parts from a documented rule, found by tests/oracle.test.mjs and

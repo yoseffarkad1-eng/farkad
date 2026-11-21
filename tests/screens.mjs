@@ -195,6 +195,24 @@ function migrationQuestions() {
     openMigrationModal();
 }
 
+// «מי עבד איפה», entered the way a person enters it: the finder, then «איפה עבד» on עלי חסן.
+// Runs in the page.
+function historyThroughTheFinder() {
+    openFind();
+    const door = document.querySelector('#findList [data-worker-id="w02"] [data-find-door="history"]');
+    if (!door) throw new Error('no «איפה עבד» on w02 in the finder');
+    door.click();
+}
+
+// Choices made in the dialog's own fields, each by its own change event. Runs in the page.
+function historyChosen(choices) {
+    choices.forEach(([id, value]) => {
+        const field = document.getElementById(id);
+        field.value = value;
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+}
+
 // A record with something for «שים לב» and «סגירות שנרשמו» to say: סאמר ח'טיב - paid by the
 // week - took 1,500 two weeks ago; that week of his and רון לוי's were closed at one moment,
 // and his week since was left open. IN MEMORY ONLY: the model's own writers on the
@@ -369,6 +387,63 @@ export const SCREENS = [
     { name: 'crew - reorder', scope: ['#reorderPanel'],
         open: async page => { await view('roster')(page); await run(page, () => openReorder()); await pause(page); },
         close: async page => { await run(page, () => closeReorder()); await pause(page, 120); } },
+    // «בדיקת הצוות» (js/ui/crewcheck.js), from its button at the foot of the crew screen. The
+    // seed as it is: 15 working days, so the too-few line, the calm line, and «לידיעה» - two
+    // men with no number, three who never worked.
+    { name: 'crew - «בדיקת הצוות», calm', scope: ['#crewCheckModal'],
+        open: async page => { await view('roster')(page); await run(page, () => openCrewCheck()); await pause(page); },
+        close: page => run(page, () => closeCrewCheck()) },
+    // The same dialog with every line it has (the idle men's note among them, which the large
+    // display's gate must measure): IN MEMORY ONLY, the model's own writers on the live
+    // schedule and nothing committed - w02's rate first, so the day added for him is stamped
+    // with it (his seeded days keep their 410: the man whose rate was cleared); then a typo'd
+    // number, a shared one, another country's, a name twice - the second of them with no rate,
+    // so both sentences of «בלי שכר יומי» are drawn and a namesake is named on three lines -
+    // two sites, and eleven working days before the seed (11/10-22/10, not the Saturday) with
+    // ראמי חורי on the first only. Taken back on closing: the eleven keys deleted, the crew and
+    // the sites put back as they were.
+    { name: 'crew - «בדיקת הצוות», with findings', scope: ['#crewCheckModal'],
+        open: async page => {
+            await view('roster')(page);
+            await run(page, () => {
+                if (!window.__crewCheckKept) {
+                    const S = State.schedule;
+                    window.__crewCheckKept = JSON.stringify({ workers: S.workers, places: S.places });
+                    const w = id => S.workers.find(x => x.id === id);
+                    w('w02').dailyRate = 0;
+                    w('w03').phone = '03-5551234';
+                    w('w05').phone = w('w01').phone;
+                    w('w04').phone = '+970 59-123-4567';
+                    w('w13').name = w('w12').name;
+                    w('w13').dailyRate = 0;
+                    S.places.push({ id: 'p6', name: 'חדרה - בית הספר', active: true }, { id: 'p7', name: 'כפר סבא - מרכז', active: true });
+                    ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-18', '2026-10-19',
+                        '2026-10-20', '2026-10-21', '2026-10-22'].forEach((date, i) => {
+                        if (i === 0) assignPlace(S, date, 'w14', 'actual', 'p6');
+                        else assignPlace(S, date, 'w01', 'actual', 'p1');
+                        if (i === 1) assignPlace(S, date, 'w02', 'actual', 'p1');
+                    });
+                }
+                render();
+                openCrewCheck();
+            });
+            await pause(page);
+        },
+        close: async page => {
+            await run(page, () => {
+                closeCrewCheck();
+                if (window.__crewCheckKept) {
+                    const kept = JSON.parse(window.__crewCheckKept);
+                    window.__crewCheckKept = null;
+                    ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-18', '2026-10-19',
+                        '2026-10-20', '2026-10-21', '2026-10-22'].forEach(date => { delete State.schedule.days[date]; });
+                    State.schedule.workers = kept.workers;
+                    State.schedule.places = kept.places;
+                }
+                render();
+            });
+            await pause(page, 120);
+        } },
 
     { name: 'advances - list', scope: APP,
         open: async page => { await run(page, () => { ADVANCE_WORKER = null; }); await view('advances')(page); } },
@@ -546,6 +621,25 @@ export const SCREENS = [
             await run(page, () => { const field = document.querySelector('#findModal input'); if (field) { field.value = 'ר'; field.dispatchEvent(new Event('input', { bubbles: true })); } });
             await pause(page, 300); },
         close: page => run(page, () => closeFind()) },
+    // «מי עבד איפה» (js/ui/history.js), each opened through the finder's door on עלי חסן and
+    // then chosen as a person chooses: the default range; p1 with Rima's lines and their note;
+    // p2 with «עובדי יוסף גבס» apart (the seed counts Rima only at p1 and יוסף גבס only at
+    // p2); and «תאריכים אחרים» with the text's fold open.
+    { name: 'find - where one man worked', scope: ['#historyModal'],
+        open: async page => { await home(page); await run(page, historyThroughTheFinder); await pause(page, 350); },
+        close: page => run(page, () => closeHistory()) },
+    { name: 'find - a site and everyone, with Rima', scope: ['#historyModal'],
+        open: async page => { await home(page); await run(page, historyThroughTheFinder);
+            await run(page, historyChosen, [['historyMan', ''], ['historySite', 'p1'], ['historyRange', 'thisMonth']]); await pause(page, 350); },
+        close: page => run(page, () => closeHistory()) },
+    { name: 'find - a site and everyone, with יוסף גבס', scope: ['#historyModal'],
+        open: async page => { await home(page); await run(page, historyThroughTheFinder);
+            await run(page, historyChosen, [['historyMan', ''], ['historySite', 'p2'], ['historyRange', 'thisMonth']]); await pause(page, 350); },
+        close: page => run(page, () => closeHistory()) },
+    { name: 'find - two dates and the text', scope: ['#historyModal'],
+        open: async page => { await home(page); await run(page, historyThroughTheFinder);
+            await run(page, historyChosen, [['historyRange', 'custom']]); await run(page, () => historyToggleText()); await pause(page, 350); },
+        close: page => run(page, () => closeHistory()) },
     { name: 'the «מה חדש» line', scope: ['#whatsNewBanner'],
         open: async page => { await home(page); await run(page, () => whatsNewShowLine()); await pause(page); },
         close: page => run(page, () => whatsNewHideLine()) },

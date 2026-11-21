@@ -1499,6 +1499,8 @@ const records = [];
             to: 'total += rates.daily * (doubled ? 3 : 1) + rates.hourly * hours;' },
         { name: 'the roster\'s rate today instead of the stamp', family: 'payroll',
             from: 'if (record && record.rates) {', to: 'if (false && record && record.rates) {' },
+        { name: 'a stamped hourly 0 read as a decided rate again', family: 'payroll',
+            from: 'const HOURLY_ZERO_STAMP_UNDECIDED = true;', to: 'const HOURLY_ZERO_STAMP_UNDECIDED = false;' },
         { name: 'two sites paid as two days', family: 'payroll',
             from: 'row.payUnits += doubled ? 2 : 1;', to: 'row.payUnits += (doubled ? 2 : 1) * entries.length;' },
         { name: 'extra hours left off the day', family: 'days',

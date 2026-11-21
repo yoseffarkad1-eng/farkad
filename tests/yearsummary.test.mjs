@@ -1623,6 +1623,8 @@ function withLibrary(device) {
     const times = [];
     let facts = null;
     for (let n = 0; n < 3; n += 1) {
+        // v207's integration (the speed track): each of the three runs cold, as on v206.
+        device.run("if (typeof REPORT_SHARED_KEPT !== 'undefined') REPORT_SHARED_KEPT = null;");
         const began = performance.now();
         facts = JSON.parse(device.run('JSON.stringify(yearSummaryFacts(2026))'));
         times.push(performance.now() - began);

@@ -664,7 +664,10 @@ function owesReadNow() {
     const today = todayStr();
     const key = owesKey(State.schedule, today);
     if (OWES_KEPT && OWES_KEPT.key === key) return OWES_KEPT.read;
-    const read = owesRead(State.schedule, today);
+    // Inside the pay sheet's one reading (reportReadOnce, js/ui/reports.js), so a board read
+    // after paint or after «איפוס מקדמות» shares the walks the readers in it ask for (v206).
+    const reading = () => owesRead(State.schedule, today);
+    const read = typeof reportReadOnce === 'function' ? reportReadOnce(reading) : reading();
     OWES_KEPT = { key, read };
     return read;
 }

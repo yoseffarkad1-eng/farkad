@@ -155,6 +155,8 @@
 :root.display-large #siteCardBody .scard-cal-saturday { min-width: 96px !important; }
 :root.display-large .find-head button { min-width: 64px !important; }
 :root.display-large .find-field button { min-width: 56px !important; }
+/* «מי עבד איפה» (js/ui/history.js): «סגור» in its head, as wide as the finder's. */
+:root.display-large .history-head button { min-width: 64px !important; }
 /* «מי חייב כסף» and «סגירות שנרשמו» (js/ui/owes.js): a row of the board, a close's card and
    the field a close's text is read in. */
 :root.display-large .owes-row,
@@ -739,6 +741,9 @@
 :root.display-large .daycheck-plain { font-size: 20px; font-weight: 600; }
 :root.display-large .daycheck-lead { font-size: 18px; line-height: 1.45; }
 :root.display-large .daycheck-foot button { font-size: 20px; }
+:root.display-large .crewcheck-entry { font-size: 20px; font-weight: 600; }
+:root.display-large #crewCheckModal .modal-content > h3 { line-height: 1.4; }
+:root.display-large .crewcheck-note { font-size: 18px; line-height: 1.45; }
 :root.display-large #transportReportModal .modal-content > h3 { line-height: 1.4; }
 :root.display-large .transport-report-ranges button { font-size: 20px; font-weight: 700; }
 :root.display-large #transportReportText { font-size: 20px; line-height: 1.65; }
@@ -889,6 +894,34 @@
 :root.display-large .find-who .badge { font-size: 20px; }
 :root.display-large .find-door { font-size: 20px; font-weight: 600; }
 :root.display-large .find-group { font-size: 21px; }
+:root.display-large .history-head h3 { line-height: 1.4; }
+:root.display-large .history-head button { font-size: 20px; }
+:root.display-large .history-field { font-size: 20px; font-weight: 600; }
+:root.display-large .history-field select,
+:root.display-large .history-field input { font-size: 20px; font-weight: 500; }
+:root.display-large .history-now { font-size: 20px; font-weight: 700; }
+:root.display-large .history-tile-label { font-size: 20px; }
+:root.display-large .history-tile-value { font-size: 27px; font-weight: 800; line-height: 1.4; }
+:root.display-large .history-note { font-size: 20px; line-height: 1.45; }
+:root.display-large .history-site-head { font-size: 22px; font-weight: 800; }
+:root.display-large .history-pair-label { font-size: 20px; font-weight: 600; }
+:root.display-large .history-pair-value { font-size: 25px; font-weight: 800; line-height: 1.4; }
+:root.display-large .history-men-head { font-size: 22px; font-weight: 800; }
+:root.display-large .history-man { font-size: 20px; }
+:root.display-large .history-fold > button { font-size: 20px; }
+:root.display-large #historyModal .history-fold-body textarea { font-size: 20px; }
+:root.display-large .history-fold-body button { font-size: 20px; }
+:root.display-large #historyStatus { font-size: 20px; }
+:root.display-large .history-month { font-size: 22px; font-weight: 800; }
+:root.display-large #historyList .history-row { font-size: 20px; }
+:root.display-large .history-when { font-size: 20px; font-weight: 700; }
+:root.display-large .history-name { font-size: 22px; font-weight: 700; }
+:root.display-large .history-day .tag { font-size: 20px; }
+:root.display-large .history-kind { font-size: 20px; font-weight: 600; }
+:root.display-large .history-kind-double { font-weight: 800; }
+:root.display-large .history-hours { font-size: 20px; font-weight: 700; }
+:root.display-large .history-day .badge { font-size: 20px; }
+:root.display-large #historyList .history-more { font-size: 20px; }
 :root.display-large body.journey-day .day-actions > #copyDayBtn { font-size: 20px !important; }
 :root.display-large #whatsNewBanner { font-size: 20px; font-weight: 600; }
 :root.display-large #whatsNewBanner button { font-size: 20px; }

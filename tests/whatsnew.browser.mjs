@@ -58,7 +58,7 @@ const SINCE = 'מה שנוסף מאז העדכון האחרון שראית, מה
 const ALL = 'כל מה שנוסף לאחרונה, מהחדש לישן.';
 const SHOW = 'הראה לי';
 // The builds that have news, newest first (tests/whatsnew.test.mjs pins the block).
-const NEWS = [206, 205, 204, 203, 202, 201, 200, 199, 198, 197, 196, 195, 194, 192, 191, 190, 189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
+const NEWS = [207, 206, 205, 204, 203, 202, 201, 200, 199, 198, 197, 196, 195, 194, 192, 191, 190, 189, 188, 187, 186, 184, 183, 182, 181, 180, 179, 174];
 
 // SYNTHETIC. Fourteen invented men on three invented sites.
 const NAMES = ['אחמד', 'מוחמד', 'יוסי', 'סמיר', 'עלי', 'Ali Hassan', 'ראמי', 'דוד', 'עבד אל-רחמן', 'מחמוד', 'חאלד', 'נביל', 'זיאד', 'כרים'];
@@ -425,7 +425,8 @@ for (const rides of [false, true]) {
     given(`הסעות is ${rides ? 'on' : 'off'}`, await page.evaluate(() => transportEnabled()) === rides);
     const ways = await page.evaluate(() => Object.keys(WHATSNEW_GO).sort());
     // MOVED ON PURPOSE (v206's integration): «לוח חודשי», «יום תשלום» and «תמונת מצב» each have a way.
-    same('the ways there are', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'monthBoard', 'payReport', 'payday', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'status', 'version', 'week']);
+    // MOVED ON PURPOSE (v207): and «בדיקת הצוות» one, 'crewcheck'.
+    same('the ways there are', ways, ['advanceReset', 'advances', 'backup', 'closeReminder', 'crewcheck', 'day', 'dayCheck', 'display', 'find', 'journeyDock', 'monthBoard', 'payReport', 'payday', 'payslipsMenu', 'reportsMenu', 'rides', 'roster', 'status', 'version', 'week']);
     const reset = () => page.evaluate(() => {
         [...document.querySelectorAll('.modal')].filter(node => node.style.display === 'flex').forEach(node => {
             const close = MODAL_CLOSERS[node.id];
@@ -456,6 +457,8 @@ for (const rides of [false, true]) {
         journeyDock: s => s.view === 'day' && s.modals.length === 0 && s.focus === 'journeyDockBtn' && s.journey === 0,
         dayCheck: s => s.view === 'day' && s.modals.join() === 'dayCheckModal',
         roster: s => s.view === 'roster' && s.modals.length === 0 && !s.settings,
+        // v207: the crew screen, «בדיקת הצוות» at its foot given the keyboard - the dialog NOT opened.
+        crewcheck: s => s.view === 'roster' && s.focus === 'crewCheckEntry' && s.modals.length === 0 && !s.settings,
         // The menu open with the row on the glass - and the row NOT pressed: no dialog.
         reportsMenu: s => s.view === 'reports' && s.menu && s.menuRows.includes('monthSummaryOpen') && s.modals.length === 0,
         // The pay sheet as it opens: on «לפי עובד», its menu shut, nothing pressed.
@@ -511,8 +514,8 @@ for (const rides of [false, true]) {
             check('journeyDock: the button is on the glass - and not pressed: no journey was started',
                 onGlass && await page.evaluate(() => localStorage.getItem('farkadSederJourney')) === null);
         }
-        if (['monthBoard', 'payday', 'status'].includes(way)) {
-            const id = { monthBoard: 'monthBoardDoor', payday: 'paydayEntry', status: 'statusDoor' }[way];
+        if (['monthBoard', 'payday', 'status', 'crewcheck'].includes(way)) {
+            const id = { monthBoard: 'monthBoardDoor', payday: 'paydayEntry', status: 'statusDoor', crewcheck: 'crewCheckEntry' }[way];
             check(`${way}: the control it names is on the glass, given the keyboard and not pressed`, await page.evaluate(name => {
                 const box = document.getElementById(name).getBoundingClientRect();
                 return box.top >= 0 && box.bottom <= window.innerHeight && document.activeElement && document.activeElement.id === name;

@@ -24,6 +24,8 @@ const MODAL_CLOSERS = {
     workerCardModal: () => closeWorkerCard(),
     // The finder (js/ui/find.js): closing it empties what was typed.
     findModal: () => closeFind(),
+    // «מי עבד איפה» (js/ui/history.js): closing it forgets the question and what was drawn.
+    historyModal: () => closeHistory(),
     shareModal: () => closeShareModal(),
     // Closing it on purpose is what stops a reload bringing it back (js/ui/seder.js).
     sederModal: () => closeSederList(),
@@ -40,6 +42,8 @@ const MODAL_CLOSERS = {
     transportSummaryModal: () => closeTransportSummary(),
     // The day's check (js/ui/daycheck.js). Nothing to clear behind it: it holds no state.
     dayCheckModal: () => closeDayCheck(),
+    // The crew's check (js/ui/crewcheck.js). It holds no state either.
+    crewCheckModal: () => closeCrewCheck(),
     // The report of a period's rides (js/ui/transport.js).
     transportReportModal: () => closeTransportReport(),
     // The month's summary (js/ui/monthsummary.js): closing it forgets which month it was.

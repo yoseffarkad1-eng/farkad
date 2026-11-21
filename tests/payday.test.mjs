@@ -145,7 +145,9 @@ function phone({ storage = null, flags = OPEN, today = TODAY, deviceId = 'd_offi
 const press = node => (node.listeners && node.listeners.click || []).forEach(heard => heard({ preventDefault() {}, target: node }));
 const at = d => `${d.ctx.todayStr()}T15:00:00.000Z`;
 const facts = d => d.call('paydayFacts', d.ctx.todayStr(), at(d));
-const fresh = d => d.run('OWES_KEPT = null; REPORT_GATE_KEPT = null; PAYDAY_KEPT = null; 1');
+// v207's integration (the speed track): its readings kept between readings are forgotten too,
+// so every timed run here is cold, as on v206.
+const fresh = d => d.run("OWES_KEPT = null; REPORT_GATE_KEPT = null; PAYDAY_KEPT = null; if (typeof REPORT_SHARED_KEPT !== 'undefined') REPORT_SHARED_KEPT = null; 1");
 const card = (f, key) => f.groups.filter(group => group.key === key)[0] || null;
 const fig = (group, kind) => group.figures.filter(one => one.kind === kind)[0].value;
 // The findings of «לפני שסוגרים» - h ('forgotten'), the quiet last line, is not one of them
