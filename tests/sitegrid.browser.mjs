@@ -310,7 +310,7 @@ const agrees = (got, want) => JSON.stringify([got.headers.slice(1, -1), got.date
                             };
                         });
                         const floor = large ? 52 : 44;
-                        const small = (large ? 18 : 14) * (doubled ? 2 : 1);
+                        const small = (large ? 18 : 16) * (doubled ? 2 : 1);       // 16, not the app's 14: this page's own floor
                         const need = large ? 7 : 4.5;
                         const worst = Math.min(...seen.colours.map(([ink, ground]) => ratio(ink, ground)));
                         const ok = seen.buttons.every(b => b[2] >= floor && b[3] >= floor) && !seen.overlap && !seen.spill
