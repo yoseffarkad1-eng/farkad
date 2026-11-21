@@ -225,6 +225,7 @@ const agrees = (got, want) => JSON.stringify([got.headers.slice(1, -1), got.date
         await page.locator('#reportsView .client-grid').scrollIntoViewIfNeeded();
         const read = () => page.evaluate(() => {
             const wrap = document.querySelector('#reportsView .client-grid-scroll');
+            wrap.querySelector('tbody tr').scrollIntoView({ block: 'center' });
             const box = wrap.getBoundingClientRect();
             const date = wrap.querySelector('tbody tr .client-grid-date').getBoundingClientRect();
             const head = wrap.querySelector('thead .client-grid-date').getBoundingClientRect();

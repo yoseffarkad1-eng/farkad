@@ -369,7 +369,10 @@ export function mediumDisk(options = {}) {
 // does not draw (payday-entry) are taken out and COUNTED (SPEED_LATER), with the boards drawn.
 // On this branch there are none; tests/speed.test.mjs holds that, and one per board once a
 // LATER_SCREENS file draws one.
-export const SNAP = `var SPEED_LATER = { rows: 0, kids: 0, boards: 0 };
+// v208: the screen grid of «לפי אתר» with its switch (renderSiteGrid, js/ui/reports.js) is one
+// block the base never drew: taken out as one node and COUNTED (SPEED_LATER.grids). Its cells
+// are held against the two invoice readers in tests/sitegrid.test.mjs.
+export const SNAP = `var SPEED_LATER = { rows: 0, kids: 0, boards: 0, grids: 0 };
 const SPEED_LATER_ROWS = ['owes-actions'];
 const SPEED_LATER_KIDS = ['payday-entry'];
 function speedHas(node, names) {
@@ -379,6 +382,7 @@ function speedHas(node, names) {
 function speedKids(node) {
     const out = [];
     node.children.forEach(child => {
+        if (speedHas(child, ['client-grid'])) { SPEED_LATER.grids += 1; return; }
         if (speedHas(child, SPEED_LATER_ROWS)) {
             SPEED_LATER.rows += 1;
             child.children.forEach(inner => {

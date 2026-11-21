@@ -234,6 +234,11 @@ function snap(node) {
 // on «לפי עובד» and on top of «מקדמות» exactly when this record may be closed, and nowhere
 // else.
 const WEEKLY_ENTRY = /(^|\s)weekly-close-entry(\s|$)/;
+// v208: the screen grid of «לפי אתר» with its switch (renderSiteGrid, js/ui/reports.js) is one
+// block v195 never drew. It is taken out of the comparison as one node and COUNTED; its every
+// cell is held against invoiceByDate and invoiceWithoutRima in tests/sitegrid.test.mjs.
+const SITE_GRID = /(^|\s)client-grid(\s|$)/;
+let SITE_GRIDS = 0;
 // v206: «יום תשלום» (js/ui/payday.js) puts its button beside «סגירת שבוע» on «מקדמות», in ONE
 // row (renderOwesInto, js/ui/owes.js) that v195 never drew. The row is taken out of the
 // comparison as one node and COUNTED (device.paydayRows, per draw) - required where the board
@@ -293,6 +298,7 @@ const withoutWeekly = (device, nodes) => nodes.filter(node => {
         device.owesMoved = (device.owesMoved || 0) + 1;
         return false;
     }
+    if (SITE_GRID.test(node.className || '')) { SITE_GRIDS += 1; return false; }
     if (PAYDAY_ROW.test(node.className || '')) {
         device.paydayRows = (device.paydayRows || 0) + 1;
         node.children.forEach(child => {
@@ -506,6 +512,7 @@ const READINGS = [
         `${tally.orderRefused} / ${tally.excused.count}`);
     check(`«סגירת שבוע»'s one button: on «לפי עובד» and «מקדמות» once a draw where the record may be closed (${tally.weekly.may} readings), nowhere where it may not (${tally.weekly.mayNot}), never on «לפי אתר» or a man's page - the only thing taken out of the comparison`,
         tally.weekly.may > 0 && tally.weekly.mayNot > 0 && tally.weeklyWrong.length === 0, tally.weeklyWrong.slice(0, 4).join(' | '));
+    check('v208: the screen grid of «לפי אתר» was there to take out, one block a draw of an invoice that has anything in it', SITE_GRIDS > 0, String(SITE_GRIDS));
     check(`v206: «יום תשלום»'s row on «מקדמות» once a draw of the board (${tally.payday} draws, every reading of the gate), never on «דוחות» or a man's page, never in v195 - taken out as one node and counted`,
         tally.payday === tally.readings && tally.paydayWrong.length === 0, tally.paydayWrong.slice(0, 4).join(' | '));
 }

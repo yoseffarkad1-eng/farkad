@@ -2526,8 +2526,8 @@ a[href]:focus-visible,
 @media screen { .report-invoice .report-norima { display: none; } }
 .client-grid { margin-top: 16px; }
 .client-grid-toggle { display: flex; margin: 0 0 8px; }
-.client-grid-toggle button { flex: 1 1 0; min-width: 0; min-height: 44px; font-size: 15px; padding: 6px 8px; white-space: normal; overflow-wrap: anywhere; }
-.client-grid-says { margin: 0 0 8px; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+.client-grid-toggle button { flex: 1 1 0; min-width: 0; min-height: 44px; font-size: 16px; padding: 6px 8px; white-space: normal; overflow-wrap: anywhere; }
+.client-grid-says { margin: 0 0 8px; font-size: 16px; line-height: 1.5; color: var(--ink-2); }
 /* On a phone .report .table-scroll lets its table spill (the cards need it); this one
    must hold its own sideways scroll, or eight sites widen the whole page. */
 .report .client-grid .client-grid-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
@@ -2544,7 +2544,7 @@ a[href]:focus-visible,
     background: var(--surface);
     color: var(--ink);
 }
-.client-grid-table thead th { font-size: 14px; font-weight: 700; color: var(--ink-2); background: var(--surface-2); white-space: normal; min-width: 64px; max-width: 120px; overflow-wrap: break-word; vertical-align: bottom; }
+.client-grid-table thead th { font-size: 16px; font-weight: 700; color: var(--ink-2); background: var(--surface-2); white-space: normal; min-width: 64px; max-width: 120px; overflow-wrap: break-word; vertical-align: bottom; }
 .client-grid-table td.num { font-weight: 600; }
 .client-grid-table .client-grid-date {
     position: sticky;
@@ -2559,7 +2559,7 @@ a[href]:focus-visible,
 .client-grid-table .client-grid-sum { font-weight: 800; background: var(--surface-2); }
 .client-grid-table tfoot th,
 .client-grid-table tfoot td { font-weight: 800; background: var(--surface-2); border-top: 2px solid var(--line); border-bottom: none; }
-.client-grid-table tfoot .client-grid-date { white-space: normal; max-width: 110px; font-size: 14px; }
+.client-grid-table tfoot .client-grid-date { white-space: normal; max-width: 110px; font-size: 16px; }
 /* עובדי יוסף גבס (v183): the list that is in no account, last on the page and apart from
    everything above it. An ordinary .report-table inside .report-invoice, so it takes the
    same phone cards and the invoice's paper rules. ON PAPER TOO - the owner, 2026-11-10: "I
