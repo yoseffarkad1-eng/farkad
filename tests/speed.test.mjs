@@ -315,6 +315,8 @@ const SEEDED = [1, 2, 3, 4, 5, 6, 7, 8].map(seed => [seed, seeded(seed, seed % 4
     same(`the rows later tracks add to «מקדמות», taken out and counted: ${tally.later.reduce((sum, [, one]) => sum + one.kids, 0)} on ${tally.later.reduce((sum, [, one]) => sum + one.boards, 0)} boards drawn`,
         later.map(([label, one]) => `${label}: ${j(one)}`), []);
     check('and the boards were drawn to count them on', tally.later.reduce((sum, [, one]) => sum + one.boards, 0) > 0);
+    check('v208: the screen grid of «לפי אתר» was there to take out of the comparison, and counted', tally.later.reduce((sum, [, one]) => sum + (one.grids || 0), 0) > 0,
+        String(tally.later.reduce((sum, [, one]) => sum + (one.grids || 0), 0)));
 }
 
 // ---------------------------------------------------------------- 1. «איפוס מקדמות»'s step 3

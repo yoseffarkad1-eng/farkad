@@ -2587,6 +2587,9 @@ function renderInvoiceTable() {
     // and both read the same workerDays.
     section.appendChild(renderInvoiceBars(places));
 
+    // v208: the counts as a grid ON THE SCREEN, with one switch for Rima's men (below).
+    section.appendChild(renderSiteGrid(all, chosen));
+
     // Only the dates this site actually worked. A client's page with a run of empty rows
     // for days their site was closed reads as a mistake.
     const dates = chosen
@@ -2642,6 +2645,152 @@ function renderInvoiceTable() {
     const yosefGeves = renderYosefGevesSection();
     if (yosefGeves) section.appendChild(yosefGeves);
     return section;
+}
+
+// ---------------------------------------------------------------- טבלת האתרים (v208)
+//
+// The owner asked for the client's account as a table he can read like a sheet - dates
+// down, sites across, the day's total last, the totals at the foot - with ONE switch,
+// «כולל עובדי רימא» / «ללא עובדי רימא» (2026-11-21; shown that both tables were already on
+// this page, he chose to have them improved in place rather than a page of their own).
+//
+// IT COUNTS NOTHING ITSELF. «כולל» is the invoice's grid, cell for cell what the paper's
+// grid above is built from (invoiceByDate - his men and the Rima count, one worker-site
+// day each). «ללא» is «בלי עובדי רימא»'s grid (invoiceWithoutRima - his men only), narrowed
+// to the chosen client's site the way that table is. So the two states are the two tables
+// this page has had since v167, drawn in one place.
+//
+// SCREEN ONLY. The paper is still the .invoice-grid above (hidden on the screen, whole in
+// print) and the picture is read off that; this block is hidden in print by css/app.css
+// and its table is NOT a .report-table, so readReportPrintout (js/ui/printout.js) never
+// sees it. «בלי עובדי רימא»'s own section stays in the document for the suites and the
+// stylesheet that know it, hidden on the screen now that this switch shows the same
+// figures - the owner's ruling that it never reaches paper or the picture is unchanged.
+//
+// A real table, not the phone's cards: the point is reading across. The first column (the
+// date) sticks to the inline start while the sites scroll sideways inside the wrapper; the
+// page itself never scrolls sideways. The header row does not stick: a wrapper that
+// scrolls sideways is the header's scrolling box, so it could only stick inside a box of
+// fixed height with a scroll of its own, and a second up-and-down scroll inside the page
+// is worse on a phone than a header that leaves.
+//
+// The choice is this page's memory and nothing else - no key anywhere - and every opening
+// of the app begins on «כולל», which is the invoice.
+let SITE_GRID_WITH_RIMA = true;
+
+// The pinned words. The two choices are the owner's own; the rest are PROPOSED.
+const SITE_GRID_TEXT = {
+    group: 'עובדי רימא בטבלה',
+    withRima: 'כולל עובדי רימא',
+    withoutRima: 'ללא עובדי רימא',
+    saysWith: 'כל העובדים בכל אתר, כולל עובדי רימא - כמו בחיוב.',
+    saysWithout: 'העובדים שלך בלבד, בלי עובדי רימא.',
+    date: 'תאריך',
+    dayTotal: 'סה״כ יומי'
+};
+
+// What the grid shows in each state: { dates, places: [{ placeId, name, workerDays }],
+// countAt, dayTotal, total } - every figure the existing reader's own.
+function siteGridFacts(all, chosen) {
+    if (!SITE_GRID_WITH_RIMA) {
+        return invoiceWithoutRima(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to,
+            chosen ? chosen.placeId : null);
+    }
+    const places = chosen ? [chosen] : all.places;
+    return {
+        dates: chosen ? chosen.days.map(day => day.date) : all.dates,
+        places,
+        countAt: (placeId, date) => all.countAt(placeId, date),
+        // The paper grid's own sum of the row it prints (renderInvoiceTable).
+        dayTotal: date => places.reduce((sum, place) => sum + all.countAt(place.placeId, date), 0),
+        total: places.reduce((sum, place) => sum + place.workerDays, 0)
+    };
+}
+
+function renderSiteGrid(all, chosen) {
+    const block = el('div', 'client-grid');
+    block.setAttribute('data-rima', SITE_GRID_WITH_RIMA ? 'with' : 'without');
+
+    const toggle = el('div', 'layer-toggle mode-toggle mode-quiet client-grid-toggle');
+    toggle.setAttribute('role', 'group');
+    toggle.setAttribute('aria-label', SITE_GRID_TEXT.group);
+    const choice = (withRima, words) => {
+        const on = SITE_GRID_WITH_RIMA === withRima;
+        const btn = button(words, on ? 'layer-on' : 'layer-off', () => {
+            if (SITE_GRID_WITH_RIMA === withRima) return;
+            SITE_GRID_WITH_RIMA = withRima;
+            // Only this block is drawn again: the figures above and below it do not
+            // depend on the switch, and the finger stays on the button it pressed.
+            const again = renderSiteGridFor();
+            if (!again) { render(); return; }
+            block.replaceWith(again);
+            const pressed = again.querySelector('.client-grid-toggle [aria-pressed="true"]');
+            if (pressed) pressed.focus();
+        });
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.setAttribute('data-rima', withRima ? 'with' : 'without');
+        return btn;
+    };
+    toggle.appendChild(choice(true, SITE_GRID_TEXT.withRima));
+    toggle.appendChild(choice(false, SITE_GRID_TEXT.withoutRima));
+    block.appendChild(toggle);
+    block.appendChild(el('p', 'client-grid-says',
+        SITE_GRID_WITH_RIMA ? SITE_GRID_TEXT.saysWith : SITE_GRID_TEXT.saysWithout));
+
+    const facts = siteGridFacts(all, chosen);
+    const table = el('table', 'client-grid-table');
+    const head = el('thead');
+    const headRow = el('tr');
+    [SITE_GRID_TEXT.date].concat(facts.places.map(place => place.name))
+        .concat([SITE_GRID_TEXT.dayTotal]).forEach((text, index) => {
+            const th = el('th', index === 0 ? 'client-grid-date' : null, text);
+            th.setAttribute('scope', 'col');
+            headRow.appendChild(th);
+        });
+    head.appendChild(headRow);
+    table.appendChild(head);
+
+    const number = value => (isBlankCell(value) ? '' : String(value));
+    const body = el('tbody');
+    facts.dates.forEach(date => {
+        const parsed = parseLocalDate(date);
+        const tr = el('tr');
+        tr.setAttribute('data-date', date);
+        // The invoice grid's own date cell: weekday and dd/mm, the year on the period line.
+        const th = el('th', 'client-grid-date', `${HEBREW_DAY_NAMES[parsed.getDay()]} ${formatShortDate(parsed)}`);
+        th.setAttribute('scope', 'row');
+        tr.appendChild(th);
+        facts.places.forEach(place =>
+            tr.appendChild(el('td', 'num', number(facts.countAt(place.placeId, date)))));
+        tr.appendChild(el('td', 'num client-grid-sum', number(facts.dayTotal(date))));
+        body.appendChild(tr);
+    });
+    table.appendChild(body);
+
+    const foot = el('tfoot');
+    const footRow = el('tr');
+    // The invoice's own word for this line, for the reason given where the paper's is built.
+    const label = el('th', 'client-grid-date', NO_RIMA_TOTAL);
+    label.setAttribute('scope', 'row');
+    footRow.appendChild(label);
+    facts.places.forEach(place => footRow.appendChild(el('td', 'num', number(place.workerDays))));
+    footRow.appendChild(el('td', 'num client-grid-sum', number(facts.total)));
+    foot.appendChild(footRow);
+    table.appendChild(foot);
+
+    const wrap = el('div', 'table-scroll client-grid-scroll');
+    wrap.appendChild(table);
+    block.appendChild(wrap);
+    return block;
+}
+
+// The block as the page would draw it now - the range and the chosen client's site read
+// afresh, so a press of the switch cannot draw a site the picker has since left.
+function renderSiteGridFor() {
+    const all = invoiceByDate(State.schedule, REPORT_RANGE.from, REPORT_RANGE.to);
+    if (all.places.length === 0) return null;
+    const chosen = all.places.find(place => place.placeId === INVOICE_PLACE) || null;
+    return renderSiteGrid(all, chosen);
 }
 
 // ---------------------------------------------------------------- רישום לרימא (v166)

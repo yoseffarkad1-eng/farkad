@@ -2517,6 +2517,51 @@ a[href]:focus-visible,
    the paper the client is handed (and readReportPrintout leaves it out of the picture). */
 .report-norima { margin-top: 18px; }
 @media print { .report-norima { display: none !important; } }
+/* טבלת האתרים (v208): the same two grids as ONE table with a switch, on the screen only.
+   .client-grid is hidden in print and its table is not a .report-table, so neither the
+   paper nor the picture knows it; «בלי עובדי רימא»'s own section stays in the document and
+   is hidden on the screen, where the switch now shows its figures. A real table: the date
+   column sticks to the inline start while the sites scroll inside .client-grid-scroll. */
+@media print { .client-grid { display: none !important; } }
+@media screen { .report-invoice .report-norima { display: none; } }
+.client-grid { margin-top: 16px; }
+.client-grid-toggle { display: flex; margin: 0 0 8px; }
+/* Two classes, so that the phone's own `.layer-toggle button` (14px, further down) does not win:
+   everything under «לפי אתר» is 16px or more (tests/reportsclarity.browser.mjs). */
+.client-grid .client-grid-toggle button { flex: 1 1 0; min-width: 0; min-height: 44px; font-size: 16px; padding: 6px 8px; white-space: normal; overflow-wrap: anywhere; }
+.client-grid-says { margin: 0 0 8px; font-size: 16px; line-height: 1.5; color: var(--ink-2); }
+/* On a phone .report .table-scroll lets its table spill (the cards need it); this one
+   must hold its own sideways scroll, or eight sites widen the whole page. */
+.report .client-grid .client-grid-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.client-grid-table { border-collapse: separate; border-spacing: 0; width: 100%; font-variant-numeric: tabular-nums; }
+.client-grid-table th,
+.client-grid-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line-soft);
+    border-inline-start: 1px solid var(--line-soft);
+    font-size: 16px;
+    line-height: 1.3;
+    text-align: center;
+    white-space: nowrap;
+    background: var(--surface);
+    color: var(--ink);
+}
+.client-grid-table thead th { font-size: 16px; font-weight: 700; color: var(--ink-2); background: var(--surface-2); white-space: normal; min-width: 64px; max-width: 120px; overflow-wrap: break-word; vertical-align: bottom; }
+.client-grid-table td.num { font-weight: 600; }
+.client-grid-table .client-grid-date {
+    position: sticky;
+    inset-inline-start: 0;
+    z-index: 1;
+    text-align: start;
+    font-weight: 700;
+    border-inline-start: none;
+    border-inline-end: 2px solid var(--line);
+}
+.client-grid-table thead .client-grid-date { z-index: 2; }
+.client-grid-table .client-grid-sum { font-weight: 800; background: var(--surface-2); }
+.client-grid-table tfoot th,
+.client-grid-table tfoot td { font-weight: 800; background: var(--surface-2); border-top: 2px solid var(--line); border-bottom: none; }
+.client-grid-table tfoot .client-grid-date { white-space: normal; max-width: 110px; font-size: 16px; }
 /* עובדי יוסף גבס (v183): the list that is in no account, last on the page and apart from
    everything above it. An ordinary .report-table inside .report-invoice, so it takes the
    same phone cards and the invoice's paper rules. ON PAPER TOO - the owner, 2026-11-10: "I

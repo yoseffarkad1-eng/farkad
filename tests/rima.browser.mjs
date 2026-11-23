@@ -876,7 +876,10 @@ async function open(width, height = 844) {
         };
     });
     const shown = await table();
-    check('it is drawn and on the screen', Boolean(shown && shown.visible), JSON.stringify(shown));
+    // v208: the screen says this through the grid's switch («ללא עובדי רימא»,
+    // tests/sitegrid.browser.mjs); the section itself stays in the document, whole, and is
+    // put away on the screen - the workbook's sheet and the checks below read it as before.
+    check('it is in the document, whole, and put away on the screen (v208: the switch shows it)', Boolean(shown && !shown.visible), JSON.stringify(shown));
     same('under the invoice and above רישום לרימא', shown && shown.order, [true, true]);
     same('titled in the pinned words', shown && shown.title, NO_RIMA);
     same('the invoice\'s own columns', shown && shown.headers, ['תאריך', 'Site A', 'Site B', 'Site C', 'Site H', 'סה״כ']);

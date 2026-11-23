@@ -482,7 +482,17 @@ async function both(act, done, options = {}) {
         check(`15. ${name}: drawn sharing, drawn again on the unmoved record, and drawn afresh - the same innerHTML (${drawn.length} characters)`,
             drawn === afresh && again === afresh && drawn.length > 200);
         if (selector === '#reportsView') {
-            reportsNodes = drawn;
+            // v208: the screen grid of «לפי אתר» with its switch is one block the base never
+            // drew (tests/sitegrid.browser.mjs holds it); it is taken out of THIS side before
+            // the two trees are compared, and required to have been there.
+            reportsNodes = await page.evaluate(() => {
+                const copy = document.getElementById('reportsView').cloneNode(true);
+                const grids = copy.querySelectorAll('.client-grid');
+                grids.forEach(node => node.remove());
+                return { html: copy.innerHTML, grids: grids.length, whole: document.getElementById('reportsView').innerHTML };
+            });
+            check('15. «דוחות» as compared with the base is the page just drawn, less the one grid v208 adds', reportsNodes.whole === drawn && reportsNodes.grids === 1, String(reportsNodes.grids));
+            reportsNodes = reportsNodes.html;
             const shared = await page.evaluate(async code => { await window.speedDraw(code, '#reportsView', false); return window.speedPicture(); }, code);
             const fresh = await page.evaluate(async code => { await window.speedDraw(code, '#reportsView', true); return window.speedPicture(); }, code);
             check(`16. sharePrintout('report'): the same PNG bytes drawn sharing and drawn afresh (${shared ? shared.slice(0, 12) : 'no picture'})`, Boolean(shared) && shared === fresh);

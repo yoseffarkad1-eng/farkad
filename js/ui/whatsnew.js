@@ -74,6 +74,14 @@ const WHATSNEW_TEXT = Object.freeze({
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
     // v207: the three tracks of 2026-11-19's second wave, each in its own track's words. Every
+    // v208: the owner's choice of 2026-11-21 (option 2) - the dates-by-sites grid under «לפי אתר» with
+    // its «כולל עובדי רימא» / «ללא עובדי רימא» switch (js/ui/reports.js, features/sitegrid). The way
+    // only shows the page on «לפי אתר»; the switch is his to press.
+    { build: 'v208', items: [
+        { title: 'חיוב: עם רימא או בלי, בטבלה אחת',
+            text: 'בדוחות ← לפי אתר: טבלת תאריכים ואתרים עם מתג «כולל עובדי רימא» / «ללא עובדי רימא», ועמודת התאריך נשארת בגלילה הצידה.',
+            where: 'דוחות ← לפי אתר', go: 'siteReport' }
+    ] },
     // «איפה» checked against the merged tree: «בדיקת הצוות» is the last thing on the crew screen
     // (#crewCheckFoot after .roster-columns); «איפה עבד» is the fourth door, last, on each man
     // «חיפוש עובד» lists; the speed layer moves no node, so its item names the pages it speeds.
@@ -604,6 +612,13 @@ const WHATSNEW_GO = Object.freeze({
     // left wherever he had it (v189: the groups in their own periods are what he is shown).
     payReport: () => {
         if (typeof REPORT_SECTION !== 'undefined' && REPORT_SECTION !== 'workers') REPORT_SECTION = 'workers';
+        showView('reports');
+        return true;
+    },
+    // v208: the reports on «לפי אתר», as it opens - the grid's switch NOT pressed, the range left
+    // wherever he had it.
+    siteReport: () => {
+        if (typeof REPORT_SECTION !== 'undefined' && REPORT_SECTION !== 'sites') REPORT_SECTION = 'sites';
         showView('reports');
         return true;
     },

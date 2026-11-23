@@ -486,13 +486,13 @@ async function seedRoster(page) {
   check('the invoice is broken out day by day',
     byDate.length === 2 && byDate[0] === '2026-08-10', JSON.stringify(byDate));
   check('the printed invoice is a date-by-site grid',
-    (await page.locator('.report-invoice tbody tr').count()) === 2);
+    (await page.locator('.report-invoice .invoice-grid tbody tr').count()) === 2);
   check('and its columns are the sites',
-    (await page.locator('.report-invoice thead th').count()) === 4);
+    (await page.locator('.report-invoice .invoice-grid thead th').count()) === 4);
 
   // the counts themselves, not just the shape: an empty grid has the right shape too
   const grid = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('.report-invoice tbody tr'))
+    Array.from(document.querySelectorAll('.report-invoice .invoice-grid tbody tr'))
       .map(tr => Array.from(tr.children).map(td => td.textContent)));
   check('each day carries the number of workers at each site',
     JSON.stringify(grid[1].slice(1)) === JSON.stringify(['2', '', '2']), JSON.stringify(grid));
@@ -6072,19 +6072,19 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.waitForTimeout(300);
 
   check('by default the invoice shows every site, for working from',
-    (await page.locator('.report-invoice thead th').count()) === 4);
+    (await page.locator('.report-invoice .invoice-grid thead th').count()) === 4);
 
   await page.locator('.invoice-picker').getByRole('button', { name: 'הרצליה' }).click();
   await page.waitForTimeout(300);
   check('choosing a site narrows the page to that client alone',
-    (await page.locator('.report-invoice thead th').count()) === 3 &&
-    !(await page.textContent('.report-invoice thead')).includes('תל אביב'));
+    (await page.locator('.report-invoice .invoice-grid thead th').count()) === 3 &&
+    !(await page.textContent('.report-invoice .invoice-grid thead')).includes('תל אביב'));
   check('and the heading names them, since the chips are not printed',
     (await page.textContent('.report-invoice h2')).includes('הרצליה'));
   check('days their site did not work are left out, not shown as empty rows',
-    (await page.locator('.report-invoice tbody tr').count()) === 2);
+    (await page.locator('.report-invoice .invoice-grid tbody tr').count()) === 2);
   check('the total is that site\'s alone',
-    (await page.textContent('.report-invoice tfoot')).includes('3'));
+    (await page.textContent('.report-invoice .invoice-grid tfoot')).includes('3'));
 
   await page.emulateMedia({ media: 'print' });
   await page.waitForTimeout(200);
@@ -6117,7 +6117,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   await page.locator('.invoice-picker').getByRole('button', { name: 'כל האתרים' }).click();
   await page.waitForTimeout(300);
   check('and it goes back to every site',
-    (await page.locator('.report-invoice thead th').count()) === 4);
+    (await page.locator('.report-invoice .invoice-grid thead th').count()) === 4);
   check('with the full workbook back behind the button', await page.evaluate(() =>
     Object.keys(reportSheets()).join(',') === 'payroll,invoice,detail'));
   await page.context().close();
@@ -6967,7 +6967,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
 
   check('the bars are what the screen shows', await page.locator('.invoice-bars').isVisible());
   check('while the grid waits whole in the DOM, unseen',
-    (await page.locator('.report-invoice tbody tr').count()) === 2 &&
+    (await page.locator('.report-invoice .invoice-grid tbody tr').count()) === 2 &&
     !(await page.locator('.report-invoice .invoice-grid').isVisible()));
 
   // The person's request, off a screenshot of this table: the day, the date and the
@@ -6975,7 +6975,7 @@ for (const [label, width, height] of [['390x844', 390, 844], ['430x932', 430, 93
   // down a column of rows it was the widest thing in the narrowest cell, and it said
   // nothing the line above had not already said.
   const dated = await page.evaluate(() => ({
-    rows: [...document.querySelectorAll('.report-invoice tbody tr')]
+    rows: [...document.querySelectorAll('.report-invoice .invoice-grid tbody tr')]
       .map(tr => tr.children[0].textContent),
     period: document.querySelector('.report-invoice .report-period').textContent
   }));
