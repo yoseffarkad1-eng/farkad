@@ -87,6 +87,12 @@ async function block(name, body) {
 // THE NEWS, AS PINNED. Every word of every item; a change in js/ui/whatsnew.js moves the
 // line here in the same commit (CLAUDE.md, law 6). PROPOSED Hebrew, not read by the owner.
 const EXPECTED = [
+    // v209: the crew as cards, two side by side (the owner, 2026-11-27); the way is 'roster', no new one.
+    { build: 'v209', items: [
+        { title: 'הצוות בכרטיסים, שניים בשורה',
+            text: 'במסך הצוות כל עובד וכל אתר בכרטיס משלו, שניים זה לצד זה (בתצוגה גדולה לרוב אחד בשורה), והכפתורים והנתונים לא השתנו.',
+            where: 'צוות', go: 'roster' }
+    ] },
     // v208: the grid under «לפי אתר» and its switch (the owner's option 2, 2026-11-21).
     { build: 'v208', items: [
         { title: 'חיוב: עם רימא או בלי, בטבלה אחת',
