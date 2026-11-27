@@ -106,7 +106,7 @@ try {
     await censusOnly(check, page, before);
     const record = await page.evaluate(() => JSON.stringify(State.schedule));
 
-    suite('one worded control on every crew row, and nothing beside it moved');
+    suite('one worded control on every crew card, a line of its own at the card\'s foot');
     given('the record on this phone may be read the new way, as the owner\'s may',
         await page.evaluate(() => carryReportingEnabled(State.schedule)) === true);
     same('every row has exactly one, the archived man\'s too',
@@ -118,16 +118,22 @@ try {
     same('and is named for the man',
         (await page.locator('[data-worker-id="w_01"] .worker-card-open').getAttribute('aria-label'))
             .replace(/[⁨⁩]/g, ''), 'כרטיס עובד של דוגמה אלף');
-    // THE ROWS AS THEY WERE, measured with the new control and then without it: every
-    // switch and every «עוד ⋯», the height of every row, and the width the line with the
-    // phone and the rates is given.
+    // THE CREW IS CARDS since the owner asked for it (2026-11-27; css/design.css, its last
+    // block; tests/crewcards.browser.mjs): two men to a line, and «כרטיס עובד» is a line of
+    // its own at the foot of a man's card, over the switch and «עוד ⋯». Until then it floated
+    // beside his name and this block held every row to the height and every control to the
+    // pixels they had before the button existed. Half a screen's width has no room beside a
+    // name, so what is held now is the same promise in the card's terms - measured with the
+    // control and then without it: the button costs every card exactly its own line, the
+    // switch and «עוד ⋯» keep their column and their size under it, and the line with the
+    // phone and the rates keeps its whole width.
     const layout = () => page.evaluate(() => [...document.querySelectorAll('#workerList .roster-row')]
         .filter(row => row.offsetParent !== null).map(row => {
             const box = node => { const at = node.getBoundingClientRect();
                 return [at.left, at.top, at.width, at.height].map(Math.round); };
             const lines = row.querySelectorAll('.roster-details > .roster-meta');
             return { id: row.dataset.workerId, toggle: box(row.querySelector('.worker-active-toggle')),
-                more: box(row.querySelector('.crew-edit')), height: box(row)[3],
+                more: box(row.querySelector('.crew-edit')), height: box(row)[3], bottom: box(row)[1] + box(row)[3],
                 meta: Math.round(lines[lines.length - 1].getBoundingClientRect().width) };
         }));
     const withIt = await layout();
@@ -137,15 +143,19 @@ try {
     await page.evaluate(() => document.querySelectorAll('.worker-card-open')
         .forEach(node => { node.style.display = ''; }));
     given('the active rows were measured', withIt.length > 2, String(withIt.length));
-    same('every switch and every «עוד ⋯» is on the pixels it was on before the card existed',
-        withIt.map(row => [row.id, row.toggle, row.more]), without.map(row => [row.id, row.toggle, row.more]));
-    same('no row is taller', withIt.map(row => [row.id, row.height]), without.map(row => [row.id, row.height]));
+    const cost = withIt.map((row, i) => row.height - without[i].height);
+    check('the button costs every card the same: its own line - 44px and the gap over it - and no more',
+        new Set(cost).size === 1 && cost[0] >= 44 && cost[0] <= 56, JSON.stringify([withIt.map(row => row.height), without.map(row => row.height)]));
+    const foot = rows => rows.map(row => [row.id, row.toggle[0], row.bottom - row.toggle[1], row.toggle[2], row.toggle[3],
+        row.more[0], row.bottom - row.more[1], row.more[2], row.more[3]]);
+    same('every switch and every «עוד ⋯» keeps its column, its size and its place at the card\'s foot with or without it',
+        foot(withIt), foot(without));
     same('and the line with the phone and the rates keeps its whole width',
         withIt.map(row => [row.id, row.meta]), without.map(row => [row.id, row.meta]));
-    // w_02 is the ordinary row: a name, a cycle, one line of details. (w_01's phone and
-    // two rates wrap onto a second line at this width with or without the card.)
-    check('an ordinary row is still inside the 125px tests/roster.browser.mjs holds it to',
-        withIt.filter(row => row.id === 'w_02').every(row => row.height <= 125)
+    // w_01 and w_02 share the first line. Two men in 250px is the 125px a man that
+    // tests/roster.browser.mjs held a row of one man to.
+    check('an ordinary line of two cards is inside 250px - 125px a man',
+        withIt.filter(row => row.id === 'w_02').every(row => row.height <= 250)
         && withIt.some(row => row.id === 'w_02'), JSON.stringify(withIt.map(row => row.height)));
     same('«עוד ⋯» still opens the same menu, with the card not among its choices',
         await (async () => {

@@ -102,7 +102,13 @@ const scrollCard = (page, top) => page.evaluate(at => { document.querySelector('
 try {
     // ------------------------------------------------------------ the way in
     for (const [width, height] of [[440, 956], [375, 667]]) {
-        suite(`one worded button on each site's row, and the row no taller for it - ${width}x${height}`);
+        // THE CREW IS CARDS since the owner asked for it (2026-11-27; css/design.css, its last
+        // block; tests/crewcards.browser.mjs): a site is a card, two to a line, and «כרטיס אתר»
+        // is a line of its own at the card's foot with «עוד ⋯» under it. Until then the button
+        // stood at the far end of the name's line and this block held the row to its old height
+        // and «עוד ⋯» to its old pixels. What it holds now is the same promise in the card's
+        // terms: the button costs a card exactly its own line and moves nothing sideways.
+        suite(`one worded button on each site's card, a line of its own at its foot - ${width}x${height}`);
         const page = await phone(width, height, 'dark');
         const rows = () => page.evaluate(() => [...document.querySelectorAll('#placeList .roster-row')].map(row => {
             const box = row.getBoundingClientRect();
@@ -132,11 +138,17 @@ try {
         same('a build without the file has the sites list with no such button', await page.locator('#placeList .site-card-open').count(), 0);
         const without = await rows();
         await page.evaluate(() => { openSiteCard = window.__open; render(); });
-        same('an ordinary site\'s row is exactly as tall as it was', withIt.slice(0, 2).map(row => row.height), without.slice(0, 2).map(row => row.height));
-        same('«עוד ⋯» is on the pixels it was on, on every row', withIt.map(row => row.more), without.map(row => row.more));
+        const cost = withIt.map((row, i) => row.height - without[i].height);
+        check('the button costs every site\'s card the same: its own line - 44px and the gap under it - and no more',
+            new Set(cost).size === 1 && cost[0] >= 44 && cost[0] <= 56, JSON.stringify([withIt.map(row => row.height), without.map(row => row.height)]));
+        same('«עוד ⋯» keeps its column, its width and its height on every card - only that line stands over it',
+            withIt.map(row => [row.more[0], row.more[1] - cost[0], row.more[2], row.more[3]]), without.map(row => row.more));
         same('and the site\'s name starts where it started', withIt.map(row => [row.tagRight, row.tagTop]), without.map(row => [row.tagRight, row.tagTop]));
-        check('the long hidden name still wraps inside its row, which grows by less than one line of it',
-            withIt[2].height - without[2].height <= 30, JSON.stringify([withIt[2].height, without[2].height]));
+        check('the long hidden name still wraps inside its card: the tag is no wider than the card and the page does not scroll sideways',
+            await page.evaluate(() => { const row = document.querySelectorAll('#placeList .roster-row')[2];
+                const [card, tag] = [row.getBoundingClientRect(), row.querySelector('.tag').getBoundingClientRect()];
+                return tag.left >= card.left && tag.right <= card.right && tag.height > 44
+                    && document.documentElement.scrollWidth <= innerWidth + 1; }));
         same('the worker rows above were not touched: each still has its own card button and nothing of this',
             await page.locator('#workerList .roster-row').evaluateAll(nodes => nodes.map(row =>
                 [row.querySelectorAll('.worker-card-open').length, row.querySelectorAll('.site-card-open').length])),

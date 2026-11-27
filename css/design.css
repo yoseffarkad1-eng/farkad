@@ -1193,7 +1193,9 @@ body.journey-on #sederModal { z-index: 60; }
    Figures are tiles because they are read one at a time; the fourteen days are a grid
    that falls to one column when the text is large; a site keeps its own colour through
    paintSite and nothing else on the card borrows it. Nothing here is a tap target but
-   the three buttons of the frame, and those are held to 44px both ways. */
+   the three buttons of the frame, and those are held to 44px both ways.
+   (Since the crew became cards - this file's last block - the way in is drawn at the foot
+   of the man's card, across it; the float below is what a row gave it and is undone there.) */
 .worker-card-open { float: left; inline-size: min-content; min-inline-size: 64px; min-height: 44px !important; margin: 0 8px 2px 0 !important; padding: 6px 8px !important; font-size: 15px !important; line-height: 1.25 !important; white-space: normal !important; }
 #rosterView .roster-details > .roster-meta { clear: left; }
 #workerCardModal .modal-content > h3 { line-height: 1.3; margin: 0 0 8px; overflow-wrap: anywhere; }
@@ -2429,5 +2431,110 @@ body.journey-day .journey-dock-row > .journey-next { order: 3; flex: 1.8 1 0 !im
 .status-strip-none .status-strip-fill { background: var(--line); }
 .status-strip-now .status-strip-fill { background: var(--accent); }
 .status-yosef { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+
+}
+
+/* ---- THE CREW IS CARDS, TWO SIDE BY SIDE --------------------------------------------
+   The owner, 2026-11-27: make each card of «צוות» square, two beside each other, pretty and
+   tidy. Until now a man was a row as wide as the screen (v169, above: "he is a row"), and
+   twelve men were five screens of scrolling with half of every row empty.
+
+   A man is a card, and so is a site: his name first and largest and never cut (it wraps),
+   then his pay cycle, his phone on a line of its own, his rates on theirs, whatever badges
+   he has; and AT THE FOOT, on the same line in both cards of a pair whatever the names above
+   them cost, the three things to tap - «כרטיס עובד» across the card, and under it the switch
+   and «עוד ⋯», half the card each. A site is the same card with the same foot. No control was added, renamed or given a new handler, and
+   the document order is what it was (js/ui/roster.js): only where things are drawn moved.
+
+   WHY THE FOOT IS TWO LINES: at 320px a card is 144px wide and holds 122. Three targets of
+   44px and their gaps are 144. It does not fit, and a target is never drawn narrower than
+   a finger to make a card squarer.
+
+   THE GRID is #workerList, the box inside the fold of «עובדים כבויים» (.crew-cards) and
+   #placeList. Two columns up to 599px; wider, as many cards of 170px as the panel holds.
+   Everything that is not a card - the sentence of an empty list, the fold itself - spans
+   the line. Screen only, like every rule of this file: nothing here reaches paper.
+
+   NOT THE REORDER MODE: «סדר מחדש» is a panel of its own over this screen with rows of its
+   own (.reorder-row), one man to a line in roster order, and is not touched. */
+@media screen {
+
+#workerList, #placeList, #workerList .crew-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+#workerList > .empty-hint, #placeList > .empty-hint, #workerList > .roster-archive { grid-column: 1 / -1; }
+/* The last card's edge is not the next thing's edge: what follows the men (the line about
+   the hourly rate) used to follow a row's 8px of padding. */
+#workerList { padding-bottom: 6px; }
+/* The fold is one of the grid's own items now, so the gap already stands between it and the
+   last card above it; app.css's 20px was the whole distance when it followed a row. */
+#rosterView #workerList > .roster-archive { margin-top: 6px; }
+/* Folded means NOT DRAWN (css/app.css says why, of the rows): said again for the box the
+   archived cards stand in, which the card's own display below would otherwise undo. */
+#workerList .roster-archive:not([open]) .crew-cards, #workerList .roster-archive:not([open]) .roster-row { display: none !important; }
+
+/* THE CARD. A surface on the page with a soft line around it - the look every other card of
+   the app has (advances, the reports' phone card). A man who is switched off keeps the
+   line and loses the fill: he reads as put aside, in words («לא פעיל»), and never faded. */
+#workerList .roster-row, #placeList .roster-row {
+    display: flex; flex-direction: column; flex-wrap: nowrap !important; align-items: stretch !important; gap: 8px !important;
+    min-width: 0; margin: 0 !important; padding: 12px 10px 10px !important;
+    border: 1px solid var(--line-soft) !important; border-radius: 14px !important; background: var(--surface) !important;
+}
+#workerList .roster-row.roster-off, #placeList .roster-row.roster-off { background: transparent !important; border-color: var(--line) !important; }
+
+/* WHAT IS KNOWN ABOUT HIM, top to bottom, each thing on a line of its own and everything
+   starting at the same edge. The details take whatever height the pair's taller card gives
+   them, which is what puts the two feet on one line. */
+#workerList .roster-details { flex: 1 1 auto !important; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+#workerList .roster-details > strong { line-height: 1.3; margin-bottom: 2px; }
+#workerList .roster-details > .crew-cycle { margin: 0; }
+#workerList .roster-details > .roster-meta { clear: none; max-width: 100%; }
+/* A badge on a card is read like the lines beside it: 14px, the app's floor (it was 11px on
+   the row), and free to wrap when the text is doubled. */
+#workerList .roster-details > .badge, #placeList .roster-details > .badge { margin-top: 2px; max-width: 100%; font-size: 14px; white-space: normal; }
+/* The phone, then the rates: units that go to the next line whole. The « · » between them
+   is right in a sentence and wrong at the end of a line, so on the screen it is not drawn;
+   the words are what they were (js/ui/roster.js). */
+#rosterView .crew-facts { display: flex; flex-wrap: wrap; gap: 0 12px; }
+#rosterView .crew-fact { min-width: 0; }
+#rosterView .crew-fact-phone { flex: 0 0 100%; }
+#rosterView .crew-sep { display: none; }
+
+/* THE FOOT. «כרטיס עובד» is the first thing in his details in the document and is drawn
+   last in them, across the card, pushed to the bottom of whatever room there is. */
+#workerList .worker-card-open { order: 99; float: none; align-self: stretch; inline-size: auto; margin: auto 0 0 !important; }
+/* ...and never touching the line above it: six pixels that are always there, drawn straight
+   before it, whether or not the pair's other card made this one taller. (Padding, not a
+   height: no fixed height is written in this layer - tests/payslips.test.mjs reads its tail.) */
+#workerList .roster-details::after { content: ''; order: 98; flex: none; padding-top: 6px; }
+#workerList .roster-actions { flex: none !important; display: flex; flex-direction: row !important; flex-wrap: wrap; gap: 6px !important; }
+/* Half the card each - and when a word is wider than half a card (doubled text), each takes a
+   line: a button here never shrinks under its own word. */
+#workerList .roster-actions button { flex: 1 1 calc(50% - 3px); min-width: min-content; padding-inline: 4px; white-space: nowrap; }
+
+/* A SITE is the same card: its name in its colour (and «לא פעיל» under it), then «כרטיס אתר»
+   across the card and «עוד ⋯» across it under that - the worker's foot without the switch.
+   The two were tried on one line: at 375px they are 151px in a card that holds 146, and a
+   foot that is one line on one phone and two on the next is not tidy on either. */
+#placeList .roster-details { flex: 1 1 auto !important; display: flex !important; flex-direction: column; flex-wrap: nowrap !important; align-items: flex-start !important; gap: 6px !important; min-width: 0; }
+#placeList .roster-details > .tag { flex: none; }
+#placeList .roster-details::after { content: ''; order: 98; flex: none; padding-top: 2px; }
+#placeList .site-card-open { order: 99; align-self: stretch; margin: auto 0 0 !important; white-space: normal !important; }
+#placeList .roster-actions { flex: none !important; display: flex; flex-direction: row !important; }
+#placeList .roster-actions button { flex: 1 1 44px; min-width: 44px; white-space: nowrap; }
+
+/* THE NARROWEST PHONE (320px): a card holds 126px, and at the 16px the lines under a name
+   have everywhere else a phone number is 125 and «תשלום כל שבועיים» is 121 - each one word
+   from breaking. So here, and only here, those lines are 15px (the app's floor is 14) and
+   the card gives two pixels of its inset on each side. The name keeps its size. */
+@media (max-width: 359px) {
+    #workerList, #placeList, #workerList .crew-cards { gap: 8px; }
+    #workerList .roster-row, #placeList .roster-row { padding-inline: 8px !important; }
+    #workerList .roster-meta, #workerList .crew-cycle { font-size: 15px; }
+    #rosterView .crew-facts { column-gap: 8px; }
+}
+
+@media (min-width: 600px) {
+    #workerList, #placeList, #workerList .crew-cards { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+}
 
 }
