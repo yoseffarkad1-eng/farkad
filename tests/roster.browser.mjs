@@ -68,10 +68,18 @@ try {
         const row = document.querySelector('[data-worker-id="w_week"]').getBoundingClientRect();
         const search = document.getElementById('rosterWorkerSearch').getBoundingClientRect();
         const tools = document.querySelector('.crew-tools').getBoundingClientRect();
-        return {lead:row.top-view.top, height:row.height, searchFirst:search.bottom<=tools.top};
+        const next = document.querySelector('[data-worker-id="w_next"]').getBoundingClientRect();
+        return {lead:row.top-view.top, height:row.height, searchFirst:search.bottom<=tools.top,
+            pair: Math.abs(next.top-row.top) < 1 && next.right <= row.left};
     });
     check('first worker starts within 240px of the crew section', compact.lead <= 240, JSON.stringify(compact));
-    check('ordinary worker card stays within 125px without shrinking controls', compact.height <= 125, JSON.stringify(compact));
+    // THE CREW IS CARDS, two men to a line (the owner, 2026-11-27; css/design.css, its last
+    // block). This held a ROW of one man to 125px; a card is taller than that row and holds
+    // half a line, so the same measure - how much of the screen a man costs - is the line of
+    // two. This line is the worst one: its second man's name takes three lines. An ordinary
+    // line is held to 250px, 125 a man, in tests/crewcards.browser.mjs.
+    check('a line of two worker cards, one of them a three-line name, stays within 280px - 140px a man - without shrinking controls',
+        compact.height <= 280 && compact.pair, JSON.stringify(compact));
     check('search precedes the less frequent list tools', compact.searchFirst);
     const archive = page.locator('#workerList .roster-archive');
     await archive.locator('summary').click();

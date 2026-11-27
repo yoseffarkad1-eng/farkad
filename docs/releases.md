@@ -1,6 +1,64 @@
-## v208 — «לפי אתר»: the dates-by-sites grid on the screen, with «כולל עובדי רימא» / «ללא עובדי רימא» (candidate, not served)
+## v209 — «צוות»: the men and the sites as cards, two side by side (candidate, not served)
 
-**NOT SERVED YET.** A candidate on v207 (main, 000dde8); `feat-sitegrid` (code e6ae04d, b653544,
+**NOT SERVED YET.** A candidate on v208 (main, f6a3202); `feat-crewcards` (code 60c6390), then this
+release commit, which moves the three build stamps to v209 and adds one «מה חדש» item (proposed).
+
+**What he asked.** On 2026-11-27 the owner asked for the «צוות» page to look better: "make the card
+square, two side by side, pretty and tidy". Until now a man was a row as wide as the screen.
+
+**What is on the screen now.**
+
+- css/design.css, a new last block, every rule `@media screen`: #workerList, the box inside the
+  «עובדים כבויים» fold and #placeList are grids of two columns up to 599px (wider: as many 170px
+  cards as fit). A man's card is his name first and largest (wrapped, never cut), his cycle, his
+  phone on a line of its own, his rates on theirs, his badges - and at the foot «כרטיס עובד» across
+  the card with the switch and «עוד ⋯» under it, half the card each; the feet of a pair stand on one
+  line whatever the names cost. A site is the same card: its coloured name, «כרטיס אתר» across,
+  «עוד ⋯» under it. At 320px only, the lines under a name are 15px (a phone number at 16px is as
+  wide as the card). Badges on a card are 14px (they were 11px on the row).
+- js/ui/roster.js: two wrappers and no word. The phone-and-rates line is the same characters in the
+  same order, each fact a unit (`.crew-fact`) and each « · » a node (`.crew-sep`), so that a card
+  never ends a line on a dot; the archived men stand in one box inside the fold (`.crew-cards`),
+  because a `<details>` cannot itself be the grid. No control added, renamed or given a new handler;
+  the document order of a row is what it was.
+- css/large.css: with «תצוגה גדולה» on, ONE card to a line under 420px (at 20px a phone number is
+  150px and half a 375px screen holds 146), two from 420px; every size the new block sets is said
+  again.
+- «סדר מחדש» is a panel of its own with rows of its own and is not touched: one man to a line, in
+  roster order.
+
+**What leaves the phone: nothing moved.** Every rule is `@media screen`; nothing on paper, in a
+picture or in a file is drawn from these rows.
+
+**No rollout rule.** Nothing is written and nothing new is stored. Nothing in js/model, js/sync,
+js/state.js, js/store.js, js/recovery.js or the rules.
+
+**Pinned expectations moved on purpose**, each because the new layout is the point:
+tests/roster.browser.mjs ("ordinary worker card stays within 125px" held a ROW of one man; the
+measure is now the line of two - the suite's own line, one name on three lines, within 280px, and
+an ordinary line within 250px in tests/crewcards.browser.mjs); tests/workercard.browser.mjs
+(«כרטיס עובד» is a line of its own at the card's foot: it costs every card exactly that line,
+44-56px, and the switch and «עוד ⋯» keep their column, size and place with or without it);
+tests/sitecard.browser.mjs (the same for «כרטיס אתר», and the long hidden name is held inside its
+card); tests/usual.test.mjs (its list of the blocks after the usual site's at the end of
+css/design.css gains this one, named). No floor was lowered: 44px, 16px, 14px and 4.5:1 are
+measured as before. New: tests/crewcards.browser.mjs (`test:crewcards-browser`, in `test:all`
+beside crewcheck-browser). «מה חדש» gains one item and NO way: its «הראה לי» is the crew screen's
+own, `roster` (the `NEWS` list of tests/whatsnew.browser.mjs moved with it).
+
+**NOT DONE, and said.**
+- **A man's card is not a true square.** Its foot is two lines, because at 320px a card holds 122px
+  and three 44px targets with their gaps are 144; a card is about 170x242 at 375.
+- **With «תצוגה גדולה» the two-beside-each-other he asked for holds only from 420px.** Under it,
+  one card to a line.
+- **Not tried on a real phone.** Nobody far-sighted has looked at it, and the owner has not seen it.
+
+**Hebrew.** No word of the crew screen changed. Proposed and pinned (tests/whatsnew.test.mjs): the
+news item «הצוות בכרטיסים, שניים בשורה» - «במסך הצוות כל עובד וכל אתר בכרטיס משלו, שניים זה לצד זה (בתצוגה גדולה לרוב אחד בשורה), והכפתורים והנתונים לא השתנו.»
+
+## v208 — «לפי אתר»: the dates-by-sites grid on the screen, with «כולל עובדי רימא» / «ללא עובדי רימא» (served 2026-11-23)
+
+**SERVED on 2026-11-23** (main f6a3202, PR #89). Written as a candidate on v207 (main, 000dde8); `feat-sitegrid` (code e6ae04d, b653544,
 cf59ba0; `features/sitegrid/handoff.md`), then this release commit, which moves the three build
 stamps to v208 and adds one «מה חדש» item (proposed). The owner has been sent the pictures.
 

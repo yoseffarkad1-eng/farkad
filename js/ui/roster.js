@@ -144,7 +144,12 @@ function renderWorkerList() {
         : `עובדים כבויים (${archived.length}) · ` +
             (owing === 1 ? 'לאחד מהם יש מקדמה רשומה' : `ל-${owing} מהם יש מקדמות רשומות`));
     box.appendChild(summary);
-    archived.forEach(worker => box.appendChild(workerRow(worker, advanceTotals)));
+    // The archived men are cards like the rest, two side by side - and a <details> cannot
+    // itself be the grid (what it lays out is its summary and one slot for everything
+    // else), so they stand in one plain box inside the fold. A wrapper and nothing more.
+    const cards = el('div', 'crew-cards');
+    archived.forEach(worker => cards.appendChild(workerRow(worker, advanceTotals)));
+    box.appendChild(cards);
     container.appendChild(box);
 }
 
@@ -156,13 +161,13 @@ function workerRow(worker, archiveAdvances) {
 
     const details = el('div', 'roster-details');
     // כרטיס עובד: the one way into his card (js/ui/workercard.js), worded. It is the FIRST
-    // thing in his details and floats at their far end, beside his name and his cycle -
-    // the two short lines - so it takes no width from the line with his phone and rates,
-    // adds no height to the row (tests/roster.browser.mjs holds a row to 125px, and the
-    // first place this was put broke that), and leaves the switch and «עוד ⋯» exactly
-    // where three people's thumbs already know them. On an archived row too: the money a
-    // man left with is the usual reason to look him up. Feature-detected like the ledger
-    // readers are: a build where that file did not load still has a crew screen.
+    // thing in his details in the DOCUMENT - what a keyboard and a screen reader reach
+    // first, as since v184 - and css/design.css draws it LAST in them, a line of its own
+    // at the foot of his card over the switch and «עוד ⋯» (the crew is cards, two side by
+    // side, since the owner asked for it on 2026-11-27; until then it floated beside his
+    // name, which half a screen's width has no room for). On an archived card too: the
+    // money a man left with is the usual reason to look him up. Feature-detected like the
+    // ledger readers are: a build where that file did not load still has a crew screen.
     if (typeof openWorkerCard === 'function') {
         const card = button(WORKER_CARD_TEXT.title, 'btn-secondary worker-card-open',
             () => openWorkerCard(worker.id),
@@ -179,22 +184,32 @@ function workerRow(worker, archiveAdvances) {
         line.appendChild(ltr(worker.idNumber));
         details.appendChild(line);
     }
-    // One line for the phone and the rates - it is a list of thirty, and every extra
-    // line per man is a screen of scrolling. A man with no phone says so, because a
-    // blank next to a list of numbers reads as "somebody forgot", which is the case.
-    const line = el('div', 'roster-meta');
+    // The phone and the rates. They were one run of text with « · » between the facts,
+    // which is right for a row as wide as the screen and wrong for a card half as wide:
+    // the run broke wherever the width ran out, a rate on one line and its label on the
+    // line above. So each fact is a unit of its own (.crew-fact) and each « · » a node of
+    // its own (.crew-sep) - css/design.css puts the phone on its line and the rates on
+    // theirs and draws no dot at the end of a line. THE TEXT IS WHAT IT WAS, character
+    // for character: the same words in the same order, only wrapped. A man with no phone
+    // says so, because a blank next to a list of numbers reads as "somebody forgot",
+    // which is the case.
+    const line = el('div', 'roster-meta crew-facts');
+    const fact = (kind, ...nodes) => {
+        const unit = el('span', kind);
+        nodes.forEach(node => unit.appendChild(node));
+        line.appendChild(unit);
+    };
     if (worker.phone) {
-        line.appendChild(el('span', null, '📞 '));
-        line.appendChild(ltr(worker.phone));
+        fact('crew-fact crew-fact-phone', el('span', null, '📞 '), ltr(worker.phone));
     } else {
-        line.appendChild(el('span', null, 'בלי טלפון'));
+        fact('crew-fact crew-fact-phone', el('span', null, 'בלי טלפון'));
     }
     if (worker.dailyRate) {
-        line.appendChild(el('span', null, ' · יומי: '));
-        line.appendChild(ltr(String(worker.dailyRate)));
+        line.appendChild(el('span', 'crew-sep', ' · '));
+        fact('crew-fact', el('span', null, 'יומי: '), ltr(String(worker.dailyRate)));
         if (worker.hourlyRate) {
-            line.appendChild(el('span', null, ' · שעה: '));
-            line.appendChild(ltr(String(worker.hourlyRate)));
+            line.appendChild(el('span', 'crew-sep', ' · '));
+            fact('crew-fact', el('span', null, 'שעה: '), ltr(String(worker.hourlyRate)));
         }
     }
     details.appendChild(line);

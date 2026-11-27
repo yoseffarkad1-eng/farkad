@@ -73,7 +73,14 @@ const WHATSNEW_TEXT = Object.freeze({
 // shared rides shipped shut) has no entry. «מה חדש» itself is not an item: it is the thing
 // he is reading.
 const WHATSNEW_BUILDS = Object.freeze([
-    // v207: the three tracks of 2026-11-19's second wave, each in its own track's words. Every
+    // v209: the owner's request of 2026-11-27 - the crew screen's men and sites as cards, two side
+    // by side (css/design.css, css/large.css, two wrappers in js/ui/roster.js). No control, word or
+    // handler moved, so the way is the crew screen's own, 'roster', and no new one.
+    { build: 'v209', items: [
+        { title: 'הצוות בכרטיסים, שניים בשורה',
+            text: 'במסך הצוות כל עובד וכל אתר בכרטיס משלו, שניים זה לצד זה (בתצוגה גדולה לרוב אחד בשורה), והכפתורים והנתונים לא השתנו.',
+            where: 'צוות', go: 'roster' }
+    ] },
     // v208: the owner's choice of 2026-11-21 (option 2) - the dates-by-sites grid under «לפי אתר» with
     // its «כולל עובדי רימא» / «ללא עובדי רימא» switch (js/ui/reports.js, features/sitegrid). The way
     // only shows the page on «לפי אתר»; the switch is his to press.
@@ -82,6 +89,7 @@ const WHATSNEW_BUILDS = Object.freeze([
             text: 'בדוחות ← לפי אתר: טבלת תאריכים ואתרים עם מתג «כולל עובדי רימא» / «ללא עובדי רימא», ועמודת התאריך נשארת בגלילה הצידה.',
             where: 'דוחות ← לפי אתר', go: 'siteReport' }
     ] },
+    // v207: the three tracks of 2026-11-19's second wave, each in its own track's words. Every
     // «איפה» checked against the merged tree: «בדיקת הצוות» is the last thing on the crew screen
     // (#crewCheckFoot after .roster-columns); «איפה עבד» is the fourth door, last, on each man
     // «חיפוש עובד» lists; the speed layer moves no node, so its item names the pages it speeds.

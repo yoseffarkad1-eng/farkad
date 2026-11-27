@@ -1459,4 +1459,22 @@
 :root.display-large .client-grid-table tfoot td { font-weight: 800; }
 :root.display-large .client-grid-table tfoot .client-grid-date { font-size: 18px; }
 
+/* THE CREW'S CARDS (css/design.css, its last block; the owner, 2026-11-27). TWO SIDE BY SIDE
+   ONLY WHERE THIS MODE'S SIZES FIT HALF A SCREEN: at 20px a phone number is 150px and a card
+   of a 375px phone holds 146 - the number went under its own 📞, a rate under its label, and
+   a man was five lines of facts. So under 420px a card here is as wide as the screen, one
+   man to a line, with everything else about the card as it is; from 420px up, two.
+   And every size that block sets, said again: the name's line, and the 15px the narrowest
+   phone gives the lines under a name - which this mode does not take. */
+@media (max-width: 419px) {
+    :root.display-large #workerList,
+    :root.display-large #placeList,
+    :root.display-large #workerList .crew-cards { grid-template-columns: minmax(0, 1fr); }
+}
+:root.display-large #workerList .roster-details > strong { line-height: 1.4; }
+:root.display-large #workerList .roster-meta,
+:root.display-large #workerList .crew-cycle,
+:root.display-large #workerList .roster-details > .badge,
+:root.display-large #placeList .roster-details > .badge { font-size: 18px; }
+
 }

@@ -773,12 +773,15 @@ await block('the shell: on the page after the files it calls, in the offline she
     // after this one, in order. THE MERGED LIST (v206's integration): each of the two tracks
     // moved this check from «סגירת שבוע» to its own block; on the merged tree they land in the
     // order they were merged, «יום תשלום» then «תמונת מצב», and both are named here.
+    // AND AGAIN (the crew as cards, the owner 2026-11-27): the cards of «צוות» are one more
+    // block at the end of the layer, after «תמונת מצב»'s, and the last - seven after this one.
     const next = css.indexOf('/* ---- ', from + 10);
     const holiday = css.indexOf('/* ---- «עוד ⋯» at the foot of the day, «הכל חופש» behind it');
     const owes = css.indexOf('/* ---- «מי חייב כסף», «שים לב»');
     const weekly = css.indexOf('/* ---- «סגירת שבוע» (js/ui/weeklyclose.js)');
     const payday = css.indexOf('/* ---- «יום תשלום» (js/ui/payday.js)');
     const status = css.indexOf('/* ---- «תמונת מצב» (v206, js/ui/status.js)');
+    const cards = css.indexOf('/* ---- THE CREW IS CARDS, TWO SIDE BY SIDE');
     check('the last block of the screen layer but for the ones added since', css.trimEnd().endsWith('}')
         && (next === -1 || (css.indexOf('/* ---- the reports say the account') === next
             && css.indexOf('/* ---- ', next + 10) === holiday && holiday > next
@@ -786,7 +789,8 @@ await block('the shell: on the page after the files it calls, in the offline she
             && css.indexOf('/* ---- ', owes + 10) === weekly && weekly > owes
             && css.indexOf('/* ---- ', weekly + 10) === payday && payday > weekly
             && css.indexOf('/* ---- ', payday + 10) === status && status > payday
-            && css.indexOf('/* ---- ', status + 10) === -1)));
+            && css.indexOf('/* ---- ', status + 10) === cards && cards > status
+            && css.indexOf('/* ---- ', cards + 10) === -1)));
     const block = next === -1 ? css.slice(from) : css.slice(from, next);
     check('48px and 18px, written there', /min-height: 48px/.test(block) && /font-size: 18px/.test(block));
     same('css/readability.css does not name it', /chip-usual|usual-note/.test(source('css/readability.css')), false);

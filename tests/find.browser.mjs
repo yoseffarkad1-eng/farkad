@@ -209,8 +209,12 @@ try {
 
     suite('with the keyboard up, the field and the rows stay above the keys');
     // js/ui/bars.js's own seam: what it does when the visual viewport loses a keyboard's height.
-    await page.evaluate(() => applyKeyboardInset(300));
+    // The seam is called and the rectangles are read in ONE task: a bar measure the page had
+    // already queued for the next frame (scheduleBarMeasure) asks the real viewport, which has no
+    // keyboard here, and between two evaluate calls it could put the inset back to 0 before the
+    // reading - the dialog then measured as if no keys were up (2 runs in 15, under load).
     const kb = await page.evaluate(() => {
+        applyKeyboardInset(300);
         const line = innerHeight - 300;
         const box = node => node.getBoundingClientRect();
         const content = box(document.querySelector('#findModal .find-content'));
